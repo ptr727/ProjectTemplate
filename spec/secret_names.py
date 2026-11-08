@@ -117,6 +117,17 @@ def coverage_claiming_types(
     return claiming
 
 
+def coverage_types(
+    secrets: dict[str, Any], entry: dict[str, Any], tree: set[str] | None
+) -> list[str]:
+    """The declared types of ENTRY that owe Codecov coverage, the one composition the audit and provisioning share.
+
+    So the audit's codecov.yml check and the CODECOV_TOKEN it owes cannot disagree.
+    """
+    candidates = coverage_candidate_types(declared_types(entry), entry.get("profiles", {}))
+    return coverage_claiming_types(candidates, secrets.get("typeMechanisms", {}), tree)
+
+
 def resolve_secret_stores(
     secrets: dict[str, Any], entry: dict[str, Any], tree: set[str] | None
 ) -> tuple[dict[str, set[str]], set[str]]:
@@ -128,11 +139,10 @@ def resolve_secret_stores(
     mechanisms = [
         secrets["targetMechanisms"].get(p.get("target")) for p in entry.get("publish", [])
     ]
-    candidates = coverage_candidate_types(declared_types(entry), entry.get("profiles", {}))
-    coverage_types = coverage_claiming_types(candidates, secrets.get("typeMechanisms", {}), tree)
+    claiming = coverage_types(secrets, entry, tree)
     for name in declared_types(entry):
         mechanism = secrets.get("typeMechanisms", {}).get(name)
-        if mechanism != "codecov" or name in coverage_types:
+        if mechanism != "codecov" or name in claiming:
             mechanisms.append(mechanism)
     claimed = [secrets["mechanisms"][m] for m in mechanisms if m and m in secrets["mechanisms"]]
     required: dict[str, set[str]] = {store: set() for store in STORES}

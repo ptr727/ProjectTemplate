@@ -56,6 +56,7 @@ from secret_names import (  # noqa: F401  # re-exported, since the tests and hel
     compare_stores,
     coverage_candidate_types,
     coverage_claiming_types,
+    coverage_types,
     declared_types,
     ground_branch_of,
     in_test_directory,
@@ -1915,11 +1916,7 @@ class Run:
 
     @functools.cached_property
     def coverage_types(self):
-        candidates = coverage_candidate_types(
-            declared_types(self.entry), self.entry.get("profiles", {})
-        )
-        mechanisms = self.spec["secrets"].get("typeMechanisms", {})
-        return coverage_claiming_types(candidates, mechanisms, self.tree)
+        return coverage_types(self.spec["secrets"], self.entry, self.tree)
 
     @functools.cached_property
     def baseline(self):
