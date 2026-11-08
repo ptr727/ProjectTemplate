@@ -458,7 +458,7 @@ class NamesCliCase(unittest.TestCase):
         self.assertIn(
             (
                 "DRIFT",
-                "secrets: LEFTOVER in the actions store is claimed by no applicable mechanism (stale?)",
+                "secrets: LEFTOVER in the actions store is claimed in that store by no applicable mechanism (stale?)",
             ),
             findings,
         )
@@ -833,11 +833,11 @@ class CompareStoresCase(unittest.TestCase):
                 ("DEFECT", "secrets: forbidden FORBID present in the actions store"),
                 (
                     "DRIFT",
-                    "secrets: EXTRA in the actions store is claimed by no applicable mechanism (stale?)",
+                    "secrets: EXTRA in the actions store is claimed in that store by no applicable mechanism (stale?)",
                 ),
                 (
                     "DRIFT",
-                    "secrets: FORBID in the actions store is claimed by no applicable mechanism (stale?)",
+                    "secrets: FORBID in the actions store is claimed in that store by no applicable mechanism (stale?)",
                 ),
             ],
         )
@@ -846,6 +846,19 @@ class CompareStoresCase(unittest.TestCase):
         live = {"actions": {"A", "B"}, "dependabot": {"A"}}
         levels = {level for level, _ in secret_names.compare_stores(self.REQUIRED, set(), live)}
         self.assertEqual(levels, {"OK"})
+
+    def test_a_name_only_the_other_store_owes_is_unclaimed_where_it_is_not_owed(self) -> None:
+        live = {"actions": {"A", "B"}, "dependabot": {"A", "B"}}
+        findings = secret_names.compare_stores(self.REQUIRED, set(), live)
+        self.assertEqual(
+            [f for f in findings if f[0] != "OK"],
+            [
+                (
+                    "DRIFT",
+                    "secrets: B in the dependabot store is claimed in that store by no applicable mechanism (stale?)",
+                )
+            ],
+        )
 
 
 class TreeBlobsCase(unittest.TestCase):
