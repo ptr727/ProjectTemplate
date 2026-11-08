@@ -99,6 +99,7 @@ BEFORE_FLAG = {
     "scripts/pr_cleanup.py": ("--repo", "Example/Example", "1"),
     "scripts/pr_review.py": ("--repo", "Example/Example", "status", "1"),
     "spec/resolve_description.py": ("registry/repos.json", "Example"),
+    "spec/resolve_secrets.py": ("scaffold", "--dry-run"),
 }
 
 NO_REQUIRED_ARGUMENT = frozenset(

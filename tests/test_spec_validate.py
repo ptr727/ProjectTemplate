@@ -15,12 +15,13 @@ import time
 import unittest
 import unittest.mock
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from import_probe import import_delta
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 import audit
+import secret_names
 import validate
 
 CHECK_TYPES = {"types": {"python": {"checks": [{"id": "python.typed"}]}}, "crossCutting": {}}
@@ -255,6 +256,119 @@ class CarriedRelativeLinkCase(unittest.TestCase):
         )
 
         self.assertEqual(validate.markdown_section(text, "Rule"), "\nkept\n")
+
+
+class SecretScopeCase(unittest.TestCase):
+    """Every name a baseline, a mechanism, or a registry requiredSecrets list requires has a declared scope."""
+
+    SECRETS: ClassVar[dict[str, Any]] = {
+        "baseline": {"requires": ["BASE_ONE"], "forbids": []},
+        "mechanisms": {"docker-hub": {"requires": ["DOCKER_ONE"], "forbids": []}},
+        "secretScopes": {"BASE_ONE": "fleet", "DOCKER_ONE": "fleet", "REPO_ONE": "repository"},
+    }
+    REPOS: ClassVar[dict[str, Any]] = {
+        "repos": [{"name": "Fixture", "requiredSecrets": ["REPO_ONE"]}]
+    }
+
+    def errors(self, secrets: dict[str, Any], repos: dict[str, Any] | None = None):
+        return validate.secret_scope_errors(secrets, self.REPOS if repos is None else repos)
+
+    def test_the_shipped_spec_is_clean(self) -> None:
+        self.assertEqual(
+            validate.secret_scope_errors(
+                validate.load("spec/secrets.json"), validate.load("registry/repos.json")
+            ),
+            [],
+        )
+
+    def test_a_fully_scoped_spec_is_clean(self) -> None:
+        self.assertEqual(self.errors(self.SECRETS), [])
+
+    def test_a_cataloged_name_with_an_underscore_or_a_dot_owing_a_repository_name_is_an_error(
+        self,
+    ) -> None:
+        for name in ("Example_Repo", "Example.Repo"):
+            with self.subTest(name=name):
+                repos = {
+                    "repos": [
+                        {"name": name, "status": "cataloged", "requiredSecrets": ["REPO_ONE"]}
+                    ]
+                }
+                errors = self.errors(self.SECRETS, repos)
+                self.assertEqual(len(errors), 1)
+                self.assertIn(f"registry entry {name}:", errors[0])
+
+    def test_a_test_carrying_type_keeps_its_codecov_claim_with_no_tree_read(self) -> None:
+        """Validate reads no tree, so a python repo owes its repository-scoped Codecov name regardless."""
+        secrets = {
+            **self.SECRETS,
+            "mechanisms": {
+                "codecov": {"requires": ["CODECOV_ONE"], "forbids": [], "stores": ["actions"]}
+            },
+            "typeMechanisms": {"python": "codecov"},
+            "secretScopes": {**self.SECRETS["secretScopes"], "CODECOV_ONE": "repository"},
+        }
+        repos = {"repos": [{"name": "Example.Repo", "status": "cataloged", "types": ["python"]}]}
+        errors = self.errors(secrets, repos)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("registry entry Example.Repo:", errors[0])
+
+    def test_a_cataloged_name_with_a_dot_owing_only_fleet_names_is_clean(self) -> None:
+        """A repository owing only fleet-scoped names needs no repository name field."""
+        # The baseline is given a store, so a fleet row is planned and its stray is actually spelled.
+        secrets = {**self.SECRETS, "baseline": {**self.SECRETS["baseline"], "stores": ["actions"]}}
+        repos = {"repos": [{"name": "example.github.io", "status": "cataloged"}]}
+        plan = secret_names.secret_plan(secrets, repos["repos"][0], None, "example.github.io")
+        self.assertEqual([row["scope"] for row in plan["rows"]], ["fleet"])
+        self.assertEqual(self.errors(secrets, repos), [])
+
+    def test_a_malformed_dotted_entry_is_skipped_rather_than_raised_on(self) -> None:
+        """The per-entry checks report these shapes, so the scope check must not crash on them."""
+        for field in (
+            {"requiredSecrets": None},
+            {"requiredSecrets": [["A"]]},
+            {"publish": None},
+            {"publish": ["not-an-object"]},
+        ):
+            with self.subTest(field=field):
+                repos = {"repos": [{"name": "Example.Repo", "status": "cataloged", **field}]}
+                self.assertEqual(self.errors(self.SECRETS, repos), [])
+
+    def test_an_excluded_name_with_an_underscore_owes_no_secret_file(self) -> None:
+        repos = {"repos": [{"name": "Example_Repo", "status": "excluded"}]}
+        self.assertEqual(self.errors(self.SECRETS, repos), [])
+
+    def test_a_baseline_name_with_no_scope_is_an_error(self) -> None:
+        scopes = {k: v for k, v in self.SECRETS["secretScopes"].items() if k != "BASE_ONE"}
+        errors = self.errors({**self.SECRETS, "secretScopes": scopes})
+        self.assertEqual(
+            errors, ["secrets.json: BASE_ONE is required by baseline but has no secretScopes entry"]
+        )
+
+    def test_a_mechanism_name_with_no_scope_is_an_error(self) -> None:
+        scopes = {k: v for k, v in self.SECRETS["secretScopes"].items() if k != "DOCKER_ONE"}
+        errors = self.errors({**self.SECRETS, "secretScopes": scopes})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("DOCKER_ONE is required by mechanism 'docker-hub'", errors[0])
+
+    def test_a_registry_required_secret_with_no_scope_is_an_error(self) -> None:
+        repos = {"repos": [{"name": "Fixture", "requiredSecrets": ["NEW_SECRET"]}]}
+        errors = self.errors(self.SECRETS, repos)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("NEW_SECRET is required by registry entry Fixture requiredSecrets", errors[0])
+
+    def test_a_scope_outside_the_two_is_an_error(self) -> None:
+        scopes = {**self.SECRETS["secretScopes"], "REPO_ONE": "environment"}
+        errors = self.errors({**self.SECRETS, "secretScopes": scopes})
+        self.assertEqual(len(errors), 1)
+        self.assertIn("secretScopes['REPO_ONE'] must be one of fleet, repository", errors[0])
+
+    def test_a_missing_or_malformed_scope_table_is_an_error(self) -> None:
+        tables: list[Any] = [None, [], "fleet"]
+        for table in tables:
+            with self.subTest(table=table):
+                errors = self.errors({**self.SECRETS, "secretScopes": table})
+                self.assertEqual(errors, ["secrets.json: 'secretScopes' is not an object"])
 
 
 class PlainImportCase(unittest.TestCase):
@@ -1614,6 +1728,22 @@ class RegistryEntryGateCase(unittest.TestCase):
         self.assertNotIn("Traceback", output)
         self.assertIn("Fixture: requiredSecrets must be an array of secret names", output)
 
+    def test_a_non_list_publish_reports_rather_than_raises(self) -> None:
+        """The per-entry loop iterates publish, so a null or a number there raised before any error printed."""
+        for value in (None, 7):
+            with self.subTest(value=value):
+                entry = self.entry(
+                    status="cataloged",
+                    types=["source-only"],
+                    consumerModel="pull",
+                    hasDevelop=True,
+                    classificationPending=None,
+                )
+                entry["publish"] = value
+                output = self.run_against(entry)
+                self.assertNotIn("Traceback", output)
+                self.assertIn("Fixture: publish must be an array of publish entries", output)
+
     def test_an_unhashable_required_secret_reports_rather_than_raises(self) -> None:
         """A container-type guard passes a nested list, which then raises on the way into the cross-check's set().
 
@@ -1749,7 +1879,7 @@ class GroundBranchReaderCase(unittest.TestCase):
     no registry defaults, so a declared `defaults.groundTruthBranch` validated clean and was read by nothing.
     That is the defect whatever shape the resolve takes. Refusing the read is one rule where naming the
     shapes was an enumeration that kept leaving a gap. It is stated as a property of any reader rather than as a history
-    of the three files READERS names. This is because the history differs per file and pinning it here bought nothing.
+    of the files READERS names. This is because the history differs per file and pinning it here bought nothing.
     Three attempts to state it precisely each shipped a different false claim about spec/audit.py, while the rule
     itself never depended on which file carried what.
 
@@ -1762,7 +1892,12 @@ class GroundBranchReaderCase(unittest.TestCase):
     The rule refuses a reader resolving the key, which a call passing nothing useful is not.
     """
 
-    READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
+    READERS = (
+        "spec/audit.py",
+        "spec/fidelity_honesty.py",
+        "spec/resolve_secrets.py",
+        "spec/workflow_reuse.py",
+    )
     FUNCTION = "ground_branch_of"
     KEY = "groundTruthBranch"
 
@@ -1800,12 +1935,13 @@ class GroundBranchReaderCase(unittest.TestCase):
 
     def test_the_one_definition_still_takes_the_defaults(self) -> None:
         """A guard against the rule above being satisfied by deleting the resolve rather than routing it."""
-        tree = ast.parse((validate.ROOT / "spec" / "audit.py").read_text(encoding="utf-8"))
+        # The definition moved to spec/secret_names.py so the provisioning reads the branch the audit reads, and audit re-exports it.
+        tree = ast.parse((validate.ROOT / "spec" / "secret_names.py").read_text(encoding="utf-8"))
         found = [
             n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == self.FUNCTION
         ]
         self.assertEqual(
-            len(found), 1, "spec/audit.py no longer defines exactly one ground_branch_of()"
+            len(found), 1, "spec/secret_names.py no longer defines exactly one ground_branch_of()"
         )
         self.assertEqual([a.arg for a in found[0].args.args], ["entry", "branch", "defaults"])
 

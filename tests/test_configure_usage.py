@@ -40,6 +40,7 @@ class UsageCase(unittest.TestCase):
                 "repo-config/main.json",
                 "repo-config/develop.json",
                 "repo-config/operational/develop.json",
+                "lib/sh/secrets.sh",
             ):
                 (root / rel).parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(hub / rel, root / rel)
@@ -90,6 +91,7 @@ class UsageCase(unittest.TestCase):
             ("check", "owner/name", "bogus"): "Unknown workflow model 'bogus'",
             ("apply", "release", "owner/name"): "The model 'release' comes before the repo",
             ("check", "release", "operational"): "The model 'release' comes before the repo",
+            ("check", "owner/name", "--dry-run"): "Option '--dry-run' is valid only with apply",
         }
         for args, message in cases.items():
             with self.subTest(args=args):
