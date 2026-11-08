@@ -32,6 +32,8 @@ REGISTRY = {
     "repos": [
         {
             "name": "ExampleRepo",
+            "url": "https://github.com/owner/ExampleRepo",
+            "status": "cataloged",
             "types": ["python"],
             "publish": [{"target": "docker", "mechanism": "static-secret"}],
         }
@@ -662,6 +664,108 @@ class PrologueCase(unittest.TestCase):
                 self.assertNotIn("to resolve the entry", result.stderr)
                 self.assertNotIn("Could not compose", result.stderr)
                 self.assertNotEqual(calls, "", result.stderr)
+
+
+class StatusGateCase(unittest.TestCase):
+    """Only a cataloged registry entry owes secrets, as only those are audited."""
+
+    GATE = r"(secrets_registered=false\nsecrets_skip_reason=.*?\nfi\n)"
+
+    def gate(self, status: str) -> subprocess.CompletedProcess[str]:
+        bash = require("bash")
+        options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
+        script = "\n".join(
+            [
+                options,
+                "repo=owner/ExampleRepo\nregistry=registry/repos.json",
+                f"archived_status={shlex.quote(status)}",
+                lift(self.GATE),
+                'echo "registered=$secrets_registered"',
+                'echo "reason=$secrets_skip_reason"',
+            ]
+        )
+        return subprocess.run(
+            [bash, "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
+
+    def test_a_cataloged_entry_is_registered(self) -> None:
+        result = self.gate("cataloged")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("registered=true", result.stdout)
+
+    def test_an_excluded_entry_is_skipped_with_its_status_named(self) -> None:
+        result = self.gate("excluded")
+        self.assertIn("registered=false", result.stdout)
+        self.assertIn("the registry status 'excluded'", result.stdout)
+
+    def test_no_entry_is_skipped_and_says_so(self) -> None:
+        result = self.gate("")
+        self.assertIn("registered=false", result.stdout)
+        self.assertIn("has no entry in registry/repos.json", result.stdout)
+
+    def test_check_asserts_nothing_for_a_skipped_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fix = Fixture(tmp)
+            lifted = lift(r"(check_secrets\(\) \{.*?^\})")
+            result = fix.run(
+                f"{lifted}\nsecrets_registered=false\n"
+                "secrets_skip_reason=\"owner/ExampleRepo has the registry status 'excluded'\"\n"
+                'check_secrets\necho "FAILED=$FAILED"\n'
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("status 'excluded'", result.stdout)
+            self.assertIn("FAILED=0", result.stdout)
+            self.assertEqual(fix.argv(), "")
+
+    def test_the_apply_group_is_skipped_with_a_note_and_no_write(self) -> None:
+        text = (HUB / "repo-config" / "configure.sh").read_text(encoding="utf-8")
+        apply_body = text.split("cmd_apply() {\n", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn(
+            'if [ "$secrets_registered" = true ]; then\n        apply_secrets', apply_body
+        )
+        self.assertIn("provisioned only for a cataloged registry entry", apply_body)
+
+
+class SlugRefusalCase(unittest.TestCase):
+    """A slug the registry entry does not name stops the run before any write, and fails the check."""
+
+    def test_the_load_fails_for_a_slug_the_entry_does_not_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fix = Fixture(tmp)
+            other = {
+                "repos": [
+                    {**REGISTRY["repos"][0], "url": "https://github.com/otherowner/ExampleRepo"}
+                ]
+            }
+            fix.registry.write_text(json.dumps(other), encoding="utf-8")
+            result = LoadNamesCase().load(fix)
+            self.assertIn("LOAD_FAILED", result.stdout)
+            self.assertIn("Refusing", result.stderr)
+            self.assertIn("otherowner/ExampleRepo", result.stderr)
+            self.assertEqual(fix.argv(), "")
+
+    def test_check_fails_when_the_names_cannot_be_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fix = Fixture(tmp)
+            lifted = lift(r"(check_secrets\(\) \{.*?^\})")
+            result = fix.run(
+                f"{lifted}\nload_secret_names() {{ return 1; }}\nsecrets_registered=true\n"
+                'check_secrets\necho "FAILED=$FAILED"\n'
+            )
+            self.assertIn("  FAIL secrets - could not resolve", result.stdout)
+            self.assertIn("FAILED=1", result.stdout)
+
+    def test_apply_stops_before_any_write_when_the_names_cannot_be_resolved(self) -> None:
+        text = (HUB / "repo-config" / "configure.sh").read_text(encoding="utf-8")
+        apply_body = text.split("cmd_apply() {\n", 1)[1].split("\n}\n", 1)[0]
+        guard = apply_body.index("if ! load_secret_names; then")
+        self.assertIn("exit 1", apply_body[guard : guard + 200])
+        self.assertLess(guard, apply_body.index("General repository settings"))
 
 
 if __name__ == "__main__":

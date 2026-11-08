@@ -45,6 +45,21 @@ def ground_branch_of(
     return "main"
 
 
+def tree_blobs(tree: Any) -> dict[str, tuple[Any, Any]] | None:
+    """Every blob path of a git trees API response mapped to its (SHA, mode), or None when it cannot be read in full.
+
+    A response that is empty, holds no `tree` list, or is truncated is unreadable.
+    A truncated tree would silently drop names, so both callers refuse it rather than use part of it.
+    """
+    if not tree or not isinstance(tree, dict) or not isinstance(tree.get("tree"), list):
+        return None
+    if tree.get("truncated"):
+        return None
+    return {
+        n["path"]: (n.get("sha"), n.get("mode")) for n in tree["tree"] if n.get("type") == "blob"
+    }
+
+
 def in_test_directory(path: str) -> bool:
     """Whether any directory segment of path names a test directory, compared case-insensitively."""
     return any(segment.lower() in ("test", "tests") for segment in path.split("/")[:-1])

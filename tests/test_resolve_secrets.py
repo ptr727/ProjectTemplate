@@ -36,7 +36,12 @@ UNTESTED = {"src/pkg/__init__.py", "pyproject.toml"}
 
 
 def entry(**fields: Any) -> dict[str, Any]:
-    return {"name": "ExampleRepo", "types": ["python"], **fields}
+    return {
+        "name": "ExampleRepo",
+        "url": "https://github.com/owner/ExampleRepo",
+        "types": ["python"],
+        **fields,
+    }
 
 
 class SecretFileNameCase(unittest.TestCase):
@@ -288,6 +293,29 @@ class NamesCliCase(unittest.TestCase):
                     argv.strip(), f"api repos/owner/ExampleRepo/git/trees/{branch}?recursive=1"
                 )
 
+    def test_a_slug_the_entry_does_not_name_is_refused_before_any_tree_read(self) -> None:
+        cases: list[tuple[str, dict[str, Any]]] = [
+            ("another owner", entry(url="https://github.com/otherowner/ExampleRepo")),
+            ("another name", entry(url="https://github.com/owner/OtherName")),
+            ("no url", {k: v for k, v in entry().items() if k != "url"}),
+        ]
+        for label, declared in cases:
+            with self.subTest(label):
+                result, argv = self.run_names({"repos": [declared]}, "ExampleRepo")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(b"owner/ExampleRepo", result.stderr)
+                self.assertIn(b"Refusing", result.stderr)
+                self.assertEqual(result.stdout, b"")
+                self.assertEqual(argv, "")
+
+    def test_the_slug_comparison_ignores_case(self) -> None:
+        result, _ = self.run_names(
+            {"repos": [entry(url="https://github.com/OWNER/exampleREPO")]},
+            "ExampleRepo",
+            ("tests/test_a.py",),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_each_loud_failure_exits_one_with_a_message(self) -> None:
         cases: list[tuple[str, Any, str, Any]] = [
             ("a registry with no repos array", {}, "ExampleRepo", None),
@@ -340,12 +368,20 @@ FLEET: dict[str, Any] = {
         {
             "name": "ExampleRepo",
             "url": "https://github.com/owner/ExampleRepo",
+            "status": "cataloged",
             "types": ["python"],
             "publish": [{"target": "docker"}],
         },
         {
             "name": "Other-Repo",
             "url": "https://github.com/owner/Other-Repo",
+            "status": "cataloged",
+            "types": ["python"],
+        },
+        {
+            "name": "Excluded-Repo",
+            "url": "https://github.com/owner/Excluded-Repo",
+            "status": "excluded",
             "types": ["python"],
         },
         {
@@ -404,14 +440,24 @@ class ScaffoldCase(unittest.TestCase):
             self.assertIn("github_codegen_app_client_id", present)
             self.assertNotIn("github_codegen_app_client_id", created)
 
-    def test_a_directory_open_to_group_or_other_is_refused_with_nothing_created(self) -> None:
-        for mode in (0o750, 0o705, 0o755):
+    def test_an_existing_directory_keeps_its_mode_whatever_it_is(self) -> None:
+        for mode in (0o750, 0o755):
             with self.subTest(mode=oct(mode)), tempfile.TemporaryDirectory() as tmp:
                 directory = Path(tmp)
                 directory.chmod(mode)
-                with self.assertRaises(resolve_secrets.ResolveError):
-                    self.run_scaffold(directory)
-                self.assertEqual(list(directory.iterdir()), [])
+                created, _, _, _ = self.run_scaffold(directory)
+                self.assertTrue(created)
+                self.assertEqual(stat.S_IMODE(directory.stat().st_mode), mode)
+
+    def test_only_cataloged_entries_owe_files(self) -> None:
+        """An excluded or archived entry is skipped, and its tree is never read."""
+        branches: list[tuple[str, str]] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            created, _, _, _ = resolve_secrets.scaffold(
+                SECRETS, FLEET, Path(tmp) / "s", True, tree_reader(TREES, branches)
+            )
+        self.assertEqual(sorted(s for s, _ in branches), ["owner/ExampleRepo", "owner/Other-Repo"])
+        self.assertFalse([c for c in created if "excluded" in c or "oldrepo" in c])
 
     def test_a_wrong_scope_file_stops_the_run_before_anything_is_created(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -554,6 +600,41 @@ class ScaffoldCliCase(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn("owner/ExampleRepo", err)
             self.assertFalse((Path(tmp) / "s").exists())
+
+
+class TreeBlobsCase(unittest.TestCase):
+    """The one parse of a git trees response, shared by the audit and the provisioning."""
+
+    GOOD: ClassVar[dict[str, Any]] = {
+        "tree": [
+            {"type": "blob", "path": "a.py", "sha": "s1", "mode": "100644"},
+            {"type": "tree", "path": "src"},
+        ],
+        "truncated": False,
+    }
+
+    def test_blobs_map_to_their_sha_and_mode_and_trees_are_dropped(self) -> None:
+        self.assertEqual(secret_names.tree_blobs(self.GOOD), {"a.py": ("s1", "100644")})
+
+    def test_each_unreadable_response_is_none(self) -> None:
+        for label, response in (
+            ("none", None),
+            ("empty", {}),
+            ("no tree key", {"truncated": False}),
+            ("truncated", {**self.GOOD, "truncated": True}),
+            ("a non-list tree", {"tree": "x"}),
+            ("a list response", []),
+        ):
+            with self.subTest(label):
+                self.assertIsNone(secret_names.tree_blobs(response))
+
+    def test_the_audit_reads_through_it_and_keeps_none_for_an_unreadable_tree(self) -> None:
+        head = {"commit": {"commit": {"tree": {"sha": "abc"}}}}
+        with unittest.mock.patch.object(audit, "gh", return_value=self.GOOD):
+            self.assertEqual(audit.repo_tree_blobs("owner/R", head), {"a.py": ("s1", "100644")})
+        with unittest.mock.patch.object(audit, "gh", return_value={"truncated": True}):
+            self.assertIsNone(audit.repo_tree_blobs("owner/R", head))
+        self.assertIsNone(audit.repo_tree_blobs("owner/R", None))
 
 
 class PlainImportCase(unittest.TestCase):

@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import stat
 import subprocess
 import sys
 from collections.abc import Callable
@@ -70,6 +69,13 @@ def resolve_names(
 ) -> dict[str, Any]:
     """The plan for NAME: its rows, forbidden names, and strays, from the tree of SLUG's ground branch."""
     entry = registry_entry(registry, name)
+    # The entry is looked up by name alone, so a slug it does not name would write one repo's credentials into another.
+    identity = validate.github_identity(entry.get("url"))
+    if identity is None or identity.lower() != slug.lower():
+        raise ResolveError(
+            f"the registry entry {name} names {identity}, not {slug}. "
+            "Refusing to resolve secrets for a repository the entry does not name"
+        )
     tree = tree_reader(slug, ground_branch(entry, registry))
     try:
         return secret_names.secret_plan(secrets, entry, tree, name)
@@ -91,9 +97,10 @@ def ground_branch(entry: dict[str, Any], registry: Any) -> str:
 def read_tree(slug: str, branch: str) -> set[str]:
     """Every blob path on BRANCH of SLUG, raising when the tree cannot be read in full."""
     tree = gh_json(["gh", "api", f"repos/{slug}/git/trees/{branch}?recursive=1"], slug)
-    if not isinstance(tree.get("tree"), list) or tree.get("truncated"):
+    blobs = secret_names.tree_blobs(tree)
+    if blobs is None:
         raise ResolveError(f"{slug}: the {branch} tree is unreadable or truncated")
-    return {n["path"] for n in tree["tree"] if n.get("type") == "blob"}
+    return set(blobs)
 
 
 def gh_json(command: list[str], slug: str) -> dict[str, Any]:
@@ -117,14 +124,14 @@ def fleet_expectations(
 ) -> tuple[dict[str, list[str]], set[str]]:
     """The expected file names mapped to the repos expecting each, and every wrong-scope file name.
 
-    Archived entries are skipped, since GitHub rejects a write to one.
+    Only cataloged entries are walked, since the audit covers only those and an excluded or archived one owes nothing.
     """
     if not isinstance(registry, dict) or not isinstance(registry.get("repos"), list):
         raise ResolveError("registry is not an object with a 'repos' array")
     expected: dict[str, list[str]] = {}
     strays: set[str] = set()
     for entry in registry["repos"]:
-        if not isinstance(entry, dict) or entry.get("status") == "archived":
+        if not isinstance(entry, dict) or entry.get("status") != "cataloged":
             continue
         name = entry.get("name")
         slug = validate.github_identity(entry.get("url"))
@@ -141,22 +148,6 @@ def fleet_expectations(
     return expected, strays - set(expected)
 
 
-def directory_problem(directory: Path) -> str | None:
-    """Why DIRECTORY cannot hold secrets, or None where it is absent or private."""
-    try:
-        info = directory.stat()
-    except FileNotFoundError:
-        return None
-    if not stat.S_ISDIR(info.st_mode):
-        return f"{directory} exists and is not a directory"
-    if info.st_mode & 0o077:
-        return (
-            f"{directory} is mode {stat.S_IMODE(info.st_mode):o}, "
-            "and must give group and other no access"
-        )
-    return None
-
-
 def scaffold(
     secrets: dict[str, Any],
     registry: Any,
@@ -169,9 +160,6 @@ def scaffold(
     Every tree is read and every stray looked for before the first file is created.
     A listing of the directory names entries and opens none of them.
     """
-    problem = directory_problem(directory)
-    if problem:
-        raise ResolveError(problem)
     expected, wrong_scope = fleet_expectations(secrets, registry, tree_reader)
     on_disk = set()
     if directory.is_dir():
@@ -186,7 +174,7 @@ def scaffold(
         if not directory.is_dir():
             directory.mkdir(mode=0o700)
         for file_name in created:
-            # O_EXCL makes a file that appeared since the listing a stop rather than an overwrite.
+            # O_EXCL makes a file that appeared since the listing stop the run, rather than be counted as created here.
             os.close(os.open(directory / file_name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
     return created, present, strays, unclaimed
 

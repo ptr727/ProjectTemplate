@@ -192,6 +192,7 @@ registry="$script_dir/../registry/repos.json"
 # The script spec/validate.py refuses both when it is run.
 name="${repo##*/}"
 
+archived_status=""
 if [ -f "$registry" ]; then
     if ! archived_status="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .status) // empty' "$registry" | sed $'s/\r$//')"; then
         echo "Failed to read status from $registry (invalid JSON?)." >&2
@@ -279,22 +280,18 @@ fi
 # ----- Secret names and the host files they are read from (shared by apply and check) -----
 # The names a repo owes come from spec/resolve_secrets.py, which resolves them through the spec/secret_names.py code spec/audit.py uses.
 # It reads the tree of the registry's ground branch, the branch the audit reads, so both start from the same tree.
-# That comes before jqr is defined, so the lookup below spells out the jq and sed pair that jqr stands for.
-# A repo with no registry entry owes nothing the registry can name.
-# The secrets group is therefore skipped for it with a note rather than failing the other groups.
-# That matches how an absent entry is treated for the model and the description above.
+# The audit covers only cataloged registry entries, so the secrets group does too.
+# An entry that is excluded or archived, or a repo with no entry, owes nothing the registry can name.
+# The group is therefore skipped for it with a note, and sets and asserts nothing.
+# The status is the one the archived check above already read, so there is no second pass over the registry.
 secrets_spec="$script_dir/../spec/secrets.json"
 resolve_secrets="$script_dir/../spec/resolve_secrets.py"
 secrets_registered=false
-if [ -f "$registry" ]; then
-    # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    if ! secrets_entry_count="$(jq -r --arg n "$name" '[.repos[] | select(.name == $n)] | length' "$registry" | sed $'s/\r$//')"; then
-        echo "Failed to read $registry to resolve the entry for $name." >&2
-        exit 1
-    fi
-    if [ "$secrets_entry_count" -gt 0 ]; then
-        secrets_registered=true
-    fi
+secrets_skip_reason="$repo has no entry in $registry"
+if [ "$archived_status" = cataloged ]; then
+    secrets_registered=true
+elif [ -n "$archived_status" ]; then
+    secrets_skip_reason="$repo has the registry status '$archived_status'"
 fi
 # The secrets library is the hub's own copy, the sanctioned reader of a private secret file per GOVERNANCE.md "Repo-Scoped Secrets".
 # shellcheck disable=SC1091  # The linter runs without -x, and the library is linted as a file of its own.
@@ -719,7 +716,7 @@ cmd_apply() {
             dry_run_secrets "$HOME/.secrets"
         fi
     elif [ "$dry_run" = true ]; then
-        echo "Dry run for $repo. It has no registry entry in $registry, so no secret names are declared and there is nothing to preview."
+        echo "Dry run for $repo. Secrets are provisioned only for a cataloged registry entry, and $secrets_skip_reason, so there is nothing to preview."
         exit 0
     fi
     echo "Applying configuration to $repo (model: $model)"
@@ -767,7 +764,7 @@ cmd_apply() {
     if [ "$secrets_registered" = true ]; then
         apply_secrets "$HOME/.secrets"
     else
-        echo "Note: $repo has no registry entry in $registry, so no secret names are declared and none were set."
+        echo "Note: secrets are provisioned only for a cataloged registry entry, and $secrets_skip_reason, so none were set."
     fi
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
 }
@@ -1149,7 +1146,7 @@ check_agent_policy() { # the repo's default branch must carry the files the regi
 check_secrets() {
     local store live sname claimed forbidden wanted
     if [ "$secrets_registered" != true ]; then
-        note "secrets: no registry entry named '$name', so no secret names are declared to check."
+        note "secrets: only a cataloged registry entry owes secrets, and $secrets_skip_reason, so none are asserted."
         return
     fi
     if ! load_secret_names; then

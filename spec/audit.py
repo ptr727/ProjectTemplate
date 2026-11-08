@@ -61,6 +61,7 @@ from secret_names import (  # noqa: F401  # re-exported, since the tests and hel
     is_csharp_test_project,
     is_python_test_module,
     resolve_secret_stores,
+    tree_blobs,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -158,12 +159,7 @@ def repo_tree_blobs(slug, ground_head):
     sha = (((ground_head or {}).get("commit") or {}).get("commit") or {}).get("tree", {}).get("sha")
     if not sha:
         return None
-    tree = gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True)
-    if not tree or "tree" not in tree or tree.get("truncated"):
-        return None
-    return {
-        n["path"]: (n.get("sha"), n.get("mode")) for n in tree["tree"] if n.get("type") == "blob"
-    }
+    return tree_blobs(gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True))
 
 
 def blob_field(blobs, index):
