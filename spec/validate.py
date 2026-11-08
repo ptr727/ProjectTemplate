@@ -949,7 +949,7 @@ def secret_scope_errors(secrets, repos):
         # The plan reads both fields bare, so it would raise rather than add to the error list.
         declared = repo.get("requiredSecrets", [])
         publish = repo.get("publish", [])
-        if not isinstance(declared, list) or not all(isinstance(s, str) for s in declared):
+        if not is_str_list(declared):
             continue
         if not isinstance(publish, list) or not all(isinstance(p, dict) for p in publish):
             continue
@@ -1533,7 +1533,11 @@ def main(argv=()):
             if isinstance(secrets_decl, list)
             else set()
         )
-        for pub in repo.get("publish", []):
+        publish_decl = repo.get("publish", [])
+        if not isinstance(publish_decl, list):
+            errors.append(f"{name}: publish must be an array of publish entries")
+            publish_decl = []
+        for pub in publish_decl:
             if not isinstance(pub, dict) or "target" not in pub or "mechanism" not in pub:
                 errors.append(f"{name}: publish entry missing 'target'/'mechanism'")
                 continue

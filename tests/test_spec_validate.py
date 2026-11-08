@@ -1723,6 +1723,22 @@ class RegistryEntryGateCase(unittest.TestCase):
         self.assertNotIn("Traceback", output)
         self.assertIn("Fixture: requiredSecrets must be an array of secret names", output)
 
+    def test_a_non_list_publish_reports_rather_than_raises(self) -> None:
+        """The per-entry loop iterates publish, so a null or a number there raised before any error printed."""
+        for value in (None, 7):
+            with self.subTest(value=value):
+                entry = self.entry(
+                    status="cataloged",
+                    types=["source-only"],
+                    consumerModel="pull",
+                    hasDevelop=True,
+                    classificationPending=None,
+                )
+                entry["publish"] = value
+                output = self.run_against(entry)
+                self.assertNotIn("Traceback", output)
+                self.assertIn("Fixture: publish must be an array of publish entries", output)
+
     def test_an_unhashable_required_secret_reports_rather_than_raises(self) -> None:
         """A container-type guard passes a nested list, which then raises on the way into the cross-check's set().
 
