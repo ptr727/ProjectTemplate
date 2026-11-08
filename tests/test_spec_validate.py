@@ -1821,7 +1821,12 @@ class GroundBranchReaderCase(unittest.TestCase):
     The rule refuses a reader resolving the key, which a call passing nothing useful is not.
     """
 
-    READERS = ("spec/audit.py", "spec/fidelity_honesty.py", "spec/workflow_reuse.py")
+    READERS = (
+        "spec/audit.py",
+        "spec/fidelity_honesty.py",
+        "spec/resolve_secrets.py",
+        "spec/workflow_reuse.py",
+    )
     FUNCTION = "ground_branch_of"
     KEY = "groundTruthBranch"
 
@@ -1859,12 +1864,13 @@ class GroundBranchReaderCase(unittest.TestCase):
 
     def test_the_one_definition_still_takes_the_defaults(self) -> None:
         """A guard against the rule above being satisfied by deleting the resolve rather than routing it."""
-        tree = ast.parse((validate.ROOT / "spec" / "audit.py").read_text(encoding="utf-8"))
+        # The definition moved to spec/secret_names.py so the provisioning reads the branch the audit reads, and audit re-exports it.
+        tree = ast.parse((validate.ROOT / "spec" / "secret_names.py").read_text(encoding="utf-8"))
         found = [
             n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == self.FUNCTION
         ]
         self.assertEqual(
-            len(found), 1, "spec/audit.py no longer defines exactly one ground_branch_of()"
+            len(found), 1, "spec/secret_names.py no longer defines exactly one ground_branch_of()"
         )
         self.assertEqual([a.arg for a in found[0].args.args], ["entry", "branch", "defaults"])
 

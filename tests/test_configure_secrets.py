@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -47,8 +48,7 @@ PLAN = (
 GH_STUB = """#!/bin/sh
 printf '%s\\n' "$*" >>"$GH_DIR/argv"
 case "$*" in
-"api repos/owner/ExampleRepo --jq .default_branch") echo main ;;
-"api repos/owner/ExampleRepo/git/trees/main?recursive=1") cat "$GH_DIR/tree.json" ;;
+"api repos/owner/ExampleRepo/git/trees/"*"?recursive=1") cat "$GH_DIR/tree.json" ;;
 "api --paginate repos/owner/ExampleRepo/actions/secrets --jq .secrets[].name") cat "$GH_DIR/list.actions" ;;
 "api --paginate repos/owner/ExampleRepo/dependabot/secrets --jq .secrets[].name") cat "$GH_DIR/list.dependabot" ;;
 "secret set "*)
@@ -108,15 +108,21 @@ class Fixture:
                 sys.executable,
                 str(SPEC / "resolve_secrets.py"),
                 "names",
+                "--slug",
+                "owner/ExampleRepo",
                 "--",
                 str(SPEC / "secrets.json"),
                 str(self.registry),
                 "ExampleRepo",
             ],
-            input="\0".join(self.tree).encode(),
             capture_output=True,
             check=True,
             timeout=30,
+            env=dict(
+                os.environ,
+                PATH=f"{self.bin}{os.pathsep}{os.environ['PATH']}",
+                GH_DIR=str(self.gh_dir),
+            ),
         )
         return result.stdout.decode().strip()
 
@@ -138,6 +144,9 @@ class Fixture:
         bash = require("bash", "jq", "sed", "grep")
         options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
         lifted = "\n".join(lift(pattern) for pattern in PLAN)
+        names = self.names_json()
+        # Resolving the names read the tree through the stub, which is not a call the script under test made.
+        (self.gh_dir / "argv").unlink(missing_ok=True)
         script = "\n".join(
             [
                 options,
@@ -146,7 +155,7 @@ class Fixture:
                 f". {shlex.quote(str(LIBRARY))}",
                 lifted,
                 "repo=owner/ExampleRepo",
-                f"secret_names_json={shlex.quote(self.names_json())}",
+                f"secret_names_json={shlex.quote(names)}",
                 f"dir={shlex.quote(str(self.secrets))}",
                 body,
             ]
@@ -475,7 +484,26 @@ class LoadNamesCase(unittest.TestCase):
             fix.write_tree(("tests/test_a.py",), truncated=True)
             result = self.load(fix)
             self.assertIn("LOAD_FAILED", result.stdout)
-            self.assertIn("truncated or unreadable", result.stderr)
+            self.assertIn("unreadable or truncated", result.stderr)
+
+    def test_the_tree_is_read_on_the_registry_ground_branch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fix = Fixture(tmp)
+            self.assertIn("git/trees/main?recursive=1", self.load_and_log(fix))
+            registry: dict[str, object] = {
+                "repos": [{**REGISTRY["repos"][0], "groundTruthBranch": "trunk"}]
+            }
+            fix.registry.write_text(json.dumps(registry), encoding="utf-8")
+            self.assertIn("git/trees/trunk?recursive=1", self.load_and_log(fix))
+            registry = {"repos": REGISTRY["repos"], "defaults": {"groundTruthBranch": "develop"}}
+            fix.registry.write_text(json.dumps(registry), encoding="utf-8")
+            self.assertIn("git/trees/develop?recursive=1", self.load_and_log(fix))
+
+    def load_and_log(self, fix: Fixture) -> str:
+        (fix.gh_dir / "argv").unlink(missing_ok=True)
+        result = self.load(fix)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return fix.argv()
 
 
 class CheckCase(unittest.TestCase):
@@ -561,6 +589,79 @@ class ScriptWiringCase(unittest.TestCase):
         self.assertLess(
             apply_body.index("dry_run_secrets "), apply_body.index("General repository settings")
         )
+
+
+class PrologueCase(unittest.TestCase):
+    """The real script, copied whole, gets past its prologue to its first API call."""
+
+    def run_real(self, command: str) -> tuple[subprocess.CompletedProcess[str], str]:
+        bash = require("bash", "jq", "sed")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bin").mkdir()
+            (root / "repo-config").mkdir()
+            shutil.copy(HUB / "repo-config" / "configure.sh", root / "repo-config" / "configure.sh")
+            for rel in (
+                "scripts/agent_policy.py",
+                "scripts/gh_graphql.py",
+                "scripts/pr_review_policy.py",
+                "spec/agent-policy.default.json",
+                "spec/resolve_description.py",
+                "spec/resolve_secrets.py",
+                "spec/secret_names.py",
+                "spec/validate.py",
+                "spec/secrets.json",
+                "repo-config/main.json",
+                "repo-config/develop.json",
+                "repo-config/operational/develop.json",
+                "repo-config/settings.json",
+                "repo-config/labels.json",
+                "repo-config/project.json",
+                "lib/sh/secrets.sh",
+            ):
+                (root / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy(HUB / rel, root / rel)
+            (root / "registry").mkdir()
+            (root / "registry" / "repos.json").write_text(
+                json.dumps(
+                    {
+                        "repos": [
+                            {
+                                "name": "ExampleRepo",
+                                "url": "https://github.com/owner/ExampleRepo",
+                                "status": "cataloged",
+                                "types": ["source-only"],
+                                "workflowModel": "release",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            calls = root / "gh-calls"
+            stub = root / "bin" / "gh"
+            stub.write_text(f'#!/bin/sh\necho "$*" >>"{calls}"\nexit 1\n', encoding="utf-8")
+            stub.chmod(0o755)
+            env = dict(os.environ, PATH=f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}")
+            result = subprocess.run(
+                [bash, str(root / "repo-config" / "configure.sh"), command, "owner/ExampleRepo"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                check=False,
+                env=env,
+            )
+            return result, calls.read_text(encoding="utf-8") if calls.exists() else ""
+
+    def test_apply_and_check_pass_the_prologue_to_the_first_api_call(self) -> None:
+        for command in ("apply", "check"):
+            with self.subTest(command=command):
+                result, calls = self.run_real(command)
+                self.assertNotIn("command not found", result.stderr)
+                self.assertNotIn("to resolve the entry", result.stderr)
+                self.assertNotIn("Could not compose", result.stderr)
+                self.assertNotEqual(calls, "", result.stderr)
 
 
 if __name__ == "__main__":

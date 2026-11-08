@@ -2,19 +2,20 @@
 """Resolve the secret names a fleet repo owes and the ~/.secrets/ file each is read from.
 
 Two subcommands share one resolver, spec/secret_names.py, which spec/audit.py uses as well.
+Both read a repo's tree on its registry ground branch, the branch the audit reads.
 
 `names` is run by repo-config/configure.sh for one repo.
-It reads that repo's blob paths on stdin, separated by NUL bytes, and never calls gh.
+It reads that repo's tree with read-only gh calls, since the tree decides whether a repo owes a Codecov token.
 It prints a JSON object with the rows (name, scope, file, stores), the forbidden names, and the strays.
 A stray is the file a name would have at the wrong scope.
 It exits 1 on a malformed registry, a duplicate or unknown entry, or a name that has no scope.
 
 `scaffold` walks the fleet and pre-creates every expected file as an empty mode 600 file in a mode 700 directory.
-It reads each default branch tree with read-only gh calls.
+It reads each ground branch tree with read-only gh calls.
 It never opens, changes, or deletes a file that exists.
 A wrong-scope file found anywhere in the directory is reported and stops the run before anything is created.
 
-Usage: resolve_secrets.py names [--] SECRETS_JSON REGISTRY NAME
+Usage: resolve_secrets.py names --slug OWNER/REPO [--] SECRETS_JSON REGISTRY NAME
        resolve_secrets.py scaffold [--secrets-dir DIR] [--dry-run]
 
 Argparse reads a NAME starting with a dash as an option, so a caller passes `--` before the positionals.
@@ -32,6 +33,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import resolve_description
 import secret_names
 import validate  # sibling, import-safe (its main is guarded)
 
@@ -45,33 +47,49 @@ class ResolveError(Exception):
 
 
 def registry_entry(registry: Any, name: str) -> dict[str, Any]:
-    """The one registry entry named NAME, raising for a malformed registry, a duplicate, or no entry."""
-    if not isinstance(registry, dict) or not isinstance(registry.get("repos"), list):
-        raise ResolveError("registry is not an object with a 'repos' array")
-    matches = [r for r in registry["repos"] if isinstance(r, dict) and r.get("name") == name]
-    if len(matches) > 1:
-        raise ResolveError(f"{len(matches)} registry entries named {name}")
-    if not matches:
+    """The one registry entry named NAME, raising when there is none or the lookup is unsound.
+
+    The lookup is resolve_description.registry_entry(), so a malformed registry, a duplicate, and a
+    near-miss on case or whitespace fail the same way for both.
+    """
+    try:
+        entry = resolve_description.registry_entry(registry, name)
+    except resolve_description.ResolveError as e:
+        raise ResolveError(str(e)) from e
+    if entry is None:
         raise ResolveError(f"no registry entry named {name}")
-    return matches[0]
+    return entry
 
 
 def resolve_names(
-    secrets: dict[str, Any], registry: Any, name: str, tree: set[str] | None
+    secrets: dict[str, Any],
+    registry: Any,
+    name: str,
+    slug: str,
+    tree_reader: Callable[[str, str], set[str]],
 ) -> dict[str, Any]:
-    """The plan for NAME: its rows, forbidden names, and strays."""
+    """The plan for NAME: its rows, forbidden names, and strays, from the tree of SLUG's ground branch."""
     entry = registry_entry(registry, name)
+    tree = tree_reader(slug, ground_branch(entry, registry))
     try:
         return secret_names.secret_plan(secrets, entry, tree, name)
     except secret_names.SecretNameError as e:
         raise ResolveError(str(e)) from e
 
 
-def read_tree(slug: str) -> set[str]:
-    """Every blob path on the default branch of SLUG, raising when the tree cannot be read in full."""
-    branch = gh_json(["gh", "api", f"repos/{slug}"], slug).get("default_branch")
-    if not isinstance(branch, str) or not branch:
-        raise ResolveError(f"{slug}: the default branch could not be read")
+def ground_branch(entry: dict[str, Any], registry: Any) -> str:
+    """The ground branch the audit reads for ENTRY, raising when the registry declares an unusable one."""
+    defaults = registry.get("defaults") if isinstance(registry, dict) else None
+    branch = secret_names.ground_branch_of(
+        entry, None, defaults if isinstance(defaults, dict) else None
+    )
+    if not isinstance(branch, str) or not branch.strip():
+        raise ResolveError(f"{entry.get('name')}: groundTruthBranch is not a non-empty string")
+    return branch
+
+
+def read_tree(slug: str, branch: str) -> set[str]:
+    """Every blob path on BRANCH of SLUG, raising when the tree cannot be read in full."""
     tree = gh_json(["gh", "api", f"repos/{slug}/git/trees/{branch}?recursive=1"], slug)
     if not isinstance(tree.get("tree"), list) or tree.get("truncated"):
         raise ResolveError(f"{slug}: the {branch} tree is unreadable or truncated")
@@ -95,7 +113,7 @@ def gh_json(command: list[str], slug: str) -> dict[str, Any]:
 
 
 def fleet_expectations(
-    secrets: dict[str, Any], registry: Any, tree_reader: Callable[[str], set[str]]
+    secrets: dict[str, Any], registry: Any, tree_reader: Callable[[str, str], set[str]]
 ) -> tuple[dict[str, list[str]], set[str]]:
     """The expected file names mapped to the repos expecting each, and every wrong-scope file name.
 
@@ -113,7 +131,8 @@ def fleet_expectations(
         if not isinstance(name, str) or slug is None:
             raise ResolveError(f"registry entry {name!r} has no name or no GitHub url")
         try:
-            plan = secret_names.secret_plan(secrets, entry, tree_reader(slug), name)
+            tree = tree_reader(slug, ground_branch(entry, registry))
+            plan = secret_names.secret_plan(secrets, entry, tree, name)
         except secret_names.SecretNameError as e:
             raise ResolveError(f"{name}: {e}") from e
         for row in plan["rows"]:
@@ -143,7 +162,7 @@ def scaffold(
     registry: Any,
     directory: Path,
     dry_run: bool,
-    tree_reader: Callable[[str], set[str]],
+    tree_reader: Callable[[str, str], set[str]],
 ) -> tuple[list[str], list[str], list[str], list[str]]:
     """Create each missing expected file, answering (created, present, strays, unclaimed) file names.
 
@@ -166,19 +185,9 @@ def scaffold(
     if created and not dry_run:
         if not directory.is_dir():
             directory.mkdir(mode=0o700)
-            directory.chmod(0o700)
-        for file_name in list(created):
-            try:
-                fd = os.open(directory / file_name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            except FileExistsError:
-                created.remove(file_name)
-                present.append(file_name)
-                continue
-            try:
-                os.fchmod(fd, 0o600)
-            finally:
-                os.close(fd)
-        present.sort()
+        for file_name in created:
+            # O_EXCL makes a file that appeared since the listing a stop rather than an overwrite.
+            os.close(os.open(directory / file_name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
     return created, present, strays, unclaimed
 
 
@@ -195,10 +204,9 @@ def run_names(args: argparse.Namespace) -> int:
     except (OSError, json.JSONDecodeError) as e:
         print(f"Failed to read the secrets spec or the registry: {e}", file=sys.stderr)
         return 1
-    tree = {p for p in sys.stdin.buffer.read().decode("utf-8").split("\0") if p}
     try:
-        plan = resolve_names(secrets, registry, args.name, tree)
-    except ResolveError as e:
+        plan = resolve_names(secrets, registry, args.name, args.slug, read_tree)
+    except (ResolveError, subprocess.TimeoutExpired) as e:
         print(e, file=sys.stderr)
         return 1
     print(json.dumps(plan))
@@ -214,7 +222,7 @@ def run_scaffold(args: argparse.Namespace) -> int:
             secrets, registry, directory, args.dry_run, read_tree
         )
     except (OSError, json.JSONDecodeError, ResolveError, subprocess.TimeoutExpired) as e:
-        print(f"Scaffold stopped, and nothing was created: {e}", file=sys.stderr)
+        print(f"Scaffold stopped: {e}", file=sys.stderr)
         return 1
     if strays:
         print_list("Wrong-scope files found, not read and not deleted", strays)
@@ -234,6 +242,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     commands = parser.add_subparsers(dest="command", required=True)
     names = commands.add_parser("names", help="resolve one repo's secret names from its tree")
+    names.add_argument("--slug", metavar="OWNER/REPO", required=True)
     names.add_argument("secrets_json", metavar="SECRETS_JSON")
     names.add_argument("registry", metavar="REGISTRY")
     names.add_argument("name", metavar="NAME")

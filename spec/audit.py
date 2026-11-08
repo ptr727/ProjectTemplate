@@ -56,6 +56,7 @@ from secret_names import (  # noqa: F401  # re-exported, since the tests and hel
     coverage_candidate_types,
     coverage_claiming_types,
     declared_types,
+    ground_branch_of,
     in_test_directory,
     is_csharp_test_project,
     is_python_test_module,
@@ -1866,21 +1867,6 @@ def classify_branch_drift(base, main, develop):
     behind = sorted(p for p in differ if develop.get(p) == base.get(p))
     diverged = sorted(p for p in differ if develop.get(p) != base.get(p))
     return behind, diverged
-
-
-def ground_branch_of(entry, branch=None, defaults=None):
-    """The branch this audit reads, the registry's `groundTruthBranch` unless overridden.
-
-    A declared empty string is kept for spec/validate.py to refuse, rather than defaulted away.
-    """
-    if branch:
-        return branch
-    if "groundTruthBranch" in entry:
-        return entry["groundTruthBranch"]
-    defaults = defaults or {}
-    if "groundTruthBranch" in defaults:
-        return defaults["groundTruthBranch"]
-    return "main"
 
 
 @functools.cache

@@ -31,8 +31,8 @@ class ResolveError(Exception):
     """A condition resolve_description() must fail loud on."""
 
 
-def resolve_description(registry: dict, name: str) -> str | None:
-    """The declared description for NAME in REGISTRY, or None if the repo has none declared.
+def registry_entry(registry: dict, name: str) -> dict | None:
+    """The one registry entry named NAME, or None if the registry has none.
 
     Raises ResolveError for anything the caller should fail loud on rather than silently read as
     absent:
@@ -40,7 +40,6 @@ def resolve_description(registry: dict, name: str) -> str | None:
     - an entry whose own name would match NAME once whitespace and case differences are normalized
       away but not otherwise
     - more than one entry named NAME
-    - a declared description that description_errors() rejects
 
     The second case is raised rather than read as a different repo.
     spec/validate.py rejects a padded name outright. GitHub itself compares a repo name
@@ -72,9 +71,19 @@ def resolve_description(registry: dict, name: str) -> str | None:
             f"{len(matches)} registry entries named {name}. "
             "Resolve the duplicate before its description can be read"
         )
-    if not matches or "description" not in matches[0]:
+    return matches[0] if matches else None
+
+
+def resolve_description(registry: dict, name: str) -> str | None:
+    """The declared description for NAME in REGISTRY, or None if the repo has none declared.
+
+    Raises ResolveError for what registry_entry() raises on, and for a declared description that
+    description_errors() rejects.
+    """
+    entry = registry_entry(registry, name)
+    if entry is None or "description" not in entry:
         return None
-    desc = matches[0]["description"]
+    desc = entry["description"]
     errors = validate.description_errors(name, desc)
     if errors:
         raise ResolveError("; ".join(errors))

@@ -191,51 +191,115 @@ class SecretPlanCase(unittest.TestCase):
             secret_names.secret_plan(without, entry(), TESTED, "ExampleRepo")
 
 
+GH_TREE_STUB = """#!/bin/sh
+printf '%s\\n' "$*" >>"$GH_DIR/argv"
+case "$*" in
+"api repos/owner/ExampleRepo/git/trees/"*"?recursive=1") cat "$GH_DIR/tree.json" ;;
+*)
+    echo "unexpected gh call: $*" >&2
+    exit 97
+    ;;
+esac
+"""
+
+
 class NamesCliCase(unittest.TestCase):
-    """`resolve_secrets.py names`, run as configure.sh runs it."""
+    """`resolve_secrets.py names`, run as configure.sh runs it, with a stub gh serving the tree."""
 
     def run_names(
-        self, registry: Any, name: str, stdin: bytes = b"", secrets: Any = None
-    ) -> subprocess.CompletedProcess[bytes]:
+        self,
+        registry: Any,
+        name: str,
+        tree: tuple[str, ...] = (),
+        secrets: Any = None,
+        truncated: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[bytes], str]:
         with tempfile.TemporaryDirectory() as tmp:
-            reg = Path(tmp) / "repos.json"
+            root = Path(tmp)
+            (root / "bin").mkdir()
+            (root / "gh").mkdir()
+            stub = root / "bin" / "gh"
+            stub.write_text(GH_TREE_STUB, encoding="utf-8")
+            stub.chmod(0o755)
+            payload = {"tree": [{"type": "blob", "path": p} for p in tree], "truncated": truncated}
+            (root / "gh" / "tree.json").write_text(json.dumps(payload), encoding="utf-8")
+            reg = root / "repos.json"
             reg.write_text(json.dumps(registry), encoding="utf-8")
-            spec = Path(tmp) / "secrets.json"
+            spec = root / "secrets.json"
             spec.write_text(json.dumps(SECRETS if secrets is None else secrets), encoding="utf-8")
-            return subprocess.run(
+            result = subprocess.run(
                 [
                     sys.executable,
                     str(HUB / "spec" / "resolve_secrets.py"),
                     "names",
+                    "--slug",
+                    "owner/ExampleRepo",
                     "--",
                     str(spec),
                     str(reg),
                     name,
                 ],
-                input=stdin,
                 capture_output=True,
                 check=False,
                 timeout=30,
+                env=dict(
+                    os.environ,
+                    PATH=f"{root / 'bin'}{os.pathsep}{os.environ['PATH']}",
+                    GH_DIR=str(root / "gh"),
+                ),
             )
+            argv = root / "gh" / "argv"
+            return result, argv.read_text(encoding="utf-8") if argv.exists() else ""
 
-    def test_blob_paths_on_stdin_decide_codecov(self) -> None:
+    def test_the_tree_the_stub_serves_decides_codecov(self) -> None:
         registry = {"repos": [entry()]}
-        with_tests = self.run_names(registry, "ExampleRepo", b"tests/test_a.py\0")
+        with_tests, _ = self.run_names(registry, "ExampleRepo", ("tests/test_a.py",))
         self.assertEqual(with_tests.returncode, 0, with_tests.stderr)
         self.assertIn("CODECOV_TOKEN", [r["name"] for r in json.loads(with_tests.stdout)["rows"]])
-        without = self.run_names(registry, "ExampleRepo", b"src/a.py\0")
+        without, _ = self.run_names(registry, "ExampleRepo", ("src/a.py",))
         self.assertNotIn("CODECOV_TOKEN", [r["name"] for r in json.loads(without.stdout)["rows"]])
 
     def test_a_path_holding_a_newline_stays_one_path(self) -> None:
-        result = self.run_names({"repos": [entry()]}, "ExampleRepo", b"tests/odd\nname_test.py\0")
+        result, _ = self.run_names(
+            {"repos": [entry()]}, "ExampleRepo", ("tests/odd\nname_test.py",)
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("CODECOV_TOKEN", [r["name"] for r in json.loads(result.stdout)["rows"]])
+
+    def test_the_tree_is_read_on_the_ground_branch_the_audit_reads(self) -> None:
+        cases: list[tuple[str, Any, str]] = [
+            ("the default of main", {"repos": [entry()]}, "main"),
+            (
+                "the entry's own branch",
+                {"repos": [entry(groundTruthBranch="trunk")]},
+                "trunk",
+            ),
+            (
+                "the registry default",
+                {"defaults": {"groundTruthBranch": "develop"}, "repos": [entry()]},
+                "develop",
+            ),
+        ]
+        for label, registry, branch in cases:
+            with self.subTest(label):
+                result, argv = self.run_names(registry, "ExampleRepo", ("tests/test_a.py",))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    argv.strip(), f"api repos/owner/ExampleRepo/git/trees/{branch}?recursive=1"
+                )
 
     def test_each_loud_failure_exits_one_with_a_message(self) -> None:
         cases: list[tuple[str, Any, str, Any]] = [
             ("a registry with no repos array", {}, "ExampleRepo", None),
             ("an unknown entry", {"repos": [entry()]}, "OtherRepo", None),
             ("a duplicate entry", {"repos": [entry(), entry()]}, "ExampleRepo", None),
+            ("a case-only near-miss", {"repos": [entry()]}, "examplerepo", None),
+            (
+                "an empty ground branch",
+                {"repos": [entry(groundTruthBranch="")]},
+                "ExampleRepo",
+                None,
+            ),
             (
                 "a name with no scope",
                 {"repos": [entry()]},
@@ -245,15 +309,25 @@ class NamesCliCase(unittest.TestCase):
         ]
         for label, registry, name, secrets in cases:
             with self.subTest(label):
-                result = self.run_names(registry, name, b"tests/test_a.py\0", secrets)
+                result, _ = self.run_names(registry, name, ("tests/test_a.py",), secrets)
                 self.assertEqual(result.returncode, 1)
                 self.assertTrue(result.stderr.strip())
                 self.assertNotIn(b"Traceback", result.stderr)
                 self.assertEqual(result.stdout, b"")
 
+    def test_a_truncated_tree_fails_naming_the_repo(self) -> None:
+        result, _ = self.run_names(
+            {"repos": [entry()]}, "ExampleRepo", ("tests/test_a.py",), truncated=True
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(b"owner/ExampleRepo", result.stderr)
+        self.assertEqual(result.stdout, b"")
 
-def tree_reader(trees: dict[str, set[str]]):
-    def read(slug: str) -> set[str]:
+
+def tree_reader(trees: dict[str, set[str]], branches: list[tuple[str, str]] | None = None):
+    def read(slug: str, branch: str) -> set[str]:
+        if branches is not None:
+            branches.append((slug, branch))
         if slug not in trees:
             raise resolve_secrets.ResolveError(f"{slug}: the tree could not be read")
         return trees[slug]
@@ -261,7 +335,7 @@ def tree_reader(trees: dict[str, set[str]]):
     return read
 
 
-FLEET = {
+FLEET: dict[str, Any] = {
     "repos": [
         {
             "name": "ExampleRepo",
@@ -386,6 +460,42 @@ class ScaffoldCase(unittest.TestCase):
             with self.assertRaisesRegex(resolve_secrets.ResolveError, "owner/Other-Repo"):
                 self.run_scaffold(directory, trees={"owner/ExampleRepo": TESTED})
             self.assertEqual(list(directory.iterdir()), [])
+
+    def test_each_tree_is_read_on_that_entrys_ground_branch(self) -> None:
+        fleet: dict[str, Any] = {
+            "defaults": {"groundTruthBranch": "develop"},
+            "repos": [{**FLEET["repos"][0], "groundTruthBranch": "trunk"}, FLEET["repos"][1]],
+        }
+        branches: list[tuple[str, str]] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            resolve_secrets.scaffold(
+                SECRETS, fleet, Path(tmp) / "s", True, tree_reader(TREES, branches)
+            )
+        self.assertEqual(
+            branches, [("owner/ExampleRepo", "trunk"), ("owner/Other-Repo", "develop")]
+        )
+
+    def test_a_file_that_appears_after_the_listing_stops_the_run_without_overwriting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            real_open = os.open
+            collided: list[str] = []
+
+            def racing_open(path: Any, flags: int, mode: int = 0o777) -> int:
+                if not collided:
+                    collided.append(str(path))
+                    Path(path).write_text("sentinel-raced-value-1\n", encoding="utf-8")
+                return real_open(path, flags, mode)
+
+            with (
+                unittest.mock.patch.object(os, "open", racing_open),
+                self.assertRaises(FileExistsError),
+            ):
+                self.run_scaffold(directory)
+            self.assertEqual(
+                Path(collided[0]).read_text(encoding="utf-8"), "sentinel-raced-value-1\n"
+            )
 
     def test_a_second_run_creates_nothing_new(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

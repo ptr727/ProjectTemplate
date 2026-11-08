@@ -28,6 +28,23 @@ def declared_types(entry: Any) -> list[str]:
     return [t for t in types if isinstance(t, str)] if isinstance(types, list) else []
 
 
+def ground_branch_of(
+    entry: dict[str, Any], branch: str | None = None, defaults: dict[str, Any] | None = None
+) -> Any:
+    """The branch the audit and the provisioning read, the registry's `groundTruthBranch` unless overridden.
+
+    A declared empty string is kept for spec/validate.py to refuse, rather than defaulted away.
+    """
+    if branch:
+        return branch
+    if "groundTruthBranch" in entry:
+        return entry["groundTruthBranch"]
+    defaults = defaults or {}
+    if "groundTruthBranch" in defaults:
+        return defaults["groundTruthBranch"]
+    return "main"
+
+
 def in_test_directory(path: str) -> bool:
     """Whether any directory segment of path names a test directory, compared case-insensitively."""
     return any(segment.lower() in ("test", "tests") for segment in path.split("/")[:-1])

@@ -28,7 +28,7 @@
 # The checkout is planned before the first API write, so a checkout that refuses stops the run with nothing applied.
 # Without --checkout apply writes no policy files and says so.
 # The secrets group runs last, after the agent policy files, and sets each secret name the repo owes from the host's ~/.secrets/ directory.
-# The names come from spec/resolve_secrets.py, which resolves them from the registry and the default branch tree exactly as spec/audit.py does.
+# The names come from spec/resolve_secrets.py, which uses the resolver spec/audit.py uses and reads the tree of the registry's ground branch.
 # Each name is scoped in spec/secrets.json, and a fleet name is read from github_<name> while a repository name is read from github_<repo>_<name>.
 # Only the file a name's scope names is read.
 # A file at the wrong scope is a stray that stops the run before any write.
@@ -277,7 +277,9 @@ if [ -f "$registry" ]; then
 fi
 
 # ----- Secret names and the host files they are read from (shared by apply and check) -----
-# The names a repo owes come from spec/resolve_secrets.py, which spec/audit.py shares through spec/secret_names.py, so the two cannot disagree.
+# The names a repo owes come from spec/resolve_secrets.py, which resolves them through the spec/secret_names.py code spec/audit.py uses.
+# It reads the tree of the registry's ground branch, the branch the audit reads, so both start from the same tree.
+# That comes before jqr is defined, so the lookup below spells out the jq and sed pair that jqr stands for.
 # A repo with no registry entry owes nothing the registry can name.
 # The secrets group is therefore skipped for it with a note rather than failing the other groups.
 # That matches how an absent entry is treated for the model and the description above.
@@ -286,11 +288,11 @@ resolve_secrets="$script_dir/../spec/resolve_secrets.py"
 secrets_registered=false
 if [ -f "$registry" ]; then
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    if ! entry_count="$(jqr --arg n "$name" '[.repos[] | select(.name == $n)] | length' "$registry")"; then
+    if ! secrets_entry_count="$(jq -r --arg n "$name" '[.repos[] | select(.name == $n)] | length' "$registry" | sed $'s/\r$//')"; then
         echo "Failed to read $registry to resolve the entry for $name." >&2
         exit 1
     fi
-    if [ "$entry_count" -gt 0 ]; then
+    if [ "$secrets_entry_count" -gt 0 ]; then
         secrets_registered=true
     fi
 fi
@@ -298,27 +300,14 @@ fi
 # shellcheck disable=SC1091  # The linter runs without -x, and the library is linted as a file of its own.
 . "$script_dir/../lib/sh/secrets.sh"
 
-# Resolve the secret names this repo owes from its default branch tree, leaving the resolver's JSON in secret_names_json.
-# The tree is read through the API rather than from a checkout, so the answer is the one spec/audit.py computes whatever directory this runs in.
+# Resolve the secret names this repo owes, leaving the resolver's JSON in secret_names_json.
+# The resolver reads the tree of the registry's ground branch through read-only gh calls.
+# That keeps one tree reader, which is not restated here.
 # A truncated or unreadable tree fails, since a partial one would drop the codecov file a repo with tests owes.
 # It returns non-zero with its own message on any failure, so the caller decides whether that stops the run or reports a failed check.
 load_secret_names() {
-    local branch tree
-    if ! branch="$(gh api "repos/$repo" --jq '.default_branch')"; then
-        echo "Failed to read the default branch of $repo, so its secret names cannot be resolved." >&2
-        return 1
-    fi
-    if ! tree="$(gh api "repos/$repo/git/trees/$branch?recursive=1")"; then
-        echo "Failed to read the $branch tree of $repo, so its secret names cannot be resolved." >&2
-        return 1
-    fi
-    if ! jq -e '(.tree | type == "array") and (.truncated != true)' >/dev/null 2>&1 <<<"$tree"; then
-        echo "The $branch tree of $repo is truncated or unreadable, so its secret names cannot be resolved." >&2
-        return 1
-    fi
-    # The paths are separated by NUL bytes, since a path may hold a newline and NUL is the one byte it cannot hold.
-    if ! secret_names_json="$(printf '%s' "$tree" | jq -j '.tree[] | select(.type == "blob") | .path + "\u0000"' | "${py_cmd[@]}" "$resolve_secrets" names -- "$secrets_spec" "$registry" "$name")"; then
-        echo "Could not resolve the secret names for $repo." >&2
+    if ! secret_names_json="$("${py_cmd[@]}" "$resolve_secrets" names --slug "$repo" -- "$secrets_spec" "$registry" "$name")"; then
+        echo "Could not resolve the secret names for $repo from its tree." >&2
         return 1
     fi
 }
