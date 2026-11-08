@@ -306,7 +306,7 @@ fi
 # That sentence is left in secret_names_skip, and the callers decide what an unset group means for their run.
 # The resolver reads the tree of the registry's ground branch through read-only gh calls.
 # That keeps one tree reader, which is not restated here.
-# A truncated or unreadable tree fails, since a partial one would drop the codecov file a repo with tests owes.
+# A truncated or unreadable tree fails, since a partial one could drop the Dependabot copy of the Codecov token a repo with tests owes.
 # It returns non-zero with its own message on any failure, so the caller decides whether that stops the run or reports a failed check.
 load_secret_names() {
     if ! secret_names_json="$("${py_cmd[@]}" "$resolve_secrets" names --slug "$repo" "$@" -- "$secrets_spec" "$registry" "$name")"; then
