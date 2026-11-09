@@ -238,8 +238,7 @@ maintainer when".
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
-   An `introduced` finding leads to an issue only where `pr-review-conduct` "Triaging findings"
-   or the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
+   An `introduced` finding leads to an issue only where the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
    pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
    "Trust Boundaries and Hardening Effort" lets it earn a fix or an issue, it takes the fix.
    Otherwise it is declined under outcome 2 with that section's reason.
