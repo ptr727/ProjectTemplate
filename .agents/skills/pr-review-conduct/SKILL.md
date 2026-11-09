@@ -213,7 +213,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
-     in the pull request body.
+     in the pull request body. An item showing observed data takes outcome 4's observed-data
+     bullet instead, and its acknowledgment names only the kind of data.
    - Post the outcomes with `pr_review.py comment <number> --repo <owner>/<repo> --fingerprint
      <fp> --body <outcomes>`. One from an owner, member, or collaborator clears the hold,
      `shapes=ACKNOWLEDGED`. New unplaced text on a new head owes a new acknowledgment.
@@ -527,7 +528,9 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - A finding shows observed data in a public repository's pushed history, or in a carrying
   repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
   names the repository and the kind of data. In any mode, it and any issue, comment, or answer
-  it writes name no commit, file, line, or value. They quote none of the reviewer's words.
+  it writes name no commit, file, line, or value. They quote none of the reviewer's words. This
+  holds over the unplaced-item bullet above, so an unplaced item showing such data is escalated
+  without its raw text.
 
 An agent that cannot reach the maintainer directly escalates to whoever dispatched it and stops
 that unit of work there. A dispatched subagent is the ordinary case. Such an agent never substitutes its own
