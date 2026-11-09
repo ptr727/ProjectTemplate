@@ -503,7 +503,7 @@ carry its own context. An observed-data finding is the exception. A `REVIEWER OU
 whose part holds observed data takes no answer at all, per Merge Gate item 4. Otherwise an
 observed-data finding's answer names only the kind of data, per outcome 4's observed-data bullet.
 It reads `Listed in the body` for a recorded one and `Awaiting maintainer` for an escalation. Where another pull request holds the record, as on a
-promotion, the answer names it. Otherwise, quote the finding with its `file:line` anchor and enough of the reviewer's
+promotion, the answer names it. For every other finding, quote it with its `file:line` anchor and enough of the reviewer's
 own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
 `No change needed`, `Deferred to <issue>`, `Listed in the body`, or `Awaiting maintainer`. An
 `Awaiting maintainer` answer leaves the finding open until a later answer records the
@@ -534,6 +534,8 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - An item in a part the digest prints under `UNPLACED ON THE HEAD` cannot be told to be a finding
   or not. Quote its raw text in the escalation, unless its part holds observed data, which
   the escalation names by kind only.
+- A part the digest could not place holds observed data, per Merge Gate item 4's lead bullet. The
+  escalation names the repository, the pull request, and the kind of data, and nothing finer.
 - A finding shows observed data in a public repository's pushed history, or in a carrying
   repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
   names the repository and the kind of data. In any mode, it and any issue, comment, or answer
