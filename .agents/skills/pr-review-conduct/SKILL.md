@@ -214,7 +214,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body. An item showing observed data takes outcome 4's observed-data
-     bullet instead, and its acknowledgment names only the kind of data.
+     bullet instead, and its acknowledgment names only the kind of data. An escalated one is
+     acknowledged only once the maintainer answers, so the hold stays until then.
    - Post the outcomes with `pr_review.py comment <number> --repo <owner>/<repo> --fingerprint
      <fp> --body <outcomes>`. One from an owner, member, or collaborator clears the hold,
      `shapes=ACKNOWLEDGED`. New unplaced text on a new head owes a new acknowledgment.
