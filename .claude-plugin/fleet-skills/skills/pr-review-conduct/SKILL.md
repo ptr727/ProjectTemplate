@@ -396,8 +396,7 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
      as its own issue, labeled `pre-existing`. Such a finding names an input or a state and the
      wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
      filed` heading and links that issue. A thread raising it is answered with that issue's link
-     and resolved. Where its class has other sites, that one issue names each, per `GOVERNANCE.md`
-     "Design Before Code". An open issue for that class takes the new sites instead of a new one, unless a
+     and resolved. Where its class has other sites, that one issue names each. An open issue for that class takes the new sites instead of a new one, unless a
      fix for it is already merged or claimed.
      A near-duplicate with no defect behind it is a consolidation finding, which the dropped
      bullet below takes.
