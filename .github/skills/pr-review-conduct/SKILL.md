@@ -392,8 +392,8 @@ observed. A value the repository constructed is disproved under outcome 2 instea
      The other is data in a carrying repository's copy of hub-authored text. In a private repository, pushed data is
      replaced here, even in a file this change does not otherwise touch. Where the current text
      no longer holds it, nothing is replaced, and the record below is still owed. On a develop ->
-     main promotion pull request, the record lands in a feature pull request of its own, with any
-     replacement. Its body line goes under an `Observed data recorded` heading with the location
+     main promotion pull request, a replacement lands in a feature pull request of its own, with
+     its record. Where nothing is replaced, the record goes in the promotion's own body. Its body line goes under an `Observed data recorded` heading with the location
      and the kind, never the value. Where another pull request's review raised it, the line names
      that one too. The pull request holding the record takes the `history-data` label, and so
      does the one whose review raised it. Where the repository lacks that label, the maintainer is
