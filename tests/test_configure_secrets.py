@@ -600,7 +600,7 @@ class CheckCase(unittest.TestCase):
             self.list_stores(fix, [*self.OWED, "LEFTOVER_NAME"], self.OWED)
             result = self.check(fix)
             self.assertIn(
-                "secrets: LEFTOVER_NAME in the actions store is claimed by no applicable mechanism",
+                "secrets: LEFTOVER_NAME in the actions store is claimed in that store by no applicable mechanism",
                 result.stdout,
             )
             self.assertIn("FAILED=0", result.stdout)
