@@ -457,8 +457,8 @@ never against its confidence label. Classify before responding:
 - **Design finding that `GOVERNANCE.md` "Design Before Code" backs**, such as logic an existing
   helper provides or a per-site fix for a class seen elsewhere. It is not an architectural
   opinion. Fix it, extending the existing helper where this repository holds it, and move the
-  class's sites in the touched files onto it. The other sites take the outcome a sibling the class
-  sweep leaves unfixed takes under outcome 4. An extension a helper in another
+  class's sites in the touched files onto it. The other sites take outcome 1's class sweep, as
+  any sibling does. An extension a helper in another
   repository needs takes outcome 4's last bullet.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
   contradicts the tree or industry norm, **fix the rule, not the code**. Take such a rule to the
