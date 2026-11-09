@@ -844,6 +844,8 @@ subagents and holds only what they return.
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
 7. **Record the round's report** in working notes, per "Run State", and start the next round.
+   The next planner's net-flow counts complete that report, since they include this round's
+   fixes. At the run's end, dispatch one more planner to measure before the final report.
 
 The orchestrator's working notes hold the round plans, the outcome lines, the reports, and the set awaiting promotion at the run's start. Nothing
 else read in a round outlives it. An away run writes no session handoff and saves no memory. Its
