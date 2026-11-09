@@ -391,13 +391,14 @@ observed. A value the repository constructed is disproved under outcome 2 instea
      threads stay open. One is data in a public repository's pushed history, the hub's included.
      The other is data in a carrying repository's copy of hub-authored text. In a private repository, pushed data is
      replaced here, even in a file this change does not otherwise touch. Where the current text
-     no longer holds it, nothing is replaced, and the record below is still owed. On a develop -> main
-     promotion pull request, that replacement lands as a feature pull request of its own. Its
-     body line goes under an `Observed data replaced` heading with the location and the kind,
-     never the value. Where another pull request's review raised it, the line names that one too. The pull request carrying the replacement takes the `history-data` label, and so
-     does the one whose review raised it, where that is another one.
-     Where the repository lacks that label, the maintainer is told. A thread raising a replaced
-     finding is answered with a pointer to its body line and resolved.
+     no longer holds it, nothing is replaced, and the record below is still owed. On a develop ->
+     main promotion pull request, the record lands in a feature pull request of its own, with any
+     replacement. Its body line goes under an `Observed data recorded` heading with the location
+     and the kind, never the value. Where another pull request's review raised it, the line names
+     that one too. The pull request holding the record takes the `history-data` label, and so
+     does the one whose review raised it. Where the repository lacks that label, the maintainer is
+     told. A thread raising a recorded finding is answered with a pointer to its body line and
+     resolved.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
@@ -491,7 +492,7 @@ never against its confidence label. Classify before responding:
 
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
 carry its own context. An observed-data finding is the exception. Its answer names only the kind
-of data, per outcome 4's observed-data bullet, with `Fixed in <SHA>` for a replacement and
+of data, per outcome 4's observed-data bullet, with `Listed in the body` for a recorded one and
 `Awaiting maintainer` for an escalation. Otherwise, quote the finding with its `file:line` anchor and enough of the reviewer's
 own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
 `No change needed`, `Deferred to <issue>`, `Listed in the body`, or `Awaiting maintainer`. An
