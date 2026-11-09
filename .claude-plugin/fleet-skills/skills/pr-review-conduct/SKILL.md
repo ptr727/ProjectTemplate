@@ -181,9 +181,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    What closing a finding owes turns on whether it is `pre-existing`, under the classes
    `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
    `pre-existing` finding on text inside a canonical Markdown unit takes the tracker bullet of
-   outcome 4 of "Every finding ends in a listed outcome" below. An observed-data finding there
-   takes that outcome's first bullet instead, since the data is the maintainer's to decide. That
-   holds in a carrying repository too, ahead of routing by fidelity. Such a unit is one the hub's
+   outcome 4 of "Every finding ends in a listed outcome" below. Such a unit is one the hub's
    `scripts/canonical_review.py list` names. The tracker bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and
@@ -380,16 +378,6 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
-   - A `pre-existing` finding that committed text holds observed data is the maintainer's, per
-     `GOVERNANCE.md` "Representative Data in Agent-Authored Text", rather than a worker's to
-     rewrite. That holds wherever the text sits, a canonical unit or a touched file included. It
-     is filed once as a `decision` issue. Its body line goes under a `Pre-existing findings,
-     filed` heading. That issue and that line name the location and the shape of the data, never
-     the data. A thread raising it is answered with that issue's link and resolved. The issue goes
-     where the paragraph after these bullets sends an issue, under the write condition the last
-     bullet states. Where that write is not allowed, the finding is escalated per "Escalate to
-     the maintainer when". Its body line stands under the same heading without a link, and a
-     thread raising it stays open for the maintainer. Listing it in a body alone would leave it unreported, and each clone keeps copying it.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a

@@ -245,16 +245,6 @@ maintainer when".
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
-   - A `pre-existing` finding that committed text holds observed data is the maintainer's, per
-     `GOVERNANCE.md` "Representative Data in Agent-Authored Text", rather than a worker's to
-     rewrite. That holds wherever the text sits, a canonical unit or a touched file included. It
-     is filed once as a `decision` issue. Its body line goes under a `Pre-existing findings,
-     filed` heading. That issue and that line name the location and the shape of the data, never
-     the data. A thread raising it is answered with that issue's link and resolved. The issue goes
-     where the paragraph after these bullets sends an issue, under the write condition the last
-     bullet states. Where that write is not allowed, the finding is escalated per "Escalate to
-     the maintainer when". Its body line stands under the same heading without a link, and a
-     thread raising it stays open for the maintainer. Listing it in a body alone would leave it unreported, and each clone keeps copying it.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
