@@ -817,8 +817,8 @@ The orchestrator reads no issue body, diff, or review thread in away mode. Each 
 subagents and holds only what they return.
 
 1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository. It first measures the run's net flow
-   per step 8, and returns those counts with the plan. Its brief names when the run began, and
-   the set awaiting promotion then.
+   per step 8, and returns those counts with the plan. Its brief names when the run began. The
+   first planner reads the set awaiting promotion then and returns it, and later briefs carry it.
    It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
    each claim comment. It holds back each issue "Needs the Maintainer" names. Where one turns on an
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
