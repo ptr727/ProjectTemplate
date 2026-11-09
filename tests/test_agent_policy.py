@@ -499,11 +499,10 @@ class CarriedExclusionCase(unittest.TestCase):
     def test_check_reports_a_malformed_ignore_as_drift(self) -> None:
         rendered = agent_policy.render(None, "Fixture", "release")
         want = agent_policy.facts(rendered)["qodo"]
-        for text in (
-            "ignore = 'x'\n[config]\ndisable_auto_feedback = false\n",
-            "[[ignore]]\nglob = ['x']\n[config]\ndisable_auto_feedback = false\n",
-        ):
-            with self.subTest(text=text):
+        globs = repr(want["ignore_glob"])
+        for ignore in ("ignore = 'x'\n", f"ignore = {globs}\n", f"[[ignore]]\nglob = {globs}\n"):
+            with self.subTest(ignore=ignore):
+                text = ignore + "[config]\ndisable_auto_feedback = false\n"
                 got = agent_policy.judge_toml(want)(text)
                 self.assertEqual([ok for ok, _ in got], [True, False])
 

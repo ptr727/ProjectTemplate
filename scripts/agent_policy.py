@@ -656,11 +656,11 @@ def judge_toml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
             return [(False, f"{TOML_PATH} does not parse as TOML")]
         got = (doc.get("config") or {}).get("disable_auto_feedback")
         ignore = doc.get("ignore")
-        glob = ignore.get("glob") if isinstance(ignore, dict) else ignore
-        globs_absent = missing(glob, want["ignore_glob"])
+        table = ignore is None or isinstance(ignore, dict)
+        globs_ok = table and missing((ignore or {}).get("glob"), want["ignore_glob"]) == []
         return [
             (exactly(got, want["disable_auto_feedback"]), msg),
-            (globs_absent == [], f"{TOML_PATH} ignore.glob includes {want['ignore_glob']}"),
+            (globs_ok, f"{TOML_PATH} ignore.glob includes {want['ignore_glob']}"),
         ]
 
     return judge
