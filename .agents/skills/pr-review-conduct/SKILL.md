@@ -341,7 +341,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 ## Every finding ends in a listed outcome
 
 A finding that committed text holds observed data takes outcome 4's observed-data bullet,
-whatever its class, ahead of every other outcome.
+whatever its class, ahead of every other outcome. That applies once the data is confirmed as
+observed. A value the repository constructed is disproved under outcome 2 instead.
 
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying. Fix each one sitting
