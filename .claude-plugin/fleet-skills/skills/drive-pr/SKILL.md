@@ -250,7 +250,7 @@ maintainer when".
      rewrite. That holds wherever the text sits, a canonical unit or a touched file included. It
      is filed once as a `decision` issue. Its body line goes under a `Pre-existing findings,
      filed` heading. That issue and that line name the location and the shape of the data, never
-     the data. Listing it in a body alone would leave it unreported, and each clone keeps copying it.
+     the data. A thread raising it is answered with that issue's link and resolved. Listing it in a body alone would leave it unreported, and each clone keeps copying it.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a

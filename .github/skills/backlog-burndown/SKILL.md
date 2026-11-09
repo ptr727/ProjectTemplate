@@ -96,8 +96,9 @@ A round is the unit. Each one runs these steps in order.
    can rank high once a sibling fix lands.
    **Measure the run's net flow before that ranking**, read fresh each round rather than carried.
    Count the issues created since the run began, leaving out what "Ranking" leaves out of every
-   count and any `decision`. Count the issues fixed since then: those closed, and those awaiting
-   promotion as "Ranking" reads that set. Report both, and the open count less the issues awaiting
+   count and any `decision`. Count the issues fixed since then, with the same exclusions. Those
+   are the issues closed since then, and those a pull request merged since then names on a `Closes on
+   promotion:` line. Report both, and the open count less the issues awaiting
    promotion as the backlog. The counts take in issues the maintainer or another session opened,
    so they are a signal rather than a verdict on the review loop. Where the run has opened more
    than it fixed, the next ranking changes. The issues opened since the run began get no weight
@@ -366,8 +367,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   A branch a claim comment names for the first time is one no pull request on the repository has
   used as its head. That is checked with `gh pr list --head <name> --state all` before the
   comment is written.
-- **The brief quotes `pr-review-conduct` outcome 4 whole and adds no filing instruction of its
-  own.** A worker reads its brief as the more specific instruction. So a brief saying "file a
+- **The brief quotes `pr-review-conduct` outcome 4 whole and adds no instruction of its own to
+  file a review finding.** A worker reads its brief as the more specific instruction. So a brief saying "file a
   follow-up" overrides that outcome for every finding it drops or lists. The run then turns its
   own review loop into backlog. Quote outcome 4 whole: its opening lines, every bullet, and the
   paragraph after them. Take them from the copy this run reads its skills from, per the bullet on
