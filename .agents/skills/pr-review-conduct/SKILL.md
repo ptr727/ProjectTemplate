@@ -219,8 +219,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      whatever outcome 4 does with the data. The agent tells the maintainer, or its dispatcher,
      naming the repository, the pull request, and the kind of data, and nothing finer. It then stops
      that unit of work. Once the maintainer answers, the agent posts the acknowledgment carrying
-     that answer. Nothing the agent writes quotes or locates the data. That holds ahead of
-     "Answering a suppressed finding".
+     that answer. Nothing the agent writes quotes or locates the data. That holds ahead of the
+     `REVIEWER OUTPUT NOTED` paragraph below and of "Answering a suppressed finding".
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.

@@ -350,4 +350,5 @@ instance's outcome is context for the new one, never a standing answer to reuse 
 - A part of the review the digest prints under `UNPLACED ON THE HEAD` holds the gate until its
   outcomes are acknowledged per pr-review-conduct's Merge Gate item 4. Never guess what the new
   wording probably meant. An item that cannot be told to be a finding or not goes to the
-  maintainer. So does any part that item's lead bullet covers.
+  maintainer. So does any part that pr-review-conduct's Merge Gate item 4 lead bullet
+  covers.
