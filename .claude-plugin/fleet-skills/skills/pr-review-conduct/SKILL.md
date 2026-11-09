@@ -371,8 +371,7 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
-   An `introduced` finding leads to an issue only where `pr-review-conduct` "Triaging findings"
-   or the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
+   An `introduced` finding leads to an issue only where the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
    pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
    "Trust Boundaries and Hardening Effort" lets it earn a fix or an issue, it takes the fix.
    Otherwise it is declined under outcome 2 with that section's reason.
@@ -396,7 +395,10 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
      as its own issue, labeled `pre-existing`. Such a finding names an input or a state and the
      wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
      filed` heading and links that issue. A thread raising it is answered with that issue's link
-     and resolved.
+     and resolved. Where its class has other sites, that one issue names each. An open issue for that class takes the new sites instead of a new one, unless a
+     fix for it is already merged or claimed.
+     A near-duplicate with no defect behind it is a consolidation finding, which the dropped
+     bullet below takes.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
@@ -414,7 +416,7 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
      a blocker filed elsewhere. A deferral noted only in a thread is lost the
      moment the PR merges, so each of these leaves its record where its outcome says.
 
-   The body keeps every other unfiled `pre-existing` line, the fifth bullet's, under one
+   The body keeps every other unfiled `pre-existing` line, the "Any other" bullet's, under one
    heading, `Pre-existing findings, not filed`. Each line under these headings carries its
    location and its class. The headings stay apart from the open `introduced` findings a spent
    edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's
@@ -455,8 +457,9 @@ never against its confidence label. Classify before responding:
 - **Design finding that `GOVERNANCE.md` "Design Before Code" backs**, such as logic an existing
   helper provides or a per-site fix for a class seen elsewhere. It is not an architectural
   opinion. Fix it, extending the existing helper where this repository holds it, and move the
-  class's sites in the touched files onto it. File the other sites as one issue naming each, and
-  an extension a helper in another repository needs as an issue in that repository.
+  class's sites in the touched files onto it. The other sites take outcome 1's class sweep, as
+  any sibling does. An extension a helper in another
+  repository needs takes outcome 4's last bullet.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
   contradicts the tree or industry norm, **fix the rule, not the code**. Take such a rule to the
   maintainer (outcome 5) rather than bouncing the same code across rounds.

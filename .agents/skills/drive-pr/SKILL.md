@@ -238,8 +238,7 @@ maintainer when".
    and say so, rather than treating the intention to ask as the asking.
 4. **Deferred past this pull request, or on text it did not touch, so record it by its class.**
    An `introduced` finding fixable here and deliberately left as is takes outcome 3 instead.
-   An `introduced` finding leads to an issue only where `pr-review-conduct` "Triaging findings"
-   or the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
+   An `introduced` finding leads to an issue only where the last bullet below says so. A spent edit budget hands any other `introduced` finding to this pull request's review loop, never past the
    pull request. An edge case on code this change wrote is `introduced`. Where `GOVERNANCE.md`
    "Trust Boundaries and Hardening Effort" lets it earn a fix or an issue, it takes the fix.
    Otherwise it is declined under outcome 2 with that section's reason.
@@ -263,7 +262,10 @@ maintainer when".
      as its own issue, labeled `pre-existing`. Such a finding names an input or a state and the
      wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
      filed` heading and links that issue. A thread raising it is answered with that issue's link
-     and resolved.
+     and resolved. Where its class has other sites, that one issue names each. An open issue for that class takes the new sites instead of a new one, unless a
+     fix for it is already merged or claimed.
+     A near-duplicate with no defect behind it is a consolidation finding, which the dropped
+     bullet below takes.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
@@ -281,7 +283,7 @@ maintainer when".
      a blocker filed elsewhere. A deferral noted only in a thread is lost the
      moment the PR merges, so each of these leaves its record where its outcome says.
 
-   The body keeps every other unfiled `pre-existing` line, the fifth bullet's, under one
+   The body keeps every other unfiled `pre-existing` line, the "Any other" bullet's, under one
    heading, `Pre-existing findings, not filed`. Each line under these headings carries its
    location and its class. The headings stay apart from the open `introduced` findings a spent
    edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's
