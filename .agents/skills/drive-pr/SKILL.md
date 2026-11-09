@@ -250,7 +250,8 @@ observed. A value the repository constructed is disproved under outcome 2 instea
    bullet that fits decides:
    - A finding that committed text holds observed data takes the route `GOVERNANCE.md`
      "Representative Data in Agent-Authored Text" sets, and the first case that fits decides.
-     Read the visibility live. Data no pushed commit holds is removed from the unpushed commits
+     Sweep for its siblings as outcome 1 does, since a reviewer samples, and give each one the
+     route its own case sets. Read the visibility live. Data no pushed commit holds is removed from the unpushed commits
      before the push, and needs no record. A spent edit budget does not end that case, since the
      push waits on it. Two kinds are escalated per "Escalate to the maintainer when", and their
      threads stay open. One is data in a public repository's pushed history, the hub's included.
