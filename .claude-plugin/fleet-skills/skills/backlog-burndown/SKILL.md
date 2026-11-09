@@ -895,10 +895,6 @@ leaves the work findable.
    comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
-An observed-data escalation parks the same way, but its issue and comments say only what
-`pr-review-conduct` "Escalate to the maintainer when" allows. So step 2 names no option, file, or
-pull request, and step 3 is skipped.
-
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
 answer, the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer

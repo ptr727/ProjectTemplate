@@ -487,8 +487,9 @@ never against its confidence label. Classify before responding:
 ## Answering a suppressed finding
 
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
-carry its own context. An observed-data escalation is the exception, answered as "Escalate to the
-maintainer when" says. Otherwise, quote the finding with its `file:line` anchor and enough of the reviewer's
+carry its own context. An observed-data finding is the exception. Its answer names only the kind
+of data, per outcome 4's observed-data bullet, with `Fixed in <SHA>` for a replacement and
+`Awaiting maintainer` for an escalation. Otherwise, quote the finding with its `file:line` anchor and enough of the reviewer's
 own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
 `No change needed`, `Deferred to <issue>`, `Listed in the body`, or `Awaiting maintainer`. An
 `Awaiting maintainer` answer leaves the finding open until a later answer records the
@@ -519,9 +520,8 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
   or not. Quote its raw text in the escalation.
 - A finding shows observed data in a public repository's pushed history, or in a carrying
   repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
-  names only the repository and the kind of data. Any issue, comment, or answer it writes, in
-  any mode, says only that a history question about this repository awaits the maintainer. It quotes no anchor, words, or value, and links no pull
-  request.
+  names the repository and the kind of data. In any mode, it and any issue, comment, or answer
+  it writes name no commit, file, line, or value. They quote none of the reviewer's words.
 
 An agent that cannot reach the maintainer directly escalates to whoever dispatched it and stops
 that unit of work there. A dispatched subagent is the ordinary case. Such an agent never substitutes its own
