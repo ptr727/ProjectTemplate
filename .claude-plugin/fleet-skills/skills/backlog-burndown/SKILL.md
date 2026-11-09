@@ -94,16 +94,14 @@ A round is the unit. Each one runs these steps in order.
    carry the previous round's ranking forward. Any issue this round's reviews filed is now an
    open issue with a claim on the next round's attention. An issue that ranked low last round
    can rank high once a sibling fix lands.
-   **Measure the round's net flow before that ranking.** Count the issues created since the run began
-   that the round's merged pull requests link under a `Pre-existing findings, filed` heading, other than a
-   `decision`. Count the issues the round newly
-   named on a merged pull request's `Closes on promotion:` line. Closed issues measure nothing
-   here, since a round that does not promote closes none. Report both counts, per "Ending the
-   Run". Report too the open count, as "Ranking" counts it, less every open issue already named on
-   such a line. Where the round filed more than it fixed, the next ranking gives the issues it filed no
-   weight for being new, per "Ranking". A run whose rounds keep filing more than
-   they fix is turning its review loop into backlog. Say so at that round's report rather than at
-   the run's end.
+   **Measure the run's net flow before that ranking**, read fresh each round rather than carried.
+   Count the issues created since the run began, leaving out what "Ranking" leaves out of every
+   count and any `decision`. Count the issues fixed since then: those closed, and those awaiting
+   promotion as "Ranking" reads that set. Report both, and the open count less the issues awaiting
+   promotion as the backlog. The counts take in issues the maintainer or another session opened,
+   so they are a signal rather than a verdict on the review loop. Where the run has opened more
+   than it fixed, the next ranking changes. The issues opened since the run began get no weight
+   for being new, per "Ranking". Say so at that round's report rather than at the run's end.
 
 ## Ranking
 
@@ -123,8 +121,8 @@ Rank on these, highest first where they conflict:
   worth more than any one of its children, and fixing it may close them.
 - **It is new.** An issue filed by a recent review round is evidence of something the current
   content actually got wrong. That issue is also the freshest context anyone has on it. The
-  exception is an issue the last measured round filed, where that round filed more than it
-  fixed, per "The Round" step 8. It gets no weight for being new.
+  exception is an issue opened since the run began, while "The Round" step 8 finds the run
+  opening more than it fixed. It then gets no weight for being new.
 - **It is small and self-contained**, as a tie-break only. Size breaks a tie between two issues of
   equal value, and it never promotes a trivial issue over a real defect.
 
@@ -817,9 +815,8 @@ works from the accepting comment rather than the body.
 The orchestrator reads no issue body, diff, or review thread in away mode. Each round it dispatches
 subagents and holds only what they return.
 
-1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository. It first measures the previous round's
-   net flow per step 8, and returns those counts with the plan. Its brief names that round's merged
-   pull requests from the outcome lines, so it measures that set rather than a time window.
+1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository. It first measures the run's net flow
+   per step 8, and returns those counts with the plan. Its brief names when the run began.
    It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
    each claim comment. It holds back each issue "Needs the Maintainer" names. Where one turns on an
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
@@ -975,7 +972,7 @@ also covers an issue held back for a setting, a credential, a host, or the agent
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
-request, awaiting promotion, and `deferred`, given by count. A round that filed more than it fixed is named as that. A held promotion is named too, with each `decision` issue holding
+request, awaiting promotion, and `deferred`, given by count. A run that opened more than it fixed, at the last round's measure, is named as that. A held promotion is named too, with each `decision` issue holding
 it. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State
