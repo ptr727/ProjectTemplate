@@ -181,7 +181,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    What closing a finding owes turns on whether it is `pre-existing`, under the classes
    `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
    `pre-existing` finding on text inside a canonical Markdown unit takes the tracker bullet of
-   outcome 4 of "Every finding ends in a listed outcome" below. Such a unit is one the hub's
+   outcome 4 of "Every finding ends in a listed outcome" below. An observed-data finding there
+   takes that outcome's observed-data bullet instead. Such a unit is one the hub's
    `scripts/canonical_review.py list` names. The tracker bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and
@@ -193,6 +194,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    since a resync writes the whole text there. It declines the finding under
    that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker.
    A finding on an intent unit is filed there too, since the defect is still fixed at the source.
+   An observed-data finding on either kind of unit takes outcome 4's observed-data bullet instead.
    The carrier adapts its own copy of an intent unit meanwhile. Every other finding, a `style`
    remark on untouched text included, takes its own outcome in that section.
 
@@ -338,6 +340,10 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
 
 ## Every finding ends in a listed outcome
 
+A finding that committed text holds observed data takes outcome 4's observed-data bullet,
+whatever its class, ahead of every other outcome. That applies once the data is confirmed as
+observed. A value the repository constructed is disproved under outcome 2 instead.
+
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying. Fix each one sitting
    in a file the diff already touches or that this change itself made wrong. Each of the rest takes
@@ -377,6 +383,23 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
+   - A finding that committed text holds observed data takes the route `GOVERNANCE.md`
+     "Representative Data in Agent-Authored Text" sets, and the first case that fits decides.
+     Sweep for its siblings as outcome 1 does, since a reviewer samples, and give each one the
+     route its own case sets. Read the visibility live. Data no pushed commit holds is removed from the unpushed commits
+     before the push, and needs no record. A spent edit budget does not end that case, since the
+     push waits on it. Two kinds are escalated per "Escalate to the maintainer when", and their
+     threads stay open. One is data in a public repository's pushed history, the hub's included.
+     The other is data in a carrying repository's copy of hub-authored text. In a private repository, pushed data is
+     replaced here, even in a file this change does not otherwise touch. Where the current text
+     no longer holds it, nothing is replaced, and the record below is still owed. On a develop ->
+     main promotion pull request, a replacement lands in a feature pull request of its own, with
+     its record. Where nothing is replaced, the record goes in the promotion's own body. Its body line goes under an `Observed data recorded` heading with the location
+     and the kind, never the value. Where another pull request's review raised it, the line names
+     that one too. The pull request holding the record takes the `history-data` label, and so
+     does the one whose review raised it. Where the repository lacks that label, the maintainer is
+     told. A thread raising a recorded finding is answered with a pointer to its body line and
+     resolved.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
@@ -469,7 +492,10 @@ never against its confidence label. Classify before responding:
 ## Answering a suppressed finding
 
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
-carry its own context. Quote the finding with its `file:line` anchor and enough of the reviewer's
+carry its own context. An observed-data finding is the exception. Its answer names only the kind
+of data, per outcome 4's observed-data bullet, with `Listed in the body` for a recorded one and
+`Awaiting maintainer` for an escalation. Where another pull request holds the record, as on a
+promotion, the answer names it. Otherwise, quote the finding with its `file:line` anchor and enough of the reviewer's
 own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
 `No change needed`, `Deferred to <issue>`, `Listed in the body`, or `Awaiting maintainer`. An
 `Awaiting maintainer` answer leaves the finding open until a later answer records the
@@ -498,6 +524,10 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - An architectural redesign is proposed rather than a bug fix.
 - An item in a part the digest prints under `UNPLACED ON THE HEAD` cannot be told to be a finding
   or not. Quote its raw text in the escalation.
+- A finding shows observed data in a public repository's pushed history, or in a carrying
+  repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
+  names the repository and the kind of data. In any mode, it and any issue, comment, or answer
+  it writes name no commit, file, line, or value. They quote none of the reviewer's words.
 
 An agent that cannot reach the maintainer directly escalates to whoever dispatched it and stops
 that unit of work there. A dispatched subagent is the ordinary case. Such an agent never substitutes its own

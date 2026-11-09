@@ -205,6 +205,10 @@ maintainer when".
 
 <!-- include: .agents/skills/pr-review-conduct/SKILL.md > Every finding ends in a listed outcome -->
 
+A finding that committed text holds observed data takes outcome 4's observed-data bullet,
+whatever its class, ahead of every other outcome. That applies once the data is confirmed as
+observed. A value the repository constructed is disproved under outcome 2 instead.
+
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying. Fix each one sitting
    in a file the diff already touches or that this change itself made wrong. Each of the rest takes
@@ -244,6 +248,23 @@ maintainer when".
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
+   - A finding that committed text holds observed data takes the route `GOVERNANCE.md`
+     "Representative Data in Agent-Authored Text" sets, and the first case that fits decides.
+     Sweep for its siblings as outcome 1 does, since a reviewer samples, and give each one the
+     route its own case sets. Read the visibility live. Data no pushed commit holds is removed from the unpushed commits
+     before the push, and needs no record. A spent edit budget does not end that case, since the
+     push waits on it. Two kinds are escalated per "Escalate to the maintainer when", and their
+     threads stay open. One is data in a public repository's pushed history, the hub's included.
+     The other is data in a carrying repository's copy of hub-authored text. In a private repository, pushed data is
+     replaced here, even in a file this change does not otherwise touch. Where the current text
+     no longer holds it, nothing is replaced, and the record below is still owed. On a develop ->
+     main promotion pull request, a replacement lands in a feature pull request of its own, with
+     its record. Where nothing is replaced, the record goes in the promotion's own body. Its body line goes under an `Observed data recorded` heading with the location
+     and the kind, never the value. Where another pull request's review raised it, the line names
+     that one too. The pull request holding the record takes the `history-data` label, and so
+     does the one whose review raised it. Where the repository lacks that label, the maintainer is
+     told. A thread raising a recorded finding is answered with a pointer to its body line and
+     resolved.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
