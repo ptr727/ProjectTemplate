@@ -97,12 +97,12 @@ A round is the unit. Each one runs these steps in order.
    **Measure the run's net flow before that ranking**, read fresh each round rather than carried.
    Count the issues created since the run began, leaving out what "Ranking" leaves out of every
    count and any `decision`. Count the issues fixed since then, with the same exclusions. Those
-   are the issues closed since then, and those a pull request merged since then names on a `Closes on
-   promotion:` line. Report both, and the open count less the issues awaiting
-   promotion as the backlog. The counts take in issues the maintainer or another session opened,
-   so they are a signal rather than a verdict on the review loop. Where the run has opened more
-   than it fixed, the next ranking changes. The issues opened since the run began get no weight
-   for being new, per "Ranking". Say so at that round's report rather than at the run's end.
+   are the issues a pull request merged since then names on a `Closes on promotion:` line, and
+   any other issue closed since then as completed. Report both counts beside the backlog
+   "Ranking" counts, with how many of that backlog await promotion. The counts take in issues
+   anyone opened, so they are a signal for the maintainer rather than a verdict on the review
+   loop. They change no ranking. Where more were opened than fixed, say so in that round's
+   report. An attended run then asks the maintainer whether to continue before dispatching.
 
 ## Ranking
 
@@ -121,9 +121,7 @@ Rank on these, highest first where they conflict:
 - **It is a root cause rather than a leaf.** A parent issue grouping several filed symptoms is
   worth more than any one of its children, and fixing it may close them.
 - **It is new.** An issue filed by a recent review round is evidence of something the current
-  content actually got wrong. That issue is also the freshest context anyone has on it. The
-  exception is an issue opened since the run began, while "The Round" step 8 finds the run
-  opening more than it fixed. It then gets no weight for being new.
+  content actually got wrong. That issue is also the freshest context anyone has on it.
 - **It is small and self-contained**, as a tie-break only. Size breaks a tie between two issues of
   equal value, and it never promotes a trivial issue over a real defect.
 
@@ -913,8 +911,8 @@ So the run stops at develop, and its report says so.
 
 **Under `develop`**, no round opens a promotion pull request and no round freezes. An open
 promotion pull request does not freeze the run either, since no one is present to merge it. Until
-one merges, every issue the rounds fixed still reads as open. So each round's report gives the
-open count less the issues already fixed on develop, per "The Round" step 8, as the backlog. At the
+one merges, every issue the rounds fixed still reads as open. So each round's report says how
+much of the backlog is already fixed on develop, per "The Round" step 8. At the
 run's end, the orchestrator dispatches one worker where develop is ahead of main. The worker opens
 or updates the promotion pull request per "The Promotion Boundary" steps 1 and 2, and
 "Assembling the Promotion Body". It leaves the promotion for the maintainer. A finding the worker
@@ -973,7 +971,7 @@ also covers an issue held back for a setting, a credential, a host, or the agent
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
-request, awaiting promotion, and `deferred`, given by count. A run that opened more than it fixed, at the last round's measure, is named as that. A held promotion is named too, with each `decision` issue holding
+request, awaiting promotion, and `deferred`, given by count. A held promotion is named too, with each `decision` issue holding
 it. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State

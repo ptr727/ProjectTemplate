@@ -186,7 +186,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    verbatim unit in a carrying repository, that holds ahead of routing by fidelity. Its `decision`
    issue goes to the hub, which authors the text. That holds where `GOVERNANCE.md` "Repository
    Boundaries and Write Safety" and the session's own scope both allow that write. It goes to the
-   maintainer otherwise. On an intent unit's adapted copy, it is filed in the carrying repository. Such a unit is one the hub's
+   maintainer otherwise. Such a unit is one the hub's
    `scripts/canonical_review.py list` names. The tracker bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and
