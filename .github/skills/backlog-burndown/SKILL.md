@@ -295,7 +295,9 @@ for, and it binds harder than any throughput target.
   rather than leaving it to choose. The loser narrows its change to drop that file, parks until
   the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". Some losers need
   the file for a doc, manifest entry, or rule sentence their own change put in disagreement. Such
-  a loser parks rather than narrowing, so that text is fixed rather than filed. Losers parked in a
+  a loser parks rather than narrowing, so that text is fixed rather than filed. So does a loser
+  that needs the file for an edit `pr-review-conduct` outcome 4 owes, such as a private
+  repository's observed-data replacement. Losers parked in a
   cycle, each waiting on another in it, are all stopped for the maintainer per "Raising a Blocked
   Question". Where the loser has already opened a
   pull request, say whether it closes or waits. That is because one left open on an abandoned
@@ -373,8 +375,10 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   own review loop into backlog. Quote outcome 4 whole: its opening lines, every bullet, and the
   paragraph after them. Take them from the copy this run reads its skills from, per the bullet on
   develop's copy below. A `pre-existing`
-  sibling in a file another group holds takes outcome 4 like any other. It needs no edit, so it
-  needs none of the adjudication "Grouping and File Claims" describes.
+  sibling in a file another group holds takes outcome 4 like any other. Where that outcome
+  requires an edit, as a private repository's observed-data replacement does, the worker reports
+  it for adjudication under "Grouping and File Claims". There, losing that file parks the group
+  rather than narrowing it.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
