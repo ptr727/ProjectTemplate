@@ -214,6 +214,7 @@ def compare_stores(
 
     The levels are OK for a required name that is present and DEFECT for a required name that is missing.
     DEFECT also covers a forbidden name that is present, and DRIFT covers a name no applicable mechanism claims.
+    A claim is per store, so a name only one store owes is DRIFT when the other store holds it.
     A forbidden name that is present is also unclaimed, so it is reported at both levels, as AUDIT.md documents.
     The audit and repo-config/configure.sh both read their findings from here, so they cannot disagree.
     """
@@ -224,15 +225,14 @@ def compare_stores(
                 findings.append(("OK", f"secrets: {name} is in the {store} store"))
             else:
                 findings.append(("DEFECT", f"secrets: {name} missing from the {store} store"))
-    claimed_names = required["actions"] | required["dependabot"]
     for store, present in live.items():
         for name in sorted(present & forbidden):
             findings.append(("DEFECT", f"secrets: forbidden {name} present in the {store} store"))
-        for name in sorted(present - claimed_names):
+        for name in sorted(present - required[store]):
             findings.append(
                 (
                     "DRIFT",
-                    f"secrets: {name} in the {store} store is claimed by no applicable mechanism (stale?)",
+                    f"secrets: {name} in the {store} store is claimed in that store by no applicable mechanism (stale?)",
                 )
             )
     return findings
