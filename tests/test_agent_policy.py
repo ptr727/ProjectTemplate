@@ -496,6 +496,21 @@ class CarriedExclusionCase(unittest.TestCase):
         with self.assertRaises(agent_policy.Refusal):
             self.plan_toml("ignore = 'docs/**'\n")
 
+    def test_check_reports_a_malformed_ignore_as_drift(self) -> None:
+        rendered = agent_policy.render(None, "Fixture", "release")
+        want = agent_policy.facts(rendered)["qodo"]
+        for text in (
+            "ignore = 'x'\n[config]\ndisable_auto_feedback = false\n",
+            "[[ignore]]\nglob = ['x']\n[config]\ndisable_auto_feedback = false\n",
+        ):
+            with self.subTest(text=text):
+                got = agent_policy.judge_toml(want)(text)
+                self.assertEqual([ok for ok, _ in got], [True, False])
+
+    def test_rulesets_need_no_manifest(self) -> None:
+        with mock.patch.object(agent_policy, "carried_globs", side_effect=AssertionError("read")):
+            agent_policy.rulesets(None, "Fixture", "release")
+
     def test_the_globs_are_the_manifest_s_verbatim_trees(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             manifest = Path(tmp) / "files.json"
@@ -525,7 +540,7 @@ class CarriedExclusionCase(unittest.TestCase):
         self.assertEqual(len(lists), 2)
         self.assertEqual([m for m in lists if not next(r.ok for r in got if r.msg == m)], [])
 
-    def test_check_names_each_missing_exclusion(self) -> None:
+    def test_check_fails_each_file_missing_an_exclusion(self) -> None:
         rendered = agent_policy.render(None, "Fixture", "release")
         files = {
             ".github/agent-policy.json": agent_policy.serialize(rendered),

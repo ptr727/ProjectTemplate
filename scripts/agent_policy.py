@@ -149,19 +149,23 @@ def carried_globs(manifest_path: Path = MANIFEST_PATH) -> list[str]:
     return [f"{tree['target']}/**" for tree in trees if tree["fidelity"] == "verbatim-tree"]
 
 
+def copilot_rule(rendered: dict[str, Any]) -> dict[str, bool]:
+    """Whether the Copilot ruleset rule belongs on `main` and on `develop` under a rendered policy."""
+    copilot = policy_lib.parse(rendered, "rendered policy", fallback=False).bot("copilot")
+    auto = copilot.trigger == "auto"
+    return {
+        "main": auto and copilot.covers("main", "main"),
+        "develop": auto and copilot.covers("develop", "main"),
+    }
+
+
 def facts(rendered: dict[str, Any]) -> dict[str, Any]:
     """The settings the bots and the Copilot ruleset rule take from a rendered policy."""
     parsed = policy_lib.parse(rendered, "rendered policy", fallback=False)
-    copilot = parsed.bot("copilot")
-    auto = copilot.trigger == "auto"
-    default = "main"
     crab = parsed.bot("coderabbit")
     globs = carried_globs()
     return {
-        "copilotRule": {
-            "main": auto and copilot.covers("main", default),
-            "develop": auto and copilot.covers("develop", default),
-        },
+        "copilotRule": copilot_rule(rendered),
         "coderabbit": {
             "enabled": crab.trigger == "auto",
             "base_branches": [anchored(b) for b in crab.bases if b != policy_lib.DEFAULT_BASE],
@@ -195,7 +199,7 @@ def rulesets(
         branch: json.loads(path.read_text(encoding="utf-8")) for branch, path in sources.items()
     }
     copilot = [r for r in payloads["main"]["rules"] if r.get("type") == "copilot_code_review"]
-    wanted = facts(render(registry_data, name, model))["copilotRule"]
+    wanted = copilot_rule(render(registry_data, name, model))
     if not copilot and any(wanted.values()):
         raise Refusal(
             f"{name}: the policy wants a Copilot rule, and {sources['main']} carries none to copy"
@@ -651,7 +655,9 @@ def judge_toml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
         except tomllib.TOMLDecodeError:
             return [(False, f"{TOML_PATH} does not parse as TOML")]
         got = (doc.get("config") or {}).get("disable_auto_feedback")
-        globs_absent = missing((doc.get("ignore") or {}).get("glob"), want["ignore_glob"])
+        ignore = doc.get("ignore")
+        glob = ignore.get("glob") if isinstance(ignore, dict) else ignore
+        globs_absent = missing(glob, want["ignore_glob"])
         return [
             (exactly(got, want["disable_auto_feedback"]), msg),
             (globs_absent == [], f"{TOML_PATH} ignore.glob includes {want['ignore_glob']}"),
