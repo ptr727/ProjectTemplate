@@ -520,8 +520,8 @@ body. Then post one `--ack <key>=<outcome>` per key, the outcome following the v
 `Fixed in <SHA>` is `fixed`, `Disproven` and `No change needed` are `declined`, and `Deferred to
 <issue>` is `filed`. `Listed in the body` is `listed`, or `dropped` for a line under `Dropped
 findings`. `Awaiting maintainer` has no outcome, so a key holding such a finding takes no
-`--ack` until the maintainer decides. A `REVIEWER OUTPUT NOTED` key for a part item 4's
-lead bullet covers takes no `--ack` until the maintainer answers, per Merge Gate item 4. The record counts only from an owner, member, or
+`--ack` until the maintainer decides. A `REVIEWER OUTPUT NOTED` key for a part Merge Gate
+item 4's lead bullet covers takes no `--ack` until the maintainer answers, per Merge Gate item 4. The record counts only from an owner, member, or
 collaborator. Code checks that each item carries an outcome, never that the outcome is right,
 which stays this section's.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
