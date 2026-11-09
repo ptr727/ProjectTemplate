@@ -493,7 +493,8 @@ never against its confidence label. Classify before responding:
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
 carry its own context. An observed-data finding is the exception. Its answer names only the kind
 of data, per outcome 4's observed-data bullet, with `Listed in the body` for a recorded one and
-`Awaiting maintainer` for an escalation. Otherwise, quote the finding with its `file:line` anchor and enough of the reviewer's
+`Awaiting maintainer` for an escalation. Where another pull request holds the record, as on a
+promotion, the answer names it. Otherwise, quote the finding with its `file:line` anchor and enough of the reviewer's
 own words to identify it. Give one bold verdict per finding: `Fixed in <SHA>`, `Disproven`,
 `No change needed`, `Deferred to <issue>`, `Listed in the body`, or `Awaiting maintainer`. An
 `Awaiting maintainer` answer leaves the finding open until a later answer records the
