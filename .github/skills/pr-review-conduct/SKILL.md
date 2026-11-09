@@ -212,15 +212,15 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    digest prints an excerpt of each under `UNPLACED ON THE HEAD` with a fingerprint for the set.
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
    - Take an unplaced part that holds observed data while its hold or key still stands. That is
-     one on the head, or one from an earlier round now printed under `REVIEWER OUTPUT NOTED`. A
-     nested label, in a list, a quote, or a placed part, is not one. "Answering a suppressed
-     finding" routes it. No agent acknowledges it, nor the rest of its set or
-     key, until the maintainer answers. That holds
-     whatever outcome 4 does with the data. The agent tells the maintainer, or its dispatcher,
-     naming the repository, the pull request, and the kind of data, and nothing finer. It then stops
-     that unit of work. Once the maintainer answers, the agent posts the acknowledgment carrying
-     that answer. Nothing the agent writes quotes or locates the data. That holds ahead of the
-     `REVIEWER OUTPUT NOTED` paragraph below and of "Answering a suppressed finding".
+     one on the head, or one from an earlier round now printed under `REVIEWER OUTPUT NOTED`. No
+     agent acknowledges such a part, nor the rest of its set or key, until the maintainer answers.
+     That holds whatever outcome 4 does with the data. The agent tells the maintainer, or its
+     dispatcher, naming the repository, the pull request, and the kind of data, and nothing finer.
+     It then stops that unit of work. Once the maintainer answers, the agent posts the
+     acknowledgment carrying that answer. Nothing the agent writes quotes or locates the data. That
+     holds ahead of the `REVIEWER OUTPUT NOTED` paragraph below and of "Answering a suppressed
+     finding". A nested label, in a list, a quote, or a placed part, is not such a part. "Answering
+     a suppressed finding" routes it.
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.
@@ -503,7 +503,7 @@ never against its confidence label. Classify before responding:
 
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
 carry its own context. An observed-data finding is the exception. A `REVIEWER OUTPUT NOTED` key
-for an unplaced part holding observed data takes no answer until the maintainer answers, per
+for a part Merge Gate item 4's lead bullet covers takes no answer until the maintainer answers, per
 Merge Gate item 4. Otherwise an
 observed-data finding's answer names only the kind of data, per outcome 4's observed-data bullet.
 It reads `Listed in the body` for a recorded one and `Awaiting maintainer` for an escalation. Where another pull request holds the record, as on a
@@ -520,8 +520,8 @@ body. Then post one `--ack <key>=<outcome>` per key, the outcome following the v
 `Fixed in <SHA>` is `fixed`, `Disproven` and `No change needed` are `declined`, and `Deferred to
 <issue>` is `filed`. `Listed in the body` is `listed`, or `dropped` for a line under `Dropped
 findings`. `Awaiting maintainer` has no outcome, so a key holding such a finding takes no
-`--ack` until the maintainer decides. A `REVIEWER OUTPUT NOTED` key for an unplaced part
-holding observed data takes no `--ack` until the maintainer answers, per Merge Gate item 4. The record counts only from an owner, member, or
+`--ack` until the maintainer decides. A `REVIEWER OUTPUT NOTED` key for a part item 4's
+lead bullet covers takes no `--ack` until the maintainer answers, per Merge Gate item 4. The record counts only from an owner, member, or
 collaborator. Code checks that each item carries an outcome, never that the outcome is right,
 which stays this section's.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
