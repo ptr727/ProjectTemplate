@@ -249,21 +249,20 @@ whatever its class, ahead of every other outcome.
    bullet that fits decides:
    - A finding that committed text holds observed data takes the route `GOVERNANCE.md`
      "Representative Data in Agent-Authored Text" sets, and the first case that fits decides.
-     Read the visibility live. Data in commits not yet pushed is removed from those commits
-     before the push, and needs no record. In a carrying repository, data in text the hub
-     authors goes to a hub `decision` issue. That issue names the kind of data and withholds the
-     file, the line, and the value. Where the session's scope does not allow that write, its body line
-     asks the maintainer to file it, and the work moves on. In a private repository, pushed data
-     is replaced here, even in a file this change does not otherwise touch. On a develop -> main
-     promotion pull request, that replacement lands as a feature pull request of its own. Its
-     body line goes under an `Observed data replaced` heading with the location and the kind,
-     never the value. The pull request carrying the replacement takes the `history-data` label
-     where the repository has it. In a public repository, the hub included, the finding is
-     escalated per "Escalate to the maintainer when", naming only the kind of data. A run with no
-     maintainer present stops the group and names it only in its final report. It files no
-     issue and no comment that points at the exposure. A thread raising the finding stays open in
-     the public case. In the other cases it is answered with a pointer to the body line or the
-     issue and resolved.
+     Read the visibility live. Data no pushed commit holds is removed from the unpushed commits
+     before the push, and needs no record. Data in a public repository, the hub included, or in
+     a carrying repository's copy of hub-authored text, is escalated per "Escalate to the
+     maintainer when". The escalation names only the repository and the kind of data. No issue,
+     comment, or body line records it. A carrying repository then moves on, and its thread is
+     answered that the finding went to the maintainer, and resolved. In a public repository the
+     work stops and the thread stays open. A run with no maintainer present parks the group with
+     no public pointer, per `backlog-burndown` "Parking Instead of Asking". In a private
+     repository, pushed data is replaced here, even in a file this change does not otherwise
+     touch. On a develop -> main promotion pull request, that replacement lands as a feature
+     pull request of its own. Its body line goes under an `Observed data replaced` heading with
+     the location and the kind, never the value. The pull request carrying the replacement takes
+     the `history-data` label. Where the repository lacks that label, the maintainer is told. A
+     thread raising a replaced finding is answered with a pointer to its body line and resolved.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a

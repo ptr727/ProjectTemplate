@@ -895,6 +895,12 @@ leaves the work findable.
    comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
+**Observed data in a public repository, or in hub-authored text, parks with no public pointer.**
+Steps 2 to 4 are skipped, and no `decision` issue is filed. The claim comment records only that
+the group stopped for the maintainer, naming no file, kind, or issue. The run's final report
+carries the rest, per `pr-review-conduct` outcome 4's observed-data bullet. "Ranking" holds the
+group back as stopped until the maintainer releases it.
+
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
 answer, the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
