@@ -486,6 +486,12 @@ class CarriedExclusionCase(unittest.TestCase):
         assert got is not None
         self.assertIn(f'    - "!docs/**"\n    - "{self.SKILLS}"\n' + tail, got)
 
+    def test_an_end_of_line_comment_stays_on_its_own_filter(self) -> None:
+        tail = "  # Explains the next key.\n  path_instructions: []\n"
+        got = self.plan_yaml('reviews:\n  path_filters:\n    - "!docs/**"  # generated\n' + tail)
+        assert got is not None
+        self.assertIn(f'    - "!docs/**"  # generated\n    - "{self.SKILLS}"\n' + tail, got)
+
     def test_a_toml_ignore_that_is_not_a_table_is_refused(self) -> None:
         with self.assertRaises(agent_policy.Refusal):
             self.plan_toml("ignore = 'docs/**'\n")

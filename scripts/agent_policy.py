@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import copy
 import json
 import subprocess
 import sys
@@ -279,6 +280,29 @@ def take_tail_comment(seq: Any) -> Any:
     return seq.ca.items.pop(len(seq) - 1, None) if len(seq) else None
 
 
+def extend_keeping_comments(seq: Any, items: list[Any]) -> None:
+    """Append `items` to a block list, keeping each comment where the reader left it.
+
+    An end-of-line comment stays on its own item, and a comment on the lines after the list stays before the next key.
+    """
+    held = take_tail_comment(seq)
+    last = len(seq) - 1
+    seq.extend(items)
+    if held is None:
+        return
+    token = held[0]
+    if token is None or not token.value.startswith("#"):
+        seq.ca.items[len(seq) - 1] = held
+        return
+    eol, _, rest = token.value.partition("\n")
+    token.value = eol + "\n"
+    seq.ca.items[last] = held
+    if rest.strip():
+        after = copy.copy(token)
+        after.value = "\n" + rest
+        seq.ca.items[len(seq) - 1] = [after, None, None, None]
+
+
 def set_base_branches(node: Any, items: list[str]) -> None:
     """Make node['base_branches'] hold `items`, double-quoted, keeping the comment that follows the list."""
     from ruamel.yaml.comments import CommentedSeq
@@ -387,11 +411,9 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
 
         if reviews.get("path_filters") is None:
             reviews["path_filters"] = CommentedSeq()
-        seq = reviews["path_filters"]
-        held = take_tail_comment(seq) if isinstance(seq, CommentedSeq) else None
-        seq.extend(DoubleQuotedScalarString(item) for item in filters_absent)
-        if held is not None:
-            seq.ca.items[len(seq) - 1] = held
+        extend_keeping_comments(
+            reviews["path_filters"], [DoubleQuotedScalarString(item) for item in filters_absent]
+        )
     out = StringIO()
     yaml.dump(doc, out)
     return out.getvalue()
