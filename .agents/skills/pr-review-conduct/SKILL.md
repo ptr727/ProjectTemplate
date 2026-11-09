@@ -193,6 +193,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A carrying repository routes a finding on a verbatim unit by fidelity rather than by class,
    since a resync writes the whole text there. It declines the finding under
    that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker.
+   An observed-data finding there takes outcome 4's observed-data bullet instead.
    A finding on an intent unit is filed there too, since the defect is still fixed at the source.
    The carrier adapts its own copy of an intent unit meanwhile. Every other finding, a `style`
    remark on untouched text included, takes its own outcome in that section.
@@ -378,19 +379,21 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
-   - A `pre-existing` finding that committed text holds observed data takes the route
-     `GOVERNANCE.md` "Representative Data in Agent-Authored Text" sets by where it sits and who
-     can read it. Read the visibility live. Text the hub authors goes to a hub issue naming the
-     file and the kind of data, never the value. Where the session's scope does not allow that
-     write, its body line asks the maintainer to file it, and the work moves on. In a private
-     repository the data is replaced here, even in a file this change does not otherwise touch.
-     Its body line goes under an `Observed data replaced` heading with the location and the kind,
-     never the value, and the pull request carries the `history-data` label. In a public
-     repository the finding is escalated per "Escalate to the maintainer when", naming the kind of
-     data and not its location. A run with no maintainer present files that as a `decision`
-     issue saying only that observed data was found in history, with details withheld. A thread
-     raising the finding stays open in the public case. In the other two cases it is answered
-     with a pointer to the body line or the issue and resolved.
+   - A finding that committed text holds observed data takes the route `GOVERNANCE.md`
+     "Representative Data in Agent-Authored Text" sets, whatever its class. Read the visibility
+     live. Text the hub authors goes to a hub `decision` issue naming the kind of data and
+     withholding the file, the line, and the value. Where the session's scope does not allow
+     that write, its body line asks the maintainer to file it, and the work moves on. Data in
+     commits not yet pushed is removed from those commits before the push, and needs no record.
+     In a private repository, pushed data is replaced here, even in a file this change does not
+     otherwise touch. On a develop -> main promotion pull request, that replacement lands as a
+     feature pull request of its own. Its body line goes under an `Observed data replaced`
+     heading with the location and the kind, never the value. The pull request carrying the
+     replacement takes the `history-data` label. In a public repository the finding is escalated
+     per "Escalate to the maintainer when", naming the kind of data and not its location. A run
+     with no maintainer present parks it behind a `decision` issue whose question and options name
+     no commit, line, or value. A thread raising the finding stays open in the public case. In the
+     other cases it is answered with a pointer to the body line or the issue and resolved.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
