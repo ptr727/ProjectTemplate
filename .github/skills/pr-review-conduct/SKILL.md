@@ -213,7 +213,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
    - A part holding observed data is never acknowledged by an agent, nor is the rest of its set
      or key. That holds whatever outcome 4 does with the data. The agent tells the maintainer, or its
-     dispatcher, naming only the kind of data, and stops that unit of work. Its hold or key stands
+     dispatcher, naming the repository, the pull request, and the kind of data, and nothing finer.
+     It then stops that unit of work. Its hold or key stands
      until the maintainer deals with it, and nothing the agent writes quotes or locates the data.
      That holds for a part printed under `REVIEWER OUTPUT NOTED` below too, and ahead of
      "Answering a suppressed finding".
@@ -226,7 +227,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    - The spelling is a data edit to the matching `scripts/reviewers/*.json` in the hub plus one
      fixture. Whoever acknowledged the part makes it in a pull request of its own, never an issue.
    - An item that reads as neither a finding nor not one goes to the maintainer, per "Escalate to
-     the maintainer when" below. Its raw text is quoted unless it shows observed data.
+     the maintainer when" below. Its raw text is quoted unless its part holds observed data.
 
    A part on an earlier round prints under `REVIEWER OUTPUT NOTED` and decides no exit code. So
    does a label nested in a list, a quote, or a placed part. Read that block rather than the
@@ -530,8 +531,8 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - A finding is judged real but should not be fixed. That decision is never the agent's alone.
 - An architectural redesign is proposed rather than a bug fix.
 - An item in a part the digest prints under `UNPLACED ON THE HEAD` cannot be told to be a finding
-  or not. Quote its raw text in the escalation, unless it shows observed data, which the
-  escalation names by kind only.
+  or not. Quote its raw text in the escalation, unless its part holds observed data, which
+  the escalation names by kind only.
 - A finding shows observed data in a public repository's pushed history, or in a carrying
   repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
   names the repository and the kind of data. In any mode, it and any issue, comment, or answer
