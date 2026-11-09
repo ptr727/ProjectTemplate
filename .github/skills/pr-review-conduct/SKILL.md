@@ -211,8 +211,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 4. Every part of a round covering the head that the tooling could not place is answered. The
    digest prints an excerpt of each under `UNPLACED ON THE HEAD` with a fingerprint for the set.
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
-   - A part holding observed data is never acknowledged by an agent, nor is the rest of its set
-     or key. That holds whatever outcome 4 does with the data. The agent tells the maintainer, or its
+   - Take a part holding observed data whose hold or key still stands. No agent acknowledges it,
+     nor the rest of its set or key. That holds whatever outcome 4 does with the data. The agent tells the maintainer, or its
      dispatcher, naming the repository, the pull request, and the kind of data, and nothing finer.
      It then stops that unit of work. Its hold or key stands
      until the maintainer deals with it, and nothing the agent writes quotes or locates the data.
@@ -534,7 +534,8 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - An item in a part the digest prints under `UNPLACED ON THE HEAD` cannot be told to be a finding
   or not. Quote its raw text in the escalation, unless its part holds observed data, which
   the escalation names by kind only.
-- A part the digest could not place holds observed data, per Merge Gate item 4's lead bullet. The
+- A part the digest could not place holds observed data while its hold or key still stands, per
+  Merge Gate item 4's lead bullet. The
   escalation names the repository, the pull request, and the kind of data, and nothing finer.
 - A finding shows observed data in a public repository's pushed history, or in a carrying
   repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
