@@ -373,8 +373,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   own review loop into backlog. Quote outcome 4 whole: its opening lines, every bullet, and the
   paragraph after them. Take them from the copy this run reads its skills from, per the bullet on
   develop's copy below. A `pre-existing`
-  sibling in a file another group holds takes outcome 4 like any other. It needs no edit, so it
-  needs none of the adjudication "Grouping and File Claims" describes.
+  sibling in a file another group holds takes outcome 4 like any other. Where that outcome
+  requires an edit, as a private repository's observed-data replacement does, the worker reports
+  it for adjudication under "Grouping and File Claims".
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
