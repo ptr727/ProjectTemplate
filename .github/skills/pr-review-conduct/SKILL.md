@@ -213,7 +213,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
    - Take an unplaced part that holds observed data while its hold or key still stands. That is
      one on the head, or one from an earlier round now printed under `REVIEWER OUTPUT NOTED`. A
-     label nested in a placed part is not one, and "Answering a suppressed finding" routes it. No agent acknowledges it, nor the rest of its set or
+     nested label, in a list, a quote, or a placed part, is not one. "Answering a suppressed
+     finding" routes it. No agent acknowledges it, nor the rest of its set or
      key, until the maintainer answers. That holds
      whatever outcome 4 does with the data. The agent tells the maintainer, or its dispatcher,
      naming the repository, the pull request, and the kind of data, and nothing finer. It then stops
