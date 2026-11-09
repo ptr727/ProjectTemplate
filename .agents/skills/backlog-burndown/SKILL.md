@@ -895,11 +895,9 @@ leaves the work findable.
    comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
-**Observed data in a public repository, or in hub-authored text, parks with no public pointer.**
-Steps 2 to 4 are skipped, and no `decision` issue is filed. The claim comment records only that
-the group stopped for the maintainer, naming no file, kind, or issue. The run's final report
-carries the rest, per `pr-review-conduct` outcome 4's observed-data bullet. "Ranking" holds the
-group back as stopped until the maintainer releases it.
+An observed-data escalation parks the same way, but its issue and comments say only what
+`pr-review-conduct` "Escalate to the maintainer when" allows. So step 2 names no option, file, or
+pull request, and step 3 is skipped.
 
 A parked group stops that group and nothing else. Once its `decision` issue is closed with an
 answer, the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It

@@ -250,19 +250,16 @@ whatever its class, ahead of every other outcome.
    - A finding that committed text holds observed data takes the route `GOVERNANCE.md`
      "Representative Data in Agent-Authored Text" sets, and the first case that fits decides.
      Read the visibility live. Data no pushed commit holds is removed from the unpushed commits
-     before the push, and needs no record. Data in a public repository, the hub included, or in
-     a carrying repository's copy of hub-authored text, is escalated per "Escalate to the
-     maintainer when". The escalation names only the repository and the kind of data. No issue,
-     comment, or body line records it. A carrying repository then moves on, and its thread is
-     answered that the finding went to the maintainer, and resolved. In a public repository the
-     work stops and the thread stays open. A run with no maintainer present parks the group with
-     no public pointer, per `backlog-burndown` "Parking Instead of Asking". In a private
-     repository, pushed data is replaced here, even in a file this change does not otherwise
-     touch. On a develop -> main promotion pull request, that replacement lands as a feature
-     pull request of its own. Its body line goes under an `Observed data replaced` heading with
-     the location and the kind, never the value. The pull request carrying the replacement takes
-     the `history-data` label. Where the repository lacks that label, the maintainer is told. A
-     thread raising a replaced finding is answered with a pointer to its body line and resolved.
+     before the push, and needs no record. A spent edit budget does not end that case, since the
+     push waits on it. Two kinds are escalated per "Escalate to the maintainer when", and their
+     threads stay open. One is data in a public repository's pushed history, the hub's included.
+     The other is data in a carrying repository's copy of hub-authored text. In a private repository, pushed data is
+     replaced here, even in a file this change does not otherwise touch. On a develop -> main
+     promotion pull request, that replacement lands as a feature pull request of its own. Its
+     body line goes under an `Observed data replaced` heading with the location and the kind,
+     never the value. The pull request carrying the replacement takes the `history-data` label.
+     Where the repository lacks that label, the maintainer is told. A thread raising a replaced
+     finding is answered with a pointer to its body line and resolved.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
