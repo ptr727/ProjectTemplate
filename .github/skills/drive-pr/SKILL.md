@@ -264,6 +264,9 @@ maintainer when".
      wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
      filed` heading and links that issue. A thread raising it is answered with that issue's link
      and resolved.
+   - A `pre-existing` finding that committed text holds observed data, per `GOVERNANCE.md`
+     "Representative Data in Agent-Authored Text", is filed once the same way. Listing it in a
+     pull request body would leave the data in place, and each clone keeps copying it.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
@@ -281,7 +284,7 @@ maintainer when".
      a blocker filed elsewhere. A deferral noted only in a thread is lost the
      moment the PR merges, so each of these leaves its record where its outcome says.
 
-   The body keeps every other unfiled `pre-existing` line, the fifth bullet's, under one
+   The body keeps every other unfiled `pre-existing` line, the sixth bullet's, under one
    heading, `Pre-existing findings, not filed`. Each line under these headings carries its
    location and its class. The headings stay apart from the open `introduced` findings a spent
    edit budget puts in the body, per `local-strict-review` "Disposing of Findings". A reviewer's

@@ -94,6 +94,16 @@ A round is the unit. Each one runs these steps in order.
    carry the previous round's ranking forward. Any issue this round's reviews filed is now an
    open issue with a claim on the next round's attention. An issue that ranked low last round
    can rank high once a sibling fix lands.
+   **Measure the round's net flow before that ranking.** Count the issues opened since the
+   round began. Count the issues the round newly named on a merged pull request's `Closes on
+   promotion:` line. Closed issues measure nothing here, since a round that does not promote
+   closes none. Report both counts, and the open count less every issue already named on such a
+   line, per "Ending the Run". Where the round opened more than it fixed, the next ranking reads
+   each issue opened in the round against `pr-review-conduct` outcome 4. One that outcome would
+   not have filed ranks below all other work, and the round's report names it for the maintainer.
+   No label or body wording is needed to find them, since the test is the outcome rather than the
+   source. A run whose rounds keep filing more than they fix is turning its review loop into
+   backlog. Say so at that round's report rather than at the run's end.
 
 ## Ranking
 
@@ -356,6 +366,13 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   A branch a claim comment names for the first time is one no pull request on the repository has
   used as its head. That is checked with `gh pr list --head <name> --state all` before the
   comment is written.
+- **The brief quotes `pr-review-conduct` outcome 4's filing test and adds no filing instruction of
+  its own.** A worker reads its brief as the more specific instruction. So a brief saying "file a
+  follow-up" overrides that outcome for every finding it drops or lists. The run then turns its
+  own review loop into backlog. Quote the bullets saying what is filed, listed in the body, or
+  dropped, from develop's copy read at the round's start. State that nothing else becomes an
+  issue. A site or sentence in a file another group holds is the conflict "Grouping and File
+  Claims" adjudicates. Filing it as an issue is not one of that section's outcomes.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
@@ -891,11 +908,18 @@ suppresses no output.
 Promotion Boundary" leaves whether such a repository wants a promotion per round to the maintainer.
 So the run stops at develop, and its report says so.
 
-**Under `develop`**, no round opens a promotion pull request and no round freezes. An open
-promotion pull request does not freeze the run either, since no one is present to merge it. At the
-run's end, the orchestrator dispatches one worker where develop is ahead of main. The worker opens
-or updates the promotion pull request per "The Promotion Boundary" steps 1 and 2, and
-"Assembling the Promotion Body". It leaves the promotion for the maintainer. A finding the worker
+**Under `develop`**, no round freezes, and no round merges a promotion. An open promotion pull
+request does not freeze the run either, since no one is present to merge it. After each round's
+cleanup, where develop is ahead of main, the orchestrator dispatches one worker. That worker opens
+the promotion pull request or updates its body, per "The Promotion Boundary" step 1 and
+"Assembling the Promotion Body", and drives nothing. Each update re-derives the whole `Fixes` set
+from the range, rather than appending the round's own lines. A run with no end otherwise promotes nothing.
+Every issue its rounds fixed then reads as open, and the open count overstates the backlog by
+everything already on develop. Develop keeps merging under that pull request, since its head is
+develop. Its review loop is driven once, at the run's end, by one worker per "The Promotion
+Boundary" step 2. So no round spends a review round on a head the next round moves. A maintainer
+arriving mid-run reads the true backlog there, and can ask for that drive early. That worker
+leaves the promotion for the maintainer. A finding it
 cannot dispose of goes in the final report.
 
 **Under `main` or `release`**, the orchestrator dispatches one promotion worker each round, after
@@ -983,7 +1007,8 @@ The run ends at one of the points below, and they are different endings.
   continuing.
 
 Report at every round boundary and at each ending. Say what merged to develop, what the promotion
-pull request carries, and what was newly filed. Say what is stopped and on which question, what was
+pull request carries, and what was newly filed. Give the net-flow counts "The Round" step 8
+measures. Say what is stopped and on which question, what was
 held back and on which blocker, and what the next round would pick.
 
 ## Model Tiers
