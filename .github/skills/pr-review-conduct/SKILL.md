@@ -211,13 +211,13 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 4. Every part of a round covering the head that the tooling could not place is answered. The
    digest prints an excerpt of each under `UNPLACED ON THE HEAD` with a fingerprint for the set.
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
-   - Take a part holding observed data whose hold or key still stands. No agent acknowledges it,
-     nor the rest of its set or key. That holds whatever outcome 4 does with the data. The agent tells the maintainer, or its
-     dispatcher, naming the repository, the pull request, and the kind of data, and nothing finer.
-     It then stops that unit of work. Its hold or key stands
-     until the maintainer deals with it, and nothing the agent writes quotes or locates the data.
-     That holds for a part printed under `REVIEWER OUTPUT NOTED` below too, and ahead of
-     "Answering a suppressed finding".
+   - Take a part holding observed data whose hold or key still stands, placed or not. No agent
+     acknowledges it, nor the rest of its set or key, until the maintainer answers. That holds
+     whatever outcome 4 does with the data. The agent tells the maintainer, or its dispatcher,
+     naming the repository, the pull request, and the kind of data, and nothing finer. It then stops
+     that unit of work. Once the maintainer answers, the agent posts the acknowledgment carrying
+     that answer. Nothing the agent writes quotes or locates the data. That holds for a part
+     printed under `REVIEWER OUTPUT NOTED` below too, and ahead of "Answering a suppressed finding".
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.
@@ -500,7 +500,8 @@ never against its confidence label. Classify before responding:
 
 A suppressed finding has no thread and no resolved or unresolved state, so an answer needs to
 carry its own context. An observed-data finding is the exception. A `REVIEWER OUTPUT NOTED` key
-whose part holds observed data takes no answer at all, per Merge Gate item 4. Otherwise an
+whose part holds observed data takes no answer until the maintainer answers, per Merge Gate
+item 4. Otherwise an
 observed-data finding's answer names only the kind of data, per outcome 4's observed-data bullet.
 It reads `Listed in the body` for a recorded one and `Awaiting maintainer` for an escalation. Where another pull request holds the record, as on a
 promotion, the answer names it. For every other finding, quote it with its `file:line` anchor and enough of the reviewer's
@@ -517,7 +518,7 @@ body. Then post one `--ack <key>=<outcome>` per key, the outcome following the v
 <issue>` is `filed`. `Listed in the body` is `listed`, or `dropped` for a line under `Dropped
 findings`. `Awaiting maintainer` has no outcome, so a key holding such a finding takes no
 `--ack` until the maintainer decides. A `REVIEWER OUTPUT NOTED` key whose part holds observed
-data takes no answer and no `--ack`, per Merge Gate item 4. The record counts only from an owner, member, or
+data takes no answer and no `--ack` until the maintainer answers, per Merge Gate item 4. The record counts only from an owner, member, or
 collaborator. Code checks that each item carries an outcome, never that the outcome is right,
 which stays this section's.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
@@ -534,7 +535,7 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - An item in a part the digest prints under `UNPLACED ON THE HEAD` cannot be told to be a finding
   or not. Quote its raw text in the escalation, unless its part holds observed data, which
   the escalation names by kind only.
-- A part the digest could not place holds observed data while its hold or key still stands, per
+- A review part holding observed data has a hold or key that still stands, placed or not, per
   Merge Gate item 4's lead bullet. The
   escalation names the repository, the pull request, and the kind of data, and nothing finer.
 - A finding shows observed data in a public repository's pushed history, or in a carrying
