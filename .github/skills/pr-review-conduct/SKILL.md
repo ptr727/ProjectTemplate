@@ -214,10 +214,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    - An item showing observed data takes outcome 4's observed-data bullet ahead of every other
      bullet here. That holds for a part printed under `REVIEWER OUTPUT NOTED` below too. That
      item's own entry in the acknowledgment or `--ack` comment body names only the kind of data,
-     quoting none of its raw text. It reads `Listed in the body` for a recorded item and `Awaiting
-     maintainer` for an escalated one. Every other item in the same comment is answered as usual. An
-     escalated item is acknowledged only once the maintainer answers, so its hold or key stays open
-     until then.
+     quoting none of its raw text. A recorded item's entry reads `Listed in the body`, naming the
+     pull request holding the record where that is another one. Every other item in the same
+     comment is answered as usual. A set or key holding an escalated item takes no acknowledgment
+     until the maintainer answers, so the hold itself is the escalation's stop.
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.
