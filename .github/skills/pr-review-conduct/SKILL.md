@@ -214,7 +214,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    - An item showing observed data takes outcome 4's observed-data bullet ahead of every other
      bullet here. That holds for a part printed under `REVIEWER OUTPUT NOTED` below too. That
      item's own entry in the acknowledgment or `--ack` comment body names only the kind of data,
-     quoting none of its raw text. Every other item in the same comment is answered as usual. An
+     quoting none of its raw text. It reads `Listed in the body` for a recorded item and `Awaiting
+     maintainer` for an escalated one. Every other item in the same comment is answered as usual. An
      escalated item is acknowledged only once the maintainer answers, so its hold or key stays open
      until then.
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
@@ -532,8 +533,9 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
   or not. Quote its raw text in the escalation.
 - A finding shows observed data in a public repository's pushed history, or in a carrying
   repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
-  names the repository and the kind of data. In any mode, it and any issue, comment, or answer
-  it writes name no commit, file, line, or value. They quote none of the reviewer's words. This
+  names the repository and the kind of data. In any mode, it and its own entry in any issue,
+  comment, or answer name no commit, file, line, or value. They quote none of the reviewer's words.
+  Other items sharing that comment are answered as usual. This
   holds over the unplaced-item bullet above, so an unplaced item showing such data is escalated
   without its raw text.
 
