@@ -390,7 +390,8 @@ observed. A value the repository constructed is disproved under outcome 2 instea
      push waits on it. Two kinds are escalated per "Escalate to the maintainer when", and their
      threads stay open. One is data in a public repository's pushed history, the hub's included.
      The other is data in a carrying repository's copy of hub-authored text. In a private repository, pushed data is
-     replaced here, even in a file this change does not otherwise touch. On a develop -> main
+     replaced here, even in a file this change does not otherwise touch. Where the current text
+     no longer holds it, nothing is replaced, and the record below is still owed. On a develop -> main
      promotion pull request, that replacement lands as a feature pull request of its own. Its
      body line goes under an `Observed data replaced` heading with the location and the kind,
      never the value. Where another pull request's review raised it, the line names that one too. The pull request carrying the replacement takes the `history-data` label, and so
