@@ -182,11 +182,12 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `local-strict-review` "Disposing of Findings" defines, applied here to a PR-hosted finding. A
    `pre-existing` finding on text inside a canonical Markdown unit takes the tracker bullet of
    outcome 4 of "Every finding ends in a listed outcome" below. An observed-data finding there
-   takes that outcome's first bullet instead, since the data is the maintainer's to decide. On a
-   verbatim unit in a carrying repository, that holds ahead of routing by fidelity. Its `decision`
-   issue goes to the hub, which authors the text. That holds where `GOVERNANCE.md` "Repository
-   Boundaries and Write Safety" and the session's own scope both allow that write. It goes to the
-   maintainer otherwise. Such a unit is one the hub's
+   takes that outcome's first bullet instead, since the data is the maintainer's to decide. In a
+   carrying repository, that holds ahead of routing by fidelity, an intent unit included. The
+   `decision` issue on a verbatim unit goes to the hub, which authors the text. That holds where
+   `GOVERNANCE.md` "Repository Boundaries and Write Safety" and the session's own scope both allow
+   that write. It goes to the maintainer otherwise. One on an intent unit is filed in the carrying
+   repository, which authors its adapted copy. Such a unit is one the hub's
    `scripts/canonical_review.py list` names. The tracker bullet applies once per unit rather than once
    per finding. The round gathers that unit's such findings onto the unit's tracker, an open hub
    issue whose title carries the unit key. The change that moves the key retitles it, and

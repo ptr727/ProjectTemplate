@@ -97,12 +97,14 @@ A round is the unit. Each one runs these steps in order.
    **Measure the run's net flow before that ranking**, read fresh each round rather than carried.
    Count the issues created since the run began, leaving out what "Ranking" leaves out of every
    count and any `decision`. Count the issues fixed since then, with the same exclusions. Those
-   are the issues a pull request merged since then names on a `Closes on promotion:` line, and
-   any other issue closed since then as completed. Report both counts beside the backlog
+   are the issues closed since then as completed, and those awaiting promotion as "Ranking" reads
+   that set. Leave out every issue that awaited promotion when the run began. The run records that
+   set in its working notes at its start, and the away planner's brief carries it. Report both counts beside the backlog
    "Ranking" counts, with how many of that backlog await promotion. The counts take in issues
    anyone opened, so they are a signal for the maintainer rather than a verdict on the review
    loop. They change no ranking. Where more were opened than fixed, say so in that round's
-   report. An attended run then asks the maintainer whether to continue before dispatching.
+   report. An attended run then asks the maintainer whether to continue before dispatching, once
+   per run. That answer stands for the rest of the run.
 
 ## Ranking
 
@@ -815,7 +817,8 @@ The orchestrator reads no issue body, diff, or review thread in away mode. Each 
 subagents and holds only what they return.
 
 1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository. It first measures the run's net flow
-   per step 8, and returns those counts with the plan. Its brief names when the run began.
+   per step 8, and returns those counts with the plan. Its brief names when the run began, and
+   the set awaiting promotion then.
    It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
    each claim comment. It holds back each issue "Needs the Maintainer" names. Where one turns on an
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
