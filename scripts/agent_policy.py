@@ -42,8 +42,8 @@ SCHEMA_URL = (
 YAML_PATH = ".coderabbit.yaml"
 TOML_PATH = ".pr_agent.toml"
 MODELS = ("release", "operational")
-CARRIED_GLOBS = (".github/skills/**",)
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "repo-config"
+MANIFEST_PATH = Path(__file__).resolve().parents[1] / "spec" / "files.json"
 
 
 class Refusal(ValueError):
@@ -138,6 +138,16 @@ def serialize(rendered: dict[str, Any]) -> str:
     return json.dumps(rendered, indent=4) + "\n"
 
 
+def carried_globs(manifest_path: Path = MANIFEST_PATH) -> list[str]:
+    """A glob per tree spec/files.json carries verbatim, which a carrier's reviewers skip.
+
+    Such a tree is the hub's text byte for byte, so a finding on it belongs at the hub's source.
+    Every such tree is listed whatever its appliesTo, since skipping a path a repository lacks is harmless.
+    """
+    trees = json.loads(manifest_path.read_text(encoding="utf-8"))["trees"]
+    return [f"{tree['target']}/**" for tree in trees if tree["fidelity"] == "verbatim-tree"]
+
+
 def facts(rendered: dict[str, Any]) -> dict[str, Any]:
     """The settings the bots and the Copilot ruleset rule take from a rendered policy."""
     parsed = policy_lib.parse(rendered, "rendered policy", fallback=False)
@@ -145,6 +155,7 @@ def facts(rendered: dict[str, Any]) -> dict[str, Any]:
     auto = copilot.trigger == "auto"
     default = "main"
     crab = parsed.bot("coderabbit")
+    globs = carried_globs()
     return {
         "copilotRule": {
             "main": auto and copilot.covers("main", default),
@@ -154,11 +165,11 @@ def facts(rendered: dict[str, Any]) -> dict[str, Any]:
             "enabled": crab.trigger == "auto",
             "base_branches": [anchored(b) for b in crab.bases if b != policy_lib.DEFAULT_BASE],
             "auto_pause_after_reviewed_commits": 0,
-            "path_filters": [f"!{glob}" for glob in CARRIED_GLOBS],
+            "path_filters": [f"!{glob}" for glob in globs],
         },
         "qodo": {
             "disable_auto_feedback": parsed.bot("qodo").trigger != "auto",
-            "ignore_glob": list(CARRIED_GLOBS),
+            "ignore_glob": globs,
         },
     }
 
@@ -260,6 +271,14 @@ def lf_text(path: Path) -> str | None:
     return None if text is None else text.replace("\r\n", "\n")
 
 
+def take_tail_comment(seq: Any) -> Any:
+    """Detach and return the comment hanging off a block list's last item, or None.
+
+    A comment after a block list hangs off that item, so an item appended after it would move the comment above itself.
+    """
+    return seq.ca.items.pop(len(seq) - 1, None) if len(seq) else None
+
+
 def set_base_branches(node: Any, items: list[str]) -> None:
     """Make node['base_branches'] hold `items`, double-quoted, keeping the comment that follows the list."""
     from ruamel.yaml.comments import CommentedSeq
@@ -270,8 +289,7 @@ def set_base_branches(node: Any, items: list[str]) -> None:
     if not isinstance(seq, CommentedSeq):
         node["base_branches"] = CommentedSeq(quoted)
         return
-    # A comment after a block list hangs off the list's last item, so replacing the list would drop it.
-    held = seq.ca.items.pop(len(seq) - 1, None) if len(seq) else None
+    held = take_tail_comment(seq)
     del seq[:]
     seq.extend(quoted)
     if held is None:
@@ -369,7 +387,11 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
 
         if reviews.get("path_filters") is None:
             reviews["path_filters"] = CommentedSeq()
-        reviews["path_filters"].extend(DoubleQuotedScalarString(item) for item in filters_absent)
+        seq = reviews["path_filters"]
+        held = take_tail_comment(seq) if isinstance(seq, CommentedSeq) else None
+        seq.extend(DoubleQuotedScalarString(item) for item in filters_absent)
+        if held is not None:
+            seq.ca.items[len(seq) - 1] = held
     out = StringIO()
     yaml.dump(doc, out)
     return out.getvalue()

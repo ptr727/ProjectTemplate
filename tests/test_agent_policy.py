@@ -116,9 +116,12 @@ class FactsCase(unittest.TestCase):
                     "enabled": True,
                     "base_branches": ["^develop$"],
                     "auto_pause_after_reviewed_commits": 0,
-                    "path_filters": ["!.github/skills/**"],
+                    "path_filters": ["!.github/skills/**", "!lib/fleet/sh/**"],
                 },
-                "qodo": {"disable_auto_feedback": False, "ignore_glob": [".github/skills/**"]},
+                "qodo": {
+                    "disable_auto_feedback": False,
+                    "ignore_glob": [".github/skills/**", "lib/fleet/sh/**"],
+                },
             },
         )
 
@@ -140,11 +143,15 @@ class FactsCase(unittest.TestCase):
                 "enabled": False,
                 "base_branches": ["^release$"],
                 "auto_pause_after_reviewed_commits": 0,
-                "path_filters": ["!.github/skills/**"],
+                "path_filters": ["!.github/skills/**", "!lib/fleet/sh/**"],
             },
         )
         self.assertEqual(
-            got["qodo"], {"disable_auto_feedback": True, "ignore_glob": [".github/skills/**"]}
+            got["qodo"],
+            {
+                "disable_auto_feedback": True,
+                "ignore_glob": [".github/skills/**", "lib/fleet/sh/**"],
+            },
         )
 
 
@@ -406,7 +413,7 @@ class YamlPreservationCase(unittest.TestCase):
         self.assertEqual(got, HUB_SHAPED.replace("enabled: true  #", "enabled: false #"))
 
 
-QODO_GOOD = "[ignore]\nglob = ['.github/skills/**']\n\n[config]\ndisable_auto_feedback = false\n"
+QODO_GOOD = "[ignore]\nglob = ['.github/skills/**', 'lib/fleet/sh/**']\n\n[config]\ndisable_auto_feedback = false\n"
 
 
 class CarriedExclusionCase(unittest.TestCase):
@@ -473,6 +480,45 @@ class CarriedExclusionCase(unittest.TestCase):
         with self.assertRaises(agent_policy.Refusal):
             self.plan_toml("[ignore]\nglob = 'docs/**'\n")
 
+    def test_a_comment_after_the_yaml_filters_stays_before_the_next_key(self) -> None:
+        tail = "  # Explains the next key.\n  path_instructions: []\n"
+        got = self.plan_yaml('reviews:\n  path_filters:\n    - "!docs/**"\n' + tail)
+        assert got is not None
+        self.assertIn(f'    - "!docs/**"\n    - "{self.SKILLS}"\n' + tail, got)
+
+    def test_a_toml_ignore_that_is_not_a_table_is_refused(self) -> None:
+        with self.assertRaises(agent_policy.Refusal):
+            self.plan_toml("ignore = 'docs/**'\n")
+
+    def test_the_globs_are_the_manifest_s_verbatim_trees(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "files.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "trees": [
+                            {"target": "a/b", "fidelity": "verbatim-tree"},
+                            {"target": "c", "fidelity": "intent"},
+                            {"target": "d", "fidelity": "verbatim-tree", "appliesTo": ["x"]},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(agent_policy.carried_globs(manifest), ["a/b/**", "d/**"])
+
+    def test_the_hub_s_own_files_hold_every_required_exclusion(self) -> None:
+        rendered = agent_policy.render(None, "Fixture", "release")
+        files = {
+            ".github/agent-policy.json": agent_policy.serialize(rendered),
+            ".coderabbit.yaml": (ROOT / ".coderabbit.yaml").read_text(encoding="utf-8"),
+            ".pr_agent.toml": (ROOT / ".pr_agent.toml").read_text(encoding="utf-8"),
+        }
+        got = agent_policy.check(rendered, lambda path: files[path])
+        lists = [r.msg for r in got if "path_filters" in r.msg or "ignore.glob" in r.msg]
+        self.assertEqual(len(lists), 2)
+        self.assertEqual([m for m in lists if not next(r.ok for r in got if r.msg == m)], [])
+
     def test_check_names_each_missing_exclusion(self) -> None:
         rendered = agent_policy.render(None, "Fixture", "release")
         files = {
@@ -487,8 +533,8 @@ class CarriedExclusionCase(unittest.TestCase):
         self.assertEqual(
             failed,
             [
-                ".coderabbit.yaml reviews.path_filters includes ['!.github/skills/**']",
-                ".pr_agent.toml ignore.glob includes ['.github/skills/**']",
+                ".coderabbit.yaml reviews.path_filters includes ['!.github/skills/**', '!lib/fleet/sh/**']",
+                ".pr_agent.toml ignore.glob includes ['.github/skills/**', 'lib/fleet/sh/**']",
             ],
         )
 
@@ -507,7 +553,7 @@ class CheckCase(unittest.TestCase):
             ".coderabbit.yaml": (
                 "reviews:\n  auto_review:\n    enabled: true\n    base_branches:\n      - ^develop$\n"
                 "    auto_pause_after_reviewed_commits: 0\n"
-                "  path_filters:\n    - '!.github/skills/**'\n"
+                "  path_filters:\n    - '!.github/skills/**'\n    - '!lib/fleet/sh/**'\n"
             ),
             ".pr_agent.toml": QODO_GOOD,
         }
@@ -542,7 +588,7 @@ class CheckCase(unittest.TestCase):
         files[".github/agent-policy.json"] = agent_policy.serialize(rendered)
         files[".coderabbit.yaml"] = (
             "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^b$', '^a$']\n"
-            "    auto_pause_after_reviewed_commits: 0\n  path_filters: ['!.github/skills/**']\n"
+            "    auto_pause_after_reviewed_commits: 0\n  path_filters: ['!.github/skills/**', '!lib/fleet/sh/**']\n"
         )
         got = agent_policy.check(rendered, lambda path: files[path])
         self.assertTrue(all(r.ok for r in got), got)
@@ -556,7 +602,7 @@ class CheckCase(unittest.TestCase):
             with self.subTest(pause=pause):
                 files = dict(self.files)
                 files[".coderabbit.yaml"] = (
-                    "reviews:\n  path_filters: ['!.github/skills/**']\n  auto_review:\n"
+                    "reviews:\n  path_filters: ['!.github/skills/**', '!lib/fleet/sh/**']\n  auto_review:\n"
                     "    enabled: true\n    base_branches:\n      - ^develop$\n" + pause
                 )
                 (msg,) = self.failures(files)
@@ -564,7 +610,9 @@ class CheckCase(unittest.TestCase):
 
     def test_an_absent_qodo_key_fails(self) -> None:
         files = dict(self.files)
-        files[".pr_agent.toml"] = "[ignore]\nglob = ['.github/skills/**']\n[config]\nmodel = 'x'\n"
+        files[".pr_agent.toml"] = (
+            "[ignore]\nglob = ['.github/skills/**', 'lib/fleet/sh/**']\n[config]\nmodel = 'x'\n"
+        )
         self.assertEqual(len(self.failures(files)), 1)
 
     def test_a_missing_file_fails_naming_the_fix(self) -> None:
@@ -713,7 +761,7 @@ class CheckExitCase(unittest.TestCase):
             ".coderabbit.yaml": (
                 "reviews:\n  auto_review:\n    enabled: true\n    base_branches: ['^develop$']\n"
                 "    auto_pause_after_reviewed_commits: 0\n"
-                "  path_filters:\n    - '!.github/skills/**'\n"
+                "  path_filters:\n    - '!.github/skills/**'\n    - '!lib/fleet/sh/**'\n"
             ),
             ".pr_agent.toml": QODO_GOOD,
         }
