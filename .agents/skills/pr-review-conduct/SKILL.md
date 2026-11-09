@@ -193,8 +193,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    A carrying repository routes a finding on a verbatim unit by fidelity rather than by class,
    since a resync writes the whole text there. It declines the finding under
    that section's outcome 2, ownership sitting elsewhere, and files it on the same tracker.
-   An observed-data finding there takes outcome 4's observed-data bullet instead.
    A finding on an intent unit is filed there too, since the defect is still fixed at the source.
+   An observed-data finding on either kind of unit takes outcome 4's observed-data bullet instead.
    The carrier adapts its own copy of an intent unit meanwhile. Every other finding, a `style`
    remark on untouched text included, takes its own outcome in that section.
 
