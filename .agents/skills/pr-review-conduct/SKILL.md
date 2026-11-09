@@ -387,8 +387,9 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
      filed` heading. That issue and that line name the location and the shape of the data, never
      the data. A thread raising it is answered with that issue's link and resolved. The issue goes
      where the paragraph after these bullets sends an issue, under the write condition the last
-     bullet states. Where that write is not allowed, the body line stands under the same heading
-     without a link, and the thread stays open for the maintainer. Listing it in a body alone would leave it unreported, and each clone keeps copying it.
+     bullet states. Where that write is not allowed, the finding is escalated per "Escalate to
+     the maintainer when". Its body line stands under the same heading without a link, and a
+     thread raising it stays open for the maintainer. Listing it in a body alone would leave it unreported, and each clone keeps copying it.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
@@ -408,7 +409,8 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
      wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
      filed` heading and links that issue. A thread raising it is answered with that issue's link
      and resolved. Where its class has other sites, that one issue names each, per `GOVERNANCE.md`
-     "Design Before Code". An open issue for that class takes the new sites instead of a new one.
+     "Design Before Code". An open issue for that class takes the new sites instead of a new one, unless a
+     fix for it is already merged or claimed.
      A near-duplicate with no defect behind it is a consolidation finding, which the dropped
      bullet below takes.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch

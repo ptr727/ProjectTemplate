@@ -845,7 +845,7 @@ subagents and holds only what they return.
 6. **Promote** per "Promoting" below.
 7. **Record the round's report** in working notes, per "Run State", and start the next round.
 
-The orchestrator's working notes hold the round plans, the outcome lines, and the reports. Nothing
+The orchestrator's working notes hold the round plans, the outcome lines, the reports, and the set awaiting promotion at the run's start. Nothing
 else read in a round outlives it. An away run writes no session handoff and saves no memory. Its
 state lives in GitHub, per "Run State", and its final message is the report "Ending an Away Run"
 describes.
