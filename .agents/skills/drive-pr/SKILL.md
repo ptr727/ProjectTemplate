@@ -244,6 +244,19 @@ maintainer when".
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
+   - A `pre-existing` finding that committed text holds observed data takes the route
+     `GOVERNANCE.md` "Representative Data in Agent-Authored Text" sets by where it sits and who
+     can read it. Read the visibility live. Text the hub authors goes to a hub issue naming the
+     file and the kind of data, never the value. Where the session's scope does not allow that
+     write, its body line asks the maintainer to file it, and the work moves on. In a private
+     repository the data is replaced here, even in a file this change does not otherwise touch.
+     Its body line goes under an `Observed data replaced` heading with the location and the kind,
+     never the value, and the pull request carries the `history-data` label. In a public
+     repository the finding is escalated per "Escalate to the maintainer when", naming the kind of
+     data and not its location. A run with no maintainer present files that as a `decision`
+     issue saying only that observed data was found in history, with details withheld. A thread
+     raising the finding stays open in the public case. In the other two cases it is answered
+     with a pointer to the body line or the issue and resolved.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
