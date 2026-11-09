@@ -88,6 +88,10 @@ A parked handoff also carries `blocked`, and differs from the paragraph above in
 
 - **`canonical-sweep`**: the periodic canonical content review sweep, one open issue while any carried unit owes a read.
 
+`history-data` is a surface marker on a pull request rather than an issue. It goes on a pull request that recorded observed data still present in a private repository's git history. It also goes on the pull request whose review raised it, per [GOVERNANCE.md "Representative Data in Agent-Authored Text"][governance-representative-data]. Before such a repository becomes public, the maintainer lists the pull requests carrying it or an `Observed data recorded` heading. Each pull request such a heading names joins the list. That list holds every exposure this record caught, and the maintainer's own notes hold any escalated or reported ones.
+
+- **`history-data`**: a pull request that recorded, or whose review raised, observed data still present in git history.
+
 The class labels `introduced` and `pre-existing` record which class, per the `local-strict-review` Skill's "Disposing of Findings", a filed review finding carried. A `style` finding is never filed, so it has no label. `comments` is the one label that changes a gate's verdict rather than describing the work. A pull request carrying it stands the prose gate's `comment-added` rule down for that change, per the `comment-and-doc-style` Skill. `agents`, `skills`, and `codegen` mark the surface. The rest are GitHub's own defaults and the Dependabot pair, declared so every fleet repo carries at least this set.
 
 ## Repo Settings
@@ -130,6 +134,7 @@ A repository linked to a project of its own is left alone, like a label the payl
 [governance-durable-knowledge]: ../GOVERNANCE.md#durable-knowledge-and-self-improvement
 [governance-hub-hosted-tooling]: ../GOVERNANCE.md#hub-hosted-tooling
 [governance-pr-review-etiquette]: ../GOVERNANCE.md#pr-review-etiquette
+[governance-representative-data]: ../GOVERNANCE.md#representative-data-in-agent-authored-text
 [governance-verification-discipline]: ../GOVERNANCE.md#verification-discipline
 [project-json]: ./project.json
 [repo-config-doc]: ../docs/repo-config.md

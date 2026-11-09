@@ -94,6 +94,17 @@ A round is the unit. Each one runs these steps in order.
    carry the previous round's ranking forward. Any issue this round's reviews filed is now an
    open issue with a claim on the next round's attention. An issue that ranked low last round
    can rank high once a sibling fix lands.
+   **Measure the run's net flow before that ranking**, read fresh each round rather than carried.
+   Count the issues created since the run began, leaving out what "Ranking" leaves out of every
+   count and any `decision`. Count the issues fixed since then, with the same exclusions. Those
+   are the issues closed since then as completed, and those awaiting promotion as "Ranking" reads
+   that set. Leave out every issue that awaited promotion when the run began. The run records that
+   set in its working notes at its start, and the away planner's brief carries it. Report both counts beside the backlog
+   "Ranking" counts, with how many of that backlog await promotion. The counts take in issues
+   anyone opened, so they are a signal for the maintainer rather than a verdict on the review
+   loop. They change no ranking. Where more were opened than fixed, say so in that round's
+   report. An attended run then asks the maintainer whether to continue before dispatching, once
+   per run. That answer stands for the rest of the run.
 
 ## Ranking
 
@@ -284,7 +295,9 @@ for, and it binds harder than any throughput target.
   rather than leaving it to choose. The loser narrows its change to drop that file, parks until
   the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". Some losers need
   the file for a doc, manifest entry, or rule sentence their own change put in disagreement. Such
-  a loser parks rather than narrowing, so that text is fixed rather than filed. Losers parked in a
+  a loser parks rather than narrowing, so that text is fixed rather than filed. So does a loser
+  that needs the file for an edit `pr-review-conduct` outcome 4 owes, such as a private
+  repository's observed-data replacement. Losers parked in a
   cycle, each waiting on another in it, are all stopped for the maintainer per "Raising a Blocked
   Question". Where the loser has already opened a
   pull request, say whether it closes or waits. That is because one left open on an abandoned
@@ -309,7 +322,7 @@ own bound stated in the worker's brief.
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
   A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too. It
   is in reach where `pr-review-conduct` "Every finding ends in a listed outcome" fixes it, under
-  outcome 1's class sweep or outcome 4's first bullet.
+  outcome 1's class sweep or outcome 4's local-pass fix bullet.
   Rewording a unit that only reads less well now stays out of the diff and is not filed either.
   Every unit the diff grows into is read again by every later round, so a wider edit lengthens the
   loop it was meant to close.
@@ -356,6 +369,16 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   A branch a claim comment names for the first time is one no pull request on the repository has
   used as its head. That is checked with `gh pr list --head <name> --state all` before the
   comment is written.
+- **The brief quotes `pr-review-conduct` outcome 4 whole and adds no instruction of its own to
+  file a review finding.** A worker reads its brief as the more specific instruction. So a brief saying "file a
+  follow-up" overrides that outcome for every finding it drops or lists. The run then turns its
+  own review loop into backlog. Quote outcome 4 whole: its opening lines, every bullet, and the
+  paragraph after them. Take them from the copy this run reads its skills from, per the bullet on
+  develop's copy below. A `pre-existing`
+  sibling in a file another group holds takes outcome 4 like any other. Where that outcome
+  requires an edit, as a private repository's observed-data replacement does, the worker reports
+  it for adjudication under "Grouping and File Claims". There, losing that file parks the group
+  rather than narrowing it.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
@@ -797,7 +820,9 @@ works from the accepting comment rather than the body.
 The orchestrator reads no issue body, diff, or review thread in away mode. Each round it dispatches
 subagents and holds only what they return.
 
-1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository.
+1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository. It first measures the run's net flow
+   per step 8, and returns those counts with the plan. Its brief names when the run began. The
+   first planner reads the set awaiting promotion then and returns it, and later briefs carry it.
    It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
    each claim comment. It holds back each issue "Needs the Maintainer" names. Where one turns on an
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
@@ -823,8 +848,11 @@ subagents and holds only what they return.
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
 7. **Record the round's report** in working notes, per "Run State", and start the next round.
+   The next planner's net-flow counts complete that report, since they include this round's
+   fixes. A run ending without another planner gives the last counts it has, and its final
+   report says they are a round old.
 
-The orchestrator's working notes hold the round plans, the outcome lines, and the reports. Nothing
+The orchestrator's working notes hold the round plans, the outcome lines, the reports, and the set awaiting promotion at the run's start. Nothing
 else read in a round outlives it. An away run writes no session handoff and saves no memory. Its
 state lives in GitHub, per "Run State", and its final message is the report "Ending an Away Run"
 describes.
@@ -892,7 +920,9 @@ Promotion Boundary" leaves whether such a repository wants a promotion per round
 So the run stops at develop, and its report says so.
 
 **Under `develop`**, no round opens a promotion pull request and no round freezes. An open
-promotion pull request does not freeze the run either, since no one is present to merge it. At the
+promotion pull request does not freeze the run either, since no one is present to merge it. Until
+one merges, every issue the rounds fixed still reads as open. So each round's report says how
+much of the backlog is already fixed on develop, per "The Round" step 8. At the
 run's end, the orchestrator dispatches one worker where develop is ahead of main. The worker opens
 or updates the promotion pull request per "The Promotion Boundary" steps 1 and 2, and
 "Assembling the Promotion Body". It leaves the promotion for the maintainer. A finding the worker
@@ -983,7 +1013,8 @@ The run ends at one of the points below, and they are different endings.
   continuing.
 
 Report at every round boundary and at each ending. Say what merged to develop, what the promotion
-pull request carries, and what was newly filed. Say what is stopped and on which question, what was
+pull request carries, and what was newly filed. Give the net-flow counts "The Round" step 8
+measures. Say what is stopped and on which question, what was
 held back and on which blocker, and what the next round would pick.
 
 ## Model Tiers
