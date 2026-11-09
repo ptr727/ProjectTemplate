@@ -94,13 +94,14 @@ A round is the unit. Each one runs these steps in order.
    carry the previous round's ranking forward. Any issue this round's reviews filed is now an
    open issue with a claim on the next round's attention. An issue that ranked low last round
    can rank high once a sibling fix lands.
-   **Measure the round's net flow before that ranking.** Count the issues the round's merged pull
-   requests link under a `Pre-existing findings, filed` heading. Count the issues the round newly
+   **Measure the round's net flow before that ranking.** Count the issues created during the round
+   that its merged pull requests link under a `Pre-existing findings, filed` heading, other than a
+   `decision`. Count the issues the round newly
    named on a merged pull request's `Closes on promotion:` line. Closed issues measure nothing
    here, since a round that does not promote closes none. Report both counts, per "Ending the
    Run". Report too the open count, as "Ranking" counts it, less every issue already named on such
-   a line. Where the round filed more than it fixed, the next ranking holds the defect-class
-   issues it filed below all other work, per "Ranking". A run whose rounds keep filing more than
+   a line. Where the round filed more than it fixed, the next ranking gives the issues it filed no
+   weight for being new, per "Ranking". A run whose rounds keep filing more than
    they fix is turning its review loop into backlog. Say so at that round's report rather than at
    the run's end.
 
@@ -122,8 +123,8 @@ Rank on these, highest first where they conflict:
   worth more than any one of its children, and fixing it may close them.
 - **It is new.** An issue filed by a recent review round is evidence of something the current
   content actually got wrong. That issue is also the freshest context anyone has on it. The
-  exception is a defect-class issue "The Round" step 8 holds for net flow. It ranks below all
-  other work for the next round.
+  exception is an issue filed in a round that filed more than it fixed, per "The Round" step 8.
+  It gets no weight for being new.
 - **It is small and self-contained**, as a tie-break only. Size breaks a tie between two issues of
   equal value, and it never promotes a trivial issue over a real defect.
 
@@ -370,8 +371,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The brief quotes `pr-review-conduct` outcome 4 whole and adds no filing instruction of its
   own.** A worker reads its brief as the more specific instruction. So a brief saying "file a
   follow-up" overrides that outcome for every finding it drops or lists. The run then turns its
-  own review loop into backlog. Quote every bullet of outcome 4, its last included, from the copy
-  this run reads its skills from, per the bullet on develop's copy below. A `pre-existing`
+  own review loop into backlog. Quote outcome 4 whole: its opening lines, every bullet, and the
+  paragraph after them. Take them from the copy this run reads its skills from, per the bullet on
+  develop's copy below. A `pre-existing`
   sibling in a file another group holds takes outcome 4 like any other. It needs no edit, so it
   needs none of the adjudication "Grouping and File Claims" describes.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
@@ -816,7 +818,8 @@ The orchestrator reads no issue body, diff, or review thread in away mode. Each 
 subagents and holds only what they return.
 
 1. **Dispatch the planner** at `frontier`. It runs "The Round" steps 1 to 3 for this repository. It first measures the previous round's
-   net flow per step 8, and returns those counts with the plan.
+   net flow per step 8, and returns those counts with the plan. Its brief names that round's merged
+   pull requests from the outcome lines, so it measures that set rather than a time window.
    It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
    each claim comment. It holds back each issue "Needs the Maintainer" names. Where one turns on an
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
@@ -913,13 +916,13 @@ So the run stops at develop, and its report says so.
 **Under `develop`**, no round freezes, and no round merges a promotion. An open promotion pull
 request does not freeze the run either, since no one is present to merge it. After each round's
 cleanup, where develop is ahead of main, the orchestrator dispatches one worker. That worker opens
-the promotion pull request or updates its body, per "The Promotion Boundary" step 1 and
+the promotion pull request as a draft or updates its body, per "The Promotion Boundary" step 1 and
 "Assembling the Promotion Body", and drives nothing. Each update re-derives the whole `Fixes` set
 from the range, rather than appending the round's own lines. A run with no end otherwise promotes nothing.
 Every issue its rounds fixed then reads as open, and the open count overstates the backlog by
 everything already on develop. Develop keeps merging under that pull request, since its head is
 develop. Its review loop is driven once, at the run's end, by one worker per "The Promotion
-Boundary" step 2. So no round spends a review round on a head the next round moves. A maintainer
+Boundary" step 2. That worker first marks it ready for review. A draft draws no ruleset review. So no round spends a review round on a head the next round moves. A maintainer
 arriving mid-run reads the true backlog there, and can ask for that drive early. That worker
 leaves the promotion for the maintainer. A finding it
 cannot dispose of goes in the final report.
@@ -977,7 +980,7 @@ also covers an issue held back for a setting, a credential, a host, or the agent
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
-request, awaiting promotion, and `deferred`, given by count. An issue held for net flow is named as that. A held promotion is named too, with each `decision` issue holding
+request, awaiting promotion, and `deferred`, given by count. A round that filed more than it fixed is named as that. A held promotion is named too, with each `decision` issue holding
 it. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State

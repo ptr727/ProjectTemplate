@@ -378,6 +378,12 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
    Otherwise it is declined under outcome 2 with that section's reason.
    The class is the one `local-strict-review` "Disposing of Findings" defines, and the first
    bullet that fits decides:
+   - A `pre-existing` finding that committed text holds observed data is the maintainer's, per
+     `GOVERNANCE.md` "Representative Data in Agent-Authored Text", rather than a worker's to
+     rewrite. That holds wherever the text sits, a canonical unit or a touched file included. It
+     is filed once as a `decision` issue. Its body line goes under a `Pre-existing findings,
+     filed` heading. That issue and that line name the location and the shape of the data, never
+     the data. Listing it in a body alone would leave it unreported, and each clone keeps copying it.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
@@ -396,17 +402,10 @@ After an authorized merge, run the `repo-worktree` post-merge cleanup procedure 
      as its own issue, labeled `pre-existing`. Such a finding names an input or a state and the
      wrong output or the crash it produces. Its body line goes under a `Pre-existing findings,
      filed` heading and links that issue. A thread raising it is answered with that issue's link
-     and resolved.
-   - A defect class seen a second time can have other sites in files this change did not touch.
-     Those take the one issue `GOVERNANCE.md` "Design Before Code" names, listing each site. Where an
-     open issue for that class exists, the new sites are added to it rather than filed again. Its
-     body line goes under the same `Pre-existing findings, filed` heading. A near-duplicate with
-     no defect behind it is a consolidation finding, which the dropped bullet below takes.
-   - A `pre-existing` finding that committed text holds observed data is the maintainer's, per
-     `GOVERNANCE.md` "Representative Data in Agent-Authored Text", rather than a worker's to
-     rewrite. It is filed once as a `decision` issue, and its body line goes under the same heading.
-     That issue and that line name the location and the shape of the data, never the data.
-     Listing it in a body alone would leave it unreported, and each clone keeps copying it.
+     and resolved. Where its class has other sites, that one issue names each, per `GOVERNANCE.md`
+     "Design Before Code". An open issue for that class takes the new sites instead of a new one.
+     A near-duplicate with no defect behind it is a consolidation finding, which the dropped
+     bullet below takes.
    - A `style`, wording, consolidation, or restatement finding on text this change did not touch
      is dropped. It gets one line under a `Dropped findings` heading and nothing else. It gets no
      decline text, no issue, and no reply beyond a pointer to that line, which resolves any
