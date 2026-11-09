@@ -257,7 +257,7 @@ whatever its class, ahead of every other outcome.
      replaced here, even in a file this change does not otherwise touch. On a develop -> main
      promotion pull request, that replacement lands as a feature pull request of its own. Its
      body line goes under an `Observed data replaced` heading with the location and the kind,
-     never the value. The pull request carrying the replacement takes the `history-data` label, and so
+     never the value. Where another pull request's review raised it, the line names that one too. The pull request carrying the replacement takes the `history-data` label, and so
      does the one whose review raised it, where that is another one.
      Where the repository lacks that label, the maintainer is told. A thread raising a replaced
      finding is answered with a pointer to its body line and resolved.
