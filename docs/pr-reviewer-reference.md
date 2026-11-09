@@ -64,7 +64,7 @@ The formal review body was empty. All useful state lived in inline comments, so 
 
 ### Generated Mirrors
 
-`.github/skills/` and `.claude-plugin/fleet-skills/` are the trees `scripts/build_dist.py` generates from `.agents/skills/`, and CI holds them current. So a finding in either belongs at its source, and a review of every copy is one finding three times. Two committed files tell CodeRabbit and Qodo to skip them. Copilot's exclusion is a repository setting this account does not have, so `.github/copilot-instructions.md` asks instead.
+`.github/skills/` and `.claude-plugin/fleet-skills/` are the trees `scripts/build_dist.py` generates from `.agents/skills/`, and CI holds them current. So a finding in either belongs at its source, and a review of every copy is one finding three times. Two committed files tell CodeRabbit and Qodo to skip them. A fleet repository carries `.github/skills/` byte for byte, so the `.coderabbit.yaml` and `.pr_agent.toml` that `repo-config/configure.sh` renders there skip it too. They skip every other tree `spec/files.json` carries verbatim as well. Copilot's exclusion is a repository setting this account does not have, so `.github/copilot-instructions.md` asks instead.
 
 - **CodeRabbit** reads [`reviews.path_filters`][coderabbit-config] from `.coderabbit.yaml` at the repository root, where a pattern prefixed with `!` excludes.
 - **Qodo** reads [its configuration][qodo-config] from `.pr_agent.toml` at the root of the default branch, so the file binds only once it is promoted to `main`. Its [`[ignore]` glob list][qodo-ignore] names the paths to skip.
