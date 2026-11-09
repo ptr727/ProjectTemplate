@@ -94,13 +94,13 @@ A round is the unit. Each one runs these steps in order.
    carry the previous round's ranking forward. Any issue this round's reviews filed is now an
    open issue with a claim on the next round's attention. An issue that ranked low last round
    can rank high once a sibling fix lands.
-   **Measure the round's net flow before that ranking.** Count the issues created during the round
-   that its merged pull requests link under a `Pre-existing findings, filed` heading, other than a
+   **Measure the round's net flow before that ranking.** Count the issues created since the run began
+   that the round's merged pull requests link under a `Pre-existing findings, filed` heading, other than a
    `decision`. Count the issues the round newly
    named on a merged pull request's `Closes on promotion:` line. Closed issues measure nothing
    here, since a round that does not promote closes none. Report both counts, per "Ending the
-   Run". Report too the open count, as "Ranking" counts it, less every issue already named on such
-   a line. Where the round filed more than it fixed, the next ranking gives the issues it filed no
+   Run". Report too the open count, as "Ranking" counts it, less every open issue already named on
+   such a line. Where the round filed more than it fixed, the next ranking gives the issues it filed no
    weight for being new, per "Ranking". A run whose rounds keep filing more than
    they fix is turning its review loop into backlog. Say so at that round's report rather than at
    the run's end.
@@ -123,8 +123,8 @@ Rank on these, highest first where they conflict:
   worth more than any one of its children, and fixing it may close them.
 - **It is new.** An issue filed by a recent review round is evidence of something the current
   content actually got wrong. That issue is also the freshest context anyone has on it. The
-  exception is an issue filed in a round that filed more than it fixed, per "The Round" step 8.
-  It gets no weight for being new.
+  exception is an issue the last measured round filed, where that round filed more than it
+  fixed, per "The Round" step 8. It gets no weight for being new.
 - **It is small and self-contained**, as a tie-break only. Size breaks a tie between two issues of
   equal value, and it never promotes a trivial issue over a real defect.
 
@@ -321,7 +321,7 @@ own bound stated in the worker's brief.
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
   A `pre-existing` correctness defect elsewhere in a file the change touches is in reach too. It
   is in reach where `pr-review-conduct` "Every finding ends in a listed outcome" fixes it, under
-  outcome 1's class sweep or outcome 4's first bullet.
+  outcome 1's class sweep or outcome 4's local-pass fix bullet.
   Rewording a unit that only reads less well now stays out of the diff and is not filed either.
   Every unit the diff grows into is read again by every later round, so a wider edit lengthens the
   loop it was meant to close.
@@ -913,18 +913,13 @@ suppresses no output.
 Promotion Boundary" leaves whether such a repository wants a promotion per round to the maintainer.
 So the run stops at develop, and its report says so.
 
-**Under `develop`**, no round freezes, and no round merges a promotion. An open promotion pull
-request does not freeze the run either, since no one is present to merge it. After each round's
-cleanup, where develop is ahead of main, the orchestrator dispatches one worker. That worker opens
-the promotion pull request as a draft or updates its body, per "The Promotion Boundary" step 1 and
-"Assembling the Promotion Body", and drives nothing. Each update re-derives the whole `Fixes` set
-from the range, rather than appending the round's own lines. A run with no end otherwise promotes nothing.
-Every issue its rounds fixed then reads as open, and the open count overstates the backlog by
-everything already on develop. Develop keeps merging under that pull request, since its head is
-develop. Its review loop is driven once, at the run's end, by one worker per "The Promotion
-Boundary" step 2. That worker first marks it ready for review. A draft draws no ruleset review. So no round spends a review round on a head the next round moves. A maintainer
-arriving mid-run reads the true backlog there, and can ask for that drive early. That worker
-leaves the promotion for the maintainer. A finding it
+**Under `develop`**, no round opens a promotion pull request and no round freezes. An open
+promotion pull request does not freeze the run either, since no one is present to merge it. Until
+one merges, every issue the rounds fixed still reads as open. So each round's report gives the
+open count less the issues already fixed on develop, per "The Round" step 8, as the backlog. At the
+run's end, the orchestrator dispatches one worker where develop is ahead of main. The worker opens
+or updates the promotion pull request per "The Promotion Boundary" steps 1 and 2, and
+"Assembling the Promotion Body". It leaves the promotion for the maintainer. A finding the worker
 cannot dispose of goes in the final report.
 
 **Under `main` or `release`**, the orchestrator dispatches one promotion worker each round, after
