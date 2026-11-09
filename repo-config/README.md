@@ -88,7 +88,7 @@ A parked handoff also carries `blocked`, and differs from the paragraph above in
 
 - **`canonical-sweep`**: the periodic canonical content review sweep, one open issue while any carried unit owes a read.
 
-`history-data` is a surface marker on a pull request rather than an issue. It goes on a pull request that replaced observed data still present in a private repository's git history, per [GOVERNANCE.md "Representative Data in Agent-Authored Text"][governance-representative-data]. Before such a repository becomes public, listing the pull requests carrying it is how the maintainer finds every known exposure in its history.
+`history-data` is a surface marker on a pull request rather than an issue. It goes on a pull request that replaced observed data still present in a private repository's git history, per [GOVERNANCE.md "Representative Data in Agent-Authored Text"][governance-representative-data]. Before such a repository becomes public, the maintainer lists the pull requests carrying it to find every known exposure in its history. Where the label was missing, the `Observed data replaced` heading stands in.
 
 - **`history-data`**: a pull request that replaced observed data still present in git history.
 
