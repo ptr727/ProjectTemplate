@@ -460,8 +460,8 @@ never against its confidence label. Classify before responding:
   helper provides or a per-site fix for a class seen elsewhere. It is not an architectural
   opinion. Fix it, extending the existing helper where this repository holds it, and move the
   class's sites in the touched files onto it. The other sites take the outcome a sibling the class
-  sweep leaves unfixed takes under outcome 4. File an extension a helper
-  in another repository needs as an issue in that repository.
+  sweep leaves unfixed takes under outcome 4. An extension a helper in another
+  repository needs takes outcome 4's last bullet.
 - **Style or convention**. If the cited rule matches the existing tree, fix the code. If the rule
   contradicts the tree or industry norm, **fix the rule, not the code**. Take such a rule to the
   maintainer (outcome 5) rather than bouncing the same code across rounds.
