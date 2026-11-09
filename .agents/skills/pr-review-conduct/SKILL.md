@@ -212,9 +212,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    digest prints an excerpt of each under `UNPLACED ON THE HEAD` with a fingerprint for the set.
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
    - A part holding observed data is never acknowledged by an agent, nor is the rest of its set
-     or key. Its hold or key stands until the maintainer deals with it, as an escalation per
-     "Escalate to the maintainer when". No comment quotes or locates the data. That holds for a
-     part printed under `REVIEWER OUTPUT NOTED` below too.
+     or key. That holds whatever outcome 4 does with the data. The agent tells the maintainer, or its
+     dispatcher, naming only the kind of data, and stops that unit of work. Its hold or key stands
+     until the maintainer deals with it, and nothing the agent writes quotes or locates the data.
+     That holds for a part printed under `REVIEWER OUTPUT NOTED` below too, and ahead of
+     "Answering a suppressed finding".
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.
@@ -223,8 +225,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      `shapes=ACKNOWLEDGED`. New unplaced text on a new head owes a new acknowledgment.
    - The spelling is a data edit to the matching `scripts/reviewers/*.json` in the hub plus one
      fixture. Whoever acknowledged the part makes it in a pull request of its own, never an issue.
-   - An item that reads as neither a finding nor not one goes to the maintainer with its raw text
-     quoted, per "Escalate to the maintainer when" below.
+   - An item that reads as neither a finding nor not one goes to the maintainer, per "Escalate to
+     the maintainer when" below. Its raw text is quoted unless it shows observed data.
 
    A part on an earlier round prints under `REVIEWER OUTPUT NOTED` and decides no exit code. So
    does a label nested in a list, a quote, or a placed part. Read that block rather than the
@@ -512,7 +514,8 @@ body. Then post one `--ack <key>=<outcome>` per key, the outcome following the v
 `Fixed in <SHA>` is `fixed`, `Disproven` and `No change needed` are `declined`, and `Deferred to
 <issue>` is `filed`. `Listed in the body` is `listed`, or `dropped` for a line under `Dropped
 findings`. `Awaiting maintainer` has no outcome, so a key holding such a finding takes no
-`--ack` until the maintainer decides. The record counts only from an owner, member, or
+`--ack` until the maintainer decides. A `REVIEWER OUTPUT NOTED` key holding observed data takes
+none either, per Merge Gate item 4. The record counts only from an owner, member, or
 collaborator. Code checks that each item carries an outcome, never that the outcome is right,
 which stays this section's.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
