@@ -212,8 +212,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    digest prints an excerpt of each under `UNPLACED ON THE HEAD` with a fingerprint for the set.
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
    - An item showing observed data takes outcome 4's observed-data bullet ahead of every other
-     bullet here. That holds for a part printed under `REVIEWER OUTPUT NOTED` below too. Its
-     acknowledgment or `--ack` names only the kind of data and quotes no raw text. An escalated
+     bullet here. That holds for a part printed under `REVIEWER OUTPUT NOTED` below too. The body
+     of its acknowledgment or `--ack` comment names only the kind of data and quotes no raw text. An escalated
      one is acknowledged only once the maintainer answers, so its hold or key stays open until
      then.
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
