@@ -211,13 +211,10 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
 4. Every part of a round covering the head that the tooling could not place is answered. The
    digest prints an excerpt of each under `UNPLACED ON THE HEAD` with a fingerprint for the set.
    It reads `shapes=HELD`, and `status` and `wait` exit `50`.
-   - An item showing observed data takes outcome 4's observed-data bullet ahead of every other
-     bullet here. That holds for a part printed under `REVIEWER OUTPUT NOTED` below too. That
-     item's own entry in the acknowledgment or `--ack` comment body names only the kind of data,
-     quoting none of its raw text. A recorded item's entry reads `Listed in the body`, naming the
-     pull request holding the record where that is another one. Every other item in the same
-     comment is answered as usual. A set or key holding an escalated item takes no acknowledgment
-     until the maintainer answers, so the hold itself is the escalation's stop.
+   - A part holding observed data is never acknowledged by an agent, nor is the rest of its set
+     or key. Its hold or key stands until the maintainer deals with it, as an escalation per
+     "Escalate to the maintainer when". No comment quotes or locates the data. That holds for a
+     part printed under `REVIEWER OUTPUT NOTED` below too.
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.
@@ -530,14 +527,12 @@ from a hub checkout. Do not use a provider connector or reconstruct the GitHub m
 - A finding is judged real but should not be fixed. That decision is never the agent's alone.
 - An architectural redesign is proposed rather than a bug fix.
 - An item in a part the digest prints under `UNPLACED ON THE HEAD` cannot be told to be a finding
-  or not. Quote its raw text in the escalation.
+  or not. Quote its raw text in the escalation, unless it shows observed data, which the
+  escalation names by kind only.
 - A finding shows observed data in a public repository's pushed history, or in a carrying
   repository's copy of hub-authored text, per outcome 4's observed-data bullet. The escalation
-  names the repository and the kind of data. In any mode, it and its own entry in any issue,
-  comment, or answer name no commit, file, line, or value. They quote none of the reviewer's words.
-  Other items sharing that comment are answered as usual. This
-  holds over the unplaced-item bullet above, so an unplaced item showing such data is escalated
-  without its raw text.
+  names the repository and the kind of data. In any mode, it and any issue, comment, or answer
+  it writes name no commit, file, line, or value. They quote none of the reviewer's words.
 
 An agent that cannot reach the maintainer directly escalates to whoever dispatched it and stops
 that unit of work there. A dispatched subagent is the ordinary case. Such an agent never substitutes its own
