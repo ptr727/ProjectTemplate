@@ -1060,7 +1060,7 @@ def _moves_branch(argv: list[str]) -> bool:
         operands = [a for a in _flags("rebase", args) if not a.startswith("-")]
         return len(operands) >= (1 if "--root" in args else 2)
     if git.sub == "symbolic-ref":
-        flags = _before_dashes("symbolic-ref", args)
+        flags = _flags("symbolic-ref", args)
         operands = [a for a in flags if not a.startswith("-")]
         return "--delete" in flags or _short_has(flags, "d") or len(operands) > 1
     if git.sub == "checkout":
@@ -1863,6 +1863,13 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git rebase -ix make develop && git push origin", _RULES, "feature/x", "allow", "3783"),
     ("git rebase -i develop topic && git push origin", _RULES, "feature/x", "deny", "3783"),
     ("git symbolic-ref -qd HEAD && git push origin", _RULES, "feature/x", "deny", "3783"),
+    (
+        "git symbolic-ref -- HEAD refs/heads/develop && git push origin",
+        _RULES,
+        "feature/x",
+        "deny",
+        "3783",
+    ),
     ("git symbolic-ref HEAD refs/heads/develop && git push", _RULES, "feature/x", "deny", "3729"),
     ("gh pr checkout 5 && git push origin", _RULES, "feature/x", "deny", "3729"),
     ("git switch develop && git push origin feature/x", _RULES, "feature/x", "allow", "3729"),
@@ -1906,6 +1913,8 @@ _IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
     ('git commit -m "Record live change"', "develop", "allow"),
     ('git commit -m "Record live change"', None, "deny"),
     ("git commit -S -m x", "develop", "allow"),
+    ("git commit -Sa -m x", "develop", "allow"),
+    ("git commit -aS -m x", "develop", "deny"),
     ("git commit -S -m x automations.yaml", "develop", "deny"),
     ("git rm old.yaml", "develop", "allow"),
     ("git mv a.yaml b.yaml", "develop", "allow"),
