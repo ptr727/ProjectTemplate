@@ -766,7 +766,7 @@ class TestCleanupLocalHalf(LocalCleanupCase):
             self.assertTrue(os.path.isdir(path))
         else:
             self.assertEqual(0, self.run_local())
-            self.assertIn("note: the shell's directory", self.out.getvalue())
+            self.assertIn(f"note: the shell's directory was {path}, which", self.out.getvalue())
             self.assertFalse(os.path.exists(path))
 
     def test_a_shell_inside_the_worktree_refuses_on_windows(self) -> None:
@@ -1418,6 +1418,18 @@ class TestCleanupSweep(LocalCleanupCase):
         self.assertEqual(0, self.sweep("--apply"))
         self.assertIn("keep submodules", self.out.getvalue())
         self.assertIn(path, self.listed())
+
+    @unittest.skipIf(pr_cleanup.ON_WINDOWS, "Windows keeps a worktree the shell stands in")
+    def test_a_shell_inside_a_removed_worktree_is_told_by_the_sweep(self) -> None:
+        path, tip = self.worktree("held-work")
+        self.merged_pr("held-work", tip)
+        self.age(path, 48)
+        self.wire_sweep(remote_gone=True)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(path)
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn(f"note: the shell's directory was {path}, which", self.out.getvalue())
+        self.assertNotIn(path, self.listed())
 
     def test_a_shell_inside_a_worktree_keeps_it_on_windows(self) -> None:
         path, tip = self.worktree("held-work")
