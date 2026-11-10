@@ -1,20 +1,5 @@
 name: Validate task
 
-# The fleet validation gate, hosted here once and reached by every repo's test-pull-request stub and its own publish-release stub.
-# The jobs are test-matrix, lint, unit-test, and validate.
-# The test-matrix job checks the python-versions and test-matrix inputs and builds the unit-test matrix.
-# The lint job is the fleet doc-lint block plus language lint, by tree detection.
-# For Python it lints the declared directories, and it also runs the repo gate, and the prose gate on a pull_request event.
-# The unit-test job is a generic dotnet test, and a pytest or unittest suite under coverage in each Python directory.
-# It runs once per interpreter the python-versions input names, or once per test-matrix leg.
-# The validate job is the validate hook, a repo's own domain checks.
-# Examples are an ESPHome compile, a Hugo build, a KiCad ERC, a codegen-drift check, or PowerShell tests.
-# No permissions beyond contents: read where a job needs one, since every job here only checks out and reads.
-# No required inputs.
-# The optional inputs are markdown-exclude-globs, repo-gate-exclude-globs, python-directories, python-versions, test-matrix and workflow-model.
-# CODECOV_TOKEN is the one optional secret, since coverage upload is best-effort.
-# Hub-owned gates and default hooks resolve through $/ at the reusable workflow's commit.
-# Each implementation is therefore reproducible against the caller's released pin without a second checkout.
 on:
   workflow_call:
     inputs:
@@ -285,37 +270,29 @@ jobs:
           hashFiles('**/*.csproj') != '' && hashFiles('.config/dotnet-tools.json') != ''
         run: dotnet csharpier check .
 
+      - name: Resolve .NET workspaces step
+        id: dotnet
+        if: hashFiles('**/*.csproj') != ''
+        uses: $/.github/actions/dotnet-workspaces
+        with:
+          projects: ':(glob)**/*.csproj'
+          solutions: 'true'
+
       # The dotnet SDK ships dotnet format, so it needs no tool restore.
       # The severity and verbosity flags match the fleet's canonical invocation, per CODESTYLE.md and PhotoCleaner's own gate.
       - name: Check C# style step
         if: hashFiles('**/*.csproj') != ''
+        env:
+          WORKSPACES: ${{ steps.dotnet.outputs.workspaces }}
         run: |
           set -Eeuo pipefail
-          # Both dotnet format and dotnet test resolve a lone solution or project from the working directory, and fail where the root holds none.
-          # A root holding one keeps that bare call.
-          # Otherwise each tracked project matching the first argument is named.
-          # With a second argument of solutions, each tracked solution is named instead wherever the tree holds one.
-          dotnet_workspaces() {
-            local solutions=
-            if [ -z "$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')" ]; then
-              if [ "${2:-}" = solutions ]; then
-                solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
-              fi
-              if [ -n "$solutions" ]; then
-                printf '%s\n' "$solutions"
-              else
-                git ls-files -- "$1"
-              fi
-            fi
-          }
-          workspaces=$(dotnet_workspaces ':(glob)**/*.csproj' solutions)
-          if [ -z "$workspaces" ]; then
+          if [ -z "$WORKSPACES" ]; then
             dotnet format style --verify-no-changes --severity=info --verbosity=detailed
           fi
           while IFS= read -r workspace; do
             [ -n "$workspace" ] || continue
             dotnet format style "$workspace" --verify-no-changes --severity=info --verbosity=detailed < /dev/null
-          done <<< "$workspaces"
+          done <<< "$WORKSPACES"
 
       - name: Resolve Python directories step
         id: python
@@ -653,40 +630,31 @@ jobs:
         with:
           dotnet-version: 10.x
 
+      - name: Resolve .NET workspaces step
+        id: dotnet
+        if: hashFiles('**/*Tests*.csproj') != ''
+        uses: $/.github/actions/dotnet-workspaces
+        with:
+          projects: ':(glob)**/*Tests*.csproj'
+
       # --coverage-output stays unset because pinning one filename gives every test project in the solution the same path, and the last to finish overwrites the rest.
       # The default <guid>.cobertura.xml written instead is a name codecov-cli's finder does not match.
       # Each report is therefore prefixed rather than renamed, keeping the guid that makes it unique.
       - name: Run unit tests step
         if: hashFiles('**/*Tests*.csproj') != ''
+        env:
+          WORKSPACES: ${{ steps.dotnet.outputs.workspaces }}
         run: |
           set -Eeuo pipefail
           rm -rf ./coverage
-          # Both dotnet format and dotnet test resolve a lone solution or project from the working directory, and fail where the root holds none.
-          # A root holding one keeps that bare call.
-          # Otherwise each tracked project matching the first argument is named.
-          # With a second argument of solutions, each tracked solution is named instead wherever the tree holds one.
-          dotnet_workspaces() {
-            local solutions=
-            if [ -z "$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')" ]; then
-              if [ "${2:-}" = solutions ]; then
-                solutions=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
-              fi
-              if [ -n "$solutions" ]; then
-                printf '%s\n' "$solutions"
-              else
-                git ls-files -- "$1"
-              fi
-            fi
-          }
           # A solution holding no test project fails dotnet test with no test projects found, so the tests are named one project at a time.
-          workspaces=$(dotnet_workspaces ':(glob)**/*Tests*.csproj')
-          if [ -z "$workspaces" ]; then
+          if [ -z "$WORKSPACES" ]; then
             dotnet test --coverage --coverage-output-format cobertura --results-directory ./coverage
           fi
           while IFS= read -r workspace; do
             [ -n "$workspace" ] || continue
             dotnet test --project "$workspace" --coverage --coverage-output-format cobertura --results-directory ./coverage < /dev/null
-          done <<< "$workspaces"
+          done <<< "$WORKSPACES"
           written=0
           for report in ./coverage/*.cobertura.xml; do
             [ -e "$report" ] || continue
