@@ -1513,14 +1513,27 @@ class RenderCase(unittest.TestCase):
         et, eb = audit.render_issue(fe, [], "main", "abc1234", "2026-01-01T00:00:00Z", "hub123")
         msg = "issue: render_issue grouping/title/empty behavior"
         self.assertIn("Widget", it, msg)
-        self.assertIn("(3 findings)", it, msg)
+        self.assertIn("(3 detected findings)", it, msg)
         self.assertIn("## Must fix", ib, msg)
         self.assertIn("**LETTER** file: X absent", ib, msg)
         self.assertIn("## Converge", ib, msg)
         self.assertIn("verbatim: Y differs", ib, msg)
         self.assertIn("## Could not verify", ib, msg)
-        self.assertIn("(0 findings)", et, msg)
+        self.assertIn("(0 detected findings)", et, msg)
         self.assertIn("nothing to converge", eb, msg)
+
+    def test_render_issue_ends_at_the_manual_findings_section(self) -> None:
+        """Both bodies end in the one hand-written section, so regenerating can keep it, per AUDIT.md section 8."""
+        fe = {"name": "Widget", "types": ["python"]}
+        for findings in ([], [("DRIFT", "verbatim: Y differs"), ("ERROR", "gh failed")]):
+            with self.subTest(findings=len(findings)):
+                _, body = audit.render_issue(
+                    fe, findings, "main", "abc1234", "2026-01-01T00:00:00Z", "hub123"
+                )
+                headings = [line for line in body.splitlines() if line.startswith("## ")]
+                self.assertEqual(headings[-1], audit.MANUAL_HEADING)
+                self.assertEqual(headings.count(audit.MANUAL_HEADING), 1)
+                self.assertIn(f"replace only the text above `{audit.MANUAL_HEADING}`", body)
 
     def test_title_and_intro_mirror(self) -> None:
         r_md = "# Widget <!-- omit from toc -->\n\nDoes widget things.\n\n## Build\n"
@@ -2965,6 +2978,7 @@ OLD_COMMIT = [{"commit": {"committer": {"date": "2019-01-01T00:00:00+00:00"}}}]
 def intent_run(baseline: dict[str, Any], content: dict[str, str], notes: list[str]) -> Any:
     """A non-hub Run holding `content` as read, for check_files_intent."""
     run = audit.Run({"name": "Widget", "driftNotes": notes}, {}, "o/r", "main", {}, None, None)
+    run.head = {"commit": {"sha": "c0ffee"}}
     run.__dict__["baseline"] = {p: (item, set(), set()) for p, item in baseline.items()}
     run.content.update(content)
     run.found.update({p: p for p in content})
@@ -3090,7 +3104,7 @@ class IntentAdvisoryCase(unittest.TestCase):
                 mock.patch.object(audit, "gh", fake),
             ):
                 findings = audit.check_files_intent(run)
-            self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=main&per_page=1"])
+            self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=c0ffee&per_page=1"])
             self.assertEqual([t.split(" ", 2)[1] for _, t in findings], want)
 
     def test_the_anchor_is_read_only_from_an_intent_ref(self) -> None:
@@ -5496,10 +5510,11 @@ class RegistryCase(unittest.TestCase):
 
     def test_an_unparsed_dependabot_file_is_one_finding(self) -> None:
         run = audit.Run({"name": "Widget"}, {}, "o/r", "main", {}, None, None)
+        run.head = {"commit": {"sha": "c0ffee"}}
         bad = {"encoding": "base64", "content": base64.b64encode(b"updates:\n  - [\n").decode()}
 
         def gh(path: str, ok404: bool = False) -> Any:
-            return bad if path.endswith("dependabot.yml?ref=main") else None
+            return bad if path.endswith("dependabot.yml?ref=c0ffee") else None
 
         with mock.patch.object(audit, "gh", gh):
             got = audit.check_dependabot_ecosystems(run)

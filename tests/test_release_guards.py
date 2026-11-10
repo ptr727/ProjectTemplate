@@ -2024,28 +2024,13 @@ gh() {
                 (work / "coverage/coverage-committed.cobertura.xml").write_text(
                     "<coverage/>", encoding="utf-8"
                 )
-                # The step reads the tracked tree for its workspaces, so the work directory is a repository holding one at its root.
-                (work / "App.slnx").write_text("", encoding="utf-8")
-                run(
-                    ["git", "init", "-q"],
-                    cwd=work,
-                    env=without_git_location(),
-                    check=True,
-                    timeout=60,
-                )
-                run(
-                    ["git", "add", "App.slnx"],
-                    cwd=work,
-                    env=without_git_location(),
-                    check=True,
-                    timeout=60,
-                )
                 verdict = run(
                     [bash_or_skip(), "-c", script],
                     cwd=work,
                     env={
                         **without_git_location(),
                         "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+                        "WORKSPACES": "",
                     },
                     capture_output=True,
                     text=True,
@@ -2060,24 +2045,74 @@ gh() {
                 else:
                     self.assertTrue((work / "coverage/coverage-0f1e2d3c.cobertura.xml").exists())
 
-    @unittest.skipUnless(shutil.which("git"), "the steps under test read the tracked tree with git")
+    @unittest.skipUnless(
+        shutil.which("git") and shutil.which("bash") and os.name == "posix",
+        "the action reads the tracked tree with git, and the steps run under bash against a stand-in dotnet",
+    )
     def test_validator_dotnet_steps_run_once_per_workspace(self) -> None:
-        """A root holding no solution or project gets each tracked solution, or each project, named instead."""
+        """Only a root holding exactly one solution or project keeps the bare call.
+
+        Every other tree gets each tracked solution, or each project, named instead. A root holding
+        several never takes a nested solution. It names its own solutions, or the projects where it
+        holds none, so a nested one never hides the root's projects. Each job's
+        resolver step is read from the workflow with the inputs it passes, and its output feeds that
+        job's dotnet step. So a job passing the wrong input, or reading another step's output, fails
+        here as a workflow edit would on a runner. The output reaches the step as the runner hands a
+        multiline output over, without its last newline.
+        """
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         lint = workflow.split("\n  lint:\n", 1)[1].split("\n  unit-test:\n", 1)[0]
         unit = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
-        style = step_script_text(lint, "Check C# style step")
-        tests = step_script_text(unit, "Run unit tests step")
+        action = (REPO / ".github/actions/dotnet-workspaces/action.yml").read_text(encoding="utf-8")
+        resolver = step_script_text(action, "Resolve .NET workspaces step")
+        self.assertNotIn("dotnet_workspaces", workflow)
 
-        def resolver(script: str) -> str:
-            return script.split("dotnet_workspaces() {", 1)[1].split("\n}\n", 1)[0]
+        def wiring(job: str, consumer: str) -> tuple[str, dict[str, str]]:
+            """The consumer's script and the inputs its job passes the resolver, held to one wiring.
 
-        self.assertEqual(resolver(style), resolver(tests))
+            The two share one condition, since a resolver skipped where its consumer runs leaves the
+            list empty, which is the bare call.
+            """
+            resolve = yaml_step(job, "Resolve .NET workspaces step")
+            self.assertEqual(yaml_value(resolve, "uses"), "$/.github/actions/dotnet-workspaces")
+            step = yaml_step(job, consumer)
+            self.assertEqual(yaml_value(resolve, "if"), yaml_value(step, "if"))
+            step_id = yaml_value(resolve, "id")
+            self.assertEqual(
+                yaml_value(step, "env", "WORKSPACES"),
+                f"${{{{ steps.{step_id}.outputs.workspaces }}}}",
+            )
+            inputs = {}
+            for key in ("projects", "solutions"):
+                value = yaml_value(resolve, "with", key)
+                if value is not None:
+                    inputs[key.upper()] = value.strip("'")
+            for key in ("projects", "solutions"):
+                default = yaml_value(action, "inputs", key, "default")
+                if key.upper() not in inputs and default is not None:
+                    inputs[key.upper()] = default.strip("'")
+            return step_script_text(job, consumer), inputs
+
+        style, style_inputs = wiring(lint, "Check C# style step")
+        tests, test_inputs = wiring(unit, "Run unit tests step")
         flags = "--coverage --coverage-output-format cobertura --results-directory ./coverage"
+        bare_style = ["format style --verify-no-changes --severity=info --verbosity=detailed"]
+
+        def named_style(*workspaces: str) -> list[str]:
+            return [
+                f"format style {w} --verify-no-changes --severity=info --verbosity=detailed"
+                for w in workspaces
+            ]
+
         trees = {
             "a root solution": (
                 ["App.sln", "src/Lib/Lib.csproj", "tests/LibTests/LibTests.csproj"],
-                ["format style --verify-no-changes --severity=info --verbosity=detailed"],
+                bare_style,
+                [f"test {flags}"],
+            ),
+            "a root project": (
+                ["App.csproj", "tests/AppTests/AppTests.csproj"],
+                bare_style,
                 [f"test {flags}"],
             ),
             "solutions below the root": (
@@ -2087,33 +2122,53 @@ gh() {
                     "src/Lib/Lib.csproj",
                     "src/LibTests/LibTests.csproj",
                 ],
-                [
-                    f"format style {w} --verify-no-changes --severity=info --verbosity=detailed"
-                    for w in ("src/App.sln", "tools/Tool.slnx")
-                ],
+                named_style("src/App.sln", "tools/Tool.slnx"),
                 [f"test --project src/LibTests/LibTests.csproj {flags}"],
             ),
             "projects and no solution": (
                 ["FindInFile/FindInFile.csproj", "FindInFileTests/FindInFileTests.csproj"],
-                [
-                    f"format style {w} --verify-no-changes --severity=info --verbosity=detailed"
-                    for w in (
-                        "FindInFile/FindInFile.csproj",
-                        "FindInFileTests/FindInFileTests.csproj",
-                    )
-                ],
+                named_style(
+                    "FindInFile/FindInFile.csproj", "FindInFileTests/FindInFileTests.csproj"
+                ),
                 [f"test --project FindInFileTests/FindInFileTests.csproj {flags}"],
             ),
+            "a root .sln beside the .slnx dotnet sln migrate writes": (
+                ["App.sln", "App.slnx", "src/Lib/Lib.csproj", "tests/LibTests/LibTests.csproj"],
+                named_style("App.sln", "App.slnx"),
+                [f"test --project tests/LibTests/LibTests.csproj {flags}"],
+            ),
+            "a root solution beside a root project": (
+                ["App.slnx", "Tool.csproj", "tests/AppTests/AppTests.csproj"],
+                named_style("App.slnx"),
+                [f"test --project tests/AppTests/AppTests.csproj {flags}"],
+            ),
+            "two root projects": (
+                ["App.csproj", "AppTests.csproj"],
+                named_style("App.csproj", "AppTests.csproj"),
+                [f"test --project AppTests.csproj {flags}"],
+            ),
+            "two root projects beside a nested solution": (
+                ["App.csproj", "AppTests.csproj", "sub/Tool.sln", "sub/Tool.csproj"],
+                named_style("App.csproj", "AppTests.csproj", "sub/Tool.csproj"),
+                [f"test --project AppTests.csproj {flags}"],
+            ),
+            "two root solutions beside a nested solution": (
+                ["App.sln", "App.slnx", "sub/Tool.sln", "tests/AppTests/AppTests.csproj"],
+                named_style("App.sln", "App.slnx"),
+                [f"test --project tests/AppTests/AppTests.csproj {flags}"],
+            ),
         }
+        steps = ((style, style_inputs, 1), (tests, test_inputs, 2))
         for label, (tracked, want_style, want_tests) in trees.items():
-            for script, want in ((style, want_style), (tests, want_tests)):
+            for (script, inputs, which), want in zip(steps, (want_style, want_tests), strict=True):
                 with (
-                    self.subTest(label, step=script is style),
+                    self.subTest(label, step=which),
                     tempfile.TemporaryDirectory() as scratch,
                 ):
                     bin_dir, work = Path(scratch) / "bin", Path(scratch) / "work"
                     bin_dir.mkdir()
-                    log = Path(scratch) / "log"
+                    log, output = Path(scratch) / "log", Path(scratch) / "output"
+                    output.write_text("", encoding="utf-8")
                     stand_in = bin_dir / "dotnet"
                     stand_in.write_text(
                         '#!/usr/bin/env bash\necho "$*" >> "$STUB_LOG"\n'
@@ -2124,20 +2179,29 @@ gh() {
                     for path in tracked:
                         (work / path).parent.mkdir(parents=True, exist_ok=True)
                         (work / path).write_text("", encoding="utf-8")
-                    run(
-                        ["git", "init", "-q"],
+                    for command in (["git", "init", "-q"], ["git", "add", "."]):
+                        run(
+                            command,
+                            cwd=work,
+                            env=without_git_location(),
+                            check=True,
+                            timeout=60,
+                        )
+                    resolved = run(
+                        [bash_or_skip(), "-c", resolver],
                         cwd=work,
-                        env=without_git_location(),
-                        check=True,
+                        env={**without_git_location(), **inputs, "GITHUB_OUTPUT": str(output)},
+                        capture_output=True,
+                        text=True,
+                        encoding="utf-8",
                         timeout=60,
+                        check=False,
                     )
-                    run(
-                        ["git", "add", "."],
-                        cwd=work,
-                        env=without_git_location(),
-                        check=True,
-                        timeout=60,
-                    )
+                    self.assertEqual(0, resolved.returncode, resolved.stdout + resolved.stderr)
+                    written = output.read_text(encoding="utf-8")
+                    match = re.fullmatch(r"workspaces<<(\S+)\n((?:.+\n)*)\1\n", written)
+                    self.assertIsNotNone(match, written)
+                    assert match is not None
                     result = run(
                         [bash_or_skip(), "-c", script],
                         cwd=work,
@@ -2145,6 +2209,7 @@ gh() {
                             **without_git_location(),
                             "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
                             "STUB_LOG": str(log),
+                            "WORKSPACES": match.group(2).removesuffix("\n"),
                         },
                         capture_output=True,
                         text=True,

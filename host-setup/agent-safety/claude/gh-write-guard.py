@@ -107,10 +107,6 @@ _CHECKOUT_FORCE_FLAGS = frozenset(
     {"-b", "-B", "-c", "-C", "--force", "-f", "--discard-changes", "--orphan", "--create"}
     | {"--force-create"}
 )
-_CHECKOUT_FORCE_CHARS = frozenset("bBcCf")
-_REBASE_VALUES = frozenset(
-    {"--onto", "-x", "--exec", "-s", "--strategy", "-X", "--strategy-option"}
-)
 
 _ALLOW_ENV = "GH_WRITE_GUARD_ALLOW"
 _ALLOW_PRIMARY_ENV = "GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT"
@@ -121,6 +117,14 @@ _COMMIT_VALUES = frozenset(
     {"--message", "--file", "--reuse-message", "--reedit-message", "--template", "--author"}
     | {"--date", "--cleanup", "--trailer", "--fixup", "--squash"}
 )
+_OPTION_VALUES = {
+    "commit": ("mFcCt", "uS", _COMMIT_VALUES),
+    "push": ("o", "", frozenset({"--repo", "--receive-pack", "--exec", "--push-option"})),
+    "clean": ("e", "", frozenset({"--exclude"})),
+    "branch": ("u", "t", frozenset({"--set-upstream-to", "--points-at", "--sort", "--format"})),
+    "rebase": ("xsXC", "S", frozenset({"--onto", "--exec", "--strategy", "--strategy-option"})),
+    "symbolic-ref": ("m", "", frozenset()),
+}
 _COMMIT_SWEEPS = frozenset({"--all", "--amend", "--patch", "--interactive", "--include", "--only"})
 _IN_PLACE_PUSH_FLAGS = frozenset({"-q", "--quiet", "-v", "--verbose", "-u", "--set-upstream"})
 
@@ -857,32 +861,14 @@ def _push_targets(
 
     `branch_of` gives each branch a push naming no refspec, or `HEAD`, may write.
     """
-    force = delete = every = mirror = tags = False
-    pos: list[str] = []
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--":
-            pos += args[i + 1 :]
-            break
-        if not a.startswith("-") or a == "-":
-            pos.append(a)
-        elif a in ("--force", "--force-if-includes") or a.startswith("--force-with-lease"):
-            force = True
-        elif a == "--delete":
-            delete = True
-        elif a in ("--all", "--branches"):
-            every = True
-        elif a == "--mirror":
-            mirror = True
-        elif a == "--tags":
-            tags = True
-        elif a in ("--repo", "--receive-pack", "--exec", "-o", "--push-option"):
-            i += 1
-        elif m := re.fullmatch(r"-([A-Za-np-z0-9]*)(o?)(.*)", a):
-            force, delete = force or "f" in m[1], delete or "d" in m[1]
-            i += bool(m[2]) and not m[3]
-        i += 1
+    words = _flags("push", args)
+    end = words.index("--") if "--" in words else len(words)
+    opts = {a for a in words[:end] if a.startswith("-") and a != "-"}
+    pos = [a for a in words[:end] if a not in opts] + words[end + 1 :]
+    short = "".join(a[1:] for a in opts if a[1] != "-")
+    force = "f" in short or bool({"--force", "--force-if-includes", "--force-with-lease"} & opts)
+    delete, every = "d" in short or "--delete" in opts, bool({"--all", "--branches"} & opts)
+    mirror, tags = "--mirror" in opts, "--tags" in opts
     remote, specs = (pos[0], pos[1:]) if pos else (None, [])
     write = "force" if force else "update"
     if mirror:
@@ -1001,51 +987,56 @@ def _rule_denial(op: str, br: str, rules: set[str] | None) -> str | None:
     return None
 
 
-def _commit_flags(args: list[str]) -> list[str]:
-    """A commit's options before any `--`, each short cluster cut at its first value-taking flag.
+def _cluster(word: str, values: str, optional: str = "") -> tuple[str, bool]:
+    """A short-option cluster's letters before its first value-taking one, and whether the value is the next word.
 
-    A value attached to its flag is dropped, and the word after a detached value is skipped. So a
-    message such as `-m "-n fix"` or `-m"a typo"` reads as no flag.
+    A letter in `values` takes the rest of the word, or the next word where it ends the word. One in
+    `optional` takes the rest of the word only. So `-mtest` reads as no flag and `-fe.env` as `f`.
     """
+    cut = next((k for k, ch in enumerate(word) if k and ch in values + optional), len(word))
+    return word[1:cut], cut == len(word) - 1 and word[cut] in values
+
+
+def _flags(sub: str, args: list[str]) -> list[str]:
+    """A subcommand's words with each option's value dropped, then any `--` and the words after it.
+
+    `_OPTION_VALUES` holds, per subcommand, the short letters taking a value, those taking one only
+    attached, and the long options taking the next word. Each short cluster is cut by `_cluster`,
+    and a long option loses an `=value`. So a message such as
+    `-m "-n fix"`, `-m"a typo"`, or `clean -e -n` reads as no flag.
+    """
+    values, optional, longs = _OPTION_VALUES[sub]
     out: list[str] = []
     i = 0
     while i < len(args) and args[i] != "--":
         a = args[i]
         if len(a) > 1 and a[0] == "-" and a[1] != "-":
-            cut = next((k for k, ch in enumerate(a) if ch in "mFcCt"), len(a))
-            out.append(a[:cut])
-            i += cut == len(a) - 1
-        elif a in _COMMIT_VALUES:
+            letters, takes = _cluster(a, values, optional)
+            out += [f"-{letters}"] if letters else []
+            i += takes
+        elif a in longs:
             i += 1
-        elif a.startswith("-"):
-            out.append(a.split("=", 1)[0])
         else:
-            out.append(a)
+            out.append(a.split("=", 1)[0] if a.startswith("-") else a)
         i += 1
     return out + args[i:]
 
 
+def _before_dashes(sub: str, args: list[str]) -> list[str]:
+    """The words `_flags` reads before any `--`."""
+    words = _flags(sub, args)
+    return words[: words.index("--")] if "--" in words else words
+
+
+def _short_has(words: list[str], letters: str) -> bool:
+    """Whether a short cluster among `words` carries one of `letters`."""
+    return any(a[:1] == "-" and a[1:2] != "-" and bool(set(letters) & set(a[1:])) for a in words)
+
+
 def _skips_hooks(sub: str, args: list[str]) -> bool:
     """True when a commit or push carries `--no-verify`, or a commit its `-n` in a short cluster."""
-    if sub == "commit":
-        flags = _commit_flags(args)
-        flags = flags[: flags.index("--")] if "--" in flags else flags
-        return any(a == "--no-verify" or re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", a) for a in flags)
-    return "--no-verify" in args[: args.index("--")] if "--" in args else "--no-verify" in args
-
-
-def _operands(args: list[str], values: frozenset[str]) -> list[str]:
-    """The words in `args` that are not options, skipping the word after each option in `values`."""
-    out: list[str] = []
-    skip = False
-    for a in args:
-        if skip:
-            skip = False
-        elif a in values:
-            skip = True
-        elif not a.startswith("-"):
-            out.append(a)
-    return out
+    flags = _before_dashes(sub, args)
+    return "--no-verify" in flags or sub == "commit" and _short_has(flags, "n")
 
 
 def _moves_branch(argv: list[str]) -> bool:
@@ -1063,11 +1054,15 @@ def _moves_branch(argv: list[str]) -> bool:
     if git.sub == "stash":
         return args[:1] == ["branch"]
     if git.sub == "branch":
-        return any(re.fullmatch(r"-[A-Za-z]*[mM][A-Za-z]*|--mo.*", a) for a in args)
+        flags = _before_dashes("branch", args)
+        return _short_has(flags, "mM") or any(a.startswith("--mo") for a in flags)
     if git.sub == "rebase":
-        return len(_operands(args, _REBASE_VALUES)) >= (1 if "--root" in args else 2)
+        operands = [a for a in _flags("rebase", args) if not a.startswith("-")]
+        return len(operands) >= (1 if "--root" in args else 2)
     if git.sub == "symbolic-ref":
-        return bool({"-d", "--delete"} & set(args)) or len(_operands(args, frozenset({"-m"}))) > 1
+        flags = _flags("symbolic-ref", args)
+        operands = [a for a in flags if not a.startswith("-")]
+        return "--delete" in flags or _short_has(flags, "d") or len(operands) > 1
     if git.sub == "checkout":
         return "--" not in args or args.index("--") == len(args) - 1
     return git.sub == "switch"
@@ -1161,18 +1156,12 @@ def _primary_checkout_verdict(
     """Whether requirement 6 denies this subcommand in a primary checkout."""
     if sub == "worktree":
         before = args[1 : args.index("--")] if "--" in args else args[1:]
-        return args[:1] == ["remove"] and any(
-            a in ("-f", "--force") or re.fullmatch(r"-[A-Za-z]*f[A-Za-z]*", a) for a in before
-        )
+        return args[:1] == ["remove"] and ("--force" in before or _short_has(before, "f"))
     if sub in ("checkout", "switch"):
-        if "--" in args or any(
-            a in _CHECKOUT_FORCE_FLAGS
-            or (
-                a.startswith("-")
-                and not a.startswith("--")
-                and any(ch in _CHECKOUT_FORCE_CHARS for ch in a[1:])
-            )
-            for a in args
+        if (
+            "--" in args
+            or _short_has(args, "bBcCf")
+            or any(a in _CHECKOUT_FORCE_FLAGS for a in args)
         ):
             return True
         positional = [a for a in args if a == "-" or not a.startswith("-")]
@@ -1184,10 +1173,10 @@ def _primary_checkout_verdict(
     if sub == "stash":
         return args[:1] not in (["list"], ["show"])
     if sub == "clean":
-        before = args[: args.index("--")] if "--" in args else args
-        if any(a == "--dry-run" or re.fullmatch(r"-[A-Za-z]*n[A-Za-z]*", a) for a in before):
+        before = _before_dashes("clean", args)
+        if "--dry-run" in before or _short_has(before, "n"):
             return False
-        return any(a == "--force" or re.fullmatch(r"-[A-Za-z]*f[A-Za-z]*", a) for a in before)
+        return "--force" in before or _short_has(before, "f")
     return sub in _ALWAYS_DENY_SUBS
 
 
@@ -1239,7 +1228,7 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
             and pos[1] in specs
         )
     if sub == "commit":
-        flags = _commit_flags(args)
+        flags = _flags("commit", args)
         return not any(
             not a.startswith("-")
             or a == "--"
@@ -1745,6 +1734,11 @@ _CASES: list[tuple[str, str, str]] = [
     ("git commit -n -m x", "deny", "R4"),
     ("git commit -an -m x", "deny", "R4"),
     ("git commit -mn", "allow", "R4"),
+    ("git commit -mtest --no-verify", "deny", "3783"),
+    ("git commit -mtest -n", "deny", "3783"),
+    ("git commit -Snkey -m x", "allow", "3783"),
+    ("git commit -uno -m x", "allow", "3783"),
+    ("git push -o --no-verify origin feature/x", "allow", "3783"),
     ("git push --no-verify origin feature/x", "deny", "R4"),
     ("git push -n origin feature/x", "allow", "R4"),
     ("git -c core.hooksPath=/dev/null commit -m x", "deny", "1127"),
@@ -1844,6 +1838,7 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git push -ofoo origin main", _RULES, "feature/x", "allow", "3720"),
     ("git push -4f origin main", _RULES, "feature/x", "deny", "3720"),
     ("git push -uo ci.skip origin", _RULES, "develop", "deny", "3720"),
+    ("git push -o ci.skip origin", _RULES, "develop", "deny", "3783"),
     ("git push origin :main", _RULES, "feature/x", "deny", "R4"),
     ("git push origin --delete main", _RULES, "feature/x", "deny", "R4"),
     ("git push origin --delete feature/example", _RULES, "feature/x", "allow", "3314"),
@@ -1862,6 +1857,19 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git rebase origin/develop develop && git push origin", _RULES, "feature/x", "deny", "3729"),
     ("git stash branch develop && git push origin", _RULES, "feature/x", "deny", "3729"),
     ("git branch -M develop && git push origin", _RULES, "feature/x", "deny", "3729"),
+    ("git branch -umain && git push origin", _RULES, "feature/x", "allow", "3783"),
+    ("git branch -u -m && git push origin", _RULES, "feature/x", "allow", "3783"),
+    ("git branch -tm && git push origin", _RULES, "feature/x", "allow", "3783"),
+    ("git rebase -ix make develop && git push origin", _RULES, "feature/x", "allow", "3783"),
+    ("git rebase -i develop topic && git push origin", _RULES, "feature/x", "deny", "3783"),
+    ("git symbolic-ref -qd HEAD && git push origin", _RULES, "feature/x", "deny", "3783"),
+    (
+        "git symbolic-ref -- HEAD refs/heads/develop && git push origin",
+        _RULES,
+        "feature/x",
+        "deny",
+        "3783",
+    ),
     ("git symbolic-ref HEAD refs/heads/develop && git push", _RULES, "feature/x", "deny", "3729"),
     ("gh pr checkout 5 && git push origin", _RULES, "feature/x", "deny", "3729"),
     ("git switch develop && git push origin feature/x", _RULES, "feature/x", "allow", "3729"),
@@ -1905,6 +1913,8 @@ _IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
     ('git commit -m "Record live change"', "develop", "allow"),
     ('git commit -m "Record live change"', None, "deny"),
     ("git commit -S -m x", "develop", "allow"),
+    ("git commit -Sa -m x", "develop", "allow"),
+    ("git commit -aS -m x", "develop", "deny"),
     ("git commit -S -m x automations.yaml", "develop", "deny"),
     ("git rm old.yaml", "develop", "allow"),
     ("git mv a.yaml b.yaml", "develop", "allow"),
@@ -1969,6 +1979,11 @@ _CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
     ("git stash list", _PRIMARY, {}, "allow", "R6"),
     ("git clean -fd", _PRIMARY, {}, "deny", "R6"),
     ("git clean -nfd", _PRIMARY, {}, "allow", "R6"),
+    ("git clean -fen", _PRIMARY, {}, "deny", "3783"),
+    ("git clean -fe.env", _PRIMARY, {}, "deny", "3783"),
+    ("git clean -f -e -n", _PRIMARY, {}, "deny", "3783"),
+    ("git clean -f --exclude -n", _PRIMARY, {}, "deny", "3783"),
+    ("git clean -f -e x -n", _PRIMARY, {}, "allow", "3783"),
     ("git checkout develop", _PRIMARY, {}, "allow", "R6"),
     ("git checkout -", _PRIMARY, {}, "allow", "R6"),
     ("git checkout .", _PRIMARY, {}, "deny", "R6"),

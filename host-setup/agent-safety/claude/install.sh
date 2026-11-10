@@ -12,13 +12,15 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # A bare `python` that is Python 2 is therefore rejected rather than handed the script, which would fail on import.
 py=""
 for c in python3 python; do
-    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null; then
+    command -v "$c" >/dev/null 2>&1 || continue
+    if out="$("$c" -c 'import sys; print("ok" if sys.version_info >= (3, 11) else "old")')" && [ "$out" = "ok" ]; then
         py="$c"
         break
     fi
+    echo "Passed over $c: it did not report Python 3.11 or newer." >&2
 done
 [ -n "$py" ] || {
-    echo "Python 3 is required and was not found on PATH (tried python3, python)." >&2
+    echo "Python 3.11+ is required and was not found on PATH (tried python3, python)." >&2
     exit 1
 }
 

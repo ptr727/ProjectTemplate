@@ -26,6 +26,10 @@ or a closed-out lane the track reopens. `previous=` stays fixed while the round 
 
   <!-- handoff-round: v1 track=<slug> round=<n> closed=<YYYY-MM-DD> -->
 
+That is the comment's one mark, and its first line is a `## Round <n>, closed <YYYY-MM-DD>:`
+heading naming the same round and date. A comment of any other shape, one quoting the line
+included, is an ordinary comment rather than a round.
+
 The title is for humans and nothing parses it. The invariant a reader checks is that exactly one
 open issue carries the `handoff` label for a given track in a given repository. The track is read from
 the metadata block rather than from the label. That is because an issue carrying the label and no
@@ -162,6 +166,10 @@ ROUND_MARK = re.compile(
     r"^<!--\s*handoff-round:\s*v1\s+track=(?P<track>[a-z0-9]+(?:-[a-z0-9]+)*)\s+"
     r"round=(?P<round>[1-9]\d*)\s+closed=(?P<closed>\d{4}-\d{2}-\d{2})\s*-->[ \t]*\r?$",
     re.MULTILINE,
+)
+
+ROUND_HEADING = re.compile(
+    r"^## Round (?P<round>[1-9]\d*), closed (?P<closed>\d{4}-\d{2}-\d{2}): ?(?P<title>.*?)\s*$"
 )
 
 TITLE = "Session Handoff [{track}]: {subject}"
@@ -540,27 +548,45 @@ def archived_text(comment_body: str) -> str:
     """The round text an `archive` comment holds, its heading and its mark taken off."""
     text = ROUND_MARK.sub("", comment_body or "").strip()
     first, _, rest = text.partition("\n")
-    return rest.strip() if first.startswith("## Round ") else text
+    return rest.strip() if ROUND_HEADING.match(first) else text
+
+
+def round_mark(comment_body: str) -> dict | None:
+    """A comment's round, as its mark's fields and its title, where it is shaped as a round.
+
+    A comment of any other shape is None. A mark line alone is not a round. A maintainer answering
+    a parked question can quote an example mark on a line of its own. So the comment
+    must carry exactly one mark, and its first line must be the heading `archive` writes. That
+    heading names the same round and close date as the mark.
+    """
+    text = comment_body or ""
+    marks = list(ROUND_MARK.finditer(text))
+    heading = ROUND_HEADING.match(text.strip().partition("\n")[0])
+    if len(marks) != 1 or heading is None:
+        return None
+    mark = marks[0]
+    if (heading["round"], heading["closed"]) != (mark["round"], mark["closed"]):
+        return None
+    return {**mark.groupdict(), "title": heading["title"]}
 
 
 def rounds_of(comments: list[dict], track: str) -> list[dict]:
     """The archived rounds on `track` among an issue's comments, newest first.
 
-    A comment carrying no mark is an ordinary comment, such as a parking note, and is not a
-    round. One carrying several is not a round either, since its round cannot be read. On a public
-    repository anyone can comment. So a mark counts only from an account with write access and
-    only on a comment nobody has hidden. That keeps an outsider from writing a round into the
-    track's history or blocking `new` with a conflicting one.
+    A comment not shaped as an archived round is not a round. It is an ordinary comment, such as a
+    parking note or an answer quoting a mark. On a public repository anyone can comment. So a
+    round counts only from an account with write access and only on a comment nobody has hidden.
+    That keeps an outsider from writing a round into the track's history or blocking `new` with a
+    conflicting one.
     """
     found = []
     for row in comments:
         if row.get("authorAssociation") not in WRITERS or row.get("isMinimized"):
             continue
-        marks = list(ROUND_MARK.finditer(row.get("body") or ""))
-        if len(marks) == 1 and marks[0]["track"] == track:
-            heading = (row.get("body") or "").strip().partition("\n")[0]
-            _, _, title = heading.partition(": ")
-            found.append({**row, "mark": marks[0].groupdict(), "title": title})
+        found_round = round_mark(row.get("body") or "")
+        if found_round is not None and found_round["track"] == track:
+            title = found_round.pop("title")
+            found.append({**row, "mark": found_round, "title": title})
     found.reverse()
     return found
 
