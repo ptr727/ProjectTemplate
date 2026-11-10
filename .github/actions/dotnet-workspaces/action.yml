@@ -45,11 +45,10 @@ runs:
             workspaces=$(git -c core.quotePath=false ls-files -- "$PROJECTS")
           fi
         fi
-        delimiter="workspaces_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
         {
-          echo "workspaces<<$delimiter"
+          echo "workspaces<<EOF"
           if [ -n "$workspaces" ]; then
             printf '%s\n' "$workspaces"
           fi
-          echo "$delimiter"
+          echo "EOF"
         } >> "$GITHUB_OUTPUT"

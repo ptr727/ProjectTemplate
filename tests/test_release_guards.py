@@ -2061,8 +2061,8 @@ gh() {
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         lint = workflow.split("\n  lint:\n", 1)[1].split("\n  unit-test:\n", 1)[0]
         unit = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
-        action = REPO / ".github/actions/dotnet-workspaces/action.yml"
-        resolver = step_script(action, "Resolve .NET workspaces step")
+        action = (REPO / ".github/actions/dotnet-workspaces/action.yml").read_text(encoding="utf-8")
+        resolver = step_script_text(action, "Resolve .NET workspaces step")
         self.assertNotIn("dotnet_workspaces", workflow)
 
         def wiring(job: str, consumer: str) -> tuple[str, dict[str, str]]:
@@ -2085,7 +2085,10 @@ gh() {
                 value = yaml_value(resolve, "with", key)
                 if value is not None:
                     inputs[key.upper()] = value.strip("'")
-            inputs.setdefault("SOLUTIONS", "false")
+            for key in ("projects", "solutions"):
+                default = yaml_value(action, "inputs", key, "default")
+                if key.upper() not in inputs and default is not None:
+                    inputs[key.upper()] = default.strip("'")
             return step_script_text(job, consumer), inputs
 
         style, style_inputs = wiring(lint, "Check C# style step")
