@@ -115,7 +115,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
 or invented address.** `author` and `committer` on every agent-authored commit are the GitHub
 `noreply` address of the account whose key signs the commit, in `username@users.noreply.github.com`
 or `ID+username@users.noreply.github.com` form. **Verify it, do not set it**: the scratch commit
-from the signing check above already proves this end-to-end. Read its `author=`/`committer=`
+from the signing check above already proves this end-to-end for the host. Read its `author=`/`committer=`
 output rather than trusting `git config --get user.email` alone, since a global config value doesn't prove what actually lands on a commit object. Read both rather than the author alone, since a rebase, amend, or cherry-pick can rewrite the committer while leaving the author
 untouched. Match both against that address before committing, rather than
 writing a repo-local override. The identity is host configuration set globally once. So a repo-local `user.email` is redundant where the global is right and a silently-shadowing wrong identity where
@@ -123,6 +123,34 @@ it is not. A mismatch is a host fault to surface to the maintainer, not to patch
 A wrong identity is not cosmetic: a private email trips GitHub's email-privacy push protection, and
 an invented author pollutes history. It is also a distinct failure from signing (a wrong author
 does not by itself fail the signature check). The ad-hoc identities that produce a wrong author are typically also unsigned, though, which the signing rule above then rejects independently.
+
+**Then read the target repository's own effective settings.** The scratch probe runs in a fresh repository, so it reads only the system and global config. The commit lands in the target repository. There a local or worktree config file can override what the probe proved, and so can a global `includeIf` matching that path. Such an override of `commit.gpgsign=false` lands the commit unsigned, and the protected branch then rejects the push. An override of `user.email` lands it under another address. So before the first commit in each repository a session commits to, compare the four settings the probe depends on. Compare `user.email`, `user.signingkey`, `commit.gpgsign`, and `gpg.format` in the target against what a fresh repository reads. Set `repo` to the target checkout's path, the example `/path/to/target-repo` below standing in for it. The check is one physical line too:
+
+```sh
+repo=/path/to/target-repo; d=$(mktemp -d "${TMPDIR:-/tmp}/id-check.XXXXXX") && ( trap 'rm -rf "$d"' 0; git init -q "$d" && rc=0 && for k in user.email user.signingkey commit.gpgsign gpg.format; do t=$(git -C "$repo" config --get "$k"); s=$(git -C "$d" config --get "$k"); if [ "$t" = "$s" ]; then v=same; else v=DIFFERS; rc=1; fi; printf '%s %s %s\n' "$v" "$k" "$(git -C "$repo" config --show-scope --show-origin --get "$k")"; done; [ "$rc" = 0 ] )
+```
+
+PowerShell equivalent:
+
+```powershell
+$repo = '/path/to/target-repo'
+$d = Join-Path $env:TEMP ([guid]::NewGuid())
+try {
+  git init -q "$d"
+  $bad = $false
+  foreach ($k in 'user.email', 'user.signingkey', 'commit.gpgsign', 'gpg.format') {
+    $t = git -C "$repo" config --get $k
+    $s = git -C "$d" config --get $k
+    if ($t -ceq $s) { $v = 'same' } else { $v = 'DIFFERS'; $bad = $true }
+    "$v $k $(git -C "$repo" config --show-scope --show-origin --get $k)"
+  }
+  if ($bad) { throw 'the target repository overrides an identity or signing setting' }
+} finally {
+  if (Test-Path "$d") { Remove-Item -Recurse -Force "$d" }
+}
+```
+
+Each line names a setting, whether the target matches the probe, and the scope and file the target's value comes from. A setting unset in both reads `same`. Any `DIFFERS` line, or the check failing outright, means **do not commit**, the same stop the signing probe sets. Stop at `git add` and surface each `DIFFERS` line to the maintainer as the host fault above. Do not remove or rewrite the override, and do not pass `-c` or an environment override to commit past it. The override is the maintainer's configuration, and clearing it is his call. Matching settings still leave the scratch probe as the proof that signing works, since this check reads configuration and proves nothing on its own.
 
 ## Never force push
 
