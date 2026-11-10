@@ -629,7 +629,7 @@ def cleanup_remove_worktree(primary: str, path: str) -> None:
         if any(w.path == path for w in cleanup_worktrees(primary)):
             raise CleanupUnread(f"the worktree {path} is still listed after its removal")
     if inside:
-        print("  note: the shell's directory was that worktree and is gone, so change directory")
+        print(f"  note: the shell's directory was {path}, which is gone, so change directory")
 
 
 def cleanup_delete_branch(primary: str, branch: str, tip: str) -> bool:
