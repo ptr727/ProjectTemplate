@@ -112,10 +112,10 @@ class ResolveSecretStoresCase(unittest.TestCase):
     def test_an_unread_tree_keeps_the_codecov_claim(self) -> None:
         self.assertIn("CODECOV_TOKEN", self.stores(entry(), None)["actions"])
 
-    def test_required_secrets_are_added_to_the_actions_store_only(self) -> None:
+    def test_required_secrets_are_added_to_both_stores(self) -> None:
         required = self.stores(entry(types=["docs"], requiredSecrets=["NUGET_USERNAME"]), None)
         self.assertIn("NUGET_USERNAME", required["actions"])
-        self.assertNotIn("NUGET_USERNAME", required["dependabot"])
+        self.assertIn("NUGET_USERNAME", required["dependabot"])
 
     def test_the_forbidden_names_follow_the_claimed_mechanisms(self) -> None:
         _, forbidden = secret_names.resolve_secret_stores(

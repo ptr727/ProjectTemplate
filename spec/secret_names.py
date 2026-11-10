@@ -151,8 +151,8 @@ def resolve_secret_stores(
     for mech in claimed:
         for store in mech.get("stores", []):
             required[store] |= set(mech.get("requires", []))
-    # The registry requiredSecrets are the domain-specific additions, per STANDUP.md, expected in the actions store.
-    required["actions"] |= set(entry.get("requiredSecrets", []))
+    for store in STORES:
+        required[store] |= set(entry.get("requiredSecrets", []))
     forbidden = set(secrets["baseline"].get("forbids", []))
     for mech in claimed:
         forbidden |= set(mech.get("forbids", []))
