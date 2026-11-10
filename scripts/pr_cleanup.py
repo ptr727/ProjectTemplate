@@ -26,16 +26,17 @@ request's `headRefOid` before the delete and the delete is confirmed by reading 
 
 With `--checkout <primary clone>`, a local half follows a remote half that exited 0. Every refusal
 is decided before anything is deleted. A locked, dirty, or mid-operation worktree refuses, as does
-one holding git-ignored files, which `git worktree remove` would delete without asking. So does a
-branch tip neither at the merged head nor behind it. The local half removes the worktrees
+a branch tip neither at the merged head nor behind it. The local half removes the worktrees
 holding the branch, deletes the local branch, and fast-forwards the clone to `develop`, never a
-reset, stash, or force. A clone left behind is reported and does not fail the run.
+reset, stash, or force. `git worktree remove` deletes git-ignored files without asking, so each
+removal names the ignored entries it deletes first. A clone left behind is reported and does not
+fail the run.
 
 `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports what is provably
 finished, one `would-remove` or `keep <reason>` line per worktree or branch, and removes it only
-with `--apply`. An item must sit untouched for `--min-age-hours` (default 24) and be clean, with
-no git-ignored files. A branch is finished when a pull request from `--repo` merged it at its exact tip or past it. It is
-also finished when `origin/develop` or `origin/main` contains it. For a merged develop pull request the sweep also
+with `--apply`. An item must sit untouched for `--min-age-hours` (default 24) and be clean. Each
+`would-remove` line names the git-ignored entries its removal would delete. A branch is finished
+when a pull request from `--repo` merged it at its exact tip or past it. It is also finished when `origin/develop` or `origin/main` contains it. For a merged develop pull request the sweep also
 deletes the remote head branch through the same checks as `cleanup <n>`. Permanent branches,
 locked worktrees, and worktrees mid-operation are never touched.
 
@@ -536,40 +537,31 @@ def cleanup_tip(primary: str, ref: str) -> str | None:
     return proc.stdout.strip() or None
 
 
-def cleanup_dirty(path: str, untracked: bool) -> bool:
-    """Whether the work tree at `path` has changes, without refreshing its index.
-
-    A refreshed index would make an untouched tree look touched to the age rule of `--sweep`.
-    """
-    flag = "--untracked-files=all" if untracked else "--untracked-files=no"
-    out = cleanup_git(path, "--no-optional-locks", "status", "--porcelain", flag).stdout
-    return bool(out.strip())
-
-
 IGNORED_SHOWN = 5
 
 
-def cleanup_ignored(path: str) -> str | None:
-    """The git-ignored paths in the work tree at `path`, named for a refusal, or None where none.
+def cleanup_status(path: str, untracked: bool) -> tuple[bool, str]:
+    """Whether the work tree at `path` has changes, and the git-ignored entries it holds.
 
-    `git worktree remove` refuses tracked and untracked changes but deletes ignored files without
-    asking, and the porcelain read above never lists them. An ignored directory is one entry.
+    Read without refreshing the index, since a refreshed index would make an untouched tree look
+    touched to the age rule of `--sweep`. With `untracked`, the same read lists ignored entries,
+    an ignored directory as one. `git worktree remove` refuses changes but deletes those without
+    asking, so a removal names them first. The names come back joined and capped, or empty.
     """
-    out = cleanup_git(
-        path,
-        "--no-optional-locks",
-        "status",
-        "--porcelain",
-        "-z",
-        "--ignored=matching",
-        "--untracked-files=normal",
-    ).stdout
-    ignored = [e[3:] for e in out.split("\0") if e.startswith("!! ")]
-    if not ignored:
-        return None
-    shown = ", ".join(ignored[:IGNORED_SHOWN])
+    flags = (
+        ("--untracked-files=all", "--ignored=matching") if untracked else ("--untracked-files=no",)
+    )
+    out = cleanup_git(path, "--no-optional-locks", "status", "--porcelain", "-z", *flags).stdout
+    entries = [e for e in out.split("\0") if e]
+    ignored = [e[3:] for e in entries if e.startswith("!! ")]
     more = len(ignored) - IGNORED_SHOWN
-    return shown + (f", and {more} more" if more > 0 else "")
+    named = ", ".join(ignored[:IGNORED_SHOWN]) + (f", and {more} more" if more > 0 else "")
+    return len(ignored) < len(entries), named
+
+
+def cleanup_ignored_note(named: str) -> str:
+    """The clause a removal line carries for the ignored entries it deletes, or nothing."""
+    return f" deleting its git-ignored {named}" if named else ""
 
 
 IN_PROGRESS = (
@@ -692,7 +684,7 @@ def cleanup_base(primary: str, apply: bool = True) -> bool:
         if on != "develop":
             print(f"keep base-not-on-develop {primary} is on {on or 'a detached head'}")
             return False
-        if cleanup_dirty(primary, False):
+        if cleanup_status(primary, False)[0]:
             print(f"status=BASE_DIRTY {primary} has tracked changes, so it was left where it is")
             return False
         behind = cleanup_git(
@@ -727,8 +719,13 @@ def cleanup_behind(primary: str, tip: str, head: str) -> bool:
     return proc.returncode == 0
 
 
-def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None, list[Worktree]]:
-    """Fetch, then decide every local refusal, returning the branch tip and the worktrees to remove."""
+def cleanup_preflight(
+    primary: str, branch: str, head: str
+) -> tuple[str | None, list[tuple[Worktree, str]]]:
+    """Fetch, then decide every local refusal.
+
+    Returns the branch tip and the worktrees to remove, each with the ignored entries it holds.
+    """
     cleanup_git(primary, "fetch", "--prune", "origin")
     ref = f"refs/heads/{branch}"
     tip = cleanup_tip(primary, ref)
@@ -758,7 +755,7 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
         raise CleanupRefused(
             "WORKTREE_KEPT", f"{primary} has a merge, cherry-pick, revert, or bisect in progress"
         )
-    if holds and cleanup_dirty(primary, False):
+    if holds and cleanup_status(primary, False)[0]:
         raise CleanupRefused(
             "BASE_DIRTY", f"{primary} has {branch!r} checked out with tracked changes"
         )
@@ -776,15 +773,10 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
         )
         if why is not None:
             raise CleanupRefused("WORKTREE_KEPT", f"{w.path}, {why}")
-        if not w.prunable and cleanup_dirty(w.path, True):
+        dirty, ignored = (False, "") if w.prunable else cleanup_status(w.path, True)
+        if dirty:
             raise CleanupRefused("WORKTREE_DIRTY", f"{w.path} has uncommitted changes")
-        ignored = None if w.prunable else cleanup_ignored(w.path)
-        if ignored is not None:
-            raise CleanupRefused(
-                "WORKTREE_DIRTY",
-                f"{w.path} holds git-ignored files that removing it would delete: {ignored}",
-            )
-        linked.append(w)
+        linked.append((w, ignored))
     return tip, linked
 
 
@@ -810,7 +802,9 @@ def cleanup_local(primary: str, branch: str, head: str) -> int:
         tip, linked = cleanup_preflight(primary, branch, head)
     except CleanupRefused as exc:
         raise CleanupRefused(exc.status, f"nothing local was removed: {exc}") from exc
-    for w in linked:
+    for w, ignored in linked:
+        if ignored:
+            print(f"  removing worktree {w.path}{cleanup_ignored_note(ignored)}")
         moved = cleanup_remove_worktree(primary, w.path)
         print(f"  removed worktree {w.path}")
         if moved:
@@ -1055,15 +1049,13 @@ class CleanupSweep:
             if hours < self.min_age:
                 self.keep("too-recent", f"{what} idle {hours:.1f}h of {self.min_age:g}h")
                 return
-            if cleanup_dirty(w.path, True):
+            dirty, ignored = cleanup_status(w.path, True)
+            if dirty:
                 self.keep("dirty", what)
                 return
-            ignored = cleanup_ignored(w.path)
-            if ignored is not None:
-                self.keep("ignored-files", f"{what} holds {ignored}")
-                return
+            note = cleanup_ignored_note(ignored)
             if w.branch is None:
-                return self.detached(w, what)
+                return self.detached(w, what, note)
             tip = cleanup_tip(self.primary, f"refs/heads/{w.branch}")
             if tip is None:
                 self.keep("branch-unreadable", what)
@@ -1075,9 +1067,11 @@ class CleanupSweep:
             evidence, num = done
             line = f"{what} tip={tip} evidence={evidence}"
             if not self.apply:
-                print(f"would-remove {line}")
+                print(f"would-remove {line}{note}")
                 self.remote(num, w.branch)
                 return
+            if note:
+                print(f"removing worktree {w.path}{note}")
             if cleanup_remove_worktree(self.primary, w.path):
                 cleanup_moved_note()
             print(f"removed worktree {w.path}")
@@ -1094,7 +1088,7 @@ class CleanupSweep:
         except CleanupUnread as exc:
             self.failed(what, exc)
 
-    def detached(self, w: Worktree, what: str) -> None:
+    def detached(self, w: Worktree, what: str, note: str) -> None:
         contained = cleanup_git(
             self.primary,
             "for-each-ref",
@@ -1108,8 +1102,10 @@ class CleanupSweep:
             self.keep("unpushed-commits", what)
             return
         if not self.apply:
-            print(f"would-remove {what} head={w.head} evidence=contained in {contained}")
+            print(f"would-remove {what} head={w.head} evidence=contained in {contained}{note}")
             return
+        if note:
+            print(f"removing worktree {w.path}{note}")
         if cleanup_remove_worktree(self.primary, w.path):
             cleanup_moved_note()
         print(f"removed worktree {w.path} head={w.head} evidence=contained in {contained}")

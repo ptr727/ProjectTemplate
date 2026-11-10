@@ -240,7 +240,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   in flight across the whole fleet.
 - **Cleanup after merge is the default terminal step.** Run it after a squash merge into `develop`. Run it again after a merge-commit promotion into `main`, unless the user explicitly says to retain a checkout or branch. A merge or release handoff is incomplete while finished task, conflict-resolution, installer, or release worktrees remain registered.
 - **Verify before removing.** A worktree or branch is removed only once live state proves it
-  finished. For a pull request, that proof is its merged state and head SHA read from GitHub. That proof also requires the worktree to be clean and the local branch to be at that head or behind it. Clean means no git-ignored files as well as no tracked or untracked changes. That is because `git worktree remove` refuses the changes but deletes ignored files without asking, and `git status --porcelain` never lists them. `cleanup` below checks all of that in code, naming the ignored paths it finds. A dirty worktree stops cleanup because removing it would discard work. A detached
+  finished. For a pull request, that proof is its merged state and head SHA read from GitHub. That proof also requires the worktree to be clean and the local branch to be at that head or behind it. `cleanup` below checks that in code. A dirty worktree stops cleanup because force-removing it would discard work. A worktree holding only git-ignored files counts as clean, and removing it deletes them without asking, since `git status --porcelain` never lists them. So `cleanup` names each ignored entry before the removal that deletes it, and the sweep's report names them before `--apply`. A detached
   helper worktree needs no pull request, but its commit must be contained in the branch whose
   completed operation created it.
 - **A pull request merged into `develop` is cleaned up by one command.** Run
@@ -257,7 +257,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   `scripts/README.md` "`pr_cleanup.py`" in the hub holds the full contract.
 - **What no merged pull request into `develop` covers is removed by hand.** That is a promotion's
   worktree, a detached helper worktree, and a temporary standalone clone. Confirm the tree is
-  clean, with no ignored files that `git status --porcelain --ignored` lists, then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
+  clean, and read `git status --porcelain --ignored` for the ignored files the removal deletes. Then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
   `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held, a promotion
   branch merged into `main` by a merge commit for one, is left for the sweep below. The sweep reads it as finished once `origin/main` or `origin/develop` contains it. `git branch -d` is no substitute, since it judges a branch with no upstream against `HEAD`. So it refuses one merged only into
   `main` while the base clone is on `develop`. Where that branch was pushed, its remote branch is
@@ -274,7 +274,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   non-fast-forward instead of switching or reconciling it.
 - **What an interrupted or abandoned session left behind is swept.** Run
   `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo <owner>/<repo> --checkout <base-clone>`
-  from a hub checkout. It fetches and prunes `origin` and writes nothing else. It reports each worktree and branch that is clean, ignored files included, idle past `--min-age-hours` (default 24), and provably
+  from a hub checkout. It fetches and prunes `origin` and writes nothing else. It reports each worktree and branch that is clean, idle past `--min-age-hours` (default 24), and provably
   finished. Adding `--apply` removes what the report lists through the same checks, the remote
   branch of a merged `develop` pull request included. The report reaches other sessions' finished
   work as well as this task's, so `--apply` runs on the maintainer's go-ahead.
