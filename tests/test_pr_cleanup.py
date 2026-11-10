@@ -520,6 +520,13 @@ class LocalCleanupCase(CleanupCase):
     def wire_merged(self, tip: str) -> None:
         self.wire(cleanup_pr(headRefOid=tip), refs=[tip, tip, None])
 
+    def ignore(self, *patterns: str) -> None:
+        """Ignore `patterns` in every worktree through the clone's shared `info/exclude`."""
+        exclude = Path(self.primary, ".git", "info", "exclude")
+        exclude.parent.mkdir(exist_ok=True)
+        with exclude.open("a", encoding="utf-8") as f:
+            f.write("".join(f"{p}\n" for p in patterns))
+
 
 class TestCleanupLocalHalf(LocalCleanupCase):
     def test_the_worktree_and_branch_go_and_the_base_clone_catches_up(self) -> None:
@@ -576,6 +583,37 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertIn("remote branch included", self.out.getvalue())
         self.assertTrue(os.path.isdir(path))
         self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_an_ignored_file_is_named_before_its_worktree_is_removed(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.ignore("*.env")
+        Path(path, "local.env").write_text("x", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(0, self.run_local())
+        out = self.out.getvalue()
+        named = out.find(f"removing worktree {path} deleting its git-ignored local.env")
+        self.assertNotEqual(-1, named, out)
+        self.assertLess(named, out.index(f"removed worktree {path}"))
+        self.assertEqual([self.primary], self.listed())
+
+    def test_the_status_read_separates_changes_from_every_ignored_entry(self) -> None:
+        path, _ = self.worktree(CLEANUP_BRANCH)
+        self.assertEqual((False, ""), pr_cleanup.cleanup_status(path, True))
+        self.ignore("cache/", "*.env")
+        Path(path, "cache", "deep").mkdir(parents=True)
+        Path(path, "cache", "deep", "a.bin").write_text("x", encoding="utf-8")
+        Path(path, "cache", "b.bin").write_text("x", encoding="utf-8")
+        note = " deleting its git-ignored cache/"
+        self.assertEqual((False, note), pr_cleanup.cleanup_status(path, True))
+        self.assertEqual((False, ""), pr_cleanup.cleanup_status(path, False))
+        Path(path, "new.txt").write_text("x", encoding="utf-8")
+        self.assertEqual((True, note), pr_cleanup.cleanup_status(path, True))
+        sites = [f"site{n}.env" for n in range(8)]
+        for name in sites:
+            Path(path, name).write_text("x", encoding="utf-8")
+        _, named = pr_cleanup.cleanup_status(path, True)
+        named = named.removeprefix(" deleting its git-ignored ")
+        self.assertEqual(sorted(["cache/", *sites]), sorted(named.split(", ")))
 
     def test_a_locked_worktree_refuses_and_removes_nothing(self) -> None:
         path, tip = self.worktree(CLEANUP_BRANCH)
@@ -728,7 +766,7 @@ class TestCleanupLocalHalf(LocalCleanupCase):
             self.assertTrue(os.path.isdir(path))
         else:
             self.assertEqual(0, self.run_local())
-            self.assertIn("note: the shell's directory", self.out.getvalue())
+            self.assertIn(f"note: the shell's directory was {path}, which", self.out.getvalue())
             self.assertFalse(os.path.exists(path))
 
     def test_a_shell_inside_the_worktree_refuses_on_windows(self) -> None:
@@ -1321,6 +1359,56 @@ class TestCleanupSweep(LocalCleanupCase):
             self.assertIn("keep in-progress-operation branch rebasing-work", self.out.getvalue())
             self.assertIn("rebasing-work", self.branches())
 
+    def ignored_worktree(self) -> str:
+        path, tip = self.worktree("ignored-work")
+        self.merged_pr("ignored-work", tip)
+        self.ignore("*.env")
+        Path(path, "local.env").write_text("x", encoding="utf-8")
+        self.age(path, 48)
+        self.wire_sweep(remote_gone=True)
+        return path
+
+    def test_a_report_names_the_ignored_entries_a_removal_would_delete(self) -> None:
+        path = self.ignored_worktree()
+        self.assertEqual(0, self.sweep())
+        report = [ln for ln in self.out.getvalue().splitlines() if ln.startswith("would-remove")]
+        self.assertTrue(
+            any(
+                f"worktree {path} " in ln and ln.endswith("git-ignored local.env") for ln in report
+            ),
+            report,
+        )
+        self.assertTrue(Path(path, "local.env").is_file())
+
+    def test_apply_names_the_ignored_entries_before_removing_their_worktree(self) -> None:
+        path = self.ignored_worktree()
+        self.assertEqual(0, self.sweep("--apply"))
+        out = self.out.getvalue()
+        named = out.find(f"removing worktree {path} deleting its git-ignored local.env")
+        self.assertNotEqual(-1, named, out)
+        self.assertLess(named, out.index(f"removed worktree {path}"))
+        self.assertNotIn(path, self.listed())
+
+    def test_a_detached_worktree_s_ignored_entries_are_named_in_both_modes(self) -> None:
+        path = os.path.join(self.root, "wt", "detached-ignored")
+        run_git(self.primary, "worktree", "add", "--detach", path, "origin/develop")
+        self.ignore("*.env")
+        Path(path, "local.env").write_text("x", encoding="utf-8")
+        self.age(path, 48)
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep())
+        report = [ln for ln in self.out.getvalue().splitlines() if ln.startswith("would-remove")]
+        self.assertTrue(
+            any(f"worktree {path} detached" in ln and ln.endswith("local.env") for ln in report),
+            report,
+        )
+        self.assertEqual(0, self.sweep("--apply"))
+        out = self.out.getvalue()
+        named = out.find(f"removing worktree {path} deleting its git-ignored local.env")
+        self.assertNotEqual(-1, named, out)
+        self.assertLess(named, out.index(f"removed worktree {path} head="))
+        self.assertNotIn(path, self.listed())
+
     def test_a_worktree_with_submodules_is_kept(self) -> None:
         path, tip = self.worktree("modular-work")
         self.merged_pr("modular-work", tip)
@@ -1330,6 +1418,18 @@ class TestCleanupSweep(LocalCleanupCase):
         self.assertEqual(0, self.sweep("--apply"))
         self.assertIn("keep submodules", self.out.getvalue())
         self.assertIn(path, self.listed())
+
+    @unittest.skipIf(pr_cleanup.ON_WINDOWS, "Windows keeps a worktree the shell stands in")
+    def test_a_shell_inside_a_removed_worktree_is_told_by_the_sweep(self) -> None:
+        path, tip = self.worktree("held-work")
+        self.merged_pr("held-work", tip)
+        self.age(path, 48)
+        self.wire_sweep(remote_gone=True)
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(path)
+        self.assertEqual(0, self.sweep("--apply"))
+        self.assertIn(f"note: the shell's directory was {path}, which", self.out.getvalue())
+        self.assertNotIn(path, self.listed())
 
     def test_a_shell_inside_a_worktree_keeps_it_on_windows(self) -> None:
         path, tip = self.worktree("held-work")

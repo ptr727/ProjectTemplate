@@ -12,9 +12,12 @@ The script imports the review gate's Markdown readers, so it needs those require
 import base64
 import contextlib
 import datetime
+import importlib.metadata
 import io
 import json
+import re
 import sys
+import tomllib
 import typing
 import unittest
 import unittest.mock
@@ -1053,6 +1056,64 @@ class MainTests(unittest.TestCase):
         self.assertEqual(
             names, [r["name"] for r in data["repos"] if r.get("status") == "cataloged"]
         )
+
+
+class PinTests(unittest.TestCase):
+    """The exact markdown-it-py pin a token-holding run resolves, kept equal where it is stated."""
+
+    @staticmethod
+    def inline_dependencies(script: Path) -> list[str]:
+        block = re.search(
+            r"^# /// script\n(.*?)^# ///$",
+            script.read_text(encoding="utf-8"),
+            re.MULTILINE | re.DOTALL,
+        )
+        assert block, f"{script} has no inline script metadata"
+        toml = "".join(
+            line.removeprefix("#").removeprefix(" ") for line in block[1].splitlines(True)
+        )
+        return tomllib.loads(toml)["dependencies"]
+
+    def test_markdown_it_py_is_pinned_exactly_and_alike_everywhere(self) -> None:
+        repo = SCRIPTS.parent
+        stated = {
+            "backlog_metrics.py": self.inline_dependencies(SCRIPTS / "backlog_metrics.py"),
+            "prose_lint.py": self.inline_dependencies(
+                repo / ".github" / "actions" / "prose-gate" / "prose_lint.py"
+            ),
+            "tests/requirements.txt": (repo / "tests" / "requirements.txt")
+            .read_text(encoding="utf-8")
+            .splitlines(),
+        }
+        pins = {
+            name: [dep for dep in deps if re.match(r"markdown-it-py\b", dep)]
+            for name, deps in stated.items()
+        }
+        for name, found in pins.items():
+            with self.subTest(name=name):
+                self.assertEqual(1, len(found), found)
+                self.assertRegex(found[0], r"^markdown-it-py==\d")
+        self.assertEqual(1, len({found[0] for found in pins.values()}), pins)
+
+    def test_every_package_the_token_holding_run_resolves_is_pinned_exactly(self) -> None:
+        """Each declared dependency is exact, and so is each one the pinned markdown-it-py requires.
+
+        The suite installs the pinned markdown-it-py, so a bump requiring a new package fails here.
+        """
+        declared = self.inline_dependencies(SCRIPTS / "backlog_metrics.py")
+        for dep in declared:
+            with self.subTest(dep=dep):
+                self.assertRegex(dep, r"^[A-Za-z0-9._-]+==[0-9][0-9A-Za-z.]*$")
+        pinned = {re.sub(r"[-_.]+", "-", dep.split("==")[0]).lower() for dep in declared}
+        needed = [
+            re.sub(r"[-_.]+", "-", re.split(r"[^A-Za-z0-9._-]", req, maxsplit=1)[0]).lower()
+            for req in importlib.metadata.requires("markdown-it-py") or []
+            if "extra ==" not in req
+        ]
+        self.assertTrue(needed)
+        for name in needed:
+            with self.subTest(requires=name):
+                self.assertIn(name, pinned)
 
 
 if __name__ == "__main__":
