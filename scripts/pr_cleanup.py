@@ -537,16 +537,13 @@ def cleanup_tip(primary: str, ref: str) -> str | None:
     return proc.stdout.strip() or None
 
 
-IGNORED_SHOWN = 5
-
-
 def cleanup_status(path: str, untracked: bool) -> tuple[bool, str]:
     """Whether the work tree at `path` has changes, and the git-ignored entries it holds.
 
     Read without refreshing the index, since a refreshed index would make an untouched tree look
     touched to the age rule of `--sweep`. With `untracked`, the same read lists ignored entries,
     an ignored directory as one. `git worktree remove` refuses changes but deletes those without
-    asking, so a removal names them first. The names come back joined and capped, or empty.
+    asking, so a removal names them first. The names come back joined, or empty where none.
     """
     flags = (
         ("--untracked-files=all", "--ignored=matching") if untracked else ("--untracked-files=no",)
@@ -554,9 +551,7 @@ def cleanup_status(path: str, untracked: bool) -> tuple[bool, str]:
     out = cleanup_git(path, "--no-optional-locks", "status", "--porcelain", "-z", *flags).stdout
     entries = [e for e in out.split("\0") if e]
     ignored = [e[3:] for e in entries if e.startswith("!! ")]
-    more = len(ignored) - IGNORED_SHOWN
-    named = ", ".join(ignored[:IGNORED_SHOWN]) + (f", and {more} more" if more > 0 else "")
-    return len(ignored) < len(entries), named
+    return len(ignored) < len(entries), ", ".join(ignored)
 
 
 def cleanup_ignored_note(named: str) -> str:

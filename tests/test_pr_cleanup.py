@@ -596,7 +596,7 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertLess(named, out.index(f"removed worktree {path}"))
         self.assertEqual([self.primary], self.listed())
 
-    def test_the_status_read_separates_changes_from_ignored_entries(self) -> None:
+    def test_the_status_read_separates_changes_from_every_ignored_entry(self) -> None:
         path, _ = self.worktree(CLEANUP_BRANCH)
         self.assertEqual((False, ""), pr_cleanup.cleanup_status(path, True))
         self.ignore("cache/", "*.env")
@@ -607,12 +607,11 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertEqual((False, ""), pr_cleanup.cleanup_status(path, False))
         Path(path, "new.txt").write_text("x", encoding="utf-8")
         self.assertEqual((True, "cache/"), pr_cleanup.cleanup_status(path, True))
-        for n in range(pr_cleanup.IGNORED_SHOWN + 1):
-            Path(path, f"site{n}.env").write_text("x", encoding="utf-8")
+        sites = [f"site{n}.env" for n in range(8)]
+        for name in sites:
+            Path(path, name).write_text("x", encoding="utf-8")
         _, named = pr_cleanup.cleanup_status(path, True)
-        self.assertTrue(named.endswith(", and 2 more"), named)
-        shown = named.removesuffix(", and 2 more").split(", ")
-        self.assertEqual(pr_cleanup.IGNORED_SHOWN, len(shown))
+        self.assertEqual(sorted(["cache/", *sites]), sorted(named.split(", ")))
 
     def test_a_locked_worktree_refuses_and_removes_nothing(self) -> None:
         path, tip = self.worktree(CLEANUP_BRANCH)
