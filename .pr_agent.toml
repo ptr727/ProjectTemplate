@@ -1,7 +1,8 @@
-# The two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current.
+# The first two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current.
 # A finding in either therefore belongs at its source, and a review of every copy is one finding three times.
+# The third is a tree spec/files.json carries verbatim, which scripts/agent_policy.py requires every repository's file to skip.
 [ignore]
-glob = ['.github/skills/**', '.claude-plugin/fleet-skills/**']
+glob = ['.github/skills/**', '.claude-plugin/fleet-skills/**', 'lib/fleet/sh/**']
 
 [review_agent]
 # A crash claimed against a name the build accepts was disproven by running the build.

@@ -1,5 +1,6 @@
-# The two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current.
+# The first two trees below are what scripts/build_dist.py generates from .agents/skills/ and CI holds current.
 # A finding in either therefore belongs at its source, and a review of every copy is one finding three times.
+# The third is a tree spec/files.json carries verbatim, which scripts/agent_policy.py requires every repository's file to skip.
 reviews:
   # Auto review covers only the default branch unless a base is listed here, each entry a regex.
   # The default branch stays included whatever is listed.
@@ -13,6 +14,7 @@ reviews:
   path_filters:
     - "!.github/skills/**"
     - "!.claude-plugin/fleet-skills/**"
+    - "!lib/fleet/sh/**"
   # Canonical prose is linted for style in CI and read whole by the local review pass.
   # A review comment on it therefore earns its place only by naming something false or unfollowable.
   path_instructions:

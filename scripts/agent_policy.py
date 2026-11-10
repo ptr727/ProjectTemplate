@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import copy
 import json
 import subprocess
 import sys
@@ -43,6 +44,7 @@ YAML_PATH = ".coderabbit.yaml"
 TOML_PATH = ".pr_agent.toml"
 MODELS = ("release", "operational")
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "repo-config"
+MANIFEST_PATH = Path(__file__).resolve().parents[1] / "spec" / "files.json"
 
 
 class Refusal(ValueError):
@@ -137,24 +139,43 @@ def serialize(rendered: dict[str, Any]) -> str:
     return json.dumps(rendered, indent=4) + "\n"
 
 
+def carried_globs(manifest_path: Path = MANIFEST_PATH) -> list[str]:
+    """A glob per tree spec/files.json carries verbatim, which a carrier's reviewers skip.
+
+    Such a tree is the hub's text byte for byte, so a finding on it belongs at the hub's source.
+    Every such tree is listed whatever its appliesTo, since skipping a path a repository lacks is harmless.
+    """
+    trees = json.loads(manifest_path.read_text(encoding="utf-8"))["trees"]
+    return [f"{tree['target']}/**" for tree in trees if tree["fidelity"] == "verbatim-tree"]
+
+
+def copilot_rule(rendered: dict[str, Any]) -> dict[str, bool]:
+    """Whether the Copilot ruleset rule belongs on `main` and on `develop` under a rendered policy."""
+    copilot = policy_lib.parse(rendered, "rendered policy", fallback=False).bot("copilot")
+    auto = copilot.trigger == "auto"
+    return {
+        "main": auto and copilot.covers("main", "main"),
+        "develop": auto and copilot.covers("develop", "main"),
+    }
+
+
 def facts(rendered: dict[str, Any]) -> dict[str, Any]:
     """The settings the bots and the Copilot ruleset rule take from a rendered policy."""
     parsed = policy_lib.parse(rendered, "rendered policy", fallback=False)
-    copilot = parsed.bot("copilot")
-    auto = copilot.trigger == "auto"
-    default = "main"
     crab = parsed.bot("coderabbit")
+    globs = carried_globs()
     return {
-        "copilotRule": {
-            "main": auto and copilot.covers("main", default),
-            "develop": auto and copilot.covers("develop", default),
-        },
+        "copilotRule": copilot_rule(rendered),
         "coderabbit": {
             "enabled": crab.trigger == "auto",
             "base_branches": [anchored(b) for b in crab.bases if b != policy_lib.DEFAULT_BASE],
             "auto_pause_after_reviewed_commits": 0,
+            "path_filters": [f"!{glob}" for glob in globs],
         },
-        "qodo": {"disable_auto_feedback": parsed.bot("qodo").trigger != "auto"},
+        "qodo": {
+            "disable_auto_feedback": parsed.bot("qodo").trigger != "auto",
+            "ignore_glob": globs,
+        },
     }
 
 
@@ -178,7 +199,7 @@ def rulesets(
         branch: json.loads(path.read_text(encoding="utf-8")) for branch, path in sources.items()
     }
     copilot = [r for r in payloads["main"]["rules"] if r.get("type") == "copilot_code_review"]
-    wanted = facts(render(registry_data, name, model))["copilotRule"]
+    wanted = copilot_rule(render(registry_data, name, model))
     if not copilot and any(wanted.values()):
         raise Refusal(
             f"{name}: the policy wants a Copilot rule, and {sources['main']} carries none to copy"
@@ -255,6 +276,37 @@ def lf_text(path: Path) -> str | None:
     return None if text is None else text.replace("\r\n", "\n")
 
 
+def take_tail_comment(seq: Any) -> Any:
+    """Detach and return the comment hanging off a block list's last item, or None.
+
+    A comment after a block list hangs off that item, so an item appended after it would move the comment above itself.
+    """
+    return seq.ca.items.pop(len(seq) - 1, None) if len(seq) else None
+
+
+def extend_keeping_comments(seq: Any, items: list[Any]) -> None:
+    """Append `items` to a block list, keeping each comment where the reader left it.
+
+    An end-of-line comment stays on its own item, and a comment on the lines after the list stays before the next key.
+    """
+    held = take_tail_comment(seq)
+    last = len(seq) - 1
+    seq.extend(items)
+    if held is None:
+        return
+    token = held[0]
+    if token is None or not token.value.startswith("#"):
+        seq.ca.items[len(seq) - 1] = held
+        return
+    eol, _, rest = token.value.partition("\n")
+    token.value = eol + "\n"
+    seq.ca.items[last] = held
+    if rest.strip():
+        after = copy.copy(token)
+        after.value = "\n" + rest
+        seq.ca.items[len(seq) - 1] = [after, None, None, None]
+
+
 def set_base_branches(node: Any, items: list[str]) -> None:
     """Make node['base_branches'] hold `items`, double-quoted, keeping the comment that follows the list."""
     from ruamel.yaml.comments import CommentedSeq
@@ -265,8 +317,7 @@ def set_base_branches(node: Any, items: list[str]) -> None:
     if not isinstance(seq, CommentedSeq):
         node["base_branches"] = CommentedSeq(quoted)
         return
-    # A comment after a block list hangs off the list's last item, so replacing the list would drop it.
-    held = seq.ca.items.pop(len(seq) - 1, None) if len(seq) else None
+    held = take_tail_comment(seq)
     del seq[:]
     seq.extend(quoted)
     if held is None:
@@ -290,6 +341,18 @@ def set_base_branches(node: Any, items: list[str]) -> None:
     node.ca.items["base_branches"] = [None, None, token, None]
 
 
+def missing(got: Any, required: list[str]) -> list[str] | None:
+    """The required entries `got` lacks, or None where `got` is not a list at all.
+
+    A repository may list entries of its own, so only the required ones are asserted.
+    """
+    if got is None:
+        return list(required)
+    if not isinstance(got, list):
+        return None
+    return [item for item in required if item not in got]
+
+
 def exactly(got: Any, want: bool | int) -> bool:
     """Whether `got` is `want` in value and type, so YAML's `false` never reads as a pause of 0."""
     if isinstance(want, bool):
@@ -300,8 +363,9 @@ def exactly(got: Any, want: bool | int) -> bool:
 def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
     """The new .coderabbit.yaml text, or None where it already holds the wanted values.
 
-    Only reviews.auto_review.enabled, base_branches and auto_pause_after_reviewed_commits are set.
-    So every other key and comment stays.
+    Only reviews.auto_review.enabled, base_branches and auto_pause_after_reviewed_commits are set,
+    and reviews.path_filters gains any required exclusion it lacks.
+    So every other key, list entry and comment stays.
     """
     from io import StringIO
 
@@ -328,11 +392,15 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
         node = node[key]
         if not isinstance(node, dict):
             raise Refusal(f"{path}: {key} is not a mapping")
+    reviews = doc["reviews"]
+    filters_absent = missing(reviews.get("path_filters"), want["path_filters"])
+    if filters_absent is None:
+        raise Refusal(f"{path}: reviews.path_filters is not a list")
     branches = list(want["base_branches"])
     pause = want["auto_pause_after_reviewed_commits"]
     enabled_ok = exactly(node.get("enabled"), want["enabled"])
     pause_ok = exactly(node.get("auto_pause_after_reviewed_commits"), pause)
-    same = enabled_ok and pause_ok and node.get("base_branches") == branches
+    same = enabled_ok and pause_ok and node.get("base_branches") == branches and not filters_absent
     if existing is not None and same:
         return None
     if not enabled_ok:
@@ -341,13 +409,25 @@ def plan_yaml(path: Path, want: dict[str, Any]) -> str | None:
         set_base_branches(node, branches)
     if not pause_ok:
         node["auto_pause_after_reviewed_commits"] = pause
+    if filters_absent:
+        from ruamel.yaml.comments import CommentedSeq
+        from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+
+        if reviews.get("path_filters") is None:
+            reviews["path_filters"] = CommentedSeq()
+        extend_keeping_comments(
+            reviews["path_filters"], [DoubleQuotedScalarString(item) for item in filters_absent]
+        )
     out = StringIO()
     yaml.dump(doc, out)
     return out.getvalue()
 
 
 def plan_toml(path: Path, want: dict[str, Any]) -> str | None:
-    """The new .pr_agent.toml text, or None where it already holds the wanted value."""
+    """The new .pr_agent.toml text, or None where it already holds the wanted values.
+
+    Only config.disable_auto_feedback is set, and ignore.glob gains any required glob it lacks.
+    """
     import tomlkit
     from tomlkit.exceptions import TOMLKitError
 
@@ -361,10 +441,24 @@ def plan_toml(path: Path, want: dict[str, Any]) -> str | None:
     config = doc["config"]
     if not isinstance(config, dict):
         raise Refusal(f"{path}: config is not a table")
+    ignore = doc.get("ignore")
+    if ignore is not None and not isinstance(ignore, dict):
+        raise Refusal(f"{path}: ignore is not a table")
+    globs_absent = missing(None if ignore is None else ignore.get("glob"), want["ignore_glob"])
+    if globs_absent is None:
+        raise Refusal(f"{path}: ignore.glob is not a list")
     value = want["disable_auto_feedback"]
-    if existing is not None and exactly(config.get("disable_auto_feedback"), value):
+    feedback_ok = exactly(config.get("disable_auto_feedback"), value)
+    if existing is not None and feedback_ok and not globs_absent:
         return None
-    config["disable_auto_feedback"] = value
+    if not feedback_ok:
+        config["disable_auto_feedback"] = value
+    if globs_absent:
+        if ignore is None:
+            doc["ignore"] = ignore = tomlkit.table()
+        if ignore.get("glob") is None:
+            ignore["glob"] = tomlkit.array()
+        ignore["glob"].extend(globs_absent)
     return tomlkit.dumps(doc)
 
 
@@ -529,6 +623,9 @@ def judge_yaml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
         enabled_ok = exactly(auto.get("enabled"), want["enabled"])
         branches_ok = isinstance(branches, list) and set(branches) == set(want["base_branches"])
         pause_ok = exactly(auto.get("auto_pause_after_reviewed_commits"), pause)
+        filters_absent = missing(
+            ((doc or {}).get("reviews") or {}).get("path_filters"), want["path_filters"]
+        )
         return [
             (enabled_ok, f"{YAML_PATH} reviews.auto_review.enabled is {want['enabled']}"),
             (
@@ -538,6 +635,10 @@ def judge_yaml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
             (
                 pause_ok,
                 f"{YAML_PATH} reviews.auto_review.auto_pause_after_reviewed_commits is {pause}",
+            ),
+            (
+                filters_absent == [],
+                f"{YAML_PATH} reviews.path_filters includes {want['path_filters']}",
             ),
         ]
 
@@ -554,7 +655,13 @@ def judge_toml(want: dict[str, Any]) -> Callable[[str], list[tuple[bool, str]]]:
         except tomllib.TOMLDecodeError:
             return [(False, f"{TOML_PATH} does not parse as TOML")]
         got = (doc.get("config") or {}).get("disable_auto_feedback")
-        return [(exactly(got, want["disable_auto_feedback"]), msg)]
+        ignore = doc.get("ignore")
+        table = ignore is None or isinstance(ignore, dict)
+        globs_ok = table and missing((ignore or {}).get("glob"), want["ignore_glob"]) == []
+        return [
+            (exactly(got, want["disable_auto_feedback"]), msg),
+            (globs_ok, f"{TOML_PATH} ignore.glob includes {want['ignore_glob']}"),
+        ]
 
     return judge
 
