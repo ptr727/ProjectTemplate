@@ -1952,11 +1952,8 @@ class Run:
 
     @property
     def ref(self):
-        """The head commit the tree was listed at, so a push landing mid-run cannot split the file reads across two commits.
-
-        It is the branch name only before a head is resolved, where no tree has been listed either.
-        """
-        return ((self.head or {}).get("commit") or {}).get("sha") or self.ground
+        """The head commit the tree was listed at, so a push landing mid-run cannot split the file reads across two commits."""
+        return self.head["commit"]["sha"]
 
     def read_text(self, path):
         url = f"repos/{self.slug}/contents/{urllib.parse.quote(path)}?ref={self.ref}"
@@ -2612,7 +2609,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     blocking = [(k, t) for k, t in findings if k in ("DEFECT", "LETTER")]
     drift = [t for k, t in findings if k == "DRIFT"]
     errors = [t for k, t in findings if k == "ERROR"]
-    title = f"Converge {name} with the hub baseline ({len(findings)} finding{'' if len(findings) == 1 else 's'})"
+    title = f"Converge {name} with the hub baseline ({len(findings)} detected finding{'' if len(findings) == 1 else 's'})"
 
     out = []
     w = out.append
