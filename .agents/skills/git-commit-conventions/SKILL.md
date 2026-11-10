@@ -139,6 +139,7 @@ if ($LASTEXITCODE -ne 0) { throw "not inside a git repository: $repo" }
 $d = Join-Path $env:TEMP ([guid]::NewGuid())
 try {
   git init -q "$d"
+  if ($LASTEXITCODE -ne 0) { throw "git init failed: $d" }
   $bad = $false
   foreach ($k in 'user.email', 'author.email', 'committer.email', 'user.signingkey', 'commit.gpgsign', 'gpg.format') {
     $t = git -C "$repo" config --get $k
