@@ -1038,6 +1038,12 @@ class NewCase(unittest.TestCase):
             [fake.issues[30]["comments"][-1]["url"]],
         )
 
+    def test_an_archived_round_edited_below_its_mark_is_still_a_round(self) -> None:
+        """A writer's correction added under the mark keeps the round in the track's history."""
+        edited = handoff.archive("tried a pin", "default", 2, "2026-09-01", "t") + "\nFixed a typo."
+        rounds = handoff.rounds_of([note(edited)], "default")
+        self.assertEqual([(r["mark"]["round"], r["title"]) for r in rounds], [("2", "t")])
+
     def test_a_round_archived_with_other_line_endings_counts_as_the_same_text(self) -> None:
         row = link(30, "default", 2, None)
         crlf = handoff.archive(row["body"], "default", 2, "2026-09-01", "round 2")

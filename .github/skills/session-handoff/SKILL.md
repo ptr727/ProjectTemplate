@@ -79,8 +79,8 @@ not know a chain exists never goes looking for one.
   The original is narrowed to the rest, or closed in favor of those issues where nothing is left. A
   session that may not write issues names the unsplit issue in its report or handoff instead. An
   issue for a platform whose lane was closed reopens that lane with `new`, which files a new issue
-  continuing from the closed one. A platform lane is closed with `close` once none of its next steps
-  needs its platform. Before that, each remaining step with no issue of its own is filed as one. The
+  continuing from the closed one. A platform lane is ended per "Closing a Session" step 2 once none of its
+  next steps needs its platform. Before that, each remaining step with no issue of its own is filed as one. The
   closing comment carries the outcome, as `AGENTS.md` "Session Scope" closes a track whose work is
   complete.
 - **The title is for humans**, shaped `Session Handoff [<track>]: <subject>`. `new` composes it
@@ -93,8 +93,8 @@ not know a chain exists never goes looking for one.
   stays fixed while the round moves. Each archived round opens with the heading
   `## Round <n>, closed <YYYY-MM-DD>: <title>`. It ends in a line of its own,
   `<!-- handoff-round: v1 track=<slug> round=<n> closed=<YYYY-MM-DD> -->`. A reader tells a round
-  from an ordinary comment by that whole shape. Its heading and its one last-line mark name the
-  same round and date. A mark line alone is not enough, since a comment can quote one.
+  from an ordinary comment by that whole shape. Its heading and its one mark line name the same
+  round and date. A mark line alone is not enough, since a comment can quote one.
 - **A session close runs in one order.** First append the outgoing body to the issue as a comment
   headed with its round and close date. Then replace the body and advance the round. Archiving
   first means a failure between the two leaves the outgoing round in both places rather than in
@@ -183,7 +183,7 @@ can comment on a public issue. A comment counts as a round only where it has the
 Chain" above describes, so an answer quoting a mark still prints:
 
 ```sh
-gh issue view "<n>" --repo OWNER/NAME --json comments --jq '.comments[] | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | (([capture("\\A\\s*## Round (?<r>[1-9][0-9]*), closed (?<c>[0-9]{4}-[0-9]{2}-[0-9]{2}):[^\n]*\n[\\s\\S]*\n<!--[ \t]*handoff-round:[ \t]*v1[ \t]+track=[a-z0-9-]+[ \t]+round=(?<mr>[1-9][0-9]*)[ \t]+closed=(?<mc>[0-9]{4}-[0-9]{2}-[0-9]{2})[ \t]*-->\\s*\\z") | select(.r == .mr and .c == .mc)] | length) == 1 and ([scan("(^|\n)<!--[ \t]*handoff-round:")] | length) == 1) | not)) | "\(.createdAt)\n\(.body)\n"'
+gh issue view "<n>" --repo OWNER/NAME --json comments --jq '.comments[] | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) and (.isMinimized | not) and (.body | (([capture("\\A\\s*## Round (?<r>[1-9][0-9]*), closed (?<c>[0-9]{4}-[0-9]{2}-[0-9]{2}):[^\n]*\n[\\s\\S]*\n<!--[ \t]*handoff-round:[ \t]*v1[ \t]+track=[a-z0-9-]+[ \t]+round=(?<mr>[1-9][0-9]*)[ \t]+closed=(?<mc>[0-9]{4}-[0-9]{2}-[0-9]{2})[ \t]*-->[ \t\r]*(\n|\\z)") | select(.r == .mr and .c == .mc)] | length) == 1 and ([scan("(^|\n)<!--[ \t]*handoff-round:")] | length) == 1) | not)) | "\(.createdAt)\n\(.body)\n"'
 ```
 
 Read the chain before re-attempting anything. `resume` prints the current body and indexes the
@@ -238,10 +238,11 @@ the whole procedure below. Run every step without being reminded of any of them.
    `blocked` is skipped unless named, since a `backlog-burndown` away-mode worker may hold it right now.
    Where one is named, confirm with the maintainer that no unattended run is live before working
    it. Where every open link is skipped,
-   say so and ask the maintainer which to take. A link picked this way, with none named, is put to
-   the maintainer as a prompt before any work, whatever its `updatedAt`. Its first option works the
-   picked link, and the others name the rest of the open links. The newest link is also the one a
-   live session most likely still holds. And no time window tells a held link from a free one.
+   say so and ask the maintainer which to take. Where the maintainer named no link, the one this
+   order picks is a default. Put it to the maintainer as a prompt before any work, whatever its
+   `updatedAt`. A live session may still hold any link, and no time window tells a held link from
+   a free one. The prompt's first option works the picked link. The others name the links next in
+   the same order, as many as the prompt holds.
 2. **Resume it** per "Resuming" above, comments included, re-deriving live state rather than
    trusting the body.
 3. **Ask what it is blocked on first.** Where the link carries `blocked`, the parking comment names
@@ -361,7 +362,9 @@ chain, since `new` then archives and rewrites whatever `default` holds, and `clo
   that stopped between the two finds the round archived and only replaces the body. A rerun after a
   run that finished finds the body current and writes nothing.
 - **`close`** is the one way a track ends. It comments the outcome given in `--body-file` on the
-  track's issue, then closes it, and a rerun after the comment landed only closes.
+  track's issue, then closes it, and a rerun after the comment landed only closes. A session
+  running it writes a final round with `new` first where it learned something, per "Closing a
+  Session" step 2. The outcome comment is no round, so `chain --grep` never reads it.
 
 `<hub-checkout>` below is a hub checkout of the session's own, never the maintainer's. In an
 attended session it is the clone "The Attended Session" step 0 makes, in the hub itself as in any
