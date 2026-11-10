@@ -1,0 +1,55 @@
+name: .NET workspaces
+description: >-
+  Resolve the .NET solutions or projects the validator names on each dotnet call, from the tracked
+  tree. A bare dotnet format or dotnet test resolves one workspace from the working directory, so
+  it fails at a root holding none, and with MSB1011 at a root holding more than one.
+
+inputs:
+  projects:
+    description: >-
+      Git pathspec matching the tracked .csproj files to name where no solution is named, for
+      example ':(glob)**/*Tests*.csproj'.
+    required: true
+  solutions:
+    description: >-
+      'true' to name each tracked .sln or .slnx in place of the projects wherever the tree holds
+      one.
+    required: false
+    default: 'false'
+
+outputs:
+  workspaces:
+    description: >-
+      One tracked solution or project path per line. Empty where the root holds exactly one
+      solution or project, which a bare dotnet call resolves from the working directory.
+    value: ${{ steps.resolve.outputs.workspaces }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve .NET workspaces step
+      id: resolve
+      shell: bash
+      env:
+        PROJECTS: ${{ inputs.projects }}
+        SOLUTIONS: ${{ inputs.solutions }}
+      run: |
+        set -Eeuo pipefail
+        root=$(git -c core.quotePath=false ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')
+        workspaces=
+        if [ -z "$root" ] || [ "$root" != "${root%%$'\n'*}" ]; then
+          if [ "$SOLUTIONS" = true ]; then
+            workspaces=$(git -c core.quotePath=false ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
+          fi
+          if [ -z "$workspaces" ]; then
+            workspaces=$(git -c core.quotePath=false ls-files -- "$PROJECTS")
+          fi
+        fi
+        delimiter="workspaces_$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+        {
+          echo "workspaces<<$delimiter"
+          if [ -n "$workspaces" ]; then
+            printf '%s\n' "$workspaces"
+          fi
+          echo "$delimiter"
+        } >> "$GITHUB_OUTPUT"
