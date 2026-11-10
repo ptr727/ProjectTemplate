@@ -49,7 +49,7 @@ scope-widened commit, a rewritten shared history, a destructive reset).
 ## Signing, verified not configured
 
 - **Every commit must be cryptographically signed (SSH or GPG).** The fleet's rulesets require
-  signatures on `develop` and `main` and reject an unsigned commit pushed there. A feature branch carries no such ruleset, so nothing rejects an unsigned commit pushed to it, and the probe below is what catches one. Signing depends on
+  signatures on `develop` and `main` and reject an unsigned commit pushed there. A feature branch carries no such ruleset, so nothing rejects an unsigned commit pushed to it. The probe below catches a host that does not sign. The target-repository check under "Identity, verified not set" catches a repository that turns signing off. Signing depends on
   environment configuration (`commit.gpgsign`, `user.signingkey`, `gpg.format`), but none of those values prove signing actually works. For example, `gpg.format=ssh` can sign straight from a key file with no `ssh-agent` running at all (the common case on Git for Windows). GPG can likewise sign
   agent-backed or straight from a keyring. **Probing agent liveness (`ssh-add -L`, a `gpg-agent`
   check) is not a valid test and must not be used.** It tests one specific delivery path, not
