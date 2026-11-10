@@ -79,8 +79,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    started, ask the maintainer whether to dispatch, and name `main`'s current tip where it has
    moved past the merge commit. The release scope does not answer that question, since it was
    chosen for a merge this session would make. Under an away-mode grant, which cannot ask, dispatch
-   nothing. Report the unreleased promotion as needing the maintainer instead, naming its number
-   and full merge SHA, so the run's final report carries it to him. On his yes, run steps
+   nothing. File the question as a `decision` issue in this repository instead, naming the
+   promotion's number and full merge SHA. An open `decision` issue is what an away run's final
+   report carries to him. A yes recorded there is the go-ahead for steps 5 and 6, run by a
+   later session from that issue. On his yes, run steps
    5 and 6, with step 6 matching against `main`'s tip read immediately before the dispatch. On
    anything else, dispatch nothing. Either way the merge has landed, so go on to step 7 where a
    release scope was chosen, and then step 8. A digest carrying
