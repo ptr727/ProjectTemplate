@@ -70,7 +70,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    a release scope was chosen, look, then ask. Read this repo's `releaseTrigger` as step 5 does,
    and where it reads `none` report that no release is configured. Otherwise read the publisher's
    runs on the merge commit, `gh run list --repo owner/repo --workflow publish-release.yml --commit
-   <merge_commit> --json databaseId,event,headBranch,status,conclusion,createdAt`. Report whether
+   <merge-sha> --json databaseId,event,headBranch,status,conclusion,createdAt`. `<merge-sha>` is
+   the full 40-character SHA, `gh pr view [number] --repo owner/repo --json mergeCommit --jq
+   .mergeCommit.oid`, since the digest's 8-character `merge_commit=` matches no run. Report whether
    a release started, naming each run with its event, status, and conclusion. A read that fails is
    reported with its output, never taken as no release started. A run found there, whether
    running, finished, or failed, is reported and never re-dispatched from here. Where none
