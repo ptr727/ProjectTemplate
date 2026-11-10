@@ -1387,6 +1387,26 @@ class TestCleanupSweep(LocalCleanupCase):
         self.assertLess(named, out.index(f"removed worktree {path}"))
         self.assertNotIn(path, self.listed())
 
+    def test_a_detached_worktree_s_ignored_entries_are_named_in_both_modes(self) -> None:
+        path = os.path.join(self.root, "wt", "detached-ignored")
+        run_git(self.primary, "worktree", "add", "--detach", path, "origin/develop")
+        self.ignore("*.env")
+        Path(path, "local.env").write_text("x", encoding="utf-8")
+        self.age(path, 48)
+        self.wire_sweep()
+        self.assertEqual(0, self.sweep())
+        report = [ln for ln in self.out.getvalue().splitlines() if ln.startswith("would-remove")]
+        self.assertTrue(
+            any(f"worktree {path} detached" in ln and ln.endswith("local.env") for ln in report),
+            report,
+        )
+        self.assertEqual(0, self.sweep("--apply"))
+        out = self.out.getvalue()
+        named = out.find(f"removing worktree {path} deleting its git-ignored local.env")
+        self.assertNotEqual(-1, named, out)
+        self.assertLess(named, out.index(f"removed worktree {path} head="))
+        self.assertNotIn(path, self.listed())
+
     def test_a_worktree_with_submodules_is_kept(self) -> None:
         path, tip = self.worktree("modular-work")
         self.merged_pr("modular-work", tip)
