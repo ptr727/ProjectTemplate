@@ -81,9 +81,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    chosen for a merge this session would make. Under an away-mode grant, which cannot ask, dispatch
    nothing. File the question as a `decision` issue in this repository instead, naming the
    promotion's number and full merge SHA. An open `decision` issue is what an away run's final
-   report carries to him. A yes recorded there is the go-ahead for steps 5 and 6, run by a
-   later session from that issue. On his yes, run steps
-   5 and 6, with step 6 matching against `main`'s tip read immediately before the dispatch. On
+   report carries to him. Acting on its answer is his, since no step here starts from an
+   issue. Attended, on his yes, run steps 5 and 6, with step 6 matching against `main`'s tip read immediately before the dispatch. On
    anything else, dispatch nothing. Either way the merge has landed, so go on to step 7 where a
    release scope was chosen, and then step 8. A digest carrying
    `state=CLOSED` is a stop to report. A digest reading `coverage=none` is not a partial gate where the promotion meets the
