@@ -1708,22 +1708,23 @@ def contents_text(content):
     return base64.b64decode(content["content"]).decode("utf-8", "replace")
 
 
-def read_baseline_file(slug, ground, path, alternatives=()):
-    """The path a baseline file was found at and its contents response, or `(path, None)`."""
+def read_baseline_file(slug, ref, path, alternatives=()):
+    """The path a baseline file was found at and its contents response at `ref`, a branch or a commit, or `(path, None)`."""
     for candidate in (path, *alternatives):
-        content = gh(f"repos/{slug}/contents/{candidate}?ref={ground}", ok404=True)
+        content = gh(f"repos/{slug}/contents/{candidate}?ref={ref}", ok404=True)
         if content is not None:
             return candidate, content
     return path, None
 
 
-def baseline_file_findings(slug, ground, path, alternatives, item):
+def baseline_file_findings(slug, ground, path, alternatives, item, ref=None):
     """Read one baseline file, returning `(found, content, text, findings)` for what reading it alone owes.
 
     `found` is the path it was read at, a declared alternative included. `text` is None where the
-    API returned no inline content, and an empty file is an empty string.
+    API returned no inline content, and an empty file is an empty string. It is read at `ref`, the
+    audited head commit, where one is given, and a finding still names the `ground` branch.
     """
-    found, content = read_baseline_file(slug, ground, path, alternatives)
+    found, content = read_baseline_file(slug, ref or ground, path, alternatives)
     fid = item.get("fidelity") if item else "presence"
     if content is None:
         if fid == "interface":
@@ -1748,12 +1749,13 @@ def baseline_file_findings(slug, ground, path, alternatives, item):
     return found, content, contents_text(content), []
 
 
-def intent_trail(slug, ground, path, item, down_text, found):
+def intent_trail(slug, ref, path, item, down_text, found):
     """`(canonical, (repo_date, hub_date, hub_sha))` where a copy possibly trails its intent canonical, else None.
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
-    `found` is the path the copy was read at, a declared alternative included.
+    `found` is the path the copy was read at, a declared alternative included. `ref` is the branch
+    or commit its last change is looked up from.
     """
     canonical_rel, anchor = intent_ref(item, path)
     hub_change = hub_last_change(canonical_rel, anchor)
@@ -1764,7 +1766,7 @@ def intent_trail(slug, ground, path, item, down_text, found):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
-    commits = gh(f"repos/{slug}/commits?path={found}&sha={ground}&per_page=1")
+    commits = gh(f"repos/{slug}/commits?path={found}&sha={ref}&per_page=1")
     if not commits:
         return None
     repo_date = commits[0]["commit"]["committer"]["date"]
@@ -1948,8 +1950,13 @@ class Run:
             if self.content.get(p) is not None
         }
 
+    @property
+    def ref(self):
+        """The head commit the tree was listed at, so a push landing mid-run cannot split the file reads across two commits."""
+        return self.head["commit"]["sha"]
+
     def read_text(self, path):
-        url = f"repos/{self.slug}/contents/{urllib.parse.quote(path)}?ref={self.ground}"
+        url = f"repos/{self.slug}/contents/{urllib.parse.quote(path)}?ref={self.ref}"
         return contents_text(gh(url))
 
     def unread(self, family, path, purpose):
@@ -2153,7 +2160,7 @@ def check_secrets_names(run):
 def check_dependabot_ecosystems(run):
     """An ecosystem the tree implies, github-actions for workflows and devcontainers for a .devcontainer, is declared."""
     text = contents_text(
-        gh(f"repos/{run.slug}/contents/.github/dependabot.yml?ref={run.ground}", ok404=True)
+        gh(f"repos/{run.slug}/contents/.github/dependabot.yml?ref={run.ref}", ok404=True)
     )
     if not text:
         return []
@@ -2166,12 +2173,12 @@ def check_dependabot_ecosystems(run):
             )
         ]
     implied = {}
-    workflows = gh(f"repos/{run.slug}/contents/.github/workflows?ref={run.ground}", ok404=True)
+    workflows = gh(f"repos/{run.slug}/contents/.github/workflows?ref={run.ref}", ok404=True)
     if isinstance(workflows, list) and any(
         e["name"].endswith((".yml", ".yaml")) for e in workflows
     ):
         implied["github-actions"] = ".github/workflows/ is present"
-    if gh(f"repos/{run.slug}/contents/.devcontainer?ref={run.ground}", ok404=True) is not None:
+    if gh(f"repos/{run.slug}/contents/.devcontainer?ref={run.ref}", ok404=True) is not None:
         implied["devcontainers"] = ".devcontainer/ is present"
     return [
         (
@@ -2185,7 +2192,12 @@ def check_dependabot_ecosystems(run):
 
 def check_files_presence(run, path):
     found, content, text, findings = baseline_file_findings(
-        run.slug, run.ground, path, run.alternatives.get(path, []), run.baseline[path][0]
+        run.slug,
+        run.ground,
+        path,
+        run.alternatives.get(path, []),
+        run.baseline[path][0],
+        run.ref,
     )
     if content is not None:
         run.content[path] = text
@@ -2199,7 +2211,7 @@ def check_files_intent(run):
         if path not in run.content or (item or {}).get("fidelity") != "intent":
             continue
         found = run.found[path]
-        trail = intent_trail(run.slug, run.ground, path, item, run.content[path], found)
+        trail = intent_trail(run.slug, run.ref, path, item, run.content[path], found)
         if trail is not None:
             trails[found] = trail
     return intent_findings(run.entry, run.ground, trails)
@@ -2504,15 +2516,15 @@ def check_readme_tools(run):
 
 def check_cspell_workspace(run):
     """cspell.json is the one word list, so a workspace file's own cSpell list duplicates it."""
-    if gh(f"repos/{run.slug}/contents/cspell.json?ref={run.ground}", ok404=True) is None:
+    if gh(f"repos/{run.slug}/contents/cspell.json?ref={run.ref}", ok404=True) is None:
         return []
     findings = []
-    for it in gh(f"repos/{run.slug}/contents/?ref={run.ground}", ok404=True) or []:
+    for it in gh(f"repos/{run.slug}/contents/?ref={run.ref}", ok404=True) or []:
         ws_name = it.get("name", "") if isinstance(it, dict) else ""
         if not ws_name.endswith(".code-workspace"):
             continue
         ws_text = contents_text(
-            gh(f"repos/{run.slug}/contents/{ws_name}?ref={run.ground}", ok404=True)
+            gh(f"repos/{run.slug}/contents/{ws_name}?ref={run.ref}", ok404=True)
         )
         if ws_text is None:
             findings.append(
@@ -2583,30 +2595,36 @@ def _selftest_cases():
     return 0 if ok else 1
 
 
+MANUAL_HEADING = "## Manual findings"
+
+
 def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
-    """A ready-to-file convergence issue (title, body) generated from one repo's audit findings."""
+    """A ready-to-file convergence issue (title, body) generated from one repo's audit findings.
+
+    The body ends at the fixed MANUAL_HEADING, the one section written by hand, per AUDIT.md section 8.
+    """
     name = entry["name"]
     types = ", ".join(declared_types(entry)) or "untyped"
     stamp = f"{ground}@{audited_sha[:7]}" if audited_sha else ground
     blocking = [(k, t) for k, t in findings if k in ("DEFECT", "LETTER")]
     drift = [t for k, t in findings if k == "DRIFT"]
     errors = [t for k, t in findings if k == "ERROR"]
-    title = f"Converge {name} with the hub baseline ({len(findings)} finding{'' if len(findings) == 1 else 's'})"
+    title = f"Converge {name} with the hub baseline ({len(findings)} detected finding{'' if len(findings) == 1 else 's'})"
 
     out = []
     w = out.append
     # No H1, since GitHub renders the issue title as the heading.
     w(
         f"Generated from the hub audit of `{name}` ({types}). Run stamp `audit run {run_utc} | hub {hub_sha}`, "
-        f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). Regenerate with "
-        f"`uv run --no-project --script spec/audit.py --issue {name}`. Findings are a point-in-time snapshot - re-run the audit before acting. "
+        f"against `@ {stamp}` (the format AUDIT.md section 8 says a derived artifact quotes). To regenerate, run "
+        f"`uv run --no-project --script spec/audit.py --issue {name}` and replace only the text above `{MANUAL_HEADING}`, keeping that section as written. Findings are a point-in-time snapshot - re-run the audit before acting. "
         f"This lists what the audit mechanically detects. No check belonging to a project type in `spec/project-types.json` is run "
         f"here, and the cross-cutting dimensions are covered only in part, so the full letter and intent verdict lives in AUDIT.md section 4."
     )
     w("")
     if not findings:
-        w("The deterministic checks are clean - nothing to converge.")
-        return title, "\n".join(out) + "\n"
+        w("The deterministic checks are clean - nothing to converge from them.")
+        w("")
     if blocking:
         w("## Must fix")
         w("")
@@ -2637,6 +2655,13 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         for t in errors:
             w(f"- {t}")
         w("")
+    w(MANUAL_HEADING)
+    w("")
+    w(
+        "Written by hand, for a finding the audit judges by hand rather than detects, such as a check "
+        "under a type in `spec/project-types.json`. Each one goes below this line with the file it was "
+        "judged against. Regenerating replaces only the text above this heading."
+    )
     return title, "\n".join(out).rstrip() + "\n"
 
 

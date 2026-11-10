@@ -22,7 +22,8 @@ ENTRY = {
     "hasDevelop": False,
 }
 CARRIED = {"pyproject.toml", "tests/test_a.py"}
-HEAD = {"commit": {"sha": "c0ffee", "commit": {"tree": {"sha": "feed"}}}}
+HEAD_SHA = "c0ffee"
+HEAD = {"commit": {"sha": HEAD_SHA, "commit": {"tree": {"sha": "feed"}}}}
 CODECOV = {
     "path": "codecov.yml",
     "alternatives": [".codecov.yml"],
@@ -34,7 +35,8 @@ class FakeGh:
     """The REST reads audit_repo makes, answered for a repository carrying exactly `tree`.
 
     An unanticipated read fails the test rather than answering. A guessed answer could steer
-    audit_repo past the loop under test while still reading as a pass.
+    audit_repo past the loop under test while still reading as a pass. A path in `moved` is one a
+    push deleted after the tree was listed, so it resolves at the head commit and nowhere else.
     """
 
     def __init__(
@@ -43,11 +45,13 @@ class FakeGh:
         modes: dict[str, str] | None = None,
         unread: frozenset[str] = frozenset(),
         texts: dict[str, str] | None = None,
+        moved: frozenset[str] = frozenset(),
     ) -> None:
         self.tree = tree
         self.modes = modes or {}
         self.unread = unread
         self.texts = texts or {}
+        self.moved = moved
         self.paths: list[str] = []
 
     def __call__(self, path: str, ok404: bool = False) -> Any:
@@ -69,7 +73,7 @@ class FakeGh:
             return {"tree": blobs, "truncated": False}
         if base.startswith(f"repos/{SLUG}/contents/"):
             name = base.split("/contents/", 1)[1]
-            if name in self.unread:
+            if name in self.unread or (name in self.moved and path != f"{base}?ref={HEAD_SHA}"):
                 if ok404:
                     return None
                 raise RuntimeError(f"gh api {path}: HTTP 404")
@@ -87,12 +91,13 @@ def run_audit(
     unread: frozenset[str] = frozenset(),
     hub: frozenset[str] = frozenset(),
     texts: dict[str, str] | None = None,
+    moved: frozenset[str] = frozenset(),
 ) -> tuple[list[tuple[str, str]], FakeGh]:
     """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
 
     The hub's tracked paths come from a fetch of its origin. Answering them with `hub` keeps the
-    run offline and leaves the checkout the suite runs in untouched. The repo-owned trees are the
-    shipped declaration, so a test reads the exclusion the real audit applies.
+    run offline and leaves the checkout the suite runs in untouched. The repo-owned trees and the
+    gap ledger are the shipped declarations, so a test reads the exclusions the real audit applies.
     """
     spec = {
         "registry": {"repos": [ENTRY], "defaults": {}},
@@ -102,8 +107,9 @@ def run_audit(
             "baseline": [CODECOV],
             "repoOwnedTrees": audit.load("spec/files.json")["repoOwnedTrees"],
         },
+        "divergences": audit.load("spec/divergences.json"),
     }
-    fake = FakeGh(tree, modes, unread, texts)
+    fake = FakeGh(tree, modes, unread, texts, moved)
     with (
         mock.patch.object(audit, "gh", fake),
         mock.patch.object(audit, "hub_tracked", lambda rev=None: hub),
@@ -123,7 +129,7 @@ class AuditRepoAlternativesCase(unittest.TestCase):
     def test_a_repository_holding_only_the_alternative_carries_the_file(self) -> None:
         findings, fake = run_audit(CARRIED | {".codecov.yml"})
 
-        self.assertIn(f"repos/{SLUG}/contents/.codecov.yml?ref=main", fake.paths)
+        self.assertIn(f"repos/{SLUG}/contents/.codecov.yml?ref={HEAD_SHA}", fake.paths)
         absent = [text for _, text in findings if text.startswith("file: codecov.yml")]
         self.assertEqual(absent, [])
 
@@ -147,7 +153,7 @@ class AuditRepoNamingCase(unittest.TestCase):
     """audit_repo hands the tree it read, modes included, to the file-naming and secret-stem checks.
 
     Each check's own cases are covered by tests/test_audit_helpers.py, so what this adds is the call
-    site: the modes reaching the file-naming check, and its shebang read going to the audited branch.
+    site: the modes reaching the file-naming check, and its shebang read going to the audited head.
     """
 
     def naming_findings(self, findings: list[tuple[str, str]]) -> list[str]:
@@ -175,7 +181,7 @@ class AuditRepoNamingCase(unittest.TestCase):
         }
         findings, fake = run_audit(tree, {"bin/Run_Backup": "100755"})
 
-        self.assertIn(f"repos/{SLUG}/contents/bin/Run_Backup?ref=main", fake.paths)
+        self.assertIn(f"repos/{SLUG}/contents/bin/Run_Backup?ref={HEAD_SHA}", fake.paths)
         self.assertEqual(
             self.naming_findings(findings),
             [
@@ -199,7 +205,7 @@ class AuditRepoNamingCase(unittest.TestCase):
         )
 
     def test_a_bare_secrets_directory_is_read_from_the_tracked_files_naming_it(self) -> None:
-        """The issue's constructed case: nothing under secrets/ is tracked, so the audited branch's files are read."""
+        """The issue's constructed case: nothing under secrets/ is tracked, so the audited head's files are read."""
         texts = {
             ".gitignore": "secrets/\n",
             ".vscode/launch.json": (
@@ -208,7 +214,7 @@ class AuditRepoNamingCase(unittest.TestCase):
         }
         findings, fake = run_audit(CARRIED | {".codecov.yml"} | set(texts), texts=texts)
 
-        self.assertIn(f"repos/{SLUG}/contents/.vscode/launch.json?ref=main", fake.paths)
+        self.assertIn(f"repos/{SLUG}/contents/.vscode/launch.json?ref={HEAD_SHA}", fake.paths)
         self.assertEqual(
             self.naming_findings(findings),
             [
@@ -232,6 +238,42 @@ class AuditRepoNamingCase(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             run_audit(tree, {"bin/Run_Backup": "100755"}, frozenset({"bin/Run_Backup"}))
+
+
+class AuditRepoHeadCommitCase(unittest.TestCase):
+    """audit_repo reads content at the head commit it listed the tree at, not at the branch name.
+
+    A push landing between the two reads would otherwise answer a listed path with a 404. A read
+    that treats a 404 as a failure would then turn the whole repository's result into one ERROR.
+    """
+
+    def test_a_path_deleted_after_the_tree_was_listed_is_still_judged(self) -> None:
+        tree = CARRIED | {".codecov.yml", "bin/Run_Backup"}
+        findings, fake = run_audit(
+            tree, {"bin/Run_Backup": "100755"}, moved=frozenset({"bin/Run_Backup", ".codecov.yml"})
+        )
+
+        self.assertEqual([kind for kind, _ in findings if kind == "ERROR"], [])
+        self.assertIn(f"repos/{SLUG}/contents/bin/Run_Backup?ref={HEAD_SHA}", fake.paths)
+        self.assertTrue(
+            any("bin/Run_Backup (an executable with no shebang)" in text for _, text in findings),
+            findings,
+        )
+        self.assertEqual([text for _, text in findings if text.startswith("file: codecov.yml")], [])
+
+    def test_every_content_read_names_the_head_commit(self) -> None:
+        _, fake = run_audit(CARRIED | {".codecov.yml", "cspell.json", ".github/dependabot.yml"})
+
+        contents = [p for p in fake.paths if "/contents/" in p or "/commits?" in p]
+        self.assertTrue(contents)
+        self.assertEqual(
+            [
+                p
+                for p in contents
+                if not p.endswith((f"ref={HEAD_SHA}", f"sha={HEAD_SHA}&per_page=1"))
+            ],
+            [],
+        )
 
 
 class AuditRepoHubOnlyCase(unittest.TestCase):
@@ -259,6 +301,15 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
         self.assertTrue(
             any(text.startswith("hub-only: tools/hub_tool.py ") for text in hub_only), hub_only
         )
+
+    def test_the_rendered_reviewer_configs_are_not_reported(self) -> None:
+        """The hub renders these per repository and repo-config/configure.sh check judges them."""
+        rendered = {".coderabbit.yaml", ".github/agent-policy.json", ".pr_agent.toml"}
+        findings, _ = run_audit(
+            CARRIED | {".codecov.yml"} | rendered, hub=self.HUB | frozenset(rendered)
+        )
+
+        self.assertEqual(self.hub_only_findings(findings), [])
 
 
 if __name__ == "__main__":
