@@ -603,14 +603,16 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         Path(path, "cache", "deep").mkdir(parents=True)
         Path(path, "cache", "deep", "a.bin").write_text("x", encoding="utf-8")
         Path(path, "cache", "b.bin").write_text("x", encoding="utf-8")
-        self.assertEqual((False, "cache/"), pr_cleanup.cleanup_status(path, True))
+        note = " deleting its git-ignored cache/"
+        self.assertEqual((False, note), pr_cleanup.cleanup_status(path, True))
         self.assertEqual((False, ""), pr_cleanup.cleanup_status(path, False))
         Path(path, "new.txt").write_text("x", encoding="utf-8")
-        self.assertEqual((True, "cache/"), pr_cleanup.cleanup_status(path, True))
+        self.assertEqual((True, note), pr_cleanup.cleanup_status(path, True))
         sites = [f"site{n}.env" for n in range(8)]
         for name in sites:
             Path(path, name).write_text("x", encoding="utf-8")
         _, named = pr_cleanup.cleanup_status(path, True)
+        named = named.removeprefix(" deleting its git-ignored ")
         self.assertEqual(sorted(["cache/", *sites]), sorted(named.split(", ")))
 
     def test_a_locked_worktree_refuses_and_removes_nothing(self) -> None:
