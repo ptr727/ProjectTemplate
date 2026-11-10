@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2"]
 # ///
 """Render a weekly backlog and review-cost report for the fleet's repositories.
 
@@ -20,6 +20,12 @@ Usage
 
 It is a uv script because it imports the review gate's own readers, which parse Markdown. A copy
 of those readers here would drift from the gate and report figures the gate would not.
+
+markdown-it-py is pinned exactly, and so is mdurl, the one package it imports. So every run
+imports only versions this repository reviewed, a run holding a `gh` token included. Run it as
+above, with `--script`, so uv reads those pins. A markdown-it-py bump is then a reviewed change. It
+moves the prose gate's pin and `tests/requirements.txt`'s with it, and pins exactly each package the
+new version requires. A test holds all of that.
 
 Exit codes
   0  the report was written.
