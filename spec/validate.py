@@ -101,7 +101,7 @@ GROUND_TRUTH_BRANCH_SHAPE = (
 # So it is reported missing from the store on every run against a repository whose store is correct.
 # Where no mechanism maps the name, the stored one it was meant to be is reported as claimed by nothing as well.
 # This is because requiredSecrets is unioned into the claimed set and a misspelling withdraws the only claim on it.
-# A name a mechanism already requires, which is every one the registry declares today, keeps its claim and yields the missing-from-the-store finding alone.
+# A name a mechanism already requires keeps its claim and yields the missing-from-the-store finding alone.
 # The reserved GITHUB_ prefix is the other half, and it is the same never-satisfiable shape one clause away.
 # GitHub refuses to store such a name at all.
 # A repo declaring one therefore collects a missing-from-the-store finding that nothing it can do retires.
