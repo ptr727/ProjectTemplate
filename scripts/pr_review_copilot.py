@@ -552,19 +552,19 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             and vocab["table_header"]
             and not token.level
             and not any(a <= (token.map or [0])[0] < b for a, b in counted)
+            and (cells := table_cells(tokens, i, vocab["table_header"])) is not None
         ):
-            if (cells := table_cells(tokens, i, vocab["table_header"])) is not None:
-                heads, rows = cells
-                table = (table or []) + [p for row in rows if row for p in paths(row[0])]
-                if vocab["table_findings"] in heads:
-                    column = heads.index(vocab["table_findings"])
-                    marker = vocab["table_finding_marker"]
-                    texts = [inline_text(row[column]) for row in rows if len(row) > column]
-                    tabled += sum(
-                        max(1, len(marker.findall(text)))
-                        for text in texts
-                        if any(c.isalnum() for c in text)
-                    )
+            heads, rows = cells
+            table = (table or []) + [p for row in rows if row for p in paths(row[0])]
+            if vocab["table_findings"] in heads:
+                column = heads.index(vocab["table_findings"])
+                marker = vocab["table_finding_marker"]
+                texts = [inline_text(row[column]) for row in rows if len(row) > column]
+                tabled += sum(
+                    max(1, len(marker.findall(text)))
+                    for text in texts
+                    if any(c.isalnum() for c in text)
+                )
         i += 1
 
     # A count stated in a top-level paragraph opening on it, never a list item, outside counted sections.
