@@ -13,7 +13,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 py=""
 for c in python3 python; do
     command -v "$c" >/dev/null 2>&1 || continue
-    if [ "$("$c" -c 'import sys; print("ok" if sys.version_info >= (3, 11) else "old")')" = "ok" ]; then
+    if out="$("$c" -c 'import sys; print("ok" if sys.version_info >= (3, 11) else "old")')" && [ "$out" = "ok" ]; then
         py="$c"
         break
     fi

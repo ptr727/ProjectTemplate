@@ -2616,6 +2616,34 @@ class TestLauncher(StampCase):
         stub = self._stub("python3", f"echo {install.LAUNCHER_TOKEN} 3 10")
         self.assertIn("below the 3.11 floor", install.launcher_problem(str(stub)))
 
+    def test_a_malformed_version_is_refused_and_the_next_candidate_tried(self):
+        """A stub printing the token over a non-numeric version is a refusal, not a crash."""
+        stub = self._stub("python3", f"echo {install.LAUNCHER_TOKEN} 3a 11")
+        self.assertIn("malformed version probe", install.launcher_problem(str(stub)))
+        self._path_first(stub.parent)
+        launcher, rejected = install.hook_launcher()
+        self.assertEqual(launcher, sys.executable)
+        self.assertEqual(len(rejected), 1, rejected)
+
+    @unittest.skipUnless(shutil.which("bash"), "install.sh is a bash wrapper")
+    def test_install_sh_passes_over_a_python_that_prints_ok_and_fails(self):
+        """The wrapper's probe reads the exit status as well as the output."""
+        stub = self._stub("python3", "echo ok; exit 3")
+        (stub.parent / "python").symlink_to(sys.executable)
+        env = {**os.environ, "PATH": f"{stub.parent}{os.pathsep}/usr/bin{os.pathsep}/bin"}
+        env["CLAUDE_HOME"] = str(self.home)
+        r = subprocess.run(
+            ["bash", str(install.HERE / "install.sh"), "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=env,
+            check=False,
+        )
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Passed over python3", r.stderr)
+        self.assertFalse(self.home.exists())
+
     def test_a_missing_launcher_is_refused(self):
         problem = install.launcher_problem(str(pathlib.Path(self.tmp) / "no-such-python"))
         self.assertIn("could not be run", problem)
