@@ -2636,6 +2636,7 @@ class TestLauncher(StampCase):
             ["bash", str(install.HERE / "install.sh"), "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             env=env,
             check=False,
         )
