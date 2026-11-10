@@ -128,9 +128,17 @@ Withdraw a grant by deleting the `env` entry and restarting. Nothing expires it,
 ## Manual settings.json Shape (for Reference)
 
 The installer writes this. It is here so you can inspect it, not as a template to hand-place.
-The literal `"python3"` shown for `command` is what the installer writes when a `python3` launcher
-is available. It substitutes `sys.executable`'s own absolute path when it is not, most commonly on a
-Windows host with no `python3` shim. The `Bash(python3 scripts/pr_review.py:*)` rule in
+The literal `"python3"` shown for `command` is what the installer writes when a `python3` on `PATH`
+runs and reports Python 3.11 or newer. Each candidate is run with a probe that prints a token and its
+version, and the output is read. That is because presence on `PATH` and a zero exit each pass a stub
+that runs no script, such as a Windows app execution alias. A hook naming one fails open. The
+installer substitutes `sys.executable`'s own absolute path when `python3` is absent or fails the
+probe, most commonly on a Windows host with no `python3` shim. It installs nothing when neither
+passes. Each hook's self-test runs under the chosen launcher, so a pass also proves the launcher runs
+the hook. `--report` runs the launcher each registration names in the `<launcher> <path>` shape. So
+a host registered before the probe existed reports STALE once that launcher stops running. Like the
+containment check below, it runs under the reporting shell's `PATH` rather than Claude Code's.
+The `Bash(python3 scripts/pr_review.py:*)` rule in
 `permissions.allow` always names `python3` literally, since it matches a command line rather than
 the hook's own launcher.
 Run the installer rather than hand-copying this block on a host where the two might differ.
