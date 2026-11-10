@@ -2525,6 +2525,20 @@ class TestDeleteOnlyPushInPrimaryCheckout(unittest.TestCase):
             self.assertIn("forbid deletion", reason)
 
 
+class TestInPlaceCommitClusters(unittest.TestCase):
+    """An in-place commit's cluster is read up to its first value letter, as git reads it."""
+
+    def test_an_attached_signing_key_is_not_a_sweep(self):
+        spec = importlib.util.spec_from_file_location("guard_in_place", HERE / "gh-write-guard.py")
+        if spec is None or spec.loader is None:
+            self.fail("the guard did not load as a module")
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        allows = guard._in_place_allows
+        self.assertTrue(allows("commit", ["-Sa", "-m", "x"], "/c/work/primary", "develop"))
+        self.assertFalse(allows("commit", ["-aS", "-m", "x"], "/c/work/primary", "develop"))
+
+
 class TestBarePushAfterABranchSwitch(unittest.TestCase):
     """A switch in the same command adds every protected default, and the branch read keeps its own reason."""
 

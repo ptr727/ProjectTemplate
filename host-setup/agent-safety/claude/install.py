@@ -493,8 +493,6 @@ def launcher_problem(launcher):
     if r.returncode or len(words) != 3 or words[0] != LAUNCHER_TOKEN:
         detail = (r.stderr.strip() or r.stdout.strip() or "no output")[:200]
         return f"{launcher!r} did not run the version probe (exit {r.returncode}: {detail})"
-    if not all(w.isdigit() for w in words[1:]):
-        return f"{launcher!r} printed no readable version ({r.stdout.strip()!r})"
     version = (int(words[1]), int(words[2]))
     if version < LAUNCHER_FLOOR:
         return f"{launcher!r} runs Python {version[0]}.{version[1]}, below the 3.11 floor"

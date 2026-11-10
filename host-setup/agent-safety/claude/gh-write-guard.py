@@ -107,10 +107,6 @@ _CHECKOUT_FORCE_FLAGS = frozenset(
     {"-b", "-B", "-c", "-C", "--force", "-f", "--discard-changes", "--orphan", "--create"}
     | {"--force-create"}
 )
-_CHECKOUT_FORCE_CHARS = frozenset("bBcCf")
-_REBASE_VALUES = frozenset(
-    {"--onto", "-x", "--exec", "-s", "--strategy", "-X", "--strategy-option"}
-)
 
 _ALLOW_ENV = "GH_WRITE_GUARD_ALLOW"
 _ALLOW_PRIMARY_ENV = "GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT"
@@ -126,6 +122,8 @@ _OPTION_VALUES = {
     "push": ("o", "", frozenset({"--repo", "--receive-pack", "--exec", "--push-option"})),
     "clean": ("e", "", frozenset({"--exclude"})),
     "branch": ("u", "t", frozenset({"--set-upstream-to", "--points-at", "--sort", "--format"})),
+    "rebase": ("xsXC", "S", frozenset({"--onto", "--exec", "--strategy", "--strategy-option"})),
+    "symbolic-ref": ("m", "", frozenset()),
 }
 _COMMIT_SWEEPS = frozenset({"--all", "--amend", "--patch", "--interactive", "--include", "--only"})
 _IN_PLACE_PUSH_FLAGS = frozenset({"-q", "--quiet", "-v", "--verbose", "-u", "--set-upstream"})
@@ -1041,20 +1039,6 @@ def _skips_hooks(sub: str, args: list[str]) -> bool:
     return "--no-verify" in flags or sub == "commit" and _short_has(flags, "n")
 
 
-def _operands(args: list[str], values: frozenset[str]) -> list[str]:
-    """The words in `args` that are not options, skipping the word after each option in `values`."""
-    out: list[str] = []
-    skip = False
-    for a in args:
-        if skip:
-            skip = False
-        elif a in values:
-            skip = True
-        elif not a.startswith("-"):
-            out.append(a)
-    return out
-
-
 def _moves_branch(argv: list[str]) -> bool:
     """Whether a command can change the branch checked out, which the guard reads before the text runs.
 
@@ -1073,9 +1057,12 @@ def _moves_branch(argv: list[str]) -> bool:
         flags = _before_dashes("branch", args)
         return _short_has(flags, "mM") or any(a.startswith("--mo") for a in flags)
     if git.sub == "rebase":
-        return len(_operands(args, _REBASE_VALUES)) >= (1 if "--root" in args else 2)
+        operands = [a for a in _flags("rebase", args) if not a.startswith("-")]
+        return len(operands) >= (1 if "--root" in args else 2)
     if git.sub == "symbolic-ref":
-        return bool({"-d", "--delete"} & set(args)) or len(_operands(args, frozenset({"-m"}))) > 1
+        flags = _before_dashes("symbolic-ref", args)
+        operands = [a for a in flags if not a.startswith("-")]
+        return "--delete" in flags or _short_has(flags, "d") or len(operands) > 1
     if git.sub == "checkout":
         return "--" not in args or args.index("--") == len(args) - 1
     return git.sub == "switch"
@@ -1169,18 +1156,12 @@ def _primary_checkout_verdict(
     """Whether requirement 6 denies this subcommand in a primary checkout."""
     if sub == "worktree":
         before = args[1 : args.index("--")] if "--" in args else args[1:]
-        return args[:1] == ["remove"] and any(
-            a in ("-f", "--force") or re.fullmatch(r"-[A-Za-z]*f[A-Za-z]*", a) for a in before
-        )
+        return args[:1] == ["remove"] and ("--force" in before or _short_has(before, "f"))
     if sub in ("checkout", "switch"):
-        if "--" in args or any(
-            a in _CHECKOUT_FORCE_FLAGS
-            or (
-                a.startswith("-")
-                and not a.startswith("--")
-                and any(ch in _CHECKOUT_FORCE_CHARS for ch in a[1:])
-            )
-            for a in args
+        if (
+            "--" in args
+            or _short_has(args, "bBcCf")
+            or any(a in _CHECKOUT_FORCE_FLAGS for a in args)
         ):
             return True
         positional = [a for a in args if a == "-" or not a.startswith("-")]
@@ -1756,6 +1737,7 @@ _CASES: list[tuple[str, str, str]] = [
     ("git commit -mtest --no-verify", "deny", "3783"),
     ("git commit -mtest -n", "deny", "3783"),
     ("git commit -Snkey -m x", "allow", "3783"),
+    ("git commit -uno -m x", "allow", "3783"),
     ("git push -o --no-verify origin feature/x", "allow", "3783"),
     ("git push --no-verify origin feature/x", "deny", "R4"),
     ("git push -n origin feature/x", "allow", "R4"),
@@ -1877,6 +1859,10 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     ("git branch -M develop && git push origin", _RULES, "feature/x", "deny", "3729"),
     ("git branch -umain && git push origin", _RULES, "feature/x", "allow", "3783"),
     ("git branch -u -m && git push origin", _RULES, "feature/x", "allow", "3783"),
+    ("git branch -tm && git push origin", _RULES, "feature/x", "allow", "3783"),
+    ("git rebase -ix make develop && git push origin", _RULES, "feature/x", "allow", "3783"),
+    ("git rebase -i develop topic && git push origin", _RULES, "feature/x", "deny", "3783"),
+    ("git symbolic-ref -qd HEAD && git push origin", _RULES, "feature/x", "deny", "3783"),
     ("git symbolic-ref HEAD refs/heads/develop && git push", _RULES, "feature/x", "deny", "3729"),
     ("gh pr checkout 5 && git push origin", _RULES, "feature/x", "deny", "3729"),
     ("git switch develop && git push origin feature/x", _RULES, "feature/x", "allow", "3729"),
