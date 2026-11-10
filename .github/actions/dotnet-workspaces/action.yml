@@ -13,8 +13,8 @@ inputs:
   solutions:
     description: >-
       'true' to name each tracked .sln or .slnx in place of the projects wherever the tree holds
-      one. A root holding a solution or project names only its own solutions, and the projects
-      where it holds none, so a nested solution never stands in for the root's projects.
+      one. A root holding more than one solution or project names only its own solutions, and
+      the projects where it holds none, so a nested solution never stands in for the root's.
     required: false
     default: 'false'
 

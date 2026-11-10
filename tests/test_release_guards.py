@@ -2053,7 +2053,8 @@ gh() {
         """Only a root holding exactly one solution or project keeps the bare call.
 
         Every other tree gets each tracked solution, or each project, named instead. A root holding
-        several names only its own solutions, so a nested one never hides the root's projects. Each job's
+        several never takes a nested solution. It names its own solutions, or the projects where it
+        holds none, so a nested one never hides the root's projects. Each job's
         resolver step is read from the workflow with the inputs it passes, and its output feeds that
         job's dotnet step. So a job passing the wrong input, or reading another step's output, fails
         here as a workflow edit would on a runner. The output reaches the step as the runner hands a
