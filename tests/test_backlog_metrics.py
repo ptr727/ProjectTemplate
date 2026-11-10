@@ -14,7 +14,9 @@ import contextlib
 import datetime
 import io
 import json
+import re
 import sys
+import tomllib
 import typing
 import unittest
 import unittest.mock
@@ -1053,6 +1055,49 @@ class MainTests(unittest.TestCase):
         self.assertEqual(
             names, [r["name"] for r in data["repos"] if r.get("status") == "cataloged"]
         )
+
+
+class PinTests(unittest.TestCase):
+    """The exact markdown-it-py pin a token-holding run resolves, kept equal where it is stated."""
+
+    @staticmethod
+    def inline_dependencies(script: Path) -> list[str]:
+        block = re.search(
+            r"^# /// script\n(.*?)^# ///$",
+            script.read_text(encoding="utf-8"),
+            re.MULTILINE | re.DOTALL,
+        )
+        assert block, f"{script} has no inline script metadata"
+        toml = "".join(
+            line.removeprefix("#").removeprefix(" ") for line in block[1].splitlines(True)
+        )
+        return tomllib.loads(toml)["dependencies"]
+
+    def test_markdown_it_py_is_pinned_exactly_and_alike_everywhere(self) -> None:
+        repo = SCRIPTS.parent
+        stated = {
+            "backlog_metrics.py": self.inline_dependencies(SCRIPTS / "backlog_metrics.py"),
+            "prose_lint.py": self.inline_dependencies(
+                repo / ".github" / "actions" / "prose-gate" / "prose_lint.py"
+            ),
+            "tests/requirements.txt": (repo / "tests" / "requirements.txt")
+            .read_text(encoding="utf-8")
+            .splitlines(),
+        }
+        pins = {
+            name: [dep for dep in deps if re.match(r"markdown-it-py\b", dep)]
+            for name, deps in stated.items()
+        }
+        for name, found in pins.items():
+            with self.subTest(name=name):
+                self.assertEqual(1, len(found), found)
+                self.assertRegex(found[0], r"^markdown-it-py==\d")
+        self.assertEqual(1, len({found[0] for found in pins.values()}), pins)
+
+    def test_every_dependency_the_token_holding_run_resolves_is_pinned_exactly(self) -> None:
+        for dep in self.inline_dependencies(SCRIPTS / "backlog_metrics.py"):
+            with self.subTest(dep=dep):
+                self.assertRegex(dep, r"^[A-Za-z0-9._-]+==[0-9][0-9A-Za-z.]*$")
 
 
 if __name__ == "__main__":
