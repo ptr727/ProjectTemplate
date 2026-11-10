@@ -31,6 +31,7 @@ import os
 import pathlib
 import platform
 import re
+import shlex
 import shutil
 import socket
 import stat
@@ -65,6 +66,11 @@ DEPLOYED_DATA = {TIER_CONFIG_NAME: HERE.parent.parent.parent / "spec" / TIER_CON
 # A SessionEnd hook's own budget is 1.5 seconds, raised to the highest per-hook timeout the settings declare.
 # The sweep's own calls are each bounded, two `ps` reads at 5s and four `systemctl` calls at 5s, all inside this.
 SWEEP_TIMEOUT_SECONDS = 35
+
+LAUNCHER_FLOOR = (3, 11)
+LAUNCHER_TOKEN = "agent-safety-launcher"
+LAUNCHER_PROBE = f"import sys; print({LAUNCHER_TOKEN!r}, *sys.version_info[:2])"
+LAUNCHER_TIMEOUT_SECONDS = 30
 
 # The stamp's own format version, separate from the content it describes.
 # A reader that predates a field needs to know the shape changed rather than infer it from a missing key.
@@ -462,14 +468,73 @@ def foreign_prefix(data):
     return held if held is not None and not kit_prefix(held) else None
 
 
+def launcher_problem(launcher):
+    """Why `launcher` cannot run a hook, or None when running it prints Python 3.11 or newer.
+
+    The candidate is run and its output read, with its stderr kept for the reason.
+    A stub found on PATH or exiting 0 prints neither the token nor a version, so it is refused.
+    A Windows app execution alias is one such stub. `--report` runs each registered launcher through this too.
+    The path a registration names never drifts and its launcher can, so a host installed before this
+    probe existed is caught there.
+    """
+    try:
+        r = subprocess.run(
+            [launcher, "-c", LAUNCHER_PROBE],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=LAUNCHER_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        return f"{launcher!r} could not be run ({e})"
+    words = r.stdout.split()
+    if r.returncode or len(words) != 3 or words[0] != LAUNCHER_TOKEN:
+        detail = (r.stderr.strip() or r.stdout.strip() or "no output")[:200]
+        return f"{launcher!r} did not run the version probe (exit {r.returncode}: {detail})"
+    if not all(w.isdigit() for w in words[1:]):
+        return f"{launcher!r} printed no readable version ({r.stdout.strip()!r})"
+    version = (int(words[1]), int(words[2]))
+    if version < LAUNCHER_FLOOR:
+        return f"{launcher!r} runs Python {version[0]}.{version[1]}, below the 3.11 floor"
+    return None
+
+
 def hook_launcher():
-    """A python invocation for the settings.json command. Prefer a bare `python3` (portable and
-    unambiguously Python 3), else this interpreter's absolute path (guaranteed the Python 3 running the
-    installer). Never a bare `python`, which is Python 2 on some systems and would fail the hook's
-    Python 3 syntax."""
-    if shutil.which("python3"):
-        return "python3"
-    return sys.executable
+    """The python invocation the settings.json commands carry, or None, and why each other candidate failed.
+
+    A bare `python3` is preferred, being portable and unambiguously Python 3.
+    Else this interpreter's absolute path is used, which an upgrade or a move can break.
+    Never a bare `python`, which is Python 2 on some systems and would fail the hook's Python 3 syntax.
+    Each candidate is run before it is chosen, since a hook naming one that never runs fails open.
+    The install picks it before writing anything and runs each hook's self-test under it, so a pass
+    also proves the launcher runs the hook.
+    """
+    rejected = []
+    for candidate in ("python3", sys.executable):
+        if not candidate or (candidate == "python3" and not shutil.which(candidate)):
+            continue
+        problem = launcher_problem(candidate)
+        if problem is None:
+            return candidate, rejected
+        rejected.append(problem)
+    return None, rejected
+
+
+def registered_launcher(command, path):
+    """The interpreter a registration names in front of the hook at `path`, or None where it names none.
+
+    Read only from the `<launcher> <path>` shape this installer writes and a hand edit keeps.
+    Any other shape is not run, since what it executes is not decidable from the string.
+    """
+    try:
+        words = shlex.split(str(command))
+    except ValueError:
+        return None
+    if len(words) != 2 or not runs_hook(words[1], path):
+        return None
+    return os.path.expandvars(os.path.expanduser(words[0]))
 
 
 def host_facts():
@@ -1094,6 +1159,7 @@ def registration_problems(claude_home):
     if not isinstance(data, dict):
         return ["settings.json does not hold an object at its root"]
     out = []
+    probed = {}
 
     def report(note):
         """Append `note` once, since one defect a group carries is not two defects when it holds two entries."""
@@ -1155,6 +1221,15 @@ def registration_problems(claude_home):
                     out.append(
                         f"a {event} entry names the {label} but does not run the deployed one "
                         f"({hook.get('type')!r} running {hook.get('command')!r})"
+                    )
+                    continue
+                launcher = registered_launcher(hook.get("command"), path)
+                if launcher is not None and launcher not in probed:
+                    probed[launcher] = launcher_problem(launcher)
+                if launcher is not None and probed[launcher]:
+                    out.append(
+                        f"a {event} entry names a launcher that cannot run the {label} "
+                        f"({probed[launcher]}), so the {label} never runs"
                     )
                     continue
                 if judge(group, hook):
@@ -1498,7 +1573,17 @@ def main():
     if local_problem:
         sys.stderr.write(f"Nothing was installed: {local_problem}.\n")
         return 1
+    launcher, rejected = hook_launcher()
+    if launcher is None:
+        sys.stderr.write(
+            "Nothing was installed: no launcher runs the hooks at Python 3.11+ "
+            f"({'; '.join(rejected) or 'no candidate found'}).\n"
+        )
+        return 1
     print(f"Installing agent host-safety kit into: {claude_home}")
+    for problem in rejected:
+        print(f"  launcher: passed over {problem}")
+    print(f"  launcher: {launcher}")
     claude_home.mkdir(parents=True, exist_ok=True)
 
     # 0. CLAUDE.md is rendered whole: a header, one marker block per snippet, then the host-local file.
@@ -1597,7 +1682,7 @@ def main():
         except OSError:
             pass
         r = subprocess.run(
-            [sys.executable, str(tmp), "--selftest"],
+            [launcher, str(tmp), "--selftest"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1644,7 +1729,6 @@ def main():
         print(f"  hook -> {dst}")
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.
-    launcher = hook_launcher()
     # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
     hook_cmd = hook_command(launcher, hook_dst)
     # Read into a variable rather than twice off disk, once to test for content and once to parse.
