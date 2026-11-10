@@ -5089,6 +5089,16 @@ class TestMarkdown(BaitCase):
         a, c = " ".join(["word"] * 12), " ".join(["word"] * 13)
         self.assertEqual([(1, "sentence-length")], self.found_md(f"{a}\n<br>\n{c}\n"))
 
+    def test_the_html_tag_pattern_masks_the_same_spans_anchored_or_not(self) -> None:
+        """markdown-it-py 4.3.0 dropped the `^` its tag pattern opened with, which a slice broke on."""
+        tag = r"(?:<[a-z]+>|<!--[\s\S]*?-->)"
+        with self.assertRaises(re.error):
+            re.compile(tag[1:])
+        for shape in (f"^{tag}", tag):
+            with self.subTest(shape=shape):
+                spans = prose_lint.markdown_span(shape).finditer(r"a <b> `x` c <!-- y --> \* d")
+                self.assertEqual(["<b>", "`x`", "<!-- y -->", r"\*"], [m.group() for m in spans])
+
     def test_a_fence_inside_an_html_comment_is_not_a_fence(self) -> None:
         half = " ".join(["word"] * (prose_lint.SENTENCE_WORD_CAP - 5))
         text = f"<!--\n```\n-->\n{half}\n{half}\n"
