@@ -78,8 +78,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    running, finished, or failed, is reported and never re-dispatched from here. Where none
    started, ask the maintainer whether to dispatch, and name `main`'s current tip where it has
    moved past the merge commit. The release scope does not answer that question, since it was
-   chosen for a merge this session would make. Under an away-mode grant the question parks per
-   `backlog-burndown` "Parking Instead of Asking" rather than being asked. On his yes, run steps
+   chosen for a merge this session would make. Under an away-mode grant, which cannot ask, dispatch
+   nothing. Report the unreleased promotion as needing the maintainer instead, naming its number
+   and full merge SHA, so the run's final report carries it to him. On his yes, run steps
    5 and 6, with step 6 matching against `main`'s tip read immediately before the dispatch. On
    anything else, dispatch nothing. Either way the merge has landed, so go on to step 7 where a
    release scope was chosen, and then step 8. A digest carrying
@@ -164,9 +165,14 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    `bootstrap.sh --skills` or `bootstrap.ps1 -Skills` runs again, which this step does not do.
    From the same worktree, also run `python3 host-setup/agent-safety/claude/install.py --report`.
    The host-safety kit, its rendered `CLAUDE.md` included, is refreshed only by its own installer.
-   So where that report reads anything other than CURRENT, run `python3
-   host-setup/agent-safety/claude/install.py` with no arguments from the same worktree, which
-   installs the promoted kit. The installer is idempotent, and it backs up a `CLAUDE.md` edited by
+   So where that report reads anything other than CURRENT, first rule out a rollback. The report
+   judges payload digests alone, so a kit newer than `main` also reads stale. Read the commit its
+   `This machine:` line names after `hub`. Install only where that commit carries no `-dirty`
+   suffix and `git merge-base --is-ancestor <commit> origin/main` exits 0, or where the report
+   reads NOT INSTALLED. Any other result, a kit installed from `develop` or from a dirty tree
+   among them, is reported to the maintainer rather than installed over. Where the install is
+   owed, run `python3 host-setup/agent-safety/claude/install.py` with no arguments from the same
+   worktree, which installs the promoted kit. The installer is idempotent, and it backs up a `CLAUDE.md` edited by
    hand before rewriting it. Then run `--report` again and confirm it reads CURRENT. A failed
    install, or a second report still not CURRENT, is reported to the maintainer with its actual
    output, never retried. Where this seat may not run the installer, a permission denial among
