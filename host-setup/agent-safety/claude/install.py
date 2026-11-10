@@ -473,7 +473,9 @@ def launcher_problem(launcher):
 
     The candidate is run and its output read, with its stderr kept for the reason.
     A stub found on PATH or exiting 0 prints neither the token nor a version, so it is refused.
-    A Windows app execution alias is one such stub. `--report` runs each registered launcher through this too.
+    A Windows app execution alias is one such stub.
+    The token over a version that is not two integers is refused too, rather than raised.
+    `--report` runs each registered launcher through this too.
     The path a registration names never drifts and its launcher can, so a host installed before this
     probe existed is caught there.
     """
@@ -493,7 +495,10 @@ def launcher_problem(launcher):
     if r.returncode or len(words) != 3 or words[0] != LAUNCHER_TOKEN:
         detail = (r.stderr.strip() or r.stdout.strip() or "no output")[:200]
         return f"{launcher!r} did not run the version probe (exit {r.returncode}: {detail})"
-    version = (int(words[1]), int(words[2]))
+    try:
+        version = (int(words[1]), int(words[2]))
+    except ValueError:
+        return f"{launcher!r} printed a malformed version probe ({r.stdout.strip()[:200]!r})"
     if version < LAUNCHER_FLOOR:
         return f"{launcher!r} runs Python {version[0]}.{version[1]}, below the 3.11 floor"
     return None
