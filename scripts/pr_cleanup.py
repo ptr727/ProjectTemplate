@@ -26,14 +26,15 @@ request's `headRefOid` before the delete and the delete is confirmed by reading 
 
 With `--checkout <primary clone>`, a local half follows a remote half that exited 0. Every refusal
 is decided before anything is deleted. A locked, dirty, or mid-operation worktree refuses, as does
-a branch tip neither at the merged head nor behind it. The local half removes the worktrees
+one holding git-ignored files, which `git worktree remove` would delete without asking. So does a
+branch tip neither at the merged head nor behind it. The local half removes the worktrees
 holding the branch, deletes the local branch, and fast-forwards the clone to `develop`, never a
 reset, stash, or force. A clone left behind is reported and does not fail the run.
 
 `cleanup --sweep --checkout <primary clone>` takes no pull request. It reports what is provably
 finished, one `would-remove` or `keep <reason>` line per worktree or branch, and removes it only
-with `--apply`. An item must sit untouched for `--min-age-hours` (default 24) and be clean. A
-branch is finished when a pull request from `--repo` merged it at its exact tip or past it. It is
+with `--apply`. An item must sit untouched for `--min-age-hours` (default 24) and be clean, with
+no git-ignored files. A branch is finished when a pull request from `--repo` merged it at its exact tip or past it. It is
 also finished when `origin/develop` or `origin/main` contains it. For a merged develop pull request the sweep also
 deletes the remote head branch through the same checks as `cleanup <n>`. Permanent branches,
 locked worktrees, and worktrees mid-operation are never touched.
@@ -545,6 +546,32 @@ def cleanup_dirty(path: str, untracked: bool) -> bool:
     return bool(out.strip())
 
 
+IGNORED_SHOWN = 5
+
+
+def cleanup_ignored(path: str) -> str | None:
+    """The git-ignored paths in the work tree at `path`, named for a refusal, or None where none.
+
+    `git worktree remove` refuses tracked and untracked changes but deletes ignored files without
+    asking, and the porcelain read above never lists them. An ignored directory is one entry.
+    """
+    out = cleanup_git(
+        path,
+        "--no-optional-locks",
+        "status",
+        "--porcelain",
+        "-z",
+        "--ignored=matching",
+        "--untracked-files=normal",
+    ).stdout
+    ignored = [e[3:] for e in out.split("\0") if e.startswith("!! ")]
+    if not ignored:
+        return None
+    shown = ", ".join(ignored[:IGNORED_SHOWN])
+    more = len(ignored) - IGNORED_SHOWN
+    return shown + (f", and {more} more" if more > 0 else "")
+
+
 IN_PROGRESS = (
     "rebase-merge",
     "rebase-apply",
@@ -751,6 +778,12 @@ def cleanup_preflight(primary: str, branch: str, head: str) -> tuple[str | None,
             raise CleanupRefused("WORKTREE_KEPT", f"{w.path}, {why}")
         if not w.prunable and cleanup_dirty(w.path, True):
             raise CleanupRefused("WORKTREE_DIRTY", f"{w.path} has uncommitted changes")
+        ignored = None if w.prunable else cleanup_ignored(w.path)
+        if ignored is not None:
+            raise CleanupRefused(
+                "WORKTREE_DIRTY",
+                f"{w.path} holds git-ignored files that removing it would delete: {ignored}",
+            )
         linked.append(w)
     return tip, linked
 
@@ -1024,6 +1057,10 @@ class CleanupSweep:
                 return
             if cleanup_dirty(w.path, True):
                 self.keep("dirty", what)
+                return
+            ignored = cleanup_ignored(w.path)
+            if ignored is not None:
+                self.keep("ignored-files", f"{what} holds {ignored}")
                 return
             if w.branch is None:
                 return self.detached(w, what)

@@ -520,6 +520,13 @@ class LocalCleanupCase(CleanupCase):
     def wire_merged(self, tip: str) -> None:
         self.wire(cleanup_pr(headRefOid=tip), refs=[tip, tip, None])
 
+    def ignore(self, *patterns: str) -> None:
+        """Ignore `patterns` in every worktree through the clone's shared `info/exclude`."""
+        exclude = Path(self.primary, ".git", "info", "exclude")
+        exclude.parent.mkdir(exist_ok=True)
+        with exclude.open("a", encoding="utf-8") as f:
+            f.write("".join(f"{p}\n" for p in patterns))
+
 
 class TestCleanupLocalHalf(LocalCleanupCase):
     def test_the_worktree_and_branch_go_and_the_base_clone_catches_up(self) -> None:
@@ -576,6 +583,36 @@ class TestCleanupLocalHalf(LocalCleanupCase):
         self.assertIn("remote branch included", self.out.getvalue())
         self.assertTrue(os.path.isdir(path))
         self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_an_ignored_file_in_the_worktree_refuses_and_removes_nothing(self) -> None:
+        path, tip = self.worktree(CLEANUP_BRANCH)
+        self.ignore("*.env")
+        Path(path, "local.env").write_text("x", encoding="utf-8")
+        self.wire_merged(tip)
+        self.assertEqual(1, self.run_local())
+        out = self.out.getvalue()
+        self.assertIn("status=WORKTREE_DIRTY", out)
+        self.assertIn("git-ignored files that removing it would delete: local.env", out)
+        self.assertFalse(self.deleted())
+        self.assertIn("remote branch included", out)
+        self.assertTrue(Path(path, "local.env").is_file())
+        self.assertIn(path, self.listed())
+        self.assertIn(CLEANUP_BRANCH, self.branches())
+
+    def test_ignored_entries_are_named_by_directory_and_capped(self) -> None:
+        path, _ = self.worktree(CLEANUP_BRANCH)
+        self.assertIsNone(pr_cleanup.cleanup_ignored(path))
+        self.ignore("cache/", "*.env")
+        Path(path, "cache", "deep").mkdir(parents=True)
+        Path(path, "cache", "deep", "a.bin").write_text("x", encoding="utf-8")
+        Path(path, "cache", "b.bin").write_text("x", encoding="utf-8")
+        self.assertEqual("cache/", pr_cleanup.cleanup_ignored(path))
+        for n in range(pr_cleanup.IGNORED_SHOWN + 1):
+            Path(path, f"site{n}.env").write_text("x", encoding="utf-8")
+        named = pr_cleanup.cleanup_ignored(path) or ""
+        self.assertTrue(named.endswith(", and 2 more"), named)
+        shown = named.removesuffix(", and 2 more").split(", ")
+        self.assertEqual(pr_cleanup.IGNORED_SHOWN, len(shown))
 
     def test_a_locked_worktree_refuses_and_removes_nothing(self) -> None:
         path, tip = self.worktree(CLEANUP_BRANCH)
@@ -1320,6 +1357,21 @@ class TestCleanupSweep(LocalCleanupCase):
             self.assertEqual(0, self.sweep(*extra))
             self.assertIn("keep in-progress-operation branch rebasing-work", self.out.getvalue())
             self.assertIn("rebasing-work", self.branches())
+
+    def test_a_worktree_holding_ignored_files_is_kept_in_both_modes(self) -> None:
+        path, tip = self.worktree("ignored-work")
+        self.merged_pr("ignored-work", tip)
+        self.ignore("*.env")
+        Path(path, "local.env").write_text("x", encoding="utf-8")
+        self.age(path, 48)
+        self.wire_sweep()
+        for extra in ((), ("--apply",)):
+            self.assertEqual(0, self.sweep(*extra))
+            self.assertIn(f"keep ignored-files worktree {path}", self.out.getvalue())
+            self.assertIn("holds local.env", self.out.getvalue())
+            self.assertTrue(Path(path, "local.env").is_file())
+            self.assertIn(path, self.listed())
+            self.assertIn("ignored-work", self.branches())
 
     def test_a_worktree_with_submodules_is_kept(self) -> None:
         path, tip = self.worktree("modular-work")
