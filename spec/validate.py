@@ -91,7 +91,7 @@ GROUND_TRUTH_BRANCH_SHAPE = (
 # A `requiredSecrets` name is resolved against each repository secrets store by an exact comparison.
 # It is therefore the same class of value as the three above and takes the same treatment.
 # This is the shape a name must have to be resolvable against the stores spec/audit.py compares it to.
-# It is not a shape fitted to the four names the registry declares today.
+# It is not a shape fitted to the names the registry declares today.
 # That comparison is an exact set difference against the names GitHub's API returns.
 # A declaration that is not character-for-character one of them is therefore unresolvable rather than merely untidy.
 # Upper case is part of the shape for that reason.

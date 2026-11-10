@@ -220,11 +220,11 @@
             "types": ["eda"],
             "hasDevelop": true,
             "pullRequestCheck": false,
-            "publish": [{ "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": ["CODECOV_TOKEN", "KICADLIBRARY_READ_TOKEN"],
+            "publish": [],
+            "requiredSecrets": ["KICADLIBRARY_READ_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "two-phase",
-            "driftNotes": ["EDA/KiCad PCB design that checks out the private ptr727/KiCadLibrary submodule in CI with KICADLIBRARY_READ_TOKEN, so a Dependabot-triggered run needs the Dependabot copy too.", "Target is a source release on github-release, like KiCadLibrary. Its resync owes the release workflows and a dependabot.yml, and the python type once its scripts and their tests land, which is why CODECOV_TOKEN is declared ahead of them."]
+            "releaseTrigger": "none",
+            "driftNotes": ["EDA/KiCad PCB design that checks out the private ptr727/KiCadLibrary submodule in CI with KICADLIBRARY_READ_TOKEN, so a Dependabot-triggered run needs the Dependabot copy too.", "Planned: a two-phase github-release source release like KiCadLibrary's, a dependabot.yml, and the python type once its scripts and their tests land. Its resync writes each into this entry when it lands, and CODECOV_TOKEN, kept in both stores for those tests, reads as unclaimed until then."]
         },
         {
             "name": "ESPHome-Config",
