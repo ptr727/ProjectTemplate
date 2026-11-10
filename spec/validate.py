@@ -88,10 +88,10 @@ GROUND_TRUTH_BRANCH_PATTERN = (
 GROUND_TRUTH_BRANCH_SHAPE = (
     "ASCII letters, digits, and . _ - /, with neither end a . or a /, and no .."
 )
-# A `requiredSecrets` name is resolved against the repository actions store by an exact comparison.
+# A `requiredSecrets` name is resolved against each repository secrets store by an exact comparison.
 # It is therefore the same class of value as the three above and takes the same treatment.
-# This is the shape a name must have to be resolvable against the actions store spec/audit.py compares it to.
-# It is not a shape fitted to the four names the registry declares today.
+# This is the shape a name must have to be resolvable against the stores spec/audit.py compares it to.
+# It is not a shape fitted to the names the registry declares today.
 # That comparison is an exact set difference against the names GitHub's API returns.
 # A declaration that is not character-for-character one of them is therefore unresolvable rather than merely untidy.
 # Upper case is part of the shape for that reason.
@@ -101,7 +101,7 @@ GROUND_TRUTH_BRANCH_SHAPE = (
 # So it is reported missing from the store on every run against a repository whose store is correct.
 # Where no mechanism maps the name, the stored one it was meant to be is reported as claimed by nothing as well.
 # This is because requiredSecrets is unioned into the claimed set and a misspelling withdraws the only claim on it.
-# A name a mechanism already requires, which is every one the registry declares today, keeps its claim and yields the missing-from-the-store finding alone.
+# A name a mechanism already requires keeps its claim and yields the missing-from-the-store finding alone.
 # The reserved GITHUB_ prefix is the other half, and it is the same never-satisfiable shape one clause away.
 # GitHub refuses to store such a name at all.
 # A repo declaring one therefore collects a missing-from-the-store finding that nothing it can do retires.

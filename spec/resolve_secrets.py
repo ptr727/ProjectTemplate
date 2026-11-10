@@ -6,7 +6,7 @@ Both read a repo's tree on its registry ground branch, the branch the audit read
 
 `names` is run by repo-config/configure.sh for one repo.
 It reads that repo's tree with read-only gh calls.
-The tree decides whether a repo with tests owes its Codecov token in the Dependabot store too.
+The tree decides only whether a repo with tests owes the codecov mechanism.
 It prints a JSON object with the rows (name, scope, file, stores), the forbidden names, and the strays.
 A stray is the file a name would have at the wrong scope.
 With `--live` it also reads each secret store and adds the findings of secret_names.compare_stores.
