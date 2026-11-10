@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4.2.0", "pygments>=2.21.0"]
+# dependencies = ["markdown-it-py==4.3.0", "pygments>=2.21.0"]
 # ///
 """Enforce the GOVERNANCE.md "Documentation Style Conventions" rules no other linter checks.
 
@@ -1698,7 +1698,19 @@ def rule_comment_added(unit: Unit, ctx: Context) -> list[Finding]:
 
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)", re.DOTALL)
 NON_CODE = r"\\.|<[a-zA-Z][a-zA-Z0-9+.\-]{1,31}:[^<>\x00-\x20]*>"
-MARKDOWN_SPAN = re.compile(rf"{NON_CODE}|{HTML_TAG_RE.pattern[1:]}|{CODE_SPAN.pattern}", re.DOTALL)
+
+
+def markdown_span(html_tag: str) -> re.Pattern[str]:
+    """The span a Markdown line masks: an escape, an autolink, inline HTML, or a code span.
+
+    markdown-it-py 4.2.0 opens its HTML tag pattern with `^` and 4.3.0 does not. So the anchor is
+    dropped only where present, rather than sliced off as a fixed first character.
+    """
+    tag = html_tag.removeprefix("^")
+    return re.compile(rf"{NON_CODE}|{tag}|{CODE_SPAN.pattern}", re.DOTALL)
+
+
+MARKDOWN_SPAN = markdown_span(HTML_TAG_RE.pattern)
 
 
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:

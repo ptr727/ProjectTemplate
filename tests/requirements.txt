@@ -1,7 +1,9 @@
 # Third-party libraries the scripts under test import, installed before the suite runs.
 # A change that adds a library to a script's inline metadata adds it here too.
 editorconfig>=0.17
-markdown-it-py>=4.2.0
+# markdown-it-py takes the exact version the prose gate and backlog_metrics.py pin,
+# so the suite runs the version they run.
+markdown-it-py==4.3.0
 pygments>=2.21.0
 pyyaml>=6
 ruamel.yaml>=0.18
