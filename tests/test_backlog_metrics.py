@@ -12,6 +12,7 @@ The script imports the review gate's Markdown readers, so it needs those require
 import base64
 import contextlib
 import datetime
+import importlib.metadata
 import io
 import json
 import re
@@ -1094,10 +1095,25 @@ class PinTests(unittest.TestCase):
                 self.assertRegex(found[0], r"^markdown-it-py==\d")
         self.assertEqual(1, len({found[0] for found in pins.values()}), pins)
 
-    def test_every_dependency_the_token_holding_run_resolves_is_pinned_exactly(self) -> None:
-        for dep in self.inline_dependencies(SCRIPTS / "backlog_metrics.py"):
+    def test_every_package_the_token_holding_run_resolves_is_pinned_exactly(self) -> None:
+        """Each declared dependency is exact, and so is each one the pinned markdown-it-py requires.
+
+        The suite installs the pinned markdown-it-py, so a bump requiring a new package fails here.
+        """
+        declared = self.inline_dependencies(SCRIPTS / "backlog_metrics.py")
+        for dep in declared:
             with self.subTest(dep=dep):
                 self.assertRegex(dep, r"^[A-Za-z0-9._-]+==[0-9][0-9A-Za-z.]*$")
+        pinned = {re.sub(r"[-_.]+", "-", dep.split("==")[0]).lower() for dep in declared}
+        needed = [
+            re.sub(r"[-_.]+", "-", re.split(r"[^A-Za-z0-9._-]", req, maxsplit=1)[0]).lower()
+            for req in importlib.metadata.requires("markdown-it-py") or []
+            if "extra ==" not in req
+        ]
+        self.assertTrue(needed)
+        for name in needed:
+            with self.subTest(requires=name):
+                self.assertIn(name, pinned)
 
 
 if __name__ == "__main__":
