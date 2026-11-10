@@ -1522,6 +1522,19 @@ class RenderCase(unittest.TestCase):
         self.assertIn("(0 findings)", et, msg)
         self.assertIn("nothing to converge", eb, msg)
 
+    def test_render_issue_ends_at_the_manual_findings_section(self) -> None:
+        """Both bodies end in the one hand-written section, so regenerating can keep it, per AUDIT.md section 8."""
+        fe = {"name": "Widget", "types": ["python"]}
+        for findings in ([], [("DRIFT", "verbatim: Y differs"), ("ERROR", "gh failed")]):
+            with self.subTest(findings=len(findings)):
+                _, body = audit.render_issue(
+                    fe, findings, "main", "abc1234", "2026-01-01T00:00:00Z", "hub123"
+                )
+                headings = [line for line in body.splitlines() if line.startswith("## ")]
+                self.assertEqual(headings[-1], audit.MANUAL_HEADING)
+                self.assertEqual(headings.count(audit.MANUAL_HEADING), 1)
+                self.assertIn(f"replace only the text above `{audit.MANUAL_HEADING}`", body)
+
     def test_title_and_intro_mirror(self) -> None:
         r_md = "# Widget <!-- omit from toc -->\n\nDoes widget things.\n\n## Build\n"
         h_md = "# Widget\n\nDoes widget things.\n\n## Release History\n"
