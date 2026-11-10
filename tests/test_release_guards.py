@@ -2052,7 +2052,8 @@ gh() {
     def test_validator_dotnet_steps_run_once_per_workspace(self) -> None:
         """Only a root holding exactly one solution or project keeps the bare call.
 
-        Every other tree gets each tracked solution, or each project, named instead. Each job's
+        Every other tree gets each tracked solution, or each project, named instead. A root holding
+        several names only its own solutions, so a nested one never hides the root's projects. Each job's
         resolver step is read from the workflow with the inputs it passes, and its output feeds that
         job's dotnet step. So a job passing the wrong input, or reading another step's output, fails
         here as a workflow edit would on a runner. The output reaches the step as the runner hands a
@@ -2144,6 +2145,16 @@ gh() {
                 ["App.csproj", "AppTests.csproj"],
                 named_style("App.csproj", "AppTests.csproj"),
                 [f"test --project AppTests.csproj {flags}"],
+            ),
+            "two root projects beside a nested solution": (
+                ["App.csproj", "AppTests.csproj", "sub/Tool.sln", "sub/Tool.csproj"],
+                named_style("App.csproj", "AppTests.csproj", "sub/Tool.csproj"),
+                [f"test --project AppTests.csproj {flags}"],
+            ),
+            "two root solutions beside a nested solution": (
+                ["App.sln", "App.slnx", "sub/Tool.sln", "tests/AppTests/AppTests.csproj"],
+                named_style("App.sln", "App.slnx"),
+                [f"test --project tests/AppTests/AppTests.csproj {flags}"],
             ),
         }
         steps = ((style, style_inputs, 1), (tests, test_inputs, 2))

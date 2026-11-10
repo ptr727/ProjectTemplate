@@ -13,7 +13,8 @@ inputs:
   solutions:
     description: >-
       'true' to name each tracked .sln or .slnx in place of the projects wherever the tree holds
-      one.
+      one. A root holding a solution or project names only its own solutions, and the projects
+      where it holds none, so a nested solution never stands in for the root's projects.
     required: false
     default: 'false'
 
@@ -38,7 +39,9 @@ runs:
         root=$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx' ':(glob)*.csproj')
         workspaces=
         if [ -z "$root" ] || [ "$root" != "${root%%$'\n'*}" ]; then
-          if [ "$SOLUTIONS" = true ]; then
+          if [ "$SOLUTIONS" = true ] && [ -n "$root" ]; then
+            workspaces=$(git ls-files -- ':(glob)*.sln' ':(glob)*.slnx')
+          elif [ "$SOLUTIONS" = true ]; then
             workspaces=$(git ls-files -- ':(glob)**/*.sln' ':(glob)**/*.slnx')
           fi
           if [ -z "$workspaces" ]; then
