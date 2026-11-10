@@ -26,6 +26,10 @@ or a closed-out lane the track reopens. `previous=` stays fixed while the round 
 
   <!-- handoff-round: v1 track=<slug> round=<n> closed=<YYYY-MM-DD> -->
 
+That line is the comment's last, and its first is a `## Round <n>, closed <YYYY-MM-DD>:` heading
+naming the same round and date. A comment of any other shape, one quoting the line included, is
+an ordinary comment rather than a round.
+
 The title is for humans and nothing parses it. The invariant a reader checks is that exactly one
 open issue carries the `handoff` label for a given track in a given repository. The track is read from
 the metadata block rather than from the label. That is because an issue carrying the label and no
@@ -543,24 +547,43 @@ def archived_text(comment_body: str) -> str:
     return rest.strip() if first.startswith("## Round ") else text
 
 
+def round_mark(comment_body: str) -> re.Match[str] | None:
+    """The round mark of a comment shaped as `archive` writes one, or None for any other comment.
+
+    The whole shape is required, rather than a mark line anywhere. A maintainer answering a parked
+    question can quote an example mark on a line of its own, and that comment is not a round. So
+    the mark must be the comment's last line and its only mark. The first line must be the heading
+    `archive` writes, naming the same round and close date as the mark.
+    """
+    text = comment_body or ""
+    marks = list(ROUND_MARK.finditer(text))
+    if len(marks) != 1 or text[marks[0].end() :].strip():
+        return None
+    mark = marks[0]
+    heading = text.strip().partition("\n")[0]
+    if not heading.startswith(f"## Round {mark['round']}, closed {mark['closed']}:"):
+        return None
+    return mark
+
+
 def rounds_of(comments: list[dict], track: str) -> list[dict]:
     """The archived rounds on `track` among an issue's comments, newest first.
 
-    A comment carrying no mark is an ordinary comment, such as a parking note, and is not a
-    round. One carrying several is not a round either, since its round cannot be read. On a public
-    repository anyone can comment. So a mark counts only from an account with write access and
-    only on a comment nobody has hidden. That keeps an outsider from writing a round into the
-    track's history or blocking `new` with a conflicting one.
+    A comment not shaped as an archived round is not a round. It is an ordinary comment, such as a
+    parking note or an answer quoting a mark. On a public repository anyone can comment. So a
+    round counts only from an account with write access and only on a comment nobody has hidden.
+    That keeps an outsider from writing a round into the track's history or blocking `new` with a
+    conflicting one.
     """
     found = []
     for row in comments:
         if row.get("authorAssociation") not in WRITERS or row.get("isMinimized"):
             continue
-        marks = list(ROUND_MARK.finditer(row.get("body") or ""))
-        if len(marks) == 1 and marks[0]["track"] == track:
-            heading = (row.get("body") or "").strip().partition("\n")[0]
+        mark = round_mark(row.get("body") or "")
+        if mark is not None and mark["track"] == track:
+            heading = (row.get("body") or "").strip().partition("\n")[0].rstrip("\r")
             _, _, title = heading.partition(": ")
-            found.append({**row, "mark": marks[0].groupdict(), "title": title})
+            found.append({**row, "mark": mark.groupdict(), "title": title})
     found.reverse()
     return found
 

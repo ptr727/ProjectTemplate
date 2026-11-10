@@ -1011,6 +1011,33 @@ class NewCase(unittest.TestCase):
         code, out, _ = run(fake, "chain", "--repo", "o/r", "--grep", "planted|hidden")
         self.assertIn("0 of 2 rounds walked match", out)
 
+    def test_a_writer_s_comment_quoting_a_round_mark_is_no_round(self) -> None:
+        """An answer quoting an example mark on a line of its own stays an ordinary comment.
+
+        Read as a round, a quote naming the outgoing round would refuse `new` as a second text for
+        it. And `chain` would list the answer as round history.
+        """
+        row = link(30, "default", 2, None)
+        mark = handoff.archive("x", "default", 2, "2026-09-01", "t").splitlines()[-1]
+        archived = handoff.archive("quoted answer", "default", 2, "2026-09-01", "t")
+        row["comments"] = [
+            note(f"Answer: take option 1. The mark reads\n\n{mark}\n\nonce archived.", "u1"),
+            note(f"{mark}\n\nThat line is the mark to look for.", "u2"),
+            note(f"Quoting the mark at the end:\n\n{mark}", "u3"),
+            note(archived.replace("## Round 2,", "## Round 3,"), "u4"),
+        ]
+        self.assertEqual(handoff.rounds_of(row["comments"], "default"), [])
+        fake = FakeGh({30: row})
+        code, _, _ = run(
+            fake, "new", "--repo", "o/r", "--title", "Next", "--body-file", self.body_file("work")
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(writes_of(fake), [["issue", "comment"], ["issue", "edit"]])
+        self.assertEqual(
+            [r["url"] for r in handoff.rounds_of(fake.issues[30]["comments"], "default")],
+            [fake.issues[30]["comments"][-1]["url"]],
+        )
+
     def test_a_round_archived_with_other_line_endings_counts_as_the_same_text(self) -> None:
         row = link(30, "default", 2, None)
         crlf = handoff.archive(row["body"], "default", 2, "2026-09-01", "round 2")
