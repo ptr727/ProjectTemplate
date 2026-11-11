@@ -430,6 +430,30 @@ class DockerLintCase(unittest.TestCase):
         self.assertFalse(snapshot.exists())
         self.assertFalse(owner.exists())
 
+    def test_a_run_with_zero_targets_still_removes_an_ended_run_s_snapshot(self) -> None:
+        snapshot, owner = self.ended_run()
+        result, output = self.invoke({"markdownlint"}, FakeRunner())
+        self.assertEqual(0, result, output)
+        self.assertIn("SWEPT 1 snapshot(s)", output)
+        self.assertFalse(snapshot.exists())
+        self.assertFalse(owner.exists())
+
+    def test_a_run_whose_pull_fails_still_removes_an_ended_run_s_snapshot(self) -> None:
+        self.track("README.md")
+        snapshot, owner = self.ended_run()
+
+        class FailingPull(FakeRunner):
+            def __call__(
+                self, command: list[str], timeout: int, *, capture_output: bool = False
+            ) -> subprocess.CompletedProcess[str]:
+                return subprocess.CompletedProcess(command, int(command[:2] == ["docker", "pull"]))
+
+        result, output = self.invoke({"markdownlint"}, FailingPull())
+        self.assertEqual(1, result, output)
+        self.assertIn("SWEPT 1 snapshot(s)", output)
+        self.assertFalse(snapshot.exists())
+        self.assertFalse(owner.exists())
+
     def test_a_snapshot_whose_run_holds_its_lock_is_kept(self) -> None:
         self.track("README.md")
         snapshot, owner = self.ended_run()

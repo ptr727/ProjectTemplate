@@ -584,6 +584,9 @@ def lint(
             print(f"TARGETS {linter.name}: {len(files)} file(s)", flush=True)
             applicable.append((linter, files))
 
+        parent = snapshot_parent(root)
+        if swept := remove_stale_snapshots(parent):
+            print(f"SWEPT {swept} snapshot(s) an ended run left behind", flush=True)
         if not applicable:
             print("COMPLETE lint: zero applicable linters", flush=True)
             return 0
@@ -595,9 +598,6 @@ def lint(
             digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
 
         print("PHASE execution: pulls complete, repository mounts begin", flush=True)
-        parent = snapshot_parent(root)
-        if swept := remove_stale_snapshots(parent):
-            print(f"SWEPT {swept} snapshot(s) an ended run left behind", flush=True)
         with owned_snapshot(parent) as snapshot:
             staged = stage_snapshot(root, snapshot)
             print(f"SNAPSHOT {staged} tracked or unignored path(s) staged to mount", flush=True)

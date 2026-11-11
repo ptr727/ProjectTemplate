@@ -59,8 +59,9 @@ def page_reviews(pr: Any, pages: Callable[[], Iterable[dict]]) -> None:
     """Replace a windowed `reviews` read with every review, oldest first, where older ones exist.
 
     The window reads the newest reviews, so `pages` walks the whole connection forward instead. It
-    starts after the windowed read, so nothing that read saw is lost. A failed page read ends the
-    run, so a list is whole or never returned, and a read holding no connection is left alone.
+    starts at the first page and replaces the windowed nodes, so it holds all they held. A failed
+    page read ends the run, so a list is whole or never returned, and a read holding no connection
+    is left alone.
     """
     reviews = pr.get("reviews") if isinstance(pr, dict) else None
     page = reviews.get("pageInfo") if isinstance(reviews, dict) else None
