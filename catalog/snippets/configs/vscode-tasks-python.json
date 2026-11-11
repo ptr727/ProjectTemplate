@@ -130,7 +130,7 @@
             }
         },
         // Lint group, run on demand.
-        // The four Docker linters go through the hub's scripts/docker_lint.py, fetched by hub_fetch_run.py.
+        // The EditorConfig, Workflows, Markdown, and Spelling tasks go through the hub's scripts/docker_lint.py, fetched by hub_fetch_run.py.
         // Each container therefore sees a read-only snapshot of the tracked and unignored files, with no network.
         // It mirrors the CI lint gate.
         // Broad live spell-checking is the cspell extension's job.
