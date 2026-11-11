@@ -56,8 +56,9 @@ maintainer can supply what section 0A lists.
    conversion lands that conversion first, as its own merged pull request. In that case, the feature
    branch from step 2 is cut again from `develop` after that pull request merges. A `branch:`
    audit finding naming paths `develop` is behind on calls for a re-level of `develop` before
-   the conversion, per STANDUP.md section 1A. So does one too large to classify, once a hand
-   comparison shows `develop` behind. Then carry `CLAUDE.md`,
+   the conversion, per STANDUP.md section 1A. So does a hand comparison
+   showing `main` content `develop` lacks, for a finding too large to classify or a path changed
+   on both branches. Then carry `CLAUDE.md`,
    `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather
    than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
    `cspell.json`. A downstream `AUDIT.md` is the short, repository-scoped form that says how the
