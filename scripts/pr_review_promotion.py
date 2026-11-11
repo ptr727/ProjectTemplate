@@ -24,7 +24,7 @@ DEVELOP = "develop"
 DEPENDABOT = "dependabot"
 MANIFEST = re.compile(
     r"pyproject\.toml|uv\.lock|requirements[^/]*\.txt|Directory\.Packages\.props"
-    r"|packages\.lock\.json"
+    r"|packages\.lock\.json|dotnet-tools\.json"
 )
 
 Q_CONSTITUENTS = """
@@ -32,7 +32,7 @@ query($o:String!,$r:String!,$n:Int!,$after:String){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid
     commits(first:100, after:$after){ totalCount pageInfo{ hasNextPage endCursor } nodes{ commit{ oid
       associatedPullRequests(first:5){ nodes{ number baseRefName mergeCommit{ oid }
-        author{ __typename login }
+        author{ login }
         files(first:100){ pageInfo{ hasNextPage } nodes{ path } }
         commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } }
       }}
@@ -58,16 +58,15 @@ def green_bump(landed: dict, paths: set[str]) -> bool:
     """Whether a merged pull request is Dependabot's, manifests and lockfiles only, and green.
 
     Dependabot is GraphQL's Bot login, which REST spells `dependabot[bot]`. Green is the head's
-    whole rollup rather than its required checks alone, since which checks
-    were required when it merged is not on the payload. A failing optional check therefore sends
-    the bump to the maintainer, the safe side of that gap.
+    whole rollup rather than its required checks alone, since which checks were required when it
+    merged is not on the payload. A failing optional check therefore sends the bump to the
+    maintainer, the safe side of that gap.
     """
     author = landed.get("author") or {}
     tips = (landed.get("commits") or {}).get("nodes") or []
     rollup = ((tips[-1].get("commit") or {}).get("statusCheckRollup") or {}) if tips else {}
     return (
-        author.get("__typename") == "Bot"
-        and author.get("login") == DEPENDABOT
+        author.get("login") == DEPENDABOT
         and bool(paths)
         and all(is_manifest(p) for p in paths)
         and rollup.get("state") == "SUCCESS"
@@ -96,31 +95,30 @@ def read_bumps(commits: list[dict]) -> Bumps:
     """
     bumped: set[str] = set()
     other: set[str] = set()
-    numbers: set[int] = set()
+    bumps: dict[int, set[str]] = {}
     for node in commits:
         landed = landing(node)
         if landed is None:
             oid = ((node.get("commit") or {}).get("oid") or "")[:8]
             return Bumps(why=f"commit {oid} landed through no pull request into {DEVELOP}")
-        files = landed.get("files") or {}
-        if (files.get("pageInfo") or {}).get("hasNextPage"):
+        changed, cut = rounds.changed_paths(landed)
+        if cut:
             return Bumps(why=f"pull request #{landed.get('number')}'s file list runs past a page")
-        paths = {n["path"] for n in files.get("nodes") or [] if n.get("path")}
+        paths = set(changed)
         if green_bump(landed, paths):
             bumped |= paths
-            numbers.add(landed["number"])
+            bumps[landed["number"]] = paths
         else:
             other |= paths
-    return Bumps(frozenset(bumped - other), tuple(sorted(numbers)))
+    only = bumped - other
+    return Bumps(frozenset(only), tuple(sorted(n for n, p in bumps.items() if p & only)))
 
 
 def eligible(pr: dict) -> bool:
     """Whether this head is a promotion a round covers, reading `none`, its whole list in view."""
-    default = default_branch(pr)
     return (
-        bool(default)
-        and pr.get("headRefName") == DEVELOP
-        and pr.get("baseRefName") == default
+        pr.get("headRefName") == DEVELOP
+        and pr.get("baseRefName") == default_branch(pr)
         and bool(rounds.head_reviews(pr))
         and rounds.coverage(pr)[0] == "none"
         and not rounds.changed_paths(pr)[1]
@@ -175,5 +173,5 @@ def coverage(pr: dict) -> tuple[str, str]:
     note = f"{len(nodes) - len(kept)} changed only by green Dependabot bumps ({numbers})"
     if not kept:
         return "dependabot", f"every changed file is one of {note}"
-    state, reason = rounds.table_cover({**pr, "files": {**files, "nodes": kept}})
+    state, reason = rounds.table_cover({**pr, "files": {**files, "nodes": kept}}, bumps.paths)
     return ("dependabot" if state else "none"), f"{reason}, with {note} left out"

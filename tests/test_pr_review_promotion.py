@@ -27,7 +27,6 @@ def landed(
     oid: str,
     paths: list[str],
     login: str = "dependabot",
-    typename: str = "Bot",
     state: str = "SUCCESS",
     base: str = "develop",
     more: bool = False,
@@ -43,7 +42,7 @@ def landed(
                         "number": number,
                         "baseRefName": base,
                         "mergeCommit": {"oid": oid},
-                        "author": {"__typename": typename, "login": login},
+                        "author": {"login": login},
                         "files": {
                             "pageInfo": {"hasNextPage": more},
                             "nodes": [{"path": p} for p in paths],
@@ -94,6 +93,7 @@ class TestReadBumps(unittest.TestCase):
             "requirements.txt",
             "Directory.Packages.props",
             "a/packages.lock.json",
+            ".config/dotnet-tools.json",
         ):
             with self.subTest(path=path):
                 self.assertTrue(promotion.is_manifest(path))
@@ -107,17 +107,13 @@ class TestReadBumps(unittest.TestCase):
         got = promotion.read_bumps(
             [
                 landed(BUMP, ["uv.lock"]),
-                landed(FEATURE, ["uv.lock", "a.py"], login="maintainer", typename="User"),
+                landed(FEATURE, ["uv.lock", "a.py"], login="maintainer"),
             ]
         )
         self.assertEqual(frozenset(), got.paths)
 
     def test_a_bump_touching_anything_else_is_not_counted(self) -> None:
         got = promotion.read_bumps([landed(BUMP, ["uv.lock", "a.py"])])
-        self.assertEqual(frozenset(), got.paths)
-
-    def test_a_user_named_dependabot_is_not_counted(self) -> None:
-        got = promotion.read_bumps([landed(BUMP, ["uv.lock"], typename="User")])
         self.assertEqual(frozenset(), got.paths)
 
     def test_another_bot_is_not_counted(self) -> None:
@@ -141,6 +137,17 @@ class TestReadBumps(unittest.TestCase):
         got = promotion.read_bumps([landed(BUMP, ["uv.lock"], base="main")])
         self.assertEqual(frozenset(), got.paths)
         self.assertIn("landed through no pull request", got.why)
+
+    def test_only_the_bumps_behind_a_counted_path_are_named(self) -> None:
+        got = promotion.read_bumps(
+            [
+                landed(BUMP, ["uv.lock"], number=11),
+                landed("e" * 40, ["requirements.txt"], number=12),
+                landed(FEATURE, ["uv.lock"], login="m", number=13),
+            ]
+        )
+        self.assertEqual(frozenset({"requirements.txt"}), got.paths)
+        self.assertEqual((12,), got.numbers)
 
     def test_a_file_list_past_its_page_withdraws_the_reading(self) -> None:
         got = promotion.read_bumps(
@@ -178,6 +185,20 @@ class TestAttach(unittest.TestCase):
 
     def test_a_head_with_no_round_is_not_walked(self) -> None:
         pr = {**promotion_pr(["uv.lock"]), "reviews": {"nodes": [], "pageInfo": {}}}
+        follow = self.follow()
+        promotion.attach(pr, "o", "r", 7, follow)
+        follow.assert_not_called()
+
+    def test_a_truncated_review_history_is_not_walked(self) -> None:
+        pr = promotion_pr(["uv.lock"])
+        pr["reviews"]["pageInfo"]["hasPreviousPage"] = True
+        follow = self.follow()
+        promotion.attach(pr, "o", "r", 7, follow)
+        follow.assert_not_called()
+
+    def test_an_unread_file_list_is_not_walked(self) -> None:
+        pr = promotion_pr(["uv.lock"])
+        pr["files"]["unread"] = "the head moved while the list was paged"
         follow = self.follow()
         promotion.attach(pr, "o", "r", 7, follow)
         follow.assert_not_called()
@@ -226,19 +247,27 @@ class TestDigestReading(fixtures.GqlCase):
 
     def test_a_table_naming_all_but_the_bump_reads_dependabot(self) -> None:
         pr = promotion_pr(["a.py", "uv.lock"], table=["a.py"])
-        pages = page(
-            landed(BUMP, ["uv.lock"]), landed(FEATURE, ["a.py"], login="m", typename="User")
-        )
+        pages = page(landed(BUMP, ["uv.lock"]), landed(FEATURE, ["a.py"], login="m"))
         self.assertEqual(0, self.status(pr, pages))
         out = self.out.getvalue()
         self.assertIn("coverage=dependabot ", out)
         self.assertIn("with 1 changed only by green Dependabot bumps (#11) left out", out)
 
+    def test_a_table_naming_a_bumped_path_too_reads_dependabot(self) -> None:
+        pr = promotion_pr(["a.py", "pyproject.toml", "uv.lock"], table=["a.py", "pyproject.toml"])
+        pages = page(
+            landed(BUMP, ["pyproject.toml", "uv.lock"]), landed(FEATURE, ["a.py"], login="m")
+        )
+        self.assertEqual(0, self.status(pr, pages))
+        out = self.out.getvalue()
+        self.assertIn("coverage=dependabot ", out)
+        self.assertIn("with 2 changed only by", out)
+
     def test_a_table_missing_a_file_beside_the_bump_reads_none(self) -> None:
         pr = promotion_pr(["a.py", "b.py", "uv.lock"], table=["a.py"])
         pages = page(
             landed(BUMP, ["uv.lock"]),
-            landed(FEATURE, ["a.py", "b.py"], login="m", typename="User"),
+            landed(FEATURE, ["a.py", "b.py"], login="m"),
         )
         self.assertEqual(0, self.status(pr, pages))
         out = self.out.getvalue()
@@ -262,7 +291,7 @@ class TestDigestReading(fixtures.GqlCase):
 
     def test_a_promotion_with_no_bump_reads_as_it_did(self) -> None:
         pr = promotion_pr(["a.py"])
-        pages = page(landed(FEATURE, ["a.py"], login="m", typename="User"))
+        pages = page(landed(FEATURE, ["a.py"], login="m"))
         self.assertEqual(0, self.status(pr, pages))
         out = self.out.getvalue()
         self.assertIn("coverage=none ", out)

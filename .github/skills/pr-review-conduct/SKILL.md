@@ -56,14 +56,15 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    that does stands in as `coverage=carried:table`. Its table has to name exactly the changed files.
    Either table may leave out an added, modified, renamed, or deleted file with no changed line,
    such as a binary. That holds while some changed file has one. On a develop -> main promotion, a
-   file only green Dependabot bumps changed leaves that comparison, `coverage=dependabot`, as the
-   promotion case below states.
+   file only green Dependabot bumps changed leaves that comparison. The head reads
+   `coverage=dependabot`, which satisfies this item, where that covers every changed file or the
+   table names the rest.
    A table stands in only where no Copilot round on the pull request, on any commit, states
    partial coverage. So a pull request that ever had a partial round goes to the maintainer.
    `coverage=none` and `coverage=UNKNOWN` leave this item unsatisfied and decide no exit code,
    so read the field rather than the exit.
-   The coverage this item requires is Copilot's, or the attested local pass above, and CodeRabbit
-   and Qodo are advisory. That is because the hub's `docs/pr-reviewer-evaluation.md` "Status"
+   The coverage this item requires is Copilot's, the attested local pass above, or that green
+   Dependabot reading, and CodeRabbit and Qodo are advisory. That is because the hub's `docs/pr-reviewer-evaluation.md` "Status"
    names Copilot the incumbent and says no candidate is a required reviewer. An advisory
    reviewer's absence blocks nothing, while its findings owe item 3 exactly as Copilot's do.
    A review of the head it has started and not finished is not an absence. While a CodeRabbit
@@ -122,8 +123,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      it. A path `git diff -M100%` against the merge base reports as `R100` needs no read evidence,
      since no byte of it changed. A Dependabot pull request counts as covered where it changed only
      dependency manifests and lockfiles and merged into `develop` with its head's checks green.
-     `pr_review.py` reads it off the promotion's commits. Where that covers every changed file, or
-     the file table names the rest, it reads `coverage=dependabot`, which satisfies this item.
+     `pr_review.py` reads it off the promotion's commits. Where it reads `coverage=dependabot`,
+     this case is not reached.
      A change pushed directly to `develop` has no feature pull request. So an attestation published
      on the promotion counts for each file in the attested head's diff, under the same conditions.
      Its base is `main`. A Copilot round on the final head is still required, with

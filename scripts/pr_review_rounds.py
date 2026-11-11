@@ -394,12 +394,13 @@ def table_matches(named: tuple[str, ...], changed: list[str]) -> bool:
     )
 
 
-def table_cover(pr: dict) -> tuple[str, str]:
+def table_cover(pr: dict, gone: frozenset[str] = frozenset()) -> tuple[str, str]:
     """Whether a Copilot file table stands in for a missing statement, and the reason either way.
 
     The head's own table is read first, else the newest round's that carries one (`carried:table`).
     Either counts only where it names exactly the files changed now and no round states partial
     coverage. A file the table may leave out under `adapter.left_out` is left out of that match.
+    A row naming a path in `gone` leaves the match too, for a caller that took that file out.
     """
     if partial_on_record(pr):
         return "", "a round on this pull request states partial coverage, so no table stands in"
@@ -417,7 +418,7 @@ def table_cover(pr: dict) -> tuple[str, str]:
     changed, cut = changed_paths(pr)
     if cut or files_unread(pr) or not changed:
         return "", "the changed-file list is incomplete or empty, so no table can be matched"
-    named = reading(node).table or ()
+    named = tuple(e for e in reading(node).table or () if e not in gone)
     where = (commit_oid(node) or "")[:8] or "a commit this cannot name"
     skip = adapter.left_out(named, (pr.get("files") or {}).get("nodes") or [])
     kept = [p for p in changed if p not in skip]
