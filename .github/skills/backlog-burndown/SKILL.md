@@ -180,8 +180,8 @@ Where the condition it states is checkable state, such as an issue closing, and 
 That seat comments the evidence.
 Where the question the "not yet" postponed is still undetermined, the seat puts `decision` back in the same act.
 A group parked on it then stays parked, and a promotion it holds stays held.
-Where the issue held nothing but that question and a parked group waits on it, it joins that group's issues rather than ranking alone.
-Otherwise the issue is ranked like any other.
+Where the question is settled, an issue that held nothing but it and has a parked group waiting joins that group's issues.
+Any other lifted issue is ranked like any other.
 The report names each issue lifted this way.
 Any other condition, and a read that cannot be made, leaves the label on.
 
@@ -965,8 +965,7 @@ a parked group's work holds the promotion until the group has applied it. Applie
 request merged to develop, or its claim comment records that the answer ended the work with nothing
 to merge. That holds whether or not the decision issue still carries its label. A claim released
 with no merge for any other reason, as a dead worker's or an abandoned group's is, does not lift
-it. An open issue whose answer leaves work on it holds the promotion until a `Closes on promotion:` line in
-`origin/main..origin/develop` names it. A read that cannot run holds the
+it. A read that cannot run holds the
 promotion too, since it shows nothing about whether the promotion is blocked. A held promotion
 leaves the round at develop, and later rounds keep merging to develop.
 
@@ -1000,7 +999,7 @@ reported as needing the maintainer present. An outsider's issue awaiting accepta
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
 request, awaiting promotion, and `deferred`, given by count. A held promotion is named too, with each `decision` issue holding
-it. An ending that cannot dispatch a promotion worker the run owes is named too. A dispatch failure meets the same harness error, and a session ending on a context limit has no room to run one. The final message says that worker did not run, and names any open promotion pull request. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
+it. An ending that cannot dispatch a promotion worker the run owes is named too. A run ended by a dispatch failure does not attempt one, since the same harness error would meet it. A session ending on a context limit has no room to run one. The final message says that worker did not run, and names any open promotion pull request. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State
 
