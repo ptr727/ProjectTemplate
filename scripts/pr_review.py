@@ -82,12 +82,14 @@ Subcommands
            states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
            on (`PARTIAL` instead where an earlier round states partial coverage), `table` where a
            round covering the head names exactly the changed files in its own file table, one
-           added, modified, or deleted with no changed line GitHub counts left out where unnamed,
-           `carried:table` where the newest round carrying a table does, `local` where an attested
-           local pass covers a head the review policy hands to one, by default off the default, and
-           `none` otherwise. A table stands in only where no round on record states partial
-           coverage and the whole review history is in view. `none` decides no exit code and
-           prints a note, since Merge Gate item 2 in pr-review-conduct reads this field.
+           added, modified, renamed, or deleted with no changed line GitHub counts left out where
+           unnamed, `carried:table` where the newest round carrying a table does, `local` where an
+           attested local pass covers a head the review policy hands to one, by default off the
+           default, `dependabot` where only green Dependabot bumps changed a promotion's files or
+           a table names the rest, and `none` otherwise. A table stands in only where no round on
+           record states partial coverage and the whole review history is in view. `none` decides
+           no exit code and prints a note, since Merge Gate item 2 in pr-review-conduct reads this
+           field.
            A promotion re-reviews content its feature pull requests already carried, so the hosted
            review runs once per change, at the promotion. On a pull request into any other branch
            the attested local pass covers every head, `review_on_head=local` where no Copilot
@@ -248,6 +250,7 @@ from pathlib import Path
 
 import gh_graphql as shared
 import pr_review_policy as review_policy
+import pr_review_promotion as promotion
 import pr_review_side as side
 from pr_review_answers import ack_lines, report_verdict
 from pr_review_checks import (
@@ -393,7 +396,7 @@ mutation($pr:ID!,$bot:ID!){
 
 # The rollup rides this query and hangs off the last commit, which a case holds equal to `headRefOid`.
 HELD_FIELDS = """
-    headRefOid baseRefName state mergeable mergeStateStatus mergedAt closedAt mergeCommit{ oid }
+    headRefOid baseRefName state mergeable mergeStateStatus mergedAt closedAt headRefName mergeCommit{ oid }
     baseRepository{ defaultBranchRef{ name } }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
@@ -779,16 +782,13 @@ def run_log_reading(state: str, line: str) -> str:
 def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
     """The full payload with its changed files paged, read again while that list is unread."""
 
-    def read() -> dict:
-        fresh = gql(Q_FULL, owner, repo, num)
+    def read(held: dict | None = None) -> dict:
+        fresh = gql(Q_FULL, owner, repo, num) if held is None else held
         page_files(owner, repo, num, fresh)
         return fresh
 
-    if pr is None:
-        pr = read()
-    else:
-        page_files(owner, repo, num, pr)
-    return backoff(pr, read, files_unread, delays=READ_RETRY_DELAYS)
+    pr = backoff(read(pr), read, files_unread, delays=READ_RETRY_DELAYS)
+    return promotion.attach(pr, owner, repo, num, follow)
 
 
 def reread_json(path: str, jq: str) -> object:
