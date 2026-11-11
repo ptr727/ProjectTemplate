@@ -54,9 +54,9 @@ maintainer can supply what section 0A lists.
 4. **The instruction set, before authoring anything.** STANDUP.md section 1A. An existing
    repository that `docs/eol-lf-rollout.md` "Per-Repo Conversion" says needs a line-ending
    conversion lands that conversion first, as its own merged pull request. In that case, the feature
-   branch from step 2 is cut again from `develop` after that pull request merges. Where the audit
-   reports a `branch:` finding naming paths `develop` is behind on, `develop` is re-leveled before the conversion, per STANDUP.md section
-   1A. Then carry `CLAUDE.md`,
+   branch from step 2 is cut again from `develop` after that pull request merges. A `branch:`
+   audit finding naming paths `develop` is behind on calls for a re-level of `develop` before
+   the conversion, per STANDUP.md section 1A. So does one too large to classify. Then carry `CLAUDE.md`,
    `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather
    than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
    `cspell.json`. A downstream `AUDIT.md` is the short, repository-scoped form that says how the
@@ -93,7 +93,7 @@ maintainer can supply what section 0A lists.
 
 9. **Verify with the audit.** STANDUP.md section 5: run `AUDIT.md` end to end. The repo is stood
    up only when it passes for its type, or a hub-committed `reports/<repo>/audit.md`
-   plus an issue tracks its residual deltas.
+   plus an issue tracks its residual deltas. `<repo>` there is the repository name in lowercase.
 
 ## Onboarding a new repo type
 

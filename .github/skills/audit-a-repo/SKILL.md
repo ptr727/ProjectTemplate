@@ -35,7 +35,7 @@ The audit is the fleet's measurement procedure. The failure shapes it guards aga
 
 ## Reporting
 
-- **Write `reports/<repo>/audit.md` from `reports/_template.md`**, findings ranked most severe first, each with the `file:line` it was judged against, and quote the run stamp. The stamp is quoted because findings are a point-in-time snapshot. All of this is in `AUDIT.md` section 8.
+- **Write `reports/<repo>/audit.md` from `reports/_template.md`**, `<repo>` being the repository name in lowercase. Findings are ranked most severe first, each with the `file:line` it was judged against. Quote the run stamp. The stamp is quoted because findings are a point-in-time snapshot. All of this is in `AUDIT.md` section 8.
 - **The hub authors the report.** A downstream repo never opens a hub pull request to write its own, which would be self-certification. Downstream context goes into issues filed against the hub instead.
 - **Generate a convergence issue, never compose one**: `uv run --no-project --script spec/audit.py --issue <repo>` emits it from live findings. A finding judged by hand goes under the fixed `## Manual findings` heading that body ends with. That is the issue's one hand-written section, and regenerating replaces only the text above it (`AUDIT.md` section 8). An agent picking such an issue up re-runs the audit first and acts on the live result, not the pasted findings.
 - **Reconcile registry `driftNotes` in the same pass**: a resolved deviation's note is deleted, not left describing finished work. A note naming a check id is retired by a person, not by a run. All of this is in `AUDIT.md` section 8.

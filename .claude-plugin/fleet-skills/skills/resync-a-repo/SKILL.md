@@ -73,9 +73,9 @@ repo, or agent memory.
 A repository still on the old CRLF default converts first. Where `docs/eol-lf-rollout.md`
 "Per-Repo Conversion" says the repository needs the conversion, land it as its own merged pull
 request before step 1, carrying `.editorconfig` and `.gitattributes` itself. Once it merges,
-re-measure against `develop` and base the branch for the steps below on `develop`. Where that
-conversion is needed and an audit `branch:` finding names paths `develop` is behind on,
-re-level `develop` before the conversion. Use the squash pull request `RESYNC.md`
+re-measure against `develop` and base the branch for the steps below on `develop`. A needed
+conversion waits on a re-level of `develop` where an audit `branch:` finding names paths
+`develop` is behind on. It waits too where the finding is too large to classify. Use the squash pull request `RESYNC.md`
 section 3 describes.
 
 1. **The instruction set first.** `CLAUDE.md`, then `AGENTS.md` and `GOVERNANCE.md` verbatim sections, then `CODESTYLE.md` and `WORKFLOW.md`. Include the `AGENTS.md` skill-dependency pointer paragraph in this same step, as one more verbatim unit and not a separate pass. The paragraph names `scripts/skills_install.py` and where the fleet's Skills live. `CLAUDE.md` is the single `@AGENTS.md`-import file that gets `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured. **Before touching `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or `WORKFLOW.md` in this step, run the `carried-instruction-file-guard` skill's distinctive-phrase probe against the target file, every time, without exception.** **This holds regardless of whether the update is a verbatim re-vendor or an intent-fidelity edit.** This is not advisory language to weigh against how routine the diff looks. A diff that looks routine is exactly the shape the AGENTS.md-overwrite incident took. Do not proceed to the re-vendor until the probe has run and any local addition it finds has a destination. That gate follows that skill's own procedure. `CLAUDE.md` is outside that guard's scope. It carries no mixed or repo-specific content by design, so its re-vendor is an ordinary verbatim-fidelity copy, no probe needed.

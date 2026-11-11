@@ -816,7 +816,7 @@ def carried_link_errors(root, baseline):
 def hub_copy(item, path):
     """The hub file a carrier adapts for this entry, its `reference` where it names one and otherwise its own path."""
     reference = item.get("reference")
-    return reference if isinstance(reference, str) else path
+    return reference if isinstance(reference, str) and reference else path
 
 
 def placeholder_errors(root, baseline):
