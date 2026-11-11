@@ -646,7 +646,12 @@ class ScaffoldCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             directory.chmod(0o700)
-            names = ["fleet_service_key", "unknownrepo_service_key", "ExampleRepo_service_key"]
+            names = [
+                "fleet_service_key",
+                "unknownrepo_service_key",
+                "ExampleRepo_service_key",
+                "examplerepo",
+            ]
             for name in names:
                 (directory / name).write_text("", encoding="utf-8")
             _, _, strays, unclaimed, _ = self.run_scaffold(directory)

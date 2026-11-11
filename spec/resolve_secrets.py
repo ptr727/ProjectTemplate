@@ -238,14 +238,7 @@ def fleet_expectations(
 
 def registry_short_names(registry: Any) -> set[str]:
     """Every `shortName` the registry holds, the owner tokens a consumer secret file opens with."""
-    entries = registry.get("repos") if isinstance(registry, dict) else None
-    if not isinstance(entries, list):
-        return set()
-    return {
-        e["shortName"]
-        for e in entries
-        if isinstance(e, dict) and isinstance(e.get("shortName"), str)
-    }
+    return {e["shortName"] for e in registry["repos"] if "shortName" in e}
 
 
 def scaffold(
@@ -273,7 +266,8 @@ def scaffold(
             e.name
             for e in os.scandir(directory)
             if e.name.startswith(secret_names.FILE_PREFIX)
-            or e.name.split("_", 1)[0] not in short_names
+            or e.name.partition("_")[0] not in short_names
+            or "_" not in e.name
         }
     strays = sorted(on_disk & wrong_scope)
     present = sorted(on_disk & (set(expected) | held))
