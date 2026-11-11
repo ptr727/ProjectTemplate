@@ -64,7 +64,9 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-REGISTRY_REGION = lift(r'(if \[ -f "\$registry" \]; then\n    if ! archived_status=.*?\n^fi\n)')
+REGISTRY_REGION = lift(r"^(jqr\(\) \{.*?\}\n)") + lift(
+    r'(if \[ -f "\$registry" \]; then\n    if ! archived_status=.*?\n^fi\n)'
+)
 
 
 class RegistryRegionCase(unittest.TestCase):
