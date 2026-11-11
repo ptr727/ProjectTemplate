@@ -151,7 +151,7 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [ ] DevKitCIoT (same)
 - [ ] EspDinIoT (same)
 - [x] Financial-Modeling (same): adopted on `develop` in ptr727/Financial-Modeling#116 at `66a550a`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
-- [ ] HolidayLights (same)
+- [x] HolidayLights (same): adopted on `develop` in ptr727/HolidayLights#15 at `28a714c`, merged 2026-10-24 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [ ] `reports/workflow-reuse.md` regenerated with `merge-bot-pull-request.yml` showing callers equal to copies.
 
 ### Stage 2: The Gates
@@ -184,7 +184,7 @@ The remaining repos are one checkbox each below. The sweep list is every catalog
 - [x] MediaTools: adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [ ] AudioCleaner: Its `test-pull-request.yml` calls a local `validate-task.yml` copy rather than the hub's.
 - [x] Vantage-Config: adopted on `develop` in ptr727/Vantage-Config#19 at `e4fd8e2`, merged 2026-09-27 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
-- [ ] HolidayLights: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
+- [x] HolidayLights: adopted on `develop` in ptr727/HolidayLights#15 at `28a714c`, merged 2026-10-24 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] Blog: adopted on `develop` in ptr727/Blog#99 at `fa4b364`, merged 2026-08-23 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [ ] `reports/workflow-reuse.md` regenerated with `validate-task.yml` at 0 copies (a hub-only file no repo carries) and `test-pull-request.yml` showing callers equal to copies.
 
