@@ -4,14 +4,14 @@ description: >-
   Governs Bash/shell script style for ptr727/ProjectTemplate fleet repos: when a bootstrap or
   host-tool script may be shell instead of Python, the mandatory set -Eeuo pipefail header, the
   pipefail-versus-early-reader pitfall, self-recursive command shims, self-locating scripts, the
-  shellcheck-plus-shfmt clean-compile, the --help and unknown-argument rule, and the why-not-what
-  comment rule. Use this whenever writing, reviewing, or editing a shell script (`.sh`, or an
-  extensionless bash/sh shebang script), whenever deciding whether a new script should be Bash or
-  Python, whenever a `curl`/`grep`/`jq`-style pipeline looks like it silently swallowed a failure,
-  or whenever a script or probe writes a wrapper or shim named after a command it also calls.
-  Triggers even when the task looks like a one-line tweak, because a missing `-e`/`pipefail` or a
-  pipe its producer closes early stays invisible until it fails. Applies in any repo holding a shell
-  script.
+  shellcheck-plus-shfmt clean-compile, the --help and unknown-argument rule, the SIGINT/SIGTERM
+  rule, and the why-not-what comment rule. Use this whenever writing, reviewing, or editing a shell
+  script (`.sh`, or an extensionless bash/sh shebang script), whenever deciding whether a new script
+  should be Bash or Python, whenever a `curl`/`grep`/`jq`-style pipeline looks like it silently
+  swallowed a failure, or whenever a script or probe writes a wrapper or shim named after a command
+  it also calls. Triggers even when the task looks like a one-line tweak, because a missing
+  `-e`/`pipefail` or a pipe its producer closes early stays invisible until it fails. Applies in any
+  repo holding a shell script.
 ---
 
 # Shell Codestyle
@@ -90,5 +90,29 @@ A command-line script is one a person or an agent runs by name. A hook its host 
 
 - **Every command-line script answers `--help` and `-h`** with the same text on stdout, then exits 0, changing nothing. That text opens on a usage line naming the script. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted. A PowerShell script declaring its own parameters answers `-Help` and `-h` instead, from a `-Help` switch carrying an `h` alias. That form follows PowerShell's own parameter convention, so such a script owes no answer to a literal `--help`. A wrapper that forwards its arguments to another script answers whatever that script answers.
 - **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. So a PowerShell script declaring its own parameters refuses a literal `--help` like any other unrecognized argument. Where no parameter takes the remaining arguments, the binder's refusal does that. A script with such a parameter refuses a dash-prefixed leftover itself. An unrecognized first argument is never taken as a default mode or as a target.
+
+<!-- /include -->
+
+## Interrupts
+
+<!-- include: CODESTYLE.md > Interrupts -->
+
+This applies to every shell and Python script. `CODESTYLE.md` "Interrupts in Python" and "Interrupts in Shell" state each language's mechanics.
+
+- **On SIGINT or SIGTERM, a script releases what it holds before it exits.** It removes the temporary paths it created, releases the locks it took, and stops the child processes it started. A path, lock, or child left behind can stop the next run from starting, or feed it a half-written input.
+- **A write to persistent state goes to a temporary path beside the target, then is renamed over it.** An interrupt then leaves the old content or the new, never a mix of both.
+- **An interrupted script prints one line naming the signal, with no traceback, and exits 130 for SIGINT or 143 for SIGTERM.** Each status is 128 plus the signal number, the status a shell reports for a process that signal ended.
+- **A script takes this rule when it is created or next edited.** An existing script is not edited for this rule alone.
+- **A script that holds a lock, temporary state, or a child process owes a test that signals it mid-run.** The test sends SIGINT or SIGTERM, then asserts the matching exit status and that nothing the script held remains. A script holding none of these owes no such test.
+
+<!-- /include -->
+
+## Interrupts in Shell
+
+<!-- include: CODESTYLE.md > Interrupts in Shell -->
+
+- **Cleanup of temporary paths and locks runs in the script's `EXIT` trap.** Bash runs that trap when SIGINT or SIGTERM ends the script, as well as on a normal exit.
+- **The `INT` and `TERM` traps stop the script's children and keep the status, leaving other cleanup to the `EXIT` trap.** Each one stops the children the script started, prints the line `CODESTYLE.md` "Interrupts" requires, then exits 130 or 143.
+- **A long-running child runs in the background, and the script waits for it with `wait`.** Bash runs a trap only after a foreground command returns, while a trapped signal ends a `wait` at once.
 
 <!-- /include -->
