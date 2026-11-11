@@ -387,6 +387,7 @@
         },
         {
             "name": "Employment",
+            "shortName": "employment",
             "url": "https://github.com/ptr727/Employment",
             "status": "cataloged",
             "types": ["source-only", "python"],
