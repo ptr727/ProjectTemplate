@@ -25,8 +25,7 @@ the bootstrap.
 
 `spec/files.json` declares it `intent` fidelity, `whole: true`, covering named sections
 (`Commit Messages and Pull Request Titles`, `Reviewing Carried Fleet Content`, `GitHub Copilot
-Review Runbook`, `When in Doubt`), with `<owner>`, `<repo>`, and `<N>` placeholders filled per
-repo. **The fleet audit checks an `intent` file for file presence and each named section's
+Review Runbook`, `When in Doubt`). **The fleet audit checks an `intent` file for file presence and each named section's
 heading, never for content drift inside a section.** A section that is present but has fallen out
 of date against the hub produces no finding anywhere in the mechanical audit. Such staleness is the
 exact gap this skill exists to catch. Noticing that has to happen in a live session like this one.
