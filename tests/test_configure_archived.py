@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Exercise repo-config/configure.sh's archived-repository exemption by running its own lines.
+"""Exercise repo-config/configure.sh's registry region by running its own lines.
 
 The shell is lifted out of the file rather than restated here.
 An edit that removes the behavior therefore fails these tests instead of leaving a reimplementation to agree with itself. The
 region under test makes no `gh` call of its own, and the harness assigns every variable the region reads.
 So the cases running the lifted region need no `gh` stub.
-A cataloged or absent registry falls through to a marker printed just after that region.
-An archived one exits before reaching it.
+Under check, a cataloged, unlisted, or absent entry falls through to a marker printed just after that region.
+Under apply, only a listed one does, and an unlisted entry or an absent registry fails the run.
+An archived entry exits before reaching the marker.
 """
 
 from __future__ import annotations
@@ -63,11 +64,11 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-ARCHIVED_EXEMPTION = lift(r'(if \[ -f "\$registry" \]; then\n    if ! archived_status=.*?\n^fi\n)')
+REGISTRY_REGION = lift(r'(if \[ -f "\$registry" \]; then\n    if ! archived_status=.*?\n^fi\n)')
 
 
-class ArchivedRepositoryCase(unittest.TestCase):
-    """A repository the registry marks archived is out of scope, for apply and check alike."""
+class RegistryRegionCase(unittest.TestCase):
+    """The helpers that run the lifted registry region against a constructed registry."""
 
     def registry(self, tmp: str, entries: list[dict[str, object]]) -> Path:
         path = Path(tmp) / "repos.json"
@@ -78,9 +79,13 @@ class ArchivedRepositoryCase(unittest.TestCase):
         script = (
             f"registry={shlex.quote(str(registry))}\nname={shlex.quote(name)}\n"
             f"cmd={shlex.quote(cmd)}\nrepo={shlex.quote('owner/' + name)}\n"
-            f"{ARCHIVED_EXEMPTION}echo REACHED_NEXT\n"
+            f"{REGISTRY_REGION}echo REACHED_NEXT\n"
         )
         return run_bash(script, "jq")
+
+
+class ArchivedRepositoryCase(RegistryRegionCase):
+    """A repository the registry marks archived is out of scope, for apply and check alike."""
 
     def test_an_archived_entry_exits_before_the_next_line(self) -> None:
         for cmd in ("check", "apply"):
@@ -136,7 +141,7 @@ class ArchivedRepositoryCase(unittest.TestCase):
             script = (
                 f'PATH="$(cd {shlex.quote(str(bin_dir))} && pwd):$PATH"\n'
                 f"registry={shlex.quote(str(registry))}\nname=Fixture\ncmd=check\nrepo=owner/Fixture\n"
-                f"{ARCHIVED_EXEMPTION}echo REACHED_NEXT\n"
+                f"{REGISTRY_REGION}echo REACHED_NEXT\n"
             )
             result = run_bash(script)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -144,13 +149,63 @@ class ArchivedRepositoryCase(unittest.TestCase):
             self.assertNotIn("REACHED_NEXT", result.stdout)
 
 
-class EndToEndCase(unittest.TestCase):
-    """Run on an archived repository given by name, the real script exits before any `gh` call.
+class UnregisteredApplyCase(RegistryRegionCase):
+    """An apply for a repository the registry does not list fails before any write, and check does not."""
 
-    The script is copied whole, and both apply and check are covered.
+    def test_an_unlisted_name_fails_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            registry = self.registry(tmp, [{"name": "Other", "status": "cataloged"}])
+            result = self.harness(registry, "Fixture", "apply")
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("owner/Fixture has no entry in", result.stderr)
+            self.assertIn("develop only", result.stderr)
+            self.assertNotIn("REACHED_NEXT", result.stdout)
+
+    def test_no_registry_file_fails_apply(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = Path(tmp) / "does-not-exist.json"
+            result = self.harness(missing, "Fixture", "apply")
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("not found, so apply makes no write", result.stderr)
+            self.assertNotIn("REACHED_NEXT", result.stdout)
+
+    def test_a_listed_name_falls_through_apply_whatever_its_letter_case(self) -> None:
+        for listed in ("Fixture", "fixture"):
+            with self.subTest(listed=listed), tempfile.TemporaryDirectory() as tmp:
+                registry = self.registry(tmp, [{"name": listed, "status": "cataloged"}])
+                result = self.harness(registry, "Fixture", "apply")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "REACHED_NEXT\n")
+
+    def test_a_trailing_carriage_return_on_the_entry_count_is_stripped(self) -> None:
+        """A count read as `0\\r` would not equal 0, so an unlisted apply would fall through."""
+        with tempfile.TemporaryDirectory() as tmp:
+            bin_dir = Path(tmp) / "bin"
+            bin_dir.mkdir()
+            stub = bin_dir / "jq"
+            stub.write_text("#!/bin/sh\nprintf '0\\r\\n'\n", encoding="utf-8")
+            stub.chmod(0o755)
+            registry = self.registry(tmp, [{"name": "Other", "status": "cataloged"}])
+            script = (
+                f'PATH="$(cd {shlex.quote(str(bin_dir))} && pwd):$PATH"\n'
+                f"registry={shlex.quote(str(registry))}\nname=Fixture\ncmd=apply\nrepo=owner/Fixture\n"
+                f"{REGISTRY_REGION}echo REACHED_NEXT\n"
+            )
+            result = run_bash(script)
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("owner/Fixture has no entry in", result.stderr)
+            self.assertNotIn("REACHED_NEXT", result.stdout)
+
+
+class EndToEndCase(unittest.TestCase):
+    """Run the real script, copied whole, with a `gh` stub that records every call.
+
+    An archived target and an unregistered apply each exit before any `gh` call.
     """
 
-    def run_configure(self, status: str, cmd: str) -> subprocess.CompletedProcess[str]:
+    def run_configure(
+        self, entries: list[dict[str, object]], args: list[str]
+    ) -> tuple[subprocess.CompletedProcess[str], str]:
         bash = require("bash", "jq")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -159,19 +214,19 @@ class EndToEndCase(unittest.TestCase):
             (root / "bin").mkdir()
             shutil.copy(CONFIGURE, root / "repo-config" / "configure.sh")
             (root / "registry" / "repos.json").write_text(
-                json.dumps({"repos": [{"name": "Fixture", "status": status}]}), encoding="utf-8"
+                json.dumps({"repos": entries}), encoding="utf-8"
             )
+            calls = root / "gh-calls.txt"
             gh_stub = root / "bin" / "gh"
             gh_stub.write_text(
-                "#!/bin/sh\necho 'gh should never run for an archived repo' >&2\nexit 1\n",
-                encoding="utf-8",
+                f'#!/bin/sh\necho "$*" >> {shlex.quote(str(calls))}\nexit 1\n', encoding="utf-8"
             )
             gh_stub.chmod(0o755)
             env = dict(
                 os.environ, PATH=f"{root / 'bin'}{os.pathsep}{os.environ.get('PATH', os.defpath)}"
             )
-            return subprocess.run(
-                [bash, str(root / "repo-config" / "configure.sh"), cmd, "owner/Fixture"],
+            result = subprocess.run(
+                [bash, str(root / "repo-config" / "configure.sh"), *args],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -179,13 +234,27 @@ class EndToEndCase(unittest.TestCase):
                 check=False,
                 env=env,
             )
+            return result, calls.read_text(encoding="utf-8") if calls.exists() else ""
 
     def test_an_archived_target_never_calls_gh(self) -> None:
         for cmd in ("check", "apply"):
             with self.subTest(cmd=cmd):
-                result = self.run_configure("archived", cmd)
+                result, calls = self.run_configure(
+                    [{"name": "Fixture", "status": "archived"}], [cmd, "owner/Fixture"]
+                )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertNotIn("gh should never run", result.stderr)
+                self.assertEqual(calls, "")
+
+    def test_an_unregistered_apply_with_a_checkout_writes_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as checkout:
+            result, calls = self.run_configure(
+                [{"name": "Other", "status": "cataloged"}],
+                ["apply", "owner/Fixture", "release", "--checkout", checkout],
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            self.assertIn("owner/Fixture has no entry in", result.stderr)
+            self.assertEqual(calls, "")
+            self.assertEqual(list(Path(checkout).iterdir()), [])
 
 
 if __name__ == "__main__":
