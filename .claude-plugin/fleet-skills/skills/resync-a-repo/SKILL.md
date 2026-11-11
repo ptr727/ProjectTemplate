@@ -78,8 +78,8 @@ holds content `develop` lacks, re-level `develop` before that conversion, with t
 request `RESYNC.md` section 3 describes.
 
 1. **The instruction set first.** `CLAUDE.md`, then `AGENTS.md` and `GOVERNANCE.md` verbatim sections, then `CODESTYLE.md` and `WORKFLOW.md`. Include the `AGENTS.md` skill-dependency pointer paragraph in this same step, as one more verbatim unit and not a separate pass. The paragraph names `scripts/skills_install.py` and where the fleet's Skills live. `CLAUDE.md` is the single `@AGENTS.md`-import file that gets `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured. **Before touching `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or `WORKFLOW.md` in this step, run the `carried-instruction-file-guard` skill's distinctive-phrase probe against the target file, every time, without exception.** **This holds regardless of whether the update is a verbatim re-vendor or an intent-fidelity edit.** This is not advisory language to weigh against how routine the diff looks. A diff that looks routine is exactly the shape the AGENTS.md-overwrite incident took. Do not proceed to the re-vendor until the probe has run and any local addition it finds has a destination. That gate follows that skill's own procedure. `CLAUDE.md` is outside that guard's scope. It carries no mixed or repo-specific content by design, so its re-vendor is an ordinary verbatim-fidelity copy, no probe needed.
-2. **Deletions second, before any re-vendor**, other than step 3's `carry.py apply`, which "Ship it"
-   below moves into step 1's pull request. Only a `retire` disposition in
+2. **Deletions second, before any re-vendor**, other than step 3's re-vendor of the manifest-owned
+   trees, which "Ship it" below moves into step 1's pull request. Only a `retire` disposition in
    `spec/divergences.json` authorizes removing a file. The removal is swept tree-wide, per
    RESYNC.md section 4, before the deletion counts as done.
 3. **Verbatim re-vendors** for `CLAUDE.md` and everything else the probe in step 1 cleared. A
@@ -100,8 +100,11 @@ rather than leaving it standing.
 ## Ship it
 
 One focused pull request per drift class, branched from the target's `develop`, with one grouping.
-The instruction set (step 1) and step 3's `carry.py apply`, which carries the Skills tree, land in
-one pull request, with the `.github/copilot-instructions.md` skill paths. Each half cites the other's text, so either
+The instruction set (step 1) and step 3's re-vendor of the manifest-owned trees land in one pull
+request. The Skills tree is among those trees, and the `.github/copilot-instructions.md` skill
+paths come too.
+Commit step 1 before that re-vendor, since `carry.py` refuses a target with uncommitted changes.
+`RESYNC.md` section 3 step 3 gives its command. Each half cites the other's text, so either
 one alone contradicts itself until the other merges. Every other class takes its own pull
 request, branched from `develop` only after that one merges and in step order, per `RESYNC.md`
 section 6. A pull request is never a direct

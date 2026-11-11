@@ -817,6 +817,7 @@ def placeholder_errors(root, baseline):
     """Reject a declared placeholder its canonical file does not contain.
 
     A carrier fills each declared token per repository, so a token the hub's text has dropped asks for a substitution nothing can make.
+    The canonical resolves as spec/audit.py's intent_ref does, which this module cannot import since audit.py imports it.
     """
     errors = []
     for item in baseline:
@@ -830,7 +831,9 @@ def placeholder_errors(root, baseline):
             errors.append(f"files.json: {path} placeholders must be an array of strings")
             continue
         reference = item.get("reference")
-        source = reference if isinstance(reference, str) else path
+        intent = item.get("intentRef")
+        intent_path = intent.partition("#")[0] if isinstance(intent, str) else ""
+        source = reference if isinstance(reference, str) and reference else intent_path or path
         canonical = root / source
         if not canonical.is_file():
             errors.append(f"files.json: {path} declares placeholders but {source} is not a file")

@@ -2657,6 +2657,10 @@ class PlaceholderErrorsCase(unittest.TestCase):
         (self.root / "snippet.md").write_text("Only <N> here.\n", encoding="utf-8")
         self.assertEqual(self.errors(placeholders=["<N>"], reference="snippet.md"), [])
 
+    def test_the_intent_ref_outranks_the_path_with_its_anchor_stripped(self) -> None:
+        (self.root / "rules.md").write_text("Only <N> here.\n", encoding="utf-8")
+        self.assertEqual(self.errors(placeholders=["<N>"], intentRef="rules.md#a-section"), [])
+
     def test_a_missing_canonical_is_reported(self) -> None:
         self.assertEqual(
             self.errors(placeholders=["<N>"], reference="absent.md"),

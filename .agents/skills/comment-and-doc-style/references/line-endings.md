@@ -34,7 +34,8 @@ LF is the default, since it is what every tool, CI runner, and Dependabot bump p
 reason is that Windows GUI editors (VS Code, Visual Studio, Notepad, WordPad) all read and write it
 cleanly. Pin
 CRLF only for a type Windows itself requires it for: `*.bat` and `*.cmd`. Everything else
-takes the `[*]` default with no override. That includes YAML, `.gitignore`, `.dockerignore`, and a
+takes the `[*]` default with no override, apart from the cases the paired override under "Scripts
+and extensionless executables" names. That includes YAML, `.gitignore`, `.dockerignore`, and a
 tool-owned format that writes LF on every platform. No distinction is needed between workflow and
 non-workflow YAML, now that both are LF.
 
@@ -86,8 +87,8 @@ matches one path component.
 
 A byte-preserved file type takes the same four properties, under a section for its extension.
 STEP models are the worked example. They are text-shaped third-party files that arrive CRLF or
-LF. So each extension takes a `-text` pin in `.gitattributes`, written for both letter
-cases, such as `*.[sS][tT][pP]`. `end_of_line = unset` alone is not enough, since the `[*]` section still
+LF. So each extension takes a `-text` pin in `.gitattributes`. Write the glob for both
+letter cases in both files, such as `*.[sS][tT][pP]`. `end_of_line = unset` alone is not enough, since the `[*]` section still
 applies `charset`, `insert_final_newline`, and `trim_trailing_whitespace` to such a file. The
 pair stays in the repository carrying the models rather than in the hub's own files.
 
