@@ -560,21 +560,32 @@ def gql(query: str, owner: str, repo: str, num: int, policy: bool = True) -> dic
             owner, repo, pr["baseRefName"], reread, answered_absent
         )
     pages = Q_REVIEWS_LIVE if query == Q_LIVE else Q_REVIEWS_HELD
-    page_reviews(pr, functools.partial(follow, pages, owner, repo, num, "reviews"))
+    page_reviews(pr, functools.partial(follow, pages, owner, repo, num, "reviews", strict=True))
     return pr
 
 
 def follow(
-    query: str, owner: str, repo: str, num: int, connection: str, after: str | None = None
+    query: str,
+    owner: str,
+    repo: str,
+    num: int,
+    connection: str,
+    after: str | None = None,
+    strict: bool = False,
 ) -> Iterator[dict]:
-    """Each page of the pull request's `connection`, from the one past `after` to the last."""
+    """Each page of the pull request's `connection`, from the one past `after` to the last.
+
+    `strict` ends the run on a page carrying no `hasNextPage`, rather than reading it as the last.
+    """
 
     def fetch(cursor: str | None) -> dict:
         extra: dict[str, str] = {"after": cursor} if cursor else {}
         return gh_graphql(query, o=owner, r=repo, n=num, **extra)
 
     try:
-        yield from shared.walk(fetch, ("repository", "pullRequest", connection), after)
+        yield from shared.walk(
+            fetch, ("repository", "pullRequest", connection), after, strict_page=strict
+        )
     except shared.GraphQLError as exc:
         sys.stderr.write(exc.detail)
         raise SystemExit(str(exc)) from exc

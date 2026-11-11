@@ -520,10 +520,19 @@ class TestOpenFindings(unittest.TestCase):
         )
 
     def test_a_notes_cell_holding_two_markers_counts_both(self) -> None:
-        table = "| File | Review notes |\n|---|---|\n| `a.py` | [P1] One thing. [P2] Another. |\n"
+        table = "| File | Review notes |\n|---|---|\n| `a.py` | [P1] Guard the empty input. [P2] Rename the helper. |\n"
         found = adapter.read(body(sections=table))
         self.assertEqual((2, 2), (found.listed, found.unthreaded))
-        self.assertEqual(1, len(found.listed_items))
+        self.assertEqual(
+            ("`a.py`: [P1] Guard the empty input.", "`a.py`: [P2] Rename the helper."),
+            tuple(i.text for i in found.listed_items),
+        )
+        threads = [
+            {"comments": {"nodes": [{"path": "a.py", "body": "Guard the empty input here."}]}}
+        ]
+        self.assertEqual(
+            1, adapter.listed_lines(found.listed_items, threads, [{"path": "a.py"}], False)[0]
+        )
 
     def test_a_notes_table_matches_its_thread_by_path_and_text(self) -> None:
         carrier = (("scripts/example.py", "Guard the empty input before indexing it here."),)

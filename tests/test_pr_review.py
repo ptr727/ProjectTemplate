@@ -963,6 +963,11 @@ class TestReviewPaging(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.read(pr_review.Q_FULL, self.windowed(review()), SystemExit("gh failed"))
 
+    def test_a_page_with_no_next_page_flag_ends_the_run_rather_than_reading_as_last(self) -> None:
+        bare = {"repository": {"pullRequest": {"reviews": {"nodes": [review()], "pageInfo": {}}}}}
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.read(pr_review.Q_FULL, self.windowed(review()), bare)
+
     def test_a_query_with_no_reviews_connection_is_left_alone(self) -> None:
         answer = {"repository": {"pullRequest": {"headRefOid": HEAD}}}
         self.assertEqual({"headRefOid": HEAD}, self.read(pr_review.Q_CLAIMS, answer)[0])

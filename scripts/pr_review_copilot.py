@@ -126,7 +126,7 @@ class Reading(NamedTuple):
     reader cannot believe. `listed` is the larger of the items its findings lists hold and the
     file table's findings, since both name the same findings. A `Findings` cell counts each finding
     marker it carries, and once where it carries none, so the table alone can still undercount. A
-    notes cell counts its markers alone, so a filler row counts as nothing.
+    notes cell counts its markers alone, so a filler row counts as nothing, and lists one item each.
     `listed_items` is each findings-list item, or each notes cell where those name more. Each
     prints with a mark wherever the digest prints its findings with no thread.
     `unthreaded` is how many findings it names that no thread on the pull request carries.
@@ -592,7 +592,11 @@ def _read(
                 if by_marker and marks:
                     tabled += marks
                     named_paths = tuple(paths(row[0]))
-                    table_items.append(Item(f"`{', '.join(named_paths)}`: {text}", (), named_paths))
+                    starts = [0] + [m.start() for m in marker.finditer(text)][1:]
+                    table_items += [
+                        Item(f"`{', '.join(named_paths)}`: {text[a:b].strip()}", (), named_paths)
+                        for a, b in zip(starts, [*starts[1:], len(text)], strict=True)
+                    ]
                 elif not by_marker and any(c.isalnum() for c in text):
                     tabled += max(1, marks)
         i += 1
