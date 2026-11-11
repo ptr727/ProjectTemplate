@@ -81,7 +81,7 @@ doc's authorship. Archived repos are not tracked.
 - [ ] **PhotoCleaner** (`csharp`, `dotnet-publish`, `docker`): Husky.Net + doc gates.
 - [ ] **MediaTools** (`csharp`, `nuget`): Husky.Net + doc gates.
 - [ ] **AudioCleaner** (`csharp`, `dotnet-publish`): Husky.Net + doc gates.
-- [ ] **Vantage-Config** (`source-only`): doc-gate half only, no declared language.
+- [ ] **Vantage-Config** (`source-only`, `python`): `pre-commit` framework + doc gates.
 - [ ] **HolidayLights** (`source-only`): doc-gate half only, no declared language.
 - [ ] **Blog** (`hugo`, `source-only`, `python`): `pre-commit` framework + doc gates.
 
