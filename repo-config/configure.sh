@@ -205,6 +205,16 @@ if [ -f "$registry" ]; then
         echo "$repo is archived in $registry. GitHub rejects a write to an archived repository, so $cmd makes none and stops here."
         exit 0
     fi
+    if [ "$cmd" = apply ]; then
+        if ! entry_count="$(jq -r --arg n "$name" '[.repos[] | select(.name==$n)] | length' "$registry" | sed $'s/\r$//')"; then
+            echo "Failed to read the entries from $registry (invalid JSON?)." >&2
+            exit 1
+        fi
+        if [ "$entry_count" = 0 ]; then
+            echo "$repo has no entry in $registry, so apply makes no write. The entry may be on develop only: run apply from a hub checkout at develop once the entry has merged there, otherwise add the entry first." >&2
+            exit 1
+        fi
+    fi
 fi
 
 if [ -z "$model" ]; then
