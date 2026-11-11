@@ -42,7 +42,6 @@ from pr_review_rounds import (
     review_effort,
     reviewer_nodes,
     reviewer_requested,
-    reviews_truncated,
     shape_hold,
     stopping_refusal,
     thread_author,
@@ -62,13 +61,6 @@ THREADS_TRUNCATED = (
     "the newest rather than the oldest, exactly the ones most likely to still be "
     "open. `threads=` and `unresolved=` above undercount. Read the rest with "
     "`reply`'s own paginated walk before trusting either number"
-)
-REVIEWS_TRUNCATED = (
-    "  REVIEWS TRUNCATED: this pull request carries more reviews than the 100 read "
-    "here, and the connection reads newest-first, so the ones cut off are the "
-    "oldest, exactly where an unanswered suppressed or outside-diff-range finding is "
-    "most likely to still sit unresolved. `suppressed=` and `cr_outside_diff=` above "
-    "undercount"
 )
 
 
@@ -126,7 +118,6 @@ def render(
     acks = answers.acknowledged(pr)
     threads = pr["reviewThreads"]["nodes"]
     truncated = threads_truncated(pr)
-    revs_truncated = reviews_truncated(pr)
     unresolved = open_threads(threads)
     by_login = {
         login: sum(1 for t in unresolved if thread_author(t) == login) for login in KNOWN_REVIEWERS
@@ -156,7 +147,7 @@ def render(
         if excluded_refusal(refusal)
         else "YES"
     )
-    blind = [f for f in ("reviews", "comments") if window_blind(pr, f)]
+    blind = "comments" if window_blind(pr, "comments") else ""
     answered = "yes" if answer else ("unknown" if blind else "no")
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
@@ -197,14 +188,14 @@ def render(
         ("threads", f"{len(threads)}{plus}"),
         ("unresolved", f"{len(unresolved)}{plus}{breakdown}"),
         ("suppressed", collected(pr, REVIEWER, "suppressed")[1]),
-        ("previously_missed", missed_field if missed or revs_truncated else None),
+        ("previously_missed", missed_field if missed else None),
         (
             "overview",
             f"{'?' if found.open is None else found.open}/{listed}"
             if found is not None and found.marked
             else None,
         ),
-        ("cr_outside_diff", outside_field if outside or revs_truncated else None),
+        ("cr_outside_diff", outside_field if outside else None),
         ("qodo_open", len(qodo_open) if qodo else "unknown" if qodo_comments_blind(pr) else None),
         ("answered_outside_review", answered),
         ("requested", "yes" if reviewer_requested(pr) else "no"),
@@ -298,9 +289,8 @@ def render(
         )
     lines.extend(check_lines(pr, checks, stuck, now))
     for value, template in (
-        (" and ".join(blind), BEHIND_THE_WINDOW),
+        (blind, BEHIND_THE_WINDOW),
         (truncated, THREADS_TRUNCATED),
-        (revs_truncated, REVIEWS_TRUNCATED),
     ):
         if value:
             lines.append(template.format(value=value, window=window))

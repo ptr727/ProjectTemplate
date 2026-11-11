@@ -396,7 +396,7 @@ class TestUnmetItems(MergeCase):
 
     CLEAN = fixtures.overview_v2(
         open_count="0 open findings",
-        covers="<!-- fleet-review: reviewed=1 changed=1 findings=0 -->",
+        covers="<!-- fleet-review: reviewed=1 changed=1 -->",
         entries=0,
         verdict="### Approval recommended",
     )
@@ -763,15 +763,12 @@ class TestUnmetItems(MergeCase):
         unmarked = fixtures.payload([fixtures.review(body="Looks narrow.")], files=["a.py"])
         self.assertIn(f"{unread} overview=None", self.unmet_on(unmarked))
 
-    def test_a_count_a_cut_reviews_window_leaves_a_floor_is_unread(self) -> None:
+    def test_a_count_read_as_a_floor_is_unread(self) -> None:
         cut = "0+ (on_head=0 earlier=0)"
         self.assertEqual(
             [f"COUNT_UNREAD the digest holds no readable count for suppressed={cut}"],
             self.fields_on(self.clean(), suppressed=cut),
         )
-        unmet = self.unmet_on(self.clean(older_reviews=True))
-        self.assertTrue(any(item.startswith("COUNT_UNREAD") for item in unmet), unmet)
-        self.assertFalse(any(item.startswith("UNTHREADED_FINDINGS") for item in unmet), unmet)
 
     def test_a_met_wait_with_an_open_thread_merges_nothing(self) -> None:
         """`wait` returns 0 on a Copilot-covered head without reading its threads."""
