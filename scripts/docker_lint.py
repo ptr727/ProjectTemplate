@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shlex
 import shutil
@@ -12,15 +13,18 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 import local_review
 
 PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
 MAX_FILE_ARGUMENT_BYTES = 16 * 1024
+SNAPSHOT_PREFIX = "docker-lint-snapshot-"
+OWNER_SUFFIX = ".owner"
 
 
 @dataclass(frozen=True)
@@ -289,6 +293,91 @@ def exit_on_sigterm(signum: int, _frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
+def lock_owner(handle: IO[str], *, wait: bool) -> bool:
+    """Lock an owner file's first byte, the lock its run holds until the snapshot is gone.
+
+    The OS drops the lock when the holding process dies, however it was ended.
+    """
+    handle.seek(0)
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK if wait else msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+    except OSError:
+        if wait:
+            raise
+        return False
+    return True
+
+
+def unlock_owner(handle: IO[str]) -> None:
+    """Release the lock before closing, since Windows leaves a lock closed with its file to the OS."""
+    if sys.platform == "win32":
+        import msvcrt
+
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+
+
+def remove_snapshot(snapshot: Path) -> bool:
+    """Remove a snapshot, whose top directory takes the checkout's mode and so may be read-only."""
+    with contextlib.suppress(OSError):
+        snapshot.chmod(stat.S_IRWXU)
+    shutil.rmtree(snapshot, onexc=local_review.unlink_read_only)
+    return not os.path.lexists(snapshot)
+
+
+def remove_stale_snapshots(parent: Path) -> int:
+    """Remove each snapshot whose run ended without removing it, a killed task's for one.
+
+    A snapshot is stale only where its owner file names a run that wrote it and holds no lock.
+    A run writes that file only once it holds the lock, so an empty one is a run still starting.
+    A directory with no owner file is never touched.
+    """
+    removed = 0
+    for owner in sorted(parent.glob(f"{SNAPSHOT_PREFIX}*{OWNER_SUFFIX}")):
+        try:
+            with owner.open("r+", encoding="utf-8") as handle:
+                if not lock_owner(handle, wait=False):
+                    continue
+                stale = bool(handle.read())
+                unlock_owner(handle)
+        except OSError:
+            continue
+        if stale:
+            snapshot = owner.with_name(owner.name.removesuffix(OWNER_SUFFIX))
+            # An owner file outlives a snapshot that could not be removed, so a later run retries it.
+            if remove_snapshot(snapshot):
+                owner.unlink(missing_ok=True)
+                removed += 1
+    return removed
+
+
+@contextlib.contextmanager
+def owned_snapshot(parent: Path) -> Iterator[Path]:
+    """Create an empty snapshot directory, held by a locked owner file beside it until removed."""
+    descriptor, name = tempfile.mkstemp(prefix=SNAPSHOT_PREFIX, suffix=OWNER_SUFFIX, dir=parent)
+    owner = Path(name)
+    with os.fdopen(descriptor, "r+", encoding="utf-8") as handle:
+        lock_owner(handle, wait=True)
+        handle.write(f"{os.getpid()}\n")
+        handle.flush()
+        snapshot = owner.with_name(owner.name.removesuffix(OWNER_SUFFIX))
+        snapshot.mkdir()
+        try:
+            yield snapshot
+        finally:
+            removed = remove_snapshot(snapshot)
+            unlock_owner(handle)
+    if removed:
+        owner.unlink(missing_ok=True)
+
+
 def stage_snapshot(root: Path, snapshot: Path) -> int:
     """Copy the tracked and unignored files into snapshot, the only tree a container mounts.
 
@@ -506,10 +595,10 @@ def lint(
             digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
 
         print("PHASE execution: pulls complete, repository mounts begin", flush=True)
-        with tempfile.TemporaryDirectory(
-            prefix="docker-lint-snapshot-", dir=snapshot_parent(root)
-        ) as directory:
-            snapshot = Path(directory)
+        parent = snapshot_parent(root)
+        if swept := remove_stale_snapshots(parent):
+            print(f"SWEPT {swept} snapshot(s) an ended run left behind", flush=True)
+        with owned_snapshot(parent) as snapshot:
             staged = stage_snapshot(root, snapshot)
             print(f"SNAPSHOT {staged} tracked or unignored path(s) staged to mount", flush=True)
             for linter, files in applicable:
@@ -557,6 +646,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line entry point."""
     args = parse_args(argv)
     signal.signal(signal.SIGTERM, exit_on_sigterm)
+    # Closing a VS Code task's terminal sends SIGHUP rather than SIGTERM.
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, exit_on_sigterm)
     if args.timeout <= 0:
         raise SystemExit("--timeout must be greater than zero")
     root = args.root.resolve()
