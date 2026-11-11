@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import os
@@ -18,8 +19,11 @@ from unittest import mock
 
 from host_capability import requires_symlink
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "spec"))
 import docker_lint
+import git_env
 
 MOUNT_SOURCE = re.compile(r'^type=bind,"src=(.*)",dst=')
 
@@ -581,6 +585,44 @@ class DockerLintCase(unittest.TestCase):
             ),
         ):
             docker_lint.run_command(command, 90)
+
+
+class StandaloneTests(unittest.TestCase):
+    """The Lint tasks fetch the wrapper alone, so it runs with no hub file beside it."""
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        self.outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_the_wrapper_imports_only_the_standard_library(self) -> None:
+        tree = ast.parse((REPO / "scripts" / "docker_lint.py").read_text(encoding="utf-8"))
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imported.add("." if node.level else (node.module or "").split(".")[0])
+        self.assertEqual(sorted(imported - sys.stdlib_module_names - {"__future__"}), [])
+
+    def test_its_git_location_list_is_the_hub_s(self) -> None:
+        self.assertEqual(sorted(docker_lint.GIT_LOCATION_VARS), sorted(git_env.GIT_LOCATION_VARS))
+
+    def test_an_inherited_git_dir_does_not_move_the_snapshot(self) -> None:
+        """A git hook's GIT_DIR names the hook's repository, never the root this run lints."""
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
+            parent = docker_lint.snapshot_parent(self.root)
+        self.assertEqual((self.root / ".git").resolve(), parent.resolve())
+
+    def test_a_root_outside_any_repository_is_a_snapshot_failure(self) -> None:
+        ceiling = {"GIT_CEILING_DIRECTORIES": str(self.outside.parent)}
+        with (
+            mock.patch.dict(os.environ, ceiling),
+            self.assertRaisesRegex(docker_lint.CommandFailed, "snapshot failed: git rev-parse"),
+        ):
+            docker_lint.snapshot_parent(self.outside)
 
 
 if __name__ == "__main__":

@@ -18,13 +18,29 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
-import local_review
-
 PSSCRIPTANALYZER_VERSION = "1.23.0"
 PSSCRIPTANALYZER_VOLUME = f"projecttemplate-psscriptanalyzer-{PSSCRIPTANALYZER_VERSION}"
 MAX_FILE_ARGUMENT_BYTES = 16 * 1024
 SNAPSHOT_PREFIX = "docker-lint-snapshot-"
 OWNER_SUFFIX = ".owner"
+GIT_TIMEOUT = 300
+GIT_LOCATION_VARS = (
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+)
 
 
 @dataclass(frozen=True)
@@ -281,11 +297,24 @@ def snapshot_parent(root: Path) -> Path:
 
     Any Docker setup that can mount the checkout reaches it, and git never lists it.
     The system temporary directory is outside Docker Desktop for Linux's default file sharing.
+    `--absolute-git-dir` resolves per worktree, so two worktrees of one repository never share it.
+    A git hook sets some of `GIT_LOCATION_VARS`, which would name the hook's repository instead.
+    That list is `spec/git_env.py`'s, copied so the fetched wrapper runs with no hub file beside it.
     """
+    command = ["git", "rev-parse", "--absolute-git-dir"]
+    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
     try:
-        return local_review.git_dir(root)
-    except local_review.CannotRun as error:
-        raise CommandFailed(f"snapshot failed: {error}") from error
+        result = subprocess.run(
+            command, cwd=root, env=env, capture_output=True, check=False, timeout=GIT_TIMEOUT
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise CommandFailed(
+            f"snapshot failed: {shlex.join(command)} could not be run ({error})"
+        ) from error
+    if result.returncode != 0:
+        detail = os.fsdecode(result.stderr).strip()
+        raise CommandFailed(f"snapshot failed: {shlex.join(command)} failed: {detail}")
+    return Path(os.fsdecode(result.stdout).rstrip("\n"))
 
 
 def exit_on_sigterm(signum: int, _frame: object) -> None:
@@ -328,8 +357,23 @@ def remove_snapshot(snapshot: Path) -> bool:
     """Remove a snapshot, whose top directory takes the checkout's mode and so may be read-only."""
     with contextlib.suppress(OSError):
         snapshot.chmod(stat.S_IRWXU)
-    shutil.rmtree(snapshot, onexc=local_review.unlink_read_only)
+    shutil.rmtree(snapshot, onexc=unlink_read_only)
     return not os.path.lexists(snapshot)
+
+
+def unlink_read_only(func: object, path: str, exc: BaseException) -> None:
+    """An rmtree error handler that removes a read-only file, and swallows anything else.
+
+    POSIX unlinks a read-only file, since that needs write access to its directory, but Windows refuses.
+    Any other failure is left for `remove_snapshot`'s own existence check to report.
+    """
+    if func is not os.unlink or not isinstance(exc, PermissionError):
+        return
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def remove_stale_snapshots(parent: Path) -> int:
