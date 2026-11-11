@@ -285,6 +285,15 @@ class TestDigestReading(fixtures.GqlCase):
         self.assertEqual(0, self.status(pr, pages))
         self.assertIn("coverage=dependabot ", self.out.getvalue())
 
+    def test_a_glob_row_naming_a_kept_path_too_stays_in_the_match(self) -> None:
+        pr = promotion_pr(["pkg/a.py", "pkg/uv.lock", "pyproject.toml"], table=["pkg/*"])
+        pages = page(
+            landed(BUMP, ["pkg/uv.lock", "pyproject.toml"]),
+            landed(FEATURE, ["pkg/a.py"], login="m"),
+        )
+        self.assertEqual(0, self.status(pr, pages))
+        self.assertIn("coverage=dependabot ", self.out.getvalue())
+
     def test_a_table_missing_a_file_beside_the_bump_reads_none(self) -> None:
         pr = promotion_pr(["a.py", "b.py", "uv.lock"], table=["a.py"])
         pages = page(

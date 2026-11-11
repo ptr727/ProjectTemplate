@@ -76,7 +76,7 @@ def landing(node: dict) -> dict | None:
     """The pull request that landed this commit on `develop`, None where none did."""
     commit = node.get("commit") or {}
     associated = (commit.get("associatedPullRequests") or {}).get("nodes") or []
-    oid = commit.get("oid")
+    oid = rounds.commit_oid(node)
     for candidate in associated:
         merged = (candidate.get("mergeCommit") or {}).get("oid")
         if merged == oid and candidate.get("baseRefName") == DEVELOP:
@@ -98,7 +98,7 @@ def read_bumps(commits: list[dict]) -> Bumps:
     for node in commits:
         landed = landing(node)
         if landed is None:
-            oid = ((node.get("commit") or {}).get("oid") or "")[:8]
+            oid = (rounds.commit_oid(node) or "")[:8]
             return Bumps(why=f"commit {oid} landed through no pull request into {DEVELOP}")
         changed, cut = rounds.changed_paths(landed)
         if cut:
