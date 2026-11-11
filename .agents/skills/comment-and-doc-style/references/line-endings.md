@@ -34,10 +34,10 @@ LF is the default, since it is what every tool, CI runner, and Dependabot bump p
 reason is that Windows GUI editors (VS Code, Visual Studio, Notepad, WordPad) all read and write it
 cleanly. Pin
 CRLF only for a type Windows itself requires it for: `*.bat` and `*.cmd`. Everything else
-takes the `[*]` default with no override, apart from the cases the paired override under "Scripts
-and extensionless executables" names. That includes YAML, `.gitignore`, `.dockerignore`, and a
+takes the `[*]` default with no override. That includes YAML, `.gitignore`, `.dockerignore`, and a
 tool-owned format that writes LF on every platform. No distinction is needed between workflow and
-non-workflow YAML, now that both are LF.
+non-workflow YAML, now that both are LF. The paired override under "Scripts and extensionless
+executables" names the other exceptions.
 
 ## Operational (config) repos
 
