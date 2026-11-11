@@ -945,6 +945,27 @@ class IncludeCase(TreeCase):
         with self.assertRaisesRegex(ValueError, "no heading 'Title'"):
             build_dist.regenerate()
 
+    def test_a_body_running_to_the_end_stops_before_the_trailing_definitions(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## A\n\nSee [b].\n\n## Last\n\nLast text.\n\n<!-- Repo -->\n\n[b]: ./B.md\n\n"
+            "<!-- External -->\n\n[c]: https://example.com/c\n  'C title'\n",
+            encoding="utf-8",
+        )
+        self.make_skill("foo", self.region("RULES.md > Last"))
+        build_dist.regenerate()
+        self.assertEqual(
+            self.skill_text(),
+            "<!-- include: RULES.md > Last -->\n\nLast text.\n\n<!-- /include -->\n",
+        )
+
+    def test_a_body_with_no_trailing_definitions_keeps_its_last_comment(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## Last\n\nLast text.\n\n<!-- kept -->\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Last"))
+        build_dist.regenerate()
+        self.assertIn("Last text.\n\n<!-- kept -->\n\n<!-- /include -->", self.skill_text())
+
     def test_an_indented_heading_splits_as_it_does_for_the_audit(self) -> None:
         """spec/audit.py and canonical_review.py split where the shared reader does, so the generator does too.
 
