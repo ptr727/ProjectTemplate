@@ -27,13 +27,19 @@ MOUNT_SOURCE = re.compile(r'^type=bind,"src=(.*)",dst=')
 class FakeRunner:
     """Record commands and return configured Docker results."""
 
-    def __init__(self, failure: int | None = None, timeout: bool = False) -> None:
+    def __init__(
+        self,
+        failure: int | None = None,
+        timeout: bool = False,
+        fail_on: tuple[str, ...] = ("docker", "run"),
+    ) -> None:
         self.commands: list[tuple[list[str], int]] = []
         self.mounted: list[dict[str, bool]] = []
         self.sources: list[Path] = []
         self.modes: list[int] = []
         self.failure = failure
         self.timeout = timeout
+        self.fail_on = fail_on
 
     def __call__(
         self, command: list[str], timeout: int, *, capture_output: bool = False
@@ -56,7 +62,9 @@ class FakeRunner:
         if command[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(command, 0, "example@sha256:123\n", "")
         returncode = (
-            self.failure if self.failure is not None and command[:2] == ["docker", "run"] else 0
+            self.failure
+            if self.failure is not None and tuple(command[: len(self.fail_on)]) == self.fail_on
+            else 0
         )
         return subprocess.CompletedProcess(command, returncode, "", "")
 
@@ -426,6 +434,25 @@ class DockerLintCase(unittest.TestCase):
         snapshot, owner = self.ended_run()
         result, output = self.invoke({"markdownlint"}, FakeRunner())
         self.assertEqual(0, result, output)
+        self.assertIn("SWEPT 1 snapshot(s)", output)
+        self.assertFalse(snapshot.exists())
+        self.assertFalse(owner.exists())
+
+    def test_a_run_with_zero_targets_still_removes_an_ended_run_s_snapshot(self) -> None:
+        snapshot, owner = self.ended_run()
+        result, output = self.invoke({"markdownlint"}, FakeRunner())
+        self.assertEqual(0, result, output)
+        self.assertIn("SWEPT 1 snapshot(s)", output)
+        self.assertFalse(snapshot.exists())
+        self.assertFalse(owner.exists())
+
+    def test_a_run_whose_pull_fails_still_removes_an_ended_run_s_snapshot(self) -> None:
+        self.track("README.md")
+        snapshot, owner = self.ended_run()
+
+        runner = FakeRunner(failure=1, fail_on=("docker", "pull"))
+        result, output = self.invoke({"markdownlint"}, runner)
+        self.assertEqual(1, result, output)
         self.assertIn("SWEPT 1 snapshot(s)", output)
         self.assertFalse(snapshot.exists())
         self.assertFalse(owner.exists())
