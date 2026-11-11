@@ -150,7 +150,7 @@ the maintainer reads the report rather than the issue bodies. Unnamed, a stuck i
 ordinary backlog that simply never moves.
 
 An issue that needs a platform, by the test `session-handoff` "The Chain" states, is counted and
-is not ranked. CI on a platform runner counts as verification under that test, so an issue whose fix such a job verifies is ranked. An issue that needs a platform belongs to that platform's lane, so this run gives it no group, no worker, and no
+is not ranked. CI on a platform runner counts as that test's verification, so an issue a Linux host can fix and such a job verifies is ranked. An issue that needs a platform belongs to that platform's lane, so this run gives it no group, no worker, and no
 claim. An issue only part of which needs a platform is held back the same way. It waits on the
 split "The Chain" describes, which this run does not make, and the narrowed issue is ranked once
 that split lands. The round's report names each issue held back this way, its platform, and
@@ -965,8 +965,8 @@ a parked group's work holds the promotion until the group has applied it. Applie
 request merged to develop, or its claim comment records that the answer ended the work with nothing
 to merge. That holds whether or not the decision issue still carries its label. A claim released
 with no merge for any other reason, as a dead worker's or an abandoned group's is, does not lift
-it. An answer settling other work holds the promotion until a `Closes on promotion:` line in
-`origin/main..origin/develop` names the issue. A read that cannot run holds the
+it. An open issue whose answer leaves work on it holds the promotion until a `Closes on promotion:` line in
+`origin/main..origin/develop` names it. A read that cannot run holds the
 promotion too, since it shows nothing about whether the promotion is blocked. A held promotion
 leaves the round at develop, and later rounds keep merging to develop.
 
