@@ -43,6 +43,7 @@ jobs:
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     permissions:
       contents: read
+      pull-requests: read
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 

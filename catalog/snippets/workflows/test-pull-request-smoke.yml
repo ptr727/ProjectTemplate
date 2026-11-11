@@ -45,6 +45,7 @@ jobs:
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@fb7f02b24d6282f943ecb2ded1b206326d3f4610 # 2.0.1122
     permissions:
       contents: read
+      pull-requests: read
 
   # Never publishes and never uploads (D1.3): smoke: true disables every publish path in build-release-task.
   smoke-build:

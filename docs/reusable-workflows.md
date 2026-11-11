@@ -74,6 +74,8 @@ Every hub task declares the secrets it needs by name under `on.workflow_call.sec
 
 A hub task declares no job-level `permissions:` where every write goes through the App token, and the caller sets `permissions: {}`. A called workflow can only keep or reduce the caller's grant. A callee job naming a scope the caller did not grant fails at startup even when its `if:` is false. Declaring nothing in the callee is therefore the shape that cannot fail against any caller, and it gives `GITHUB_TOKEN` no scope. A task whose job genuinely writes with `GITHUB_TOKEN`, such as a release upload, declares that scope in the callee job. It also documents it in the stub's comment so the caller grants it.
 
+A caller of `validate-task.yml` grants `pull-requests: read` beside `contents: read`, for the lint job's live read of a pull request's labels. GitHub serves that read with no grant only on a public repository. The lint job does not declare the scope yet, so on a private repository the read still falls back to the event payload. A stub carries the grant before its pin reaches a task whose lint job declares the scope. A callee job naming an ungranted scope fails at startup.
+
 ### The Hub Is Its Own First Consumer
 
 The hub's own `.github/workflows/` carries the caller stubs it needs, each calling its task by `./` path. The stub is byte-shaped like a downstream stub apart from that one line. So a change to a task is felt in the hub's own CI first. This is also what makes the hook fallback path run on every hub pull request. The hub carries no hook of its own for a job with a default, so the default runs here on every change.
@@ -362,6 +364,7 @@ jobs:
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
+      pull-requests: read
 
   # Never publishes and never uploads (D1.3): smoke: true disables every publish path in build-release-task.
   smoke-build:
@@ -442,6 +445,7 @@ The Lint Markdown step's `markdown-exclude-globs` input excludes in CI alone, le
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
+      pull-requests: read
     with:
       markdown-exclude-globs: |
         !content/**
@@ -478,6 +482,7 @@ A repo whose package claims more than one interpreter names them all in `python-
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
+      pull-requests: read
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
     with:
@@ -587,6 +592,7 @@ jobs:
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
     permissions:
       contents: read
+      pull-requests: read
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 

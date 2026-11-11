@@ -24,6 +24,7 @@ jobs:
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@63cf1c9436876d55889260ce43d3900da2fd9b47 # 2.0.1166
     permissions:
       contents: read
+      pull-requests: read
     with:
       workflow-model: operational
 
