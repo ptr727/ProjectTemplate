@@ -29,6 +29,7 @@ from pr_review_checks import (
     check_nodes,
     hosted_reviews_running,
 )
+from pr_review_promotion import coverage
 from pr_review_rounds import (
     CARRIED_PARTIAL,
     CODERABBIT_LOGIN,
@@ -37,7 +38,6 @@ from pr_review_rounds import (
     answering_comments,
     collected,
     commit_oid,
-    coverage,
     head_reviews,
     newest_of,
     qodo_comment,
@@ -63,7 +63,7 @@ SOURCES = {
 }
 
 
-MET_COVERAGE = ("full", "table", "carried:table", "local")
+MET_COVERAGE = ("full", "table", "carried:table", "local", "dependabot")
 # The digest counts the gate reads, each nonzero one standing until every item under it is answered.
 COUNTED = (*SOURCES, "qodo_open", "overview", NO_THREAD, NOTED)
 # The digest builds these as None where the source they count is absent from the pull request.

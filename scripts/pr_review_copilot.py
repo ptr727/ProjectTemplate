@@ -77,7 +77,7 @@ BADGE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 SPOT = re.compile(r"(?P<path>.+):L?(?P<start>\d+)(?:\s*[-\u2013]\s*L?(?P<end>\d+))?")
-EXCUSED = ("ADDED", "MODIFIED", "DELETED")
+EXCUSED = ("ADDED", "MODIFIED", "RENAMED", "DELETED")
 # A count longer than this is an identifier rather than anything a review states.
 COUNT_DIGITS = 4
 FINGERPRINT_HEX = 12
@@ -781,11 +781,11 @@ def row_names(entry: str, path: str) -> bool:
 def left_out(named: tuple[str, ...], files: list[dict]) -> set[str]:
     """The changed files a file table may leave out: each one GitHub counts no changed line in.
 
-    Such a file is added, modified, or deleted with no added and no deleted line, a binary file
-    among them. An empty file, a mode-only change, and a text file `.gitattributes` marks binary
-    read the same, since the file list holds nothing telling them apart. A rename or copy is
-    never one, and nor is a file missing a count. None is left out unless a file with an added or
-    deleted line remains to be named.
+    Such a file is added, modified, renamed, or deleted with no added and no deleted line, a binary
+    file among them. An empty file, a mode-only change, and a text file `.gitattributes` marks
+    binary read the same. So does a rename that also changes a binary, since the file list holds
+    nothing telling them apart. A copy is never one, and nor is a file missing a count. None is left
+    out unless a file with an added or deleted line remains to be named.
     """
     lineless = {
         n["path"]

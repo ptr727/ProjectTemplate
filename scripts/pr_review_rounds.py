@@ -462,7 +462,7 @@ def coverage(pr: dict) -> tuple[str, str]:
         state, why = table_cover(pr)
         if state:
             return state, why
-    if local_cover(pr) and not any(reading(n).table is not None for n in rounds):
+    if local_cover(pr):
         return "local", f"an attested local pass recorded {attestation(pr)} finding(s)"
     return "none", why
 
