@@ -257,7 +257,8 @@ def scaffold(
     A consumer file is `<shortName>_<purpose>[_<part>]`, so its first field is its owner's registry short name.
     The name is the ownership record, so a file whose first field is no short name is unclaimed.
     A `github_` file is a provisioning file.
-    A subdirectory is no secret file, so it is never a stray or unclaimed, though its name is still taken.
+    A subdirectory is no secret file, so it is never unclaimed, though its name is still taken.
+    One at a wrong-scope name is still a stray, since `apply` refuses any entry at that name.
     A symlink, whatever it resolves to, reads as a file at its name, the one `lib/sh/secrets.sh` refuses.
     """
     expected, held, wrong_scope, skipped = fleet_expectations(secrets, registry, tree_reader)
@@ -273,7 +274,7 @@ def scaffold(
                 on_disk.add(e.name)
                 if e.is_dir(follow_symlinks=False):
                     folders.add(e.name)
-    strays = sorted((on_disk - folders) & wrong_scope)
+    strays = sorted(on_disk & wrong_scope)
     present = sorted(on_disk & (set(expected) | held))
     unclaimed = sorted(on_disk - folders - set(expected) - held - wrong_scope)
     if strays:

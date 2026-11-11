@@ -630,17 +630,25 @@ class ScaffoldCase(unittest.TestCase):
             self.assertTrue((directory / "github_oldrepo_codecov_token").exists())
             self.assertTrue(created)
 
-    def test_a_subdirectory_is_never_a_stray_or_unclaimed_and_is_never_created_over(self) -> None:
+    def test_a_subdirectory_is_never_unclaimed_and_is_never_created_over(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             directory.chmod(0o700)
-            for name in ("notes", "github_codecov_token", "github_codegen_app_client_id"):
+            for name in ("notes", "github_oldrepo_codecov_token", "github_codegen_app_client_id"):
                 (directory / name).mkdir()
             created, present, strays, unclaimed, _ = self.run_scaffold(directory)
             self.assertEqual((strays, unclaimed), ([], []))
             self.assertIn("github_codegen_app_client_id", present)
             self.assertNotIn("github_codegen_app_client_id", created)
             self.assertTrue(created)
+
+    def test_a_subdirectory_at_a_wrong_scope_name_stops_the_run_as_apply_would(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            (directory / "github_codecov_token").mkdir()
+            created, _, strays, _, _ = self.run_scaffold(directory)
+            self.assertEqual((created, strays), ([], ["github_codecov_token"]))
 
     @unittest.skipUnless(POSIX_MODES, "creating a symlink on Windows needs a privilege")
     def test_a_symlink_reads_as_a_file_at_its_name_whatever_it_resolves_to(self) -> None:
