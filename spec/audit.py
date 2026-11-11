@@ -1698,13 +1698,6 @@ def intent_ref(item, path):
     return path, None
 
 
-def declared_alternatives(baseline):
-    """Map each baseline path to the `alternatives` its entry declares, the other paths it may sit at."""
-    return {
-        item["path"]: list(item["alternatives"]) for item in baseline if item.get("alternatives")
-    }
-
-
 def contents_text(content):
     """The decoded text of a contents API response, or None where it holds no inline file content.
 
@@ -1715,54 +1708,41 @@ def contents_text(content):
     return base64.b64decode(content["content"]).decode("utf-8", "replace")
 
 
-def read_baseline_file(slug, ref, path, alternatives=()):
-    """The path a baseline file was found at and its contents response at `ref`, a branch or a commit, or `(path, None)`."""
-    for candidate in (path, *alternatives):
-        content = gh(f"repos/{slug}/contents/{candidate}?ref={ref}", ok404=True)
-        if content is not None:
-            return candidate, content
-    return path, None
+def read_baseline_file(slug, ref, path):
+    """A baseline file's contents response at `ref`, a branch or a commit, or None where it is absent."""
+    return gh(f"repos/{slug}/contents/{path}?ref={ref}", ok404=True)
 
 
-def baseline_file_findings(slug, ground, path, alternatives, item, ref=None):
-    """Read one baseline file, returning `(found, content, text, findings)` for what reading it alone owes.
+def baseline_file_findings(slug, ground, path, item, ref=None):
+    """Read one baseline file, returning `(content, text, findings)` for what reading it alone owes.
 
-    `found` is the path it was read at, a declared alternative included. `text` is None where the
-    API returned no inline content, and an empty file is an empty string. It is read at `ref`, the
-    audited head commit, where one is given, and a finding still names the `ground` branch.
+    `text` is None where the API returned no inline content, and an empty file is an empty string.
+    It is read at `ref`, the audited head commit, where one is given, and a finding still names the
+    `ground` branch.
     """
-    found, content = read_baseline_file(slug, ref or ground, path, alternatives)
+    content = read_baseline_file(slug, ref or ground, path)
     fid = item.get("fidelity") if item else "presence"
     if content is None:
         if fid == "interface":
             return (
-                found,
                 None,
                 None,
                 [("DRIFT", f"interface: {path} absent on {ground}, cannot verify its contract")],
             )
-        named = " or ".join((path, *alternatives))
         return (
-            found,
             None,
             None,
-            [
-                (
-                    "LETTER",
-                    f"file: {named} absent on {ground} (verify intent per AUDIT.md section 7)",
-                )
-            ],
+            [("LETTER", f"file: {path} absent on {ground} (verify intent per AUDIT.md section 7)")],
         )
-    return found, content, contents_text(content), []
+    return content, contents_text(content), []
 
 
-def intent_trail(slug, ref, path, item, down_text, found):
+def intent_trail(slug, ref, path, item, down_text):
     """`(canonical, (repo_date, hub_date, hub_sha))` where a copy possibly trails its intent canonical, else None.
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
-    `found` is the path the copy was read at, a declared alternative included. `ref` is the branch
-    or commit its last change is looked up from.
+    `ref` is the branch or commit its last change is looked up from.
     """
     canonical_rel, anchor = intent_ref(item, path)
     hub_change = hub_last_change(canonical_rel, anchor)
@@ -1773,7 +1753,7 @@ def intent_trail(slug, ref, path, item, down_text, found):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
-    commits = gh(f"repos/{slug}/commits?path={found}&sha={ref}&per_page=1")
+    commits = gh(f"repos/{slug}/commits?path={path}&sha={ref}&per_page=1")
     if not commits:
         return None
     repo_date = commits[0]["commit"]["committer"]["date"]
@@ -1788,7 +1768,7 @@ INTENT_ACK = re.compile(r"`([^`@]+)@([0-9a-f]{7,40})`")
 
 
 def intent_findings(entry, ground, trails):
-    """The intent advisory over `trails`, `{found path: (canonical, (repo_date, hub_date, hub_sha))}`.
+    """The intent advisory over `trails`, `{path: (canonical, (repo_date, hub_date, hub_sha))}`.
 
     A driftNote naming (files.intent) acknowledges a copy verified against the canonical change the
     advisory cites, as `` `<path>@<sha>` ``. It clears that copy until the canonical changes again.
@@ -1901,7 +1881,6 @@ class Run:
     head: Any = None
     findings: list = field(default_factory=list)
     content: dict = field(default_factory=dict)
-    found: dict = field(default_factory=dict)
 
     @functools.cached_property
     def hub(self):
@@ -1935,7 +1914,7 @@ class Run:
             path = item["path"]
             if not applies(item.get("appliesTo", "*"), self.sel):
                 continue
-            if path == "codecov.yml" and not self.coverage_types:
+            if path == ".codecov.yml" and not self.coverage_types:
                 continue
             prior, needed, verbatim = out.get(path, (None, set(), set()))
             needed |= set(required_sections(item, self.sel))
@@ -1943,10 +1922,6 @@ class Run:
             fidelity = item.get("fidelity") in ("interface", "verbatim", "intent")
             out[path] = (item if fidelity else prior, needed, verbatim)
         return out
-
-    @functools.cached_property
-    def alternatives(self):
-        return declared_alternatives(self.spec["files"]["baseline"])
 
     @property
     def docs(self):
@@ -2198,17 +2173,11 @@ def check_dependabot_ecosystems(run):
 
 
 def check_files_presence(run, path):
-    found, content, text, findings = baseline_file_findings(
-        run.slug,
-        run.ground,
-        path,
-        run.alternatives.get(path, []),
-        run.baseline[path][0],
-        run.ref,
+    content, text, findings = baseline_file_findings(
+        run.slug, run.ground, path, run.baseline[path][0], run.ref
     )
     if content is not None:
         run.content[path] = text
-        run.found[path] = found
     return findings
 
 
@@ -2217,10 +2186,9 @@ def check_files_intent(run):
     for path, (item, _, _) in run.baseline.items():
         if path not in run.content or (item or {}).get("fidelity") != "intent":
             continue
-        found = run.found[path]
-        trail = intent_trail(run.slug, run.ref, path, item, run.content[path], found)
+        trail = intent_trail(run.slug, run.ref, path, item, run.content[path])
         if trail is not None:
-            trails[found] = trail
+            trails[path] = trail
     return intent_findings(run.entry, run.ground, trails)
 
 

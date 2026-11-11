@@ -21,28 +21,23 @@ ENTRY = {
     "status": "cataloged",
     "types": ["python"],
 }
-CANONICAL = "catalog/snippets/configs/codecov.yml"
+CANONICAL = "catalog/snippets/configs/.codecov.yml"
 CODECOV = {
-    "path": "codecov.yml",
-    "alternatives": [".codecov.yml"],
+    "path": ".codecov.yml",
     "fidelity": "intent",
     "reference": CANONICAL,
     "appliesTo": ["python"],
 }
 
 
-class FidelityPassAlternativesCase(unittest.TestCase):
-    """fidelity_pass passes each unit's declared alternatives into the shared reader.
-
-    The reader's own handling of alternatives is covered by tests/test_audit_helpers.py, so what
-    this adds is the call site. Were it to stop passing them, a repository holding only an
-    alternative would land in the unavailable bucket while that self-test still passed.
+class FidelityPassReadCase(unittest.TestCase):
+    """fidelity_pass reads each repository's copy at the unit's declared path and nowhere else.
 
     The canonical's history is a git walk that refuses a shallow clone and fetches the hub's
     origin, so it is answered as empty. The copy then matches on the current canonical alone.
     """
 
-    def test_a_copy_held_only_at_the_alternative_is_read_and_compared(self) -> None:
+    def test_a_copy_at_the_declared_path_is_read_and_compared(self) -> None:
         canonical = (audit.ROOT / CANONICAL).read_bytes()
         reads: list[str] = []
 
@@ -50,8 +45,6 @@ class FidelityPassAlternativesCase(unittest.TestCase):
             reads.append(path)
             if path == f"repos/{SLUG}/contents/.codecov.yml?ref=main":
                 return {"encoding": "base64", "content": base64.b64encode(canonical).decode()}
-            if path == f"repos/{SLUG}/contents/codecov.yml?ref=main" and ok404:
-                return None
             raise AssertionError(f"unexpected gh read: {path}")
 
         spec = {
@@ -66,7 +59,8 @@ class FidelityPassAlternativesCase(unittest.TestCase):
 
         self.assertIn(f"repos/{SLUG}/contents/.codecov.yml?ref=main", reads)
         [(unit, spread)] = spreads
-        self.assertEqual(unit["path"], "codecov.yml")
+        self.assertEqual(reads, [f"repos/{SLUG}/contents/.codecov.yml?ref=main"])
+        self.assertEqual(unit["path"], ".codecov.yml")
         self.assertIsNotNone(spread)
         self.assertEqual(spread["match"], ["Fixture"])
         self.assertEqual(spread["unavailable"], [])
