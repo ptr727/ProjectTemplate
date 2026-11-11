@@ -110,8 +110,8 @@ of its own.
    holds, the line is `LIFT`. It says whether the question the "not yet" postponed is still
    undetermined. Any other condition, and a read that cannot be made, is `KEEP`. On a
    `LIFT` line the triaging session removes the label and comments the evidence, per step 7. Where
-   that question is still undetermined, it puts `decision` back in the same act, and the issue
-   joins the queued questions. Otherwise the issue goes in a later batch as an ordinary one.
+   that question is still undetermined, it puts `decision` back in the same act, making the
+   issue a queued question. Either way the issue goes in a later batch.
 3. **Research the questions** in clusters, one `frontier` researcher per cluster of five or six
    questions that share a topic, at most four running at once. A topic with fewer questions is a
    smaller cluster rather than one padded with other topics. That covers each `ASK` and `SPLIT`
