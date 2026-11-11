@@ -213,11 +213,11 @@ if [ -f "$registry" ]; then
     fi
     if [ "$cmd" = apply ]; then
         if ! entry_count="$(jqr --arg n "$name" '[.repos[] | select((.name|ascii_downcase)==($n|ascii_downcase))] | length' "$registry")"; then
-            echo "Failed to read the entries from $registry (invalid JSON?)." >&2
+            echo "Failed to read the entry names from $registry." >&2
             exit 1
         fi
         if [ "$entry_count" = 0 ]; then
-            echo "$repo has no entry in $registry, so apply makes no write. The entry may be on develop only: run apply from a hub checkout at develop once the entry has merged there, otherwise add the entry first." >&2
+            echo "$repo has no entry in $registry, so apply makes no write. The entry may be on develop only. Run apply from a hub checkout at develop once the entry has merged there. Otherwise add the entry first." >&2
             exit 1
         fi
     fi

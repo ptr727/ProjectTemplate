@@ -5,7 +5,7 @@ The shell is lifted out of the file rather than restated here.
 An edit that removes the behavior therefore fails these tests instead of leaving a reimplementation to agree with itself. The
 region under test makes no `gh` call of its own, and the harness assigns every variable the region reads.
 So the cases running the lifted region need no `gh` stub.
-Under check, a cataloged, unlisted, or absent entry falls through to a marker printed just after that region.
+Under check, a cataloged or unlisted entry and an absent registry fall through to a marker printed just after that region.
 Under apply, only a listed one does, and an unlisted entry or an absent registry fails the run.
 An archived entry exits before reaching the marker.
 """

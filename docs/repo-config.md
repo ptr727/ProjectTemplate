@@ -15,7 +15,7 @@ The hub holds all fleet-wide repository configuration:
 - `configure.sh` applies or checks those payloads through the GitHub API.
 - `central/` holds the READMEs `scripts/central_config.py` writes into the central bot-settings repositories, per "Central Bot Settings" below.
 
-Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts. Both are read from `registry/repos.json` rather than from a payload here. A `check` before registry enrollment passes the model explicitly, and `apply` refuses a repository without one.
+Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts. Both are read from `registry/repos.json` rather than from a payload here. A `check` before registry enrollment passes the model explicitly, and `apply` refuses a repository with no registry entry.
 
 The carried `AUDIT.md` reaches the hub at `main` for its configuration check, or at `develop` for an entry not yet promoted. The fleet-wide `spec/audit.py` reads the same hub payloads directly. Both paths compare live state against one source.
 
