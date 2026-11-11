@@ -579,5 +579,4 @@ answer after it reads the PR node ID. `merge` squash-merges a feature pull reque
 words instead of a line number a fix push can move. It resolves the thread only when `--resolve`
 is given. A finding posted twice on one file, as two threads with the same text, is answered with
 `--all-identical`, which the refusal names. The repository's
-`.github/copilot-instructions.md` bootstraps Copilot into the `fleet-code-review` skill and its stable
-coverage marker. Do not reconstruct the API operations by hand.
+`.github/copilot-instructions.md` bootstraps Copilot into the `fleet-code-review` skill. Do not reconstruct the API operations by hand.

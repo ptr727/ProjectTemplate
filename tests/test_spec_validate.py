@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import json
 import os
 import re
@@ -2627,6 +2629,70 @@ class InvestigateTrackingCase(unittest.TestCase):
         for disposition in ("re-vendor", "track", "accepted", "upstream-candidate", "retire"):
             with self.subTest(disposition=disposition):
                 self.assertEqual(self.errors({"disposition": disposition, "tracking": None}), [])
+
+
+class PlaceholderErrorsCase(unittest.TestCase):
+    """A declared placeholder has to occur in the file a carrier fills it in from."""
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.root / "GUIDE.md").write_text("Reach <owner> on <repo>.\n", encoding="utf-8")
+
+    def errors(self, **fields: object) -> list[str]:
+        return validate.placeholder_errors(self.root, [{"path": "GUIDE.md", **fields}])
+
+    def test_tokens_the_canonical_holds_pass(self) -> None:
+        self.assertEqual(self.errors(placeholders=["<owner>", "<repo>"]), [])
+
+    def test_a_token_the_canonical_dropped_is_named(self) -> None:
+        self.assertEqual(
+            self.errors(placeholders=["<owner>", "<N>"]),
+            ["files.json: GUIDE.md placeholder '<N>' does not occur in GUIDE.md"],
+        )
+
+    def test_an_entry_declaring_none_is_ignored(self) -> None:
+        self.assertEqual(self.errors(), [])
+
+    def test_the_reference_outranks_the_path_as_canonical(self) -> None:
+        (self.root / "snippet.md").write_text("Only <N> here.\n", encoding="utf-8")
+        self.assertEqual(self.errors(placeholders=["<N>"], reference="snippet.md"), [])
+
+    def test_the_intent_ref_rationale_is_not_searched(self) -> None:
+        (self.root / "rules.md").write_text("Only <N> here.\n", encoding="utf-8")
+        self.assertEqual(
+            self.errors(placeholders=["<N>"], intentRef="rules.md#a-section"),
+            ["files.json: GUIDE.md placeholder '<N>' does not occur in GUIDE.md"],
+        )
+
+    def test_a_missing_canonical_is_reported(self) -> None:
+        self.assertEqual(
+            self.errors(placeholders=["<N>"], reference="absent.md"),
+            ["files.json: GUIDE.md declares placeholders but absent.md is not a file"],
+        )
+
+    def test_a_malformed_list_is_reported_rather_than_crashing(self) -> None:
+        for value in ("<owner>", ["<owner>", 3]):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    self.errors(placeholders=value),
+                    ["files.json: GUIDE.md placeholders must be an array of strings"],
+                )
+
+    def test_the_shipped_manifest_is_clean(self) -> None:
+        baseline = validate.load("spec/files.json")["baseline"]
+        self.assertEqual(validate.placeholder_errors(validate.ROOT, baseline), [])
+
+    def test_the_gate_reaches_the_shipped_manifest(self) -> None:
+        """Deleting the call site leaves every helper test above green, so run the gate's own entry point."""
+        marker = "files.json: fixture placeholder error"
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(validate, "placeholder_errors", return_value=[marker]),
+            contextlib.redirect_stdout(out),
+        ):
+            status = validate.main([])
+        self.assertEqual(status, 1)
+        self.assertIn(marker, out.getvalue())
 
 
 class InvestigateTrackingWiringCase(unittest.TestCase):

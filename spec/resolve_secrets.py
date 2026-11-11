@@ -236,6 +236,11 @@ def fleet_expectations(
     return expected, held - set(expected), strays - set(expected) - held, skipped
 
 
+def registry_short_names(registry: Any) -> set[str]:
+    """Every `shortName` the registry holds, the owner tokens a consumer secret file opens with."""
+    return {e["shortName"] for e in registry["repos"] if "shortName" in e}
+
+
 def scaffold(
     secrets: dict[str, Any],
     registry: Any,
@@ -249,12 +254,20 @@ def scaffold(
 
     Every tree is read and every stray looked for before the first file is created.
     A listing of the directory names entries and opens none of them.
+    A consumer file is `<shortName>_<purpose>[_<part>]`, so its first field is its owner's registry short name.
+    The name is the ownership record, so a file whose first field is no short name is unclaimed.
+    A `github_` file is a provisioning file.
     """
     expected, held, wrong_scope, skipped = fleet_expectations(secrets, registry, tree_reader)
     on_disk = set()
     if directory.is_dir():
+        short_names = registry_short_names(registry)
         on_disk = {
-            e.name for e in os.scandir(directory) if e.name.startswith(secret_names.FILE_PREFIX)
+            e.name
+            for e in os.scandir(directory)
+            if e.name.startswith(secret_names.FILE_PREFIX)
+            or e.name.partition("_")[0] not in short_names
+            or "_" not in e.name
         }
     strays = sorted(on_disk & wrong_scope)
     present = sorted(on_disk & (set(expected) | held))

@@ -157,10 +157,10 @@ class TestRefusal(unittest.TestCase):
 class TestCoverage(unittest.TestCase):
     def test_the_marker_states_full_partial_or_an_unbelievable_pair(self) -> None:
         for marker, state in (
-            ("<!-- fleet-review: reviewed=3 changed=3 findings=0 -->", "full"),
-            ("<!-- fleet-review: reviewed=2 changed=3 findings=1 -->", "partial"),
-            ("<!-- fleet-review: reviewed=4 changed=3 findings=0 -->", "unknown"),
-            ("<!-- fleet-review: reviewed=12345 changed=12345 findings=0 -->", "unknown"),
+            ("<!-- fleet-review: reviewed=3 changed=3 -->", "full"),
+            ("<!-- fleet-review: reviewed=2 changed=3 -->", "partial"),
+            ("<!-- fleet-review: reviewed=4 changed=3 -->", "unknown"),
+            ("<!-- fleet-review: reviewed=12345 changed=12345 -->", "unknown"),
         ):
             with self.subTest(marker=marker):
                 found = adapter.read(body(tail=marker))
@@ -169,19 +169,19 @@ class TestCoverage(unittest.TestCase):
 
     def test_a_marker_ending_a_sentence_is_read(self) -> None:
         found = adapter.read(
-            body(headline="Read it all. <!-- fleet-review: reviewed=1 changed=1 findings=0 -->")
+            body(headline="Read it all. <!-- fleet-review: reviewed=1 changed=1 -->")
         )
         self.assertEqual("full", found.coverage)
 
     def test_the_worst_marker_wins(self) -> None:
         tail = (
-            "<!-- fleet-review: reviewed=3 changed=3 findings=0 -->\n\n"
-            "<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+            "<!-- fleet-review: reviewed=3 changed=3 -->\n\n"
+            "<!-- fleet-review: reviewed=1 changed=3 -->"
         )
         self.assertEqual("partial", adapter.read(body(tail=tail)).coverage)
 
     def test_a_quoted_marker_states_nothing(self) -> None:
-        marker = "<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        marker = "<!-- fleet-review: reviewed=1 changed=3 -->"
         for quoted in (f"`{marker}`", f"```\n{marker}\n```", f"    {marker}"):
             with self.subTest(quoted=quoted):
                 found = adapter.read(body(tail=f"Lead.\n\n{quoted}"))
@@ -245,8 +245,8 @@ class TestCoverage(unittest.TestCase):
 
     def test_a_partial_wins_over_any_reading_beside_it(self) -> None:
         tail = (
-            "<!-- fleet-review: reviewed=4 changed=4 findings=0 -->\n\n"
-            "<!-- fleet-review: reviewed=5 changed=4 findings=0 -->\n\n"
+            "<!-- fleet-review: reviewed=4 changed=4 -->\n\n"
+            "<!-- fleet-review: reviewed=5 changed=4 -->\n\n"
             "Copilot reviewed 3 out of 4 changed files."
         )
         self.assertEqual("partial", adapter.read(body(tail=tail)).coverage)
@@ -428,6 +428,124 @@ class TestOpenFindings(unittest.TestCase):
                 )
                 self.assertEqual((), found.notes)
                 self.assertEqual((), found.unplaced)
+
+    IDENTIFIED = (
+        "The review identified these findings:\n"
+        "- `src/example.py`: **moderate**, P1, 1 vote \u2014 an entry should be judged against "
+        "the stored value.\n"
+        "- `docs/example.md`: **nit**, P2, 2 votes \u2014 avoid an incidental count.\n\n"
+    )
+    ON_FIRST = (
+        (
+            "src/example.py",
+            "An entry should be judged against the stored value, not the cached one.",
+        ),
+    )
+
+    def test_the_identified_findings_list_is_placed_and_each_item_names_its_path(self) -> None:
+        found = adapter.read(body(sections=what_changed(extra=self.IDENTIFIED)))
+        self.assertEqual((), found.notes)
+        self.assertEqual((), found.unplaced)
+        self.assertEqual(2, found.listed)
+        self.assertEqual(
+            (("src/example.py",), ("docs/example.md",)), tuple(i.paths for i in found.listed_items)
+        )
+
+    def test_an_item_a_thread_carries_is_not_counted_again(self) -> None:
+        found = adapter.read(
+            body(sections=what_changed(extra=self.IDENTIFIED)), thread_texts=self.ON_FIRST
+        )
+        self.assertEqual(1, found.unthreaded)
+
+    def test_a_thread_on_the_path_saying_something_else_carries_nothing(self) -> None:
+        other = (("src/example.py", "Rename this constant to something shorter."),)
+        found = adapter.read(body(sections=what_changed(extra=self.IDENTIFIED)), thread_texts=other)
+        self.assertEqual(2, found.unthreaded)
+
+    def test_a_long_thread_sharing_common_words_carries_nothing(self) -> None:
+        item = "**Review findings:**\n- `a.py`: moderate - this should return when the value is missing.\n\n"
+        other = (
+            ("a.py", "This should check the value type when the list is empty, or return wrong."),
+        )
+        found = adapter.read(body(sections=what_changed(extra=item)), thread_texts=other)
+        self.assertEqual(1, found.unthreaded)
+
+    def test_an_item_with_one_longer_word_is_never_carried(self) -> None:
+        item = "**Review findings:**\n- `a.py`: **nit**, P3 - name the constant.\n\n"
+        other = (("a.py", "This constant is read before it is assigned."),)
+        found = adapter.read(body(sections=what_changed(extra=item)), thread_texts=other)
+        self.assertEqual(1, found.unthreaded)
+
+    def test_one_thread_carries_one_item(self) -> None:
+        twice = "**Review findings:**\n- `a.py`: guard the entry.\n- `a.py`: guard the entry.\n\n"
+        one = (("a.py", "Please guard the entry."),)
+        found = adapter.read(body(sections=what_changed(extra=twice)), thread_texts=one)
+        self.assertEqual(1, found.unthreaded)
+
+    def test_a_path_only_item_is_marked_by_the_thread_carrying_it(self) -> None:
+        items = adapter.read(body(sections=what_changed(extra=self.IDENTIFIED))).listed_items
+        threads = self.threads(
+            {"path": "src/example.py", "line": 3, "body": self.ON_FIRST[0][1]},
+        )
+        files = [{"path": "src/example.py"}, {"path": "docs/example.md"}]
+        unmatched, marks = adapter.listed_lines(items, threads, files, False)
+        self.assertEqual(1, unmatched)
+        self.assertTrue(marks[0].startswith("    [thread on its path] `src/example.py`"))
+        self.assertTrue(marks[1].startswith("    [no thread on its path] `docs/example.md`"))
+        cut = adapter.listed_lines(items, threads, files, True)[1][1]
+        self.assertTrue(cut.startswith("    [thread page cut, unknown] `docs/example.md`"))
+
+    NOTES = (
+        "| File | Review notes |\n|---|---|\n"
+        "| `scripts/example.py` | **[P1]** Guard the empty input before indexing it \u2014 "
+        "moderate, 1 vote. |\n"
+        "| `scripts/other.py` | Reviewed. |\n"
+    )
+
+    def test_a_notes_table_counts_its_markers_and_a_filler_row_counts_nothing(self) -> None:
+        found = adapter.read(body(sections=self.NOTES))
+        self.assertEqual((1, 1), (found.listed, found.unthreaded))
+        self.assertEqual(("scripts/example.py", "scripts/other.py"), found.table)
+        self.assertEqual((), found.notes)
+        self.assertEqual(
+            (
+                adapter.Item(
+                    "`scripts/example.py`: [P1] Guard the empty input before indexing it "
+                    "\u2014 moderate, 1 vote.",
+                    (),
+                    ("scripts/example.py",),
+                ),
+            ),
+            found.listed_items,
+        )
+
+    def test_a_notes_cell_holding_two_markers_counts_both(self) -> None:
+        table = "| File | Review notes |\n|---|---|\n| `a.py` | [P1] Guard the empty input. [P2] Rename the helper. |\n"
+        found = adapter.read(body(sections=table))
+        self.assertEqual((2, 2), (found.listed, found.unthreaded))
+        self.assertEqual(
+            ("`a.py`: [P1] Guard the empty input.", "`a.py`: [P2] Rename the helper."),
+            tuple(i.text for i in found.listed_items),
+        )
+        threads = [
+            {"comments": {"nodes": [{"path": "a.py", "body": "Guard the empty input here."}]}}
+        ]
+        self.assertEqual(
+            1, adapter.listed_lines(found.listed_items, threads, [{"path": "a.py"}], False)[0]
+        )
+
+    def test_a_notes_table_matches_its_thread_by_path_and_text(self) -> None:
+        carrier = (("scripts/example.py", "Guard the empty input before indexing it here."),)
+        found = adapter.read(body(sections=self.NOTES), thread_texts=carrier)
+        self.assertEqual(0, found.unthreaded)
+
+    def test_a_longer_findings_list_keeps_its_items_over_the_notes_table(self) -> None:
+        listed = "**Review findings:**\n- `a.py`: one.\n- `b.py`: two.\n\n"
+        found = adapter.read(body(sections=listed + self.NOTES))
+        self.assertEqual(2, found.listed)
+        self.assertEqual(
+            ("`a.py`: one.", "`b.py`: two."), tuple(i.text for i in found.listed_items)
+        )
 
     def test_a_numbered_findings_list_is_read_like_a_bulleted_one(self) -> None:
         listed = "Outstanding findings:\n\n1. **P1 `src/x.py:12`:** Guard.\n2. **P2:** Name.\n"

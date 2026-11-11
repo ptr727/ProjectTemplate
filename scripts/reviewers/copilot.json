@@ -54,7 +54,8 @@
     "unresolved review findings:",
     "open review findings:",
     "open findings:",
-    "review findings remain:"
+    "review findings remain:",
+    "the review identified these findings:"
   ],
   "finding_lists": [
     "review findings:",
@@ -65,11 +66,12 @@
     "unresolved review findings:",
     "open review findings:",
     "open findings:",
-    "review findings remain:"
+    "review findings remain:",
+    "the review identified these findings:"
   ],
   "effort": "review effort(?: level)?:? *(?:default *\\( *(?P<default>lite|balanced|max) *\\)|(?P<level>lite|balanced|max))",
   "table_header": "file",
-  "table_findings": "findings",
+  "table_findings": "findings|(?P<notes>review notes)",
   "table_finding_marker": "\\[P\\d\\]",
   "discussion_link": "#discussion_r(?P<id>\\d+)$"
 }

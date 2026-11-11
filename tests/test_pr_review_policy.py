@@ -621,7 +621,7 @@ class TestSchemaParity(unittest.TestCase):
         self.assertIn('branch in ("main", "master")', source)
 
 
-PARTIAL = f"{fixtures.OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+PARTIAL = f"{fixtures.OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
 
 
 def attested_on(pr: dict) -> dict:
