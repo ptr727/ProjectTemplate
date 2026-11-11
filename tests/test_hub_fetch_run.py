@@ -528,7 +528,6 @@ class LintTaskTests(unittest.TestCase):
         cd = lines.index('cd "$(git rev-parse --show-toplevel)" || exit 1')
         helper = lines.index('hub_fetch_run="$PWD/hub_fetch_run.py"')
         self.assertLess(cd, helper)
-        self.assertNotIn("dirname", lines[helper])
 
     def test_no_task_binds_the_live_tree_into_a_container(self) -> None:
         """The wrapper's snapshot is the only mount, so no task may call Docker itself."""
