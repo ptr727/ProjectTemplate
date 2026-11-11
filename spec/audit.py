@@ -1214,19 +1214,17 @@ def check_interface(path, contract, text):
     gated = {m[1] for m in matches.values() if m[1] != m[2]}
     # Each job is its own finding, since neither a gated job nor a missing one excuses another yielding the name off a pull_request run.
     events = workflow_events(_plain(root) if root is not None else None)
-    no_pr = bool(name and events and "pull_request" not in events)
-    if no_pr:
+    if name and events and "pull_request" not in events:
         findings.append(
             (
                 "DRIFT",
-                f"interface: {path} carries the ruleset-bound check '{name}' but no pull_request trigger, so no pull request run posts it with that run's gates. Add a pull_request trigger (WORKFLOW.md D1.5)",
+                f"interface: {path} has no pull_request trigger, so no pull request run posts the ruleset-bound check '{name}' with that run's gates. Add a pull_request trigger (WORKFLOW.md D1.5)",
             )
         )
     off_pr = [
         key
         for key, value in names.items()
         if name
-        and not no_pr
         and events - {"pull_request"}
         and (matches[key][2] if key in matches else value) == name
     ]

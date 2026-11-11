@@ -721,18 +721,20 @@ class CheckInterfaceCase(unittest.TestCase):
         self.assertIn("job 'check-workflow-status'", message)
         self.assertIn("on a run other than pull_request", message)
 
-    def test_a_gate_no_pull_request_starts_is_one_trigger_finding(self) -> None:
+    def test_a_gate_no_pull_request_starts_takes_the_trigger_finding(self) -> None:
         on = "on:\n  push:\n    branches: ['**']\n  workflow_dispatch:\n"
-        for label, check in (
-            ("literal name", PR_CHECK),
-            ("pull_request-only name", PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)),
+        for label, check, others in (
+            ("literal name", PR_CHECK, ["on a run other than pull_request"]),
+            ("pull_request-only name", PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION), []),
         ):
             with self.subTest(label):
                 text = PR_HEAD.replace("on: pull_request\n", on) + check
-                [(kind, message)] = audit.check_interface("wf", PR_CONTRACT, text)
-                self.assertEqual(kind, "DRIFT")
-                self.assertIn("Add a pull_request trigger", message)
-                self.assertNotIn("on a run other than pull_request", message)
+                trigger, *rest = audit.check_interface("wf", PR_CONTRACT, text)
+                self.assertEqual(trigger[0], "DRIFT")
+                self.assertIn("has no pull_request trigger", trigger[1])
+                self.assertEqual(len(rest), len(others))
+                for (_, message), want in zip(rest, others, strict=True):
+                    self.assertIn(want, message)
 
 
 class ShippedPullRequestStubCase(unittest.TestCase):
