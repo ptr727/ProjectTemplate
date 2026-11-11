@@ -105,13 +105,14 @@ One focused pull request per drift class, branched from the target's `develop`, 
 The instruction set (step 1) and step 3's re-vendor of the manifest-owned trees land in one pull
 request. The Skills tree is among those trees, and the `.github/copilot-instructions.md` skill
 paths come too.
-Commit step 1 before that re-vendor, since `carry.py` refuses a target with uncommitted changes
+Commit step 1 before that re-vendor's `check` runs, since `carry.py` refuses a target with uncommitted changes
 outside the trees it writes.
 `RESYNC.md` section 3 step 3 gives its command. Each half cites the other's text, so either
 one alone contradicts itself until the other merges. Every other class step 1 does not
 already carry takes its own pull request. Each branches from `develop` only after that one merges, in step order, per `RESYNC.md`
 section 6. Step 5's `apply` writes no file, so it opens no pull request and runs once step 4's has merged.
-A pin bump `RESYNC.md` section 4 requires before a retirement lands in the deletions pull request. A pull request is never a direct
+Where `RESYNC.md` section 4 requires a pin bump before a retirement, the bump lands in the
+deletions pull request. A pull request is never a direct
 push to a protected branch and never a hand edit outside a pull request. Close the review loop,
 per the `pr-review-conduct` skill, before asking the maintainer for merge permission. The
 maintainer merges, the agent drives to green and stops. Re-run the audit after the merge.
