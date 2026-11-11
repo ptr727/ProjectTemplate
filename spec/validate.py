@@ -813,11 +813,26 @@ def carried_link_errors(root, baseline):
     return errors
 
 
+def intent_ref(item, path):
+    """`(canonical, anchor)`: the hub path an intent unit's copy is judged against, and its intentRef's `#anchor` or None.
+
+    spec/audit.py resolves through this too, and runs standalone without main() having shape-checked these fields first.
+    """
+    ref = item.get("reference")
+    if isinstance(ref, str) and ref:
+        return ref, None
+    intent = item.get("intentRef")
+    if isinstance(intent, str) and intent:
+        canonical, _, anchor = intent.partition("#")
+        if canonical:
+            return canonical, anchor or None
+    return path, None
+
+
 def placeholder_errors(root, baseline):
     """Reject a declared placeholder its canonical file does not contain.
 
     A carrier fills each declared token per repository, so a token the hub's text has dropped asks for a substitution nothing can make.
-    The canonical resolves as spec/audit.py's intent_ref does, which this module cannot import since audit.py imports it.
     A missing canonical is skipped, since the manifest checks in main() already report a missing reference or intentRef.
     """
     errors = []
@@ -831,10 +846,7 @@ def placeholder_errors(root, baseline):
         if not is_str_list(declared):
             errors.append(f"files.json: {path} placeholders must be an array of strings")
             continue
-        reference = item.get("reference")
-        intent = item.get("intentRef")
-        intent_path = intent.partition("#")[0] if isinstance(intent, str) else ""
-        source = reference if isinstance(reference, str) and reference else intent_path or path
+        source, _ = intent_ref(item, path)
         canonical = root / source
         if not canonical.is_file():
             continue
