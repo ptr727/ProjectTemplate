@@ -111,8 +111,9 @@ This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codes
 ### Interrupts in Python
 
 - **SIGINT and SIGTERM take one path.** Python raises `KeyboardInterrupt` on SIGINT. The entry point installs a SIGTERM handler with `signal.signal` that records the signal and raises `KeyboardInterrupt`.
-- **The entry point catches `KeyboardInterrupt` once, and no code below it catches that exception.** It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 143 where the SIGTERM handler recorded a signal and 130 otherwise.
+- **The entry point catches `KeyboardInterrupt` once, and any handler below it that catches the exception re-raises it.** It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 143 where the SIGTERM handler recorded a signal and 130 otherwise.
 - **What the script holds is released by `with` blocks and `finally` clauses as the exception unwinds.** A `subprocess.Popen` child is stopped in a `finally` clause with `terminate()`, then `wait()`, since leaving its `with` block does not stop it.
+- **The rename over persistent state uses `os.replace`.** `os.rename` and `Path.rename` fail on Windows when the target exists.
 
 ## Shell
 
@@ -121,8 +122,8 @@ Bash, and only where a program cannot be Python: a bootstrap that installs the i
 ### Interrupts in Shell
 
 - **Cleanup of temporary paths and locks runs in the script's `EXIT` trap.** Bash runs that trap when SIGINT or SIGTERM ends the script, as well as on a normal exit.
-- **Every script sets an `INT` trap and a `TERM` trap, which stop its children and keep the status.** Each one sends SIGTERM with `kill` to the children the script started, then waits for them with `wait`. It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 130 or 143. Other cleanup stays in the `EXIT` trap. SIGTERM is the signal sent because a background child ignores SIGINT.
-- **A long-running child runs in the background, and the script waits for it with `wait`.** Bash runs a trap only after a foreground command returns, while a trapped signal ends a `wait` at once.
+- **Every script sets an `INT` trap and a `TERM` trap, which stop its children and keep the status.** Each one sends SIGTERM with `kill` to the children the script started, then waits for them with `wait`, each followed by `|| :`. Under `set -e`, a non-zero status from either would end the trap before the line prints. It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 130 or 143. Other cleanup stays in the `EXIT` trap. SIGTERM is the signal sent because a background child ignores SIGINT.
+- **A long-running child runs in the background, and the script waits for it with `wait`.** Bash runs a trap only after a foreground command returns, while a trapped signal ends a `wait` at once. A background child that reads standard input takes `<&0`, since bash otherwise gives it `/dev/null`.
 
 <!-- Repo -->
 

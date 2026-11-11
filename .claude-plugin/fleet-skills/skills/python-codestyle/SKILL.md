@@ -309,8 +309,9 @@ This applies to every shell and Python script. `CODESTYLE.md` "Interrupts in Pyt
 <!-- include: CODESTYLE.md > Interrupts in Python -->
 
 - **SIGINT and SIGTERM take one path.** Python raises `KeyboardInterrupt` on SIGINT. The entry point installs a SIGTERM handler with `signal.signal` that records the signal and raises `KeyboardInterrupt`.
-- **The entry point catches `KeyboardInterrupt` once, and no code below it catches that exception.** It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 143 where the SIGTERM handler recorded a signal and 130 otherwise.
+- **The entry point catches `KeyboardInterrupt` once, and any handler below it that catches the exception re-raises it.** It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 143 where the SIGTERM handler recorded a signal and 130 otherwise.
 - **What the script holds is released by `with` blocks and `finally` clauses as the exception unwinds.** A `subprocess.Popen` child is stopped in a `finally` clause with `terminate()`, then `wait()`, since leaving its `with` block does not stop it.
+- **The rename over persistent state uses `os.replace`.** `os.rename` and `Path.rename` fail on Windows when the target exists.
 
 <!-- /include -->
 

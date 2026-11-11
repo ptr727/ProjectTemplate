@@ -112,7 +112,7 @@ This applies to every shell and Python script. `CODESTYLE.md` "Interrupts in Pyt
 <!-- include: CODESTYLE.md > Interrupts in Shell -->
 
 - **Cleanup of temporary paths and locks runs in the script's `EXIT` trap.** Bash runs that trap when SIGINT or SIGTERM ends the script, as well as on a normal exit.
-- **Every script sets an `INT` trap and a `TERM` trap, which stop its children and keep the status.** Each one sends SIGTERM with `kill` to the children the script started, then waits for them with `wait`. It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 130 or 143. Other cleanup stays in the `EXIT` trap. SIGTERM is the signal sent because a background child ignores SIGINT.
-- **A long-running child runs in the background, and the script waits for it with `wait`.** Bash runs a trap only after a foreground command returns, while a trapped signal ends a `wait` at once.
+- **Every script sets an `INT` trap and a `TERM` trap, which stop its children and keep the status.** Each one sends SIGTERM with `kill` to the children the script started, then waits for them with `wait`, each followed by `|| :`. Under `set -e`, a non-zero status from either would end the trap before the line prints. It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 130 or 143. Other cleanup stays in the `EXIT` trap. SIGTERM is the signal sent because a background child ignores SIGINT.
+- **A long-running child runs in the background, and the script waits for it with `wait`.** Bash runs a trap only after a foreground command returns, while a trapped signal ends a `wait` at once. A background child that reads standard input takes `<&0`, since bash otherwise gives it `/dev/null`.
 
 <!-- /include -->
