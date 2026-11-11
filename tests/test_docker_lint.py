@@ -77,6 +77,7 @@ class DockerLintCase(unittest.TestCase):
     """Build a small tracked tree for each runner scenario."""
 
     def setUp(self) -> None:
+        self.enterContext(git_env.git_location_cleared())
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         # A separate temp dir, not self.root's own parent, which is the shared system temp root.
@@ -591,6 +592,7 @@ class StandaloneTests(unittest.TestCase):
     """The Lint tasks fetch the wrapper alone, so it runs with no hub file beside it."""
 
     def setUp(self) -> None:
+        self.enterContext(git_env.git_location_cleared())
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         self.outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
