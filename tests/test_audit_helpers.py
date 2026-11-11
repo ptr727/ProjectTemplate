@@ -721,6 +721,19 @@ class CheckInterfaceCase(unittest.TestCase):
         self.assertIn("job 'check-workflow-status'", message)
         self.assertIn("on a run other than pull_request", message)
 
+    def test_a_gate_no_pull_request_starts_is_one_trigger_finding(self) -> None:
+        on = "on:\n  push:\n    branches: ['**']\n  workflow_dispatch:\n"
+        for label, check in (
+            ("literal name", PR_CHECK),
+            ("pull_request-only name", PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION)),
+        ):
+            with self.subTest(label):
+                text = PR_HEAD.replace("on: pull_request\n", on) + check
+                [(kind, message)] = audit.check_interface("wf", PR_CONTRACT, text)
+                self.assertEqual(kind, "DRIFT")
+                self.assertIn("Add a pull_request trigger", message)
+                self.assertNotIn("on a run other than pull_request", message)
+
 
 class ShippedPullRequestStubCase(unittest.TestCase):
     """Every pull request stub the hub ships passes the contract spec/files.json gives a carried one."""
