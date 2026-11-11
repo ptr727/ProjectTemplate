@@ -107,9 +107,11 @@ of its own.
    Each batch also carries the `deferred` issues to re-check, which get no classification. The
    classifier reads the comment stating the condition the work waits for, from an account with
    write access. Where that condition is checkable state, such as an issue closing, and it now
-   holds, the line is `LIFT`. Any other condition, and a read that cannot be made, is `KEEP`. On a
-   `LIFT` line the triaging session removes the label and comments the evidence, per step 7. The
-   issue then goes in a later batch as an ordinary one.
+   holds, the line is `LIFT`. It says whether the question the "not yet" postponed is still
+   undetermined. Any other condition, and a read that cannot be made, is `KEEP`. On a
+   `LIFT` line the triaging session removes the label and comments the evidence, per step 7. Where
+   that question is still undetermined, it puts `decision` back in the same act, and the issue
+   joins the queued questions. Otherwise the issue goes in a later batch as an ordinary one.
 3. **Research the questions** in clusters, one `frontier` researcher per cluster of five or six
    questions that share a topic, at most four running at once. A topic with fewer questions is a
    smaller cluster rather than one padded with other topics. That covers each `ASK` and `SPLIT`
@@ -176,7 +178,7 @@ of its own.
 | classifier | `SPLIT #<n> <the undecided item in one sentence>` | part needs the maintainer, the rest does not |
 | classifier | `HELD #<n> <reason>` | waits on something other than a decision, such as a promotion or an attended run for an approved agent-safety edit |
 | classifier | `OVERTAKEN #<n> <what answered or overtook it>` | a later change already settled it, found by the history check |
-| classifier | `LIFT #<n> <the condition and the evidence that it holds>` | a `deferred` issue whose checkable condition now holds |
+| classifier | `LIFT #<n> <open or settled> <the condition and the evidence that it holds>` | a `deferred` issue whose checkable condition now holds |
 | classifier | `KEEP #<n> <the condition it still waits on>` | a `deferred` issue that stays deferred |
 | researcher | per question, a block of `QUESTION #<n>`, `OPTION` lines with the recommended one first, `EVIDENCE`, and `BLOCKS` | the researched question, each option with its reason, and each issue and pull request it blocks |
 | researcher | `OVERTAKEN #<n> <what answered or overtook it>` | a queued question no longer open |
