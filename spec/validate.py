@@ -1945,21 +1945,21 @@ def main(argv=()):
                 )
 
         # The audit engine's intent_ref() trusts this is a string once validated, the same way it trusts reference above.
-        intent_ref = item.get("intentRef")
-        if intent_ref is not None and not isinstance(intent_ref, str):
+        intent_value = item.get("intentRef")
+        if intent_value is not None and not isinstance(intent_value, str):
             errors.append(f"files.json: {path} intentRef must be a string")
-        elif isinstance(intent_ref, str):
+        elif isinstance(intent_value, str):
             # The audit engine strips a trailing #anchor before ever joining this with ROOT, so validate the same part it will actually read.
-            intent_path = intent_ref.split("#", 1)[0]
+            intent_path = intent_value.split("#", 1)[0]
             if escapes_repo_root(intent_path):
                 errors.append(
-                    f"files.json: {path} intentRef '{intent_ref}' must be a repo-relative path"
+                    f"files.json: {path} intentRef '{intent_value}' must be a repo-relative path"
                 )
             elif not canonical_file_in_root(intent_path):
                 # A directory such as "." exists but is not a file.
                 # The staleness check would then read the whole repo's most recent commit as this one file's, false-flagging every intent unit as stale.
                 errors.append(
-                    f"files.json: {path} intentRef '{intent_ref}' canonical {intent_path} is not a file in this checkout"
+                    f"files.json: {path} intentRef '{intent_value}' canonical {intent_path} is not a file in this checkout"
                 )
 
         sections = item.get("sections", [])
