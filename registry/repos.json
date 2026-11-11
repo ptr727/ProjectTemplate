@@ -9,6 +9,7 @@
     "repos": [
         {
             "name": "ProjectTemplate",
+            "shortName": "hub",
             "url": "https://github.com/ptr727/ProjectTemplate",
             "description": "Agent enablement for a fleet of repositories: autonomy and repeatable quality inside guardrails.",
             "status": "cataloged",
@@ -33,6 +34,7 @@
         },
         {
             "name": "Utilities",
+            "shortName": "utilities",
             "url": "https://github.com/ptr727/Utilities",
             "status": "cataloged",
             "types": ["csharp", "nuget"],
@@ -45,6 +47,7 @@
         },
         {
             "name": "LanguageTags",
+            "shortName": "languagetags",
             "url": "https://github.com/ptr727/LanguageTags",
             "status": "cataloged",
             "types": ["csharp", "nuget", "codegen"],
@@ -58,6 +61,7 @@
         },
         {
             "name": "aiopurpleair",
+            "shortName": "aiopurpleair",
             "url": "https://github.com/ptr727/aiopurpleair",
             "status": "cataloged",
             "types": ["python", "pypi"],
@@ -72,6 +76,7 @@
         },
         {
             "name": "homeassistant-purpleair",
+            "shortName": "hapurpleair",
             "url": "https://github.com/ptr727/homeassistant-purpleair",
             "status": "cataloged",
             "types": ["python", "homeassistant"],
@@ -89,6 +94,7 @@
         },
         {
             "name": "Financial-Modeling",
+            "shortName": "finmod",
             "url": "https://github.com/ptr727/Financial-Modeling",
             "status": "cataloged",
             "types": ["python", "source-only"],
@@ -115,6 +121,7 @@
         },
         {
             "name": "PlexCleaner",
+            "shortName": "plexcleaner",
             "url": "https://github.com/ptr727/PlexCleaner",
             "status": "cataloged",
             "types": ["csharp", "dotnet-publish", "docker", "python"],
@@ -140,6 +147,7 @@
         },
         {
             "name": "ESPHome-NonRoot",
+            "shortName": "esphomenonroot",
             "url": "https://github.com/ptr727/ESPHome-NonRoot",
             "status": "cataloged",
             "types": ["docker", "upstream-wrapper"],
@@ -153,6 +161,7 @@
         },
         {
             "name": "VSCode-Server-DotNetCore",
+            "shortName": "vscodedotnet",
             "url": "https://github.com/ptr727/VSCode-Server-DotNetCore",
             "status": "cataloged",
             "types": ["docker"],
@@ -165,6 +174,7 @@
         },
         {
             "name": "NxWitness",
+            "shortName": "nxwitness",
             "url": "https://github.com/ptr727/NxWitness",
             "status": "cataloged",
             "types": ["docker", "upstream-wrapper", "codegen", "csharp"],
@@ -178,6 +188,7 @@
         },
         {
             "name": "HomeAutomation-Config",
+            "shortName": "homelab",
             "url": "https://github.com/ptr727/HomeAutomation-Config",
             "status": "cataloged",
             "types": ["source-only", "python"],
@@ -202,6 +213,7 @@
         },
         {
             "name": "KiCadLibrary",
+            "shortName": "kicad",
             "url": "https://github.com/ptr727/KiCadLibrary",
             "status": "cataloged",
             "types": ["eda", "python"],
@@ -215,6 +227,7 @@
         },
         {
             "name": "EspDinIoT",
+            "shortName": "espdin",
             "url": "https://github.com/ptr727/EspDinIoT",
             "status": "cataloged",
             "types": ["eda"],
@@ -228,6 +241,7 @@
         },
         {
             "name": "ESPHome-Config",
+            "shortName": "esphomeconfig",
             "url": "https://github.com/ptr727/ESPHome-Config",
             "status": "cataloged",
             "types": ["source-only", "python", "cpp"],
@@ -244,6 +258,7 @@
         },
         {
             "name": "HomeAssistant-Config",
+            "shortName": "haconfig",
             "url": "https://github.com/ptr727/HomeAssistant-Config",
             "status": "cataloged",
             "types": ["source-only"],
@@ -259,6 +274,7 @@
         },
         {
             "name": "DevKitCIoT",
+            "shortName": "devkitc",
             "url": "https://github.com/ptr727/DevKitCIoT",
             "description": "ESP32-DevKitC IoT controller board with a PSU, AC relay, dry contact inputs, and temperature sensor.",
             "status": "cataloged",
@@ -273,6 +289,7 @@
         },
         {
             "name": "PhotoCleaner",
+            "shortName": "photocleaner",
             "url": "https://github.com/ptr727/PhotoCleaner",
             "status": "cataloged",
             "types": ["csharp", "dotnet-publish", "docker"],
@@ -285,6 +302,7 @@
         },
         {
             "name": "MediaTools",
+            "shortName": "mediatools",
             "url": "https://github.com/ptr727/MediaTools",
             "status": "cataloged",
             "types": ["csharp", "nuget"],
@@ -298,6 +316,7 @@
         },
         {
             "name": "AudioCleaner",
+            "shortName": "audiocleaner",
             "url": "https://github.com/ptr727/AudioCleaner",
             "status": "cataloged",
             "types": ["csharp", "dotnet-publish"],
@@ -311,6 +330,7 @@
         },
         {
             "name": "Vantage-Config",
+            "shortName": "vantage",
             "url": "https://github.com/ptr727/Vantage-Config",
             "description": "Design Center configuration for Vantage InFusion controller.",
             "status": "cataloged",
@@ -327,6 +347,7 @@
         },
         {
             "name": "HolidayLights",
+            "shortName": "holidaylights",
             "url": "https://github.com/ptr727/HolidayLights",
             "description": "Holiday light show configuration for xLights, FPP, and WLED.",
             "status": "cataloged",
@@ -348,6 +369,7 @@
         },
         {
             "name": "Blog",
+            "shortName": "blog",
             "url": "https://github.com/ptr727/Blog",
             "status": "cataloged",
             "types": ["hugo", "source-only", "python", "host-secrets"],
@@ -382,30 +404,35 @@
         },
         {
             "name": "DiskSpeedTest",
+            "shortName": "diskspeedtest",
             "url": "https://github.com/ptr727/DiskSpeedTest",
             "status": "archived",
             "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "GEM-Echo-Server",
+            "shortName": "gemecho",
             "url": "https://github.com/ptr727/GEM-Echo-Server",
             "status": "archived",
             "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "GoogleTo1Password",
+            "shortName": "google1password",
             "url": "https://github.com/ptr727/GoogleTo1Password",
             "status": "archived",
             "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "coderabbit",
+            "shortName": "coderabbit",
             "url": "https://github.com/ptr727/coderabbit",
             "status": "excluded",
             "exclusionReason": "CodeRabbit's central configuration for the owner, not a fleet project. Its whole content is written by scripts/central_config.py, which docs/repo-config.md \"Central Bot Settings\" describes, so it owes no fleet baseline."
         },
         {
             "name": "pr-agent-settings",
+            "shortName": "pragent",
             "url": "https://github.com/ptr727/pr-agent-settings",
             "status": "excluded",
             "exclusionReason": "Qodo's central configuration for the owner, not a fleet project. Its whole content is written by scripts/central_config.py, which docs/repo-config.md \"Central Bot Settings\" describes, so it owes no fleet baseline."

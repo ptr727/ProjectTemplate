@@ -1946,6 +1946,104 @@ class GroundBranchReaderCase(unittest.TestCase):
         self.assertEqual([a.arg for a in found[0].args.args], ["entry", "branch", "defaults"])
 
 
+class ShortNameCase(unittest.TestCase):
+    """A registry shortName is the planned owner token of a host secret stem, so the gate holds its shape and value."""
+
+    PINS: ClassVar[dict[str, str]] = {"Alpha-Repo": "alpha", "Beta": "beta"}
+
+    def check(self, *entries: dict[str, object]) -> list[str]:
+        return validate.short_name_errors(list(entries), self.PINS)
+
+    def alpha(self, **overrides: object) -> dict[str, object]:
+        return {"name": "Alpha-Repo", "shortName": "alpha", **overrides}
+
+    def test_a_pinned_short_name_passes(self) -> None:
+        self.assertEqual(self.check(self.alpha(), {"name": "Beta", "shortName": "beta"}), [])
+
+    def test_a_digit_is_part_of_the_shape(self) -> None:
+        self.assertEqual(
+            validate.short_name_errors([{"name": "Beta", "shortName": "b3"}], {"Beta": "b3"}), []
+        )
+
+    def test_an_absent_short_name_is_refused(self) -> None:
+        self.assertEqual(self.check({"name": "Beta"}), ["Beta: missing 'shortName'"])
+
+    def test_every_shape_outside_the_grammar_is_refused(self) -> None:
+        for value in ("Alpha", "al_pha", "al-pha", "", "alpha\n", 5, None):
+            with self.subTest(value=value):
+                errors = self.check(self.alpha(shortName=value))
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn(validate.SHORT_NAME_SHAPE, errors[0])
+
+    def test_a_reserved_token_is_refused(self) -> None:
+        for token in ("github", "fleet", "repository"):
+            with self.subTest(token=token):
+                errors = self.check({"name": "Other", "shortName": token})
+                self.assertIn(f"Other: shortName '{token}' is a reserved token", errors)
+
+    def test_a_short_name_two_entries_declare_is_refused(self) -> None:
+        errors = self.check(self.alpha(), {"name": "Beta", "shortName": "alpha"})
+        self.assertIn("Beta: shortName 'alpha' is already held by Alpha-Repo", errors)
+
+    def test_the_lowercased_name_of_another_entry_is_refused(self) -> None:
+        errors = self.check(self.alpha(shortName="beta"), {"name": "Beta", "shortName": "other"})
+        self.assertIn("Alpha-Repo: shortName 'beta' is another entry's repository name", errors)
+
+    def test_the_own_lowercased_name_of_an_entry_is_allowed(self) -> None:
+        pins = {"Beta": "beta"}
+        self.assertEqual(
+            validate.short_name_errors([{"name": "Beta", "shortName": "beta"}], pins), []
+        )
+
+    def test_a_change_to_a_pinned_short_name_is_a_migration(self) -> None:
+        errors = self.check(self.alpha(shortName="renamed"))
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("differs from its pinned 'alpha'", errors[0])
+        self.assertIn("migration needing the maintainer", errors[0])
+
+    def test_an_entry_with_no_pin_is_refused(self) -> None:
+        errors = self.check({"name": "Gamma", "shortName": "gamma"})
+        self.assertEqual(len(errors), 1, errors)
+        self.assertIn("Gamma: shortName 'gamma' has no line in", errors[0])
+
+    def test_an_entry_with_no_usable_name_is_left_to_the_registry_loop(self) -> None:
+        self.assertEqual(
+            validate.short_name_errors([{"shortName": "alpha"}, "bare"], self.PINS), []
+        )
+
+    def test_the_live_registry_is_clean_and_every_entry_is_pinned(self) -> None:
+        registry = validate.load("registry/repos.json")
+        self.assertEqual(validate.short_name_errors(registry["repos"]), [])
+        self.assertEqual(
+            {e["name"]: e["shortName"] for e in registry["repos"]}, validate.SHORT_NAME_PINS
+        )
+
+    def test_the_schema_requires_the_field(self) -> None:
+        schema = validate.load("registry/repos.schema.json")
+        self.assertIn("shortName", schema["$defs"]["repo"]["required"])
+
+    def test_the_gate_reports_a_refused_short_name_from_main(self) -> None:
+        """Calling the helper proves the rules and leaves the wiring unproven, so the real script runs here."""
+        fixture = {
+            "defaults": {"workflowModel": "release"},
+            "repos": [
+                {
+                    "name": "Fixture",
+                    "shortName": "NotValid",
+                    "url": "https://github.com/owner/Fixture",
+                    "status": "backlog",
+                    "classificationPending": True,
+                }
+            ],
+        }
+
+        def write_registry(root: Path) -> None:
+            (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+        output = run_gate_on_files({}, write_registry)
+        self.assertIn(f"Fixture: shortName 'NotValid' must be {validate.SHORT_NAME_SHAPE}", output)
+
+
 class RegistrySchemaMirrorCase(unittest.TestCase):
     """registry/repos.schema.json is advisory, since no gate runs it, so its patterns answer to spec/validate.py.
 
@@ -1990,6 +2088,7 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
                 self.props["requiredSecrets"]["items"]["pattern"],
                 validate.SECRET_NAME_PATTERN,
             ),
+            (self.props["shortName"]["pattern"], validate.SHORT_NAME_PATTERN),
         ):
             with self.subTest(pattern=pattern):
                 self.assertEqual(pattern, constant)

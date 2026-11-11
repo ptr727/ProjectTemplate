@@ -112,10 +112,48 @@ SECRET_NAME_PATTERN = r"^(?!GITHUB_)[A-Z_][A-Z0-9_]*(?![\s\S])"
 SECRET_NAME_SHAPE = (
     "upper-case ASCII letters, digits and _, not opening with a digit, and not opening with GITHUB_"
 )
+SHORT_NAME_PATTERN = r"^[a-z0-9]+(?![\s\S])"
+SHORT_NAME_SHAPE = "lower-case ASCII letters and digits only, with no _ and no -"
+RESERVED_SHORT_NAMES = frozenset(
+    {secret_names.FILE_PREFIX.rstrip("_"), *secret_names.SECRET_SCOPES}
+)
+# A short name is permanent once a host secret uses it, because changing it renames files on every host.
+# So a change to one is a migration, and only the maintainer's go-ahead edits a line here.
+# It is a table rather than a comparison against an earlier revision, since a shallow clone has no revision to compare.
+SHORT_NAME_PINS = {
+    "ProjectTemplate": "hub",
+    "Utilities": "utilities",
+    "LanguageTags": "languagetags",
+    "aiopurpleair": "aiopurpleair",
+    "homeassistant-purpleair": "hapurpleair",
+    "Financial-Modeling": "finmod",
+    "PlexCleaner": "plexcleaner",
+    "ESPHome-NonRoot": "esphomenonroot",
+    "VSCode-Server-DotNetCore": "vscodedotnet",
+    "NxWitness": "nxwitness",
+    "HomeAutomation-Config": "homelab",
+    "KiCadLibrary": "kicad",
+    "EspDinIoT": "espdin",
+    "ESPHome-Config": "esphomeconfig",
+    "HomeAssistant-Config": "haconfig",
+    "DevKitCIoT": "devkitc",
+    "PhotoCleaner": "photocleaner",
+    "MediaTools": "mediatools",
+    "AudioCleaner": "audiocleaner",
+    "Vantage-Config": "vantage",
+    "HolidayLights": "holidaylights",
+    "Blog": "blog",
+    "DiskSpeedTest": "diskspeedtest",
+    "GEM-Echo-Server": "gemecho",
+    "GoogleTo1Password": "google1password",
+    "coderabbit": "coderabbit",
+    "pr-agent-settings": "pragent",
+}
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
 GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
 SECRET_NAME_RE = re.compile(SECRET_NAME_PATTERN)
+SHORT_NAME_RE = re.compile(SHORT_NAME_PATTERN)
 # Parses owner/repo, lowercased, from a repo's url.
 # A trailing .git is stripped so it still matches GitHub's own full_name.
 # A query character or a fragment character is excluded from both groups too.
@@ -957,6 +995,40 @@ def secret_scope_errors(secrets, repos):
             secret_names.secret_plan(secrets, repo, None, name)
         except secret_names.SecretNameError as e:
             errors.append(f"registry entry {name}: {e}")
+    return errors
+
+
+def short_name_errors(repo_list, pins=None):
+    """Each registry entry's shortName has the owner-token shape, is free of collisions, and matches its pin."""
+    pins = SHORT_NAME_PINS if pins is None else pins
+    named = [r for r in repo_list if isinstance(r, dict) and isinstance(r.get("name"), str)]
+    lowered_names = {r["name"].lower() for r in named}
+    errors = []
+    first_holder = {}
+    for repo in named:
+        name = repo["name"]
+        if "shortName" not in repo:
+            errors.append(f"{name}: missing 'shortName'")
+            continue
+        short = repo["shortName"]
+        if not isinstance(short, str) or SHORT_NAME_RE.search(short) is None:
+            errors.append(f"{name}: shortName {short!r} must be {SHORT_NAME_SHAPE}")
+            continue
+        if short in RESERVED_SHORT_NAMES:
+            errors.append(f"{name}: shortName '{short}' is a reserved token")
+        if short in first_holder:
+            errors.append(f"{name}: shortName '{short}' is already held by {first_holder[short]}")
+        first_holder.setdefault(short, name)
+        if short in lowered_names and short != name.lower():
+            errors.append(f"{name}: shortName '{short}' is another entry's repository name")
+        if name not in pins:
+            errors.append(
+                f"{name}: shortName '{short}' has no line in spec/validate.py SHORT_NAME_PINS, so nothing holds it permanent"
+            )
+        elif pins[name] != short:
+            errors.append(
+                f"{name}: shortName '{short}' differs from its pinned '{pins[name]}'. Once a host secret uses one, changing it renames files on every host, so it is a migration needing the maintainer rather than an edit"
+            )
     return errors
 
 
@@ -1978,6 +2050,7 @@ def main(argv=()):
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 
     errors += secret_scope_errors(secrets, repos)
+    errors += short_name_errors(repos["repos"])
     if errors:
         print("Spec validation FAILED:")
         for err in errors:
