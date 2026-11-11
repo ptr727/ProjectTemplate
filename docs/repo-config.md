@@ -1,6 +1,6 @@
 # Repository Configuration (Hub-Only)
 
-The process for applying, checking, and regenerating the canonical repository configuration. This document and the entire `repo-config/` directory are hub-only. Every command names its target repository and runs from a hub checkout at `main`, except the `develop` case "Applying the Config" names.
+The process for applying, checking, and regenerating the canonical repository configuration. This document and the entire `repo-config/` directory are hub-only. Every command names its target repository and runs from a hub checkout at `main`, except for the `develop` case that "Applying the Config" names.
 
 ## Configuration Source
 
