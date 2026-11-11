@@ -17,7 +17,7 @@ The hub holds all fleet-wide repository configuration:
 
 Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts. Both are read from `registry/repos.json` rather than from a payload here. A `check` before registry enrollment passes the model explicitly, and `apply` waits for the entry.
 
-The carried `AUDIT.md` reaches the hub at `main` for its configuration check. The fleet-wide `spec/audit.py` reads the same hub payloads directly. Both paths compare live state against one source.
+The carried `AUDIT.md` reaches the hub at `main` for its configuration check, or at `develop` for an entry not yet promoted. The fleet-wide `spec/audit.py` reads the same hub payloads directly. Both paths compare live state against one source.
 
 ## Per-Repository Secrets
 
