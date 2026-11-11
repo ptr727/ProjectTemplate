@@ -225,6 +225,14 @@ class TestAttach(unittest.TestCase):
         self.assertEqual(frozenset(), bumps.paths)
         self.assertIn("the head moved", bumps.why)
 
+    def test_a_failed_read_counts_nothing_and_does_not_end_the_run(self) -> None:
+        pr = promotion_pr(["uv.lock"])
+        follow = mock.MagicMock(side_effect=SystemExit("GraphQL request failed"))
+        promotion.attach(pr, "o", "r", 7, follow)
+        bumps = pr[promotion.BUMPS_KEY]
+        self.assertEqual(frozenset(), bumps.paths)
+        self.assertIn("its commits could not be read", bumps.why)
+
     def test_a_commit_list_github_cut_short_counts_nothing(self) -> None:
         pr = promotion_pr(["uv.lock"])
         promotion.attach(pr, "o", "r", 7, self.follow(page(landed(BUMP, ["uv.lock"]), total=251)))

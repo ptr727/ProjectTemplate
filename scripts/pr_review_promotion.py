@@ -31,7 +31,7 @@ MANIFEST = re.compile(
 Q_CONSTITUENTS = """
 query($o:String!,$r:String!,$n:Int!,$after:String){
   repository(owner:$o,name:$r){ pullRequest(number:$n){ headRefOid
-    commits(first:100, after:$after){ totalCount pageInfo{ hasNextPage endCursor } nodes{ commit{ oid
+    commits(first:50, after:$after){ totalCount pageInfo{ hasNextPage endCursor } nodes{ commit{ oid
       associatedPullRequests(first:5){ nodes{ number baseRefName mergeCommit{ oid }
         author{ login }
         files(first:100){ pageInfo{ hasNextPage } nodes{ path } }
@@ -131,7 +131,7 @@ def attach(
 ) -> dict:
     """Attach the bumps a promotion reading `none` carries, under `BUMPS_KEY`, and return `pr`.
 
-    `follow` pages a connection and ends the run on a failed read, as any other read does.
+    `follow` pages a connection and ends the run on a failed read, which here costs only the walk.
     Only a head otherwise reading `none` costs the walk. A head moved while the list was
     paged reads as no bumps at all, not a partial answer, as does a list GitHub cut short.
     """
@@ -139,12 +139,16 @@ def attach(
         return pr
     commits: list[dict] = []
     total = 0
-    for page in follow(Q_CONSTITUENTS, owner, repo, num, "commits"):
-        if page.get("headRefOid") != pr.get("headRefOid"):
-            pr[BUMPS_KEY] = Bumps(why="the head moved while its commits were paged")
-            return pr
-        commits.extend(page["commits"]["nodes"])
-        total = page["commits"].get("totalCount") or 0
+    try:
+        for page in follow(Q_CONSTITUENTS, owner, repo, num, "commits"):
+            if page.get("headRefOid") != pr.get("headRefOid"):
+                pr[BUMPS_KEY] = Bumps(why="the head moved while its commits were paged")
+                return pr
+            commits.extend(page["commits"]["nodes"])
+            total = page["commits"].get("totalCount") or 0
+    except SystemExit as exc:
+        pr[BUMPS_KEY] = Bumps(why=f"its commits could not be read: {exc}")
+        return pr
     cut = total != len(commits)
     pr[BUMPS_KEY] = Bumps(why="the commit list is cut short") if cut else read_bumps(commits)
     return pr
