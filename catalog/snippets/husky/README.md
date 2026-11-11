@@ -6,7 +6,7 @@ runs **language formatting/lint and the fleet's shared doc gates**. For .NET it 
 `ruff check` / the repo's type checker (native tooling, no Docker, the same checks the
 `../pre-commit/.pre-commit-config.yaml` snippet runs). It also runs the diff-scoped
 prose/comment-style gate over the paths the commit stages, and the whole-tree line-ending check. Copy `../hub_fetch_run.py`
-into the repo root for the doc gates to run. The root is where every fleet repo keeps it, whichever hook it wires. The script fetches those two checks fresh from
+into the repo root for the doc gates to run. The root is where every downstream repo keeps it, whichever hook it wires. The script fetches those two checks fresh from
 `ptr727/ProjectTemplate`'s `main` branch and runs them, rather than vendoring or pinning a copy.
 A pin that nothing keeps current goes stale by construction. CI (this repo's own, and the hub's) is
 the backstop for a change that lands broken on `main` before it does real damage locally. The prose gate adds one

@@ -4,7 +4,7 @@
 set -eu
 
 # Local pre-commit: language formatting/lint, plus the fleet's shared doc gates.
-# The doc gates run via hub_fetch_run.py, copied into the repo root, the one location every fleet repo shares.
+# The doc gates run via hub_fetch_run.py, copied into the repo root, where every downstream repo keeps it.
 # It fetches them fresh from ptr727/ProjectTemplate's `main` branch rather than vendoring or pinning them.
 # See hub_fetch_run.py's own docstring, and catalog/snippets/husky/README.md, for why.
 # Full doc-lint set (Markdown, spelling, workflow YAML, EditorConfig) stays in CI and the VS Code Lint tasks, since those need Docker.
