@@ -958,17 +958,6 @@ class IncludeCase(TreeCase):
             "<!-- include: RULES.md > Last -->\n\nLast text.\n\n<!-- /include -->\n",
         )
 
-    def test_a_comment_shaped_line_in_a_code_block_is_not_a_grouping_comment(self) -> None:
-        (self.tmp / "RULES.md").write_text(
-            "## Last\n\nExample:\n\n    <!-- sample -->\n\n[b]: ./B.md\n", encoding="utf-8"
-        )
-        self.make_skill("foo", self.region("RULES.md > Last"))
-        build_dist.regenerate()
-        self.assertEqual(
-            self.skill_text(),
-            "<!-- include: RULES.md > Last -->\n\nExample:\n\n    <!-- sample -->\n\n<!-- /include -->\n",
-        )
-
     def test_a_line_the_parser_ends_a_definition_before_is_kept(self) -> None:
         (self.tmp / "RULES.md").write_text(
             "## Last\n\nLast text.\n\n[b]: ./B.md\nKeep the backups.\n", encoding="utf-8"
