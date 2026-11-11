@@ -70,7 +70,7 @@
                 "shortName": {
                     "type": "string",
                     "pattern": "^[a-z0-9]+(?![\\s\\S])",
-                    "$comment": "The exact string spec/validate.py declares as SHORT_NAME_PATTERN, which tests/test_spec_validate.py asserts. The owner token of a host consumer secret stem, and the name a maintainer uses for the repository in conversation. No `_`, since that is the stem's field separator. Uniqueness, the reserved tokens, and permanence are spec/validate.py's short_name_errors(), since a schema cannot state a rule across entries."
+                    "$comment": "The exact string spec/validate.py declares as SHORT_NAME_PATTERN, which tests/test_spec_validate.py asserts. The planned owner token of a host consumer secret stem, and the name a maintainer uses for the repository in conversation. No `_`, since that is the stem's field separator. Uniqueness, the reserved tokens, and permanence are spec/validate.py's short_name_errors(), since a schema cannot state a rule across entries."
                 },
                 "url": { "type": "string", "format": "uri", "minLength": 1 },
                 "description": {

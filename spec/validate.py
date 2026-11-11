@@ -1027,7 +1027,7 @@ def short_name_errors(repo_list, pins=None):
             )
         elif pins[name] != short:
             errors.append(
-                f"{name}: shortName '{short}' differs from its pinned '{pins[name]}'. Changing one renames files on every host, so it is a migration needing the maintainer rather than an edit"
+                f"{name}: shortName '{short}' differs from its pinned '{pins[name]}'. Once a host secret uses one, changing it renames files on every host, so it is a migration needing the maintainer rather than an edit"
             )
     return errors
 
