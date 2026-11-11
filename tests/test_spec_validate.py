@@ -2661,11 +2661,8 @@ class PlaceholderErrorsCase(unittest.TestCase):
         (self.root / "rules.md").write_text("Only <N> here.\n", encoding="utf-8")
         self.assertEqual(self.errors(placeholders=["<N>"], intentRef="rules.md#a-section"), [])
 
-    def test_a_missing_canonical_is_reported(self) -> None:
-        self.assertEqual(
-            self.errors(placeholders=["<N>"], reference="absent.md"),
-            ["files.json: GUIDE.md declares placeholders but absent.md is not a file"],
-        )
+    def test_a_missing_canonical_is_left_to_the_manifest_checks(self) -> None:
+        self.assertEqual(self.errors(placeholders=["<N>"], reference="absent.md"), [])
 
     def test_a_malformed_list_is_reported_rather_than_crashing(self) -> None:
         for value in ("<owner>", ["<owner>", 3]):

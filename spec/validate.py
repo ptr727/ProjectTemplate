@@ -818,6 +818,7 @@ def placeholder_errors(root, baseline):
 
     A carrier fills each declared token per repository, so a token the hub's text has dropped asks for a substitution nothing can make.
     The canonical resolves as spec/audit.py's intent_ref does, which this module cannot import since audit.py imports it.
+    A missing canonical is skipped, since the manifest checks in main() already report a missing reference or intentRef.
     """
     errors = []
     for item in baseline:
@@ -836,7 +837,6 @@ def placeholder_errors(root, baseline):
         source = reference if isinstance(reference, str) and reference else intent_path or path
         canonical = root / source
         if not canonical.is_file():
-            errors.append(f"files.json: {path} declares placeholders but {source} is not a file")
             continue
         text = canonical.read_text(encoding="utf-8", errors="replace")
         for token in declared:

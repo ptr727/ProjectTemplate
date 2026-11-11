@@ -88,7 +88,7 @@ matches one path component.
 A byte-preserved file type takes the same four properties, under a section for its extension.
 STEP models are the worked example. They are text-shaped third-party files that arrive CRLF or
 LF. So each extension takes a `-text` pin in `.gitattributes`. Write the glob for both
-letter cases in both files, such as `*.[sS][tT][pP]`. `end_of_line = unset` alone is not enough, since the `[*]` section still
+letter cases in both files, such as `*.[sS][tT][eE][pP]` and `*.[sS][tT][pP]`. `end_of_line = unset` alone is not enough, since the `[*]` section still
 applies `charset`, `insert_final_newline`, and `trim_trailing_whitespace` to such a file. The
 pair stays in the repository carrying the models rather than in the hub's own files.
 
