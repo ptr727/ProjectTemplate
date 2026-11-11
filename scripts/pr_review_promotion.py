@@ -4,7 +4,7 @@ This is a library module and has no command line. Merge Gate item 2 counts a Dep
 request as covered where it changed only manifests and lockfiles and merged into `develop` green.
 `pr_review_rounds.coverage` reads one pull request's own rounds, so nothing there can see such a
 bump. This module reads the promotion's commits back to the pull requests that landed them. Each
-path only such bumps changed then leaves the comparison a round's file table has to meet.
+path that only such bumps changed is then taken out of what a round's file table has to meet.
 
 The manifests are what the fleet's Dependabot ecosystems name as a manifest or a lockfile. A
 workflow or a Dockerfile is also bumped, and is left out on purpose, since either runs as written.
@@ -157,7 +157,7 @@ def attach(
 def coverage(pr: dict) -> tuple[str, str]:
     """`pr_review_rounds.coverage`, with a promotion's green Dependabot bumps counted as covered.
 
-    A `none` becomes `dependabot` where every changed file is one only such bumps changed. It does
+    A `none` becomes `dependabot` where only such bumps changed every changed file. It does
     too where a round's file table names exactly what is left once those are taken out. Every
     other reading stands, and a promotion that cannot be read back says why beside its `none`.
     """

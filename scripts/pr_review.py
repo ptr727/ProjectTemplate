@@ -85,10 +85,11 @@ Subcommands
            added, modified, renamed, or deleted with no changed line GitHub counts left out where
            unnamed, `carried:table` where the newest round carrying a table does, `local` where an
            attested local pass covers a head the review policy hands to one, by default off the
-           default, `dependabot` where a promotion's files are green Dependabot bumps' or a table
-           names the rest, and `none` otherwise. A table stands in only where no round on record
-           states partial coverage and the whole review history is in view. `none` decides no
-           exit code and prints a note, since Merge Gate item 2 in pr-review-conduct reads this field.
+           default, `dependabot` where only green Dependabot bumps changed a promotion's files or
+           a table names the rest, and `none` otherwise. A table stands in only where no round on
+           record states partial coverage and the whole review history is in view. `none` decides
+           no exit code and prints a note, since Merge Gate item 2 in pr-review-conduct reads this
+           field.
            A promotion re-reviews content its feature pull requests already carried, so the hosted
            review runs once per change, at the promotion. On a pull request into any other branch
            the attested local pass covers every head, `review_on_head=local` where no Copilot

@@ -56,7 +56,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    that does stands in as `coverage=carried:table`. Its table has to name exactly the changed files.
    Either table may leave out an added, modified, renamed, or deleted file with no changed line,
    such as a binary. That holds while some changed file has one. On a develop -> main promotion, a
-   file only green Dependabot bumps changed leaves that comparison. The head reads
+   file that only green Dependabot bumps changed is taken out of that comparison. The head reads
    `coverage=dependabot`, which satisfies this item, where that covers every changed file or the
    table names the rest.
    A table stands in only where no Copilot round on the pull request, on any commit, states
