@@ -7,6 +7,7 @@ A stub `gh` on PATH records every call, so a write that slipped through shows up
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import shutil
 import subprocess
@@ -31,7 +32,8 @@ class UnregisteredApplyCase(unittest.TestCase):
             raise unittest.SkipTest("no jq on PATH, so the registry lookup cannot run")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "repo-config").mkdir()
+            for tree in ("repo-config", "scripts", "spec", "lib"):
+                shutil.copytree(CONFIGURE.parents[1] / tree, root / tree)
             (root / "registry").mkdir()
             script = root / "repo-config" / "configure.sh"
             shutil.copy(CONFIGURE, script)
@@ -46,19 +48,15 @@ class UnregisteredApplyCase(unittest.TestCase):
                 f'#!/bin/sh\necho "$*" >> {shlex.quote(str(calls))}\nexit 1\n', encoding="utf-8"
             )
             stub.chmod(0o755)
+            env = {**os.environ, "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")}
             result = subprocess.run(
-                [
-                    bash,
-                    "-c",
-                    f'PATH="{bin_dir}:$PATH" bash {shlex.quote(str(script))} "$@"',
-                    "x",
-                    *args,
-                ],
+                [bash, str(script), *args],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
                 timeout=60,
                 check=False,
+                env=env,
             )
             made = calls.read_text(encoding="utf-8") if calls.exists() else ""
             return result, made
@@ -84,12 +82,12 @@ class UnregisteredApplyCase(unittest.TestCase):
             self.assertEqual(made, "")
             self.assertEqual(list(Path(checkout).iterdir()), [])
 
-    def test_apply_for_a_listed_name_is_not_refused(self) -> None:
-        result, _ = self.run_configure(
+    def test_apply_for_a_listed_name_reaches_gh(self) -> None:
+        result, made = self.run_configure(
             [{"name": "Fixture", "status": "cataloged"}], ["apply", "owner/Fixture", "release"]
         )
+        self.assertNotEqual(made, "")
         self.assertNotIn("has no entry in", result.stderr)
-        self.assertIn("Could not compose the ruleset payloads", result.stderr)
 
     def test_check_for_an_unlisted_name_is_not_refused(self) -> None:
         result, _ = self.run_configure(

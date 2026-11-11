@@ -206,7 +206,7 @@ if [ -f "$registry" ]; then
         exit 0
     fi
     if [ "$cmd" = apply ]; then
-        if ! entry_count="$(jq -r --arg n "$name" '[.repos[] | select(.name==$n)] | length' "$registry" | sed $'s/\r$//')"; then
+        if ! entry_count="$(jq -r --arg n "$name" '[.repos[] | select((.name|ascii_downcase)==($n|ascii_downcase))] | length' "$registry" | sed $'s/\r$//')"; then
             echo "Failed to read the entries from $registry (invalid JSON?)." >&2
             exit 1
         fi
@@ -215,6 +215,9 @@ if [ -f "$registry" ]; then
             exit 1
         fi
     fi
+elif [ "$cmd" = apply ]; then
+    echo "Registry $registry not found, so apply makes no write. Run it from a hub checkout." >&2
+    exit 1
 fi
 
 if [ -z "$model" ]; then
