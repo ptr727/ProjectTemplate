@@ -1,6 +1,6 @@
 # Repository Configuration (Hub-Only)
 
-The process for applying, checking, and regenerating the canonical repository configuration. This document and the entire `repo-config/` directory are hub-only. Every command runs from a hub checkout at `main` and names its target repository.
+The process for applying, checking, and regenerating the canonical repository configuration. This document and the entire `repo-config/` directory are hub-only. Every command names its target repository and runs from a hub checkout at `main`, except for the `develop` case that "Applying the Config" names.
 
 ## Configuration Source
 
@@ -15,9 +15,9 @@ The hub holds all fleet-wide repository configuration:
 - `configure.sh` applies or checks those payloads through the GitHub API.
 - `central/` holds the READMEs `scripts/central_config.py` writes into the central bot-settings repositories, per "Central Bot Settings" below.
 
-Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts. Both are read from `registry/repos.json` rather than from a payload here. Commands that operate before registry enrollment pass the model explicitly.
+Downstream repositories carry no `repo-config/` directory. The registry's `workflowModel` selects the `develop` payload, and its `environments` declares the deployment environments the check mode asserts. Both are read from `registry/repos.json` rather than from a payload here. A `check` before registry enrollment passes the model explicitly, and `apply` refuses a repository with no registry entry.
 
-The carried `AUDIT.md` reaches the hub at `main` for its configuration check. The fleet-wide `spec/audit.py` reads the same hub payloads directly. Both paths compare live state against one source.
+The carried `AUDIT.md` reaches the hub at `main` for its configuration check, or at `develop` for an entry not yet promoted. The fleet-wide `spec/audit.py` reads the same hub payloads directly. Both paths compare live state against one source.
 
 ## Per-Repository Secrets
 
@@ -29,7 +29,7 @@ Downstream repositories carry no copy of `spec/secrets.json`. `baseline` applies
 
 **Configure by importing the JSON payloads, never by hand-building the rules** (hand reconstruction has gone wrong on past setups). The result must be **exactly two rulesets named `develop` and `main`**, and the names are load-bearing (`AGENTS.md` and the workflows reference them). Only the `develop` *content* varies by model.
 
-Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. Both modes need project access on the token as well as admin on the repository, since the project link is read and written through GraphQL. A token that cannot read projects stops `apply` in its pre-flight with nothing written, naming the scope to grant. Under `check` such a token reads as a failing project group. A token that can read them but not write one reaches the link write itself and fails there. The script applies `settings.json`, the Dependabot security features, the label set, both rulesets, the link to the fleet project, and the repository's secrets from `~/.secrets/`. The link is written only where it is absent. The declared project title is compared with the live one first. The comparison exists because a project number is reusable and the same declared number is applied to every fleet repository. A registered repository can omit the model and use the registry lookup. A repository outside the registry passes the model explicitly:
+Remove all classic branch-protection rules and stray rulesets. Run `configure.sh apply` from a hub checkout at `main`, naming the target repository and its model. `apply` refuses, writing nothing, a repository with no entry in the registry it reads. Without the entry, the rulesets and policy files would come from the default policy. A repository whose entry has merged to `develop` but not yet been promoted is configured and checked from a hub checkout at `develop`. Every other repository's run stays on `main`. Both modes need project access on the token as well as admin on the repository, since the project link is read and written through GraphQL. A token that cannot read projects stops `apply` in its pre-flight with nothing written, naming the scope to grant. Under `check` such a token reads as a failing project group. A token that can read them but not write one reaches the link write itself and fails there. The script applies `settings.json`, the Dependabot security features, the label set, both rulesets, the link to the fleet project, and the repository's secrets from `~/.secrets/`. The link is written only where it is absent. The declared project title is compared with the live one first. The comparison exists because a project number is reusable and the same declared number is applied to every fleet repository. A registered repository can omit the model and use the registry lookup. The model is passed as:
 
 ```sh
 repo-config/configure.sh apply owner/repo release|operational

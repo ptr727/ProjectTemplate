@@ -77,14 +77,14 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 
 ### Apply or verify repository configuration
 
-Run these commands from a hub checkout at `main`. The payloads, registry, and script are hub-hosted.
+Run these commands from a hub checkout at `main`. A repo whose registry entry has merged to `develop` but not yet reached `main` runs them from a hub checkout at `develop` instead. The payloads, registry, and script are hub-hosted.
 
 ```sh
 repo-config/configure.sh check owner/repo release|operational
 repo-config/configure.sh apply owner/repo release|operational
 ```
 
-**Always pass the command, the repository, and the model.** The command is required. A missing or unknown command, an unknown option, a repository not shaped `owner/name`, and an unknown model are each refused before any read. `--help` prints the usage. An omitted target resolves to the hub repository. Applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument.
+**Always pass the command, the repository, and the model.** The command is required. A missing or unknown command, an unknown option, a repository not shaped `owner/name`, and an unknown model are each refused before any read. `--help` prints the usage. An omitted target resolves to the hub repository. Applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so under `check` a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument. `apply` refuses a repo the registry does not name, writing nothing.
 
 `check` is read-only and exits non-zero on drift. `apply` is idempotent and drives from the committed payloads, its rulesets composed for the repo, so it changes no setting on a conformant repo. The secrets group is the exception, since a stored value can never be read back to compare. Each run rewrites every secret the repo owes from `~/.secrets/`, so a value rotated in the GitHub UI and not in that file is overwritten. `check` also asserts one group `apply` never writes, the existence and deployment-branch policy of every environment the registry's `environments` declares for the repo. So the two are not exact inverses. [docs/repo-config.md](./docs/repo-config.md) "Deployment Environments" says why.
 

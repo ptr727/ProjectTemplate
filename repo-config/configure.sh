@@ -195,9 +195,15 @@ registry="$script_dir/../registry/repos.json"
 # The script spec/validate.py refuses both when it is run.
 name="${repo##*/}"
 
+# Call as `jqr FILTER...`: jq -r plus stripping a line's trailing \r that a native Windows jq (WinGet's jq-1.8.2) puts there.
+# The \r bash expands here, a literal byte rather than sed's own backslash-escape.
+# That is because sed's own escape is a GNU extension a BSD sed would not honor.
+jqr() { jq -r "$@" | sed $'s/\r$//'; }
+
 archived_status=""
+# shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
 if [ -f "$registry" ]; then
-    if ! archived_status="$(jq -r --arg n "$name" '(.repos[] | select(.name==$n) | .status) // empty' "$registry" | sed $'s/\r$//')"; then
+    if ! archived_status="$(jqr --arg n "$name" '(.repos[] | select(.name==$n) | .status) // empty' "$registry")"; then
         echo "Failed to read status from $registry (invalid JSON?)." >&2
         exit 1
     fi
@@ -205,6 +211,19 @@ if [ -f "$registry" ]; then
         echo "$repo is archived in $registry. GitHub rejects a write to an archived repository, so $cmd makes none and stops here."
         exit 0
     fi
+    if [ "$cmd" = apply ]; then
+        if ! entry_count="$(jqr --arg n "$name" '[.repos[] | select((.name|ascii_downcase)==($n|ascii_downcase))] | length' "$registry")"; then
+            echo "Failed to read the entry names from $registry." >&2
+            exit 1
+        fi
+        if [ "$entry_count" = 0 ]; then
+            echo "$repo has no entry in $registry, so apply makes no write. The entry may be on develop only. Run apply from a hub checkout at develop once the entry has merged there. Otherwise add the entry first." >&2
+            exit 1
+        fi
+    fi
+elif [ "$cmd" = apply ]; then
+    echo "Registry $registry not found, so apply makes no write. Run it from a hub checkout." >&2
+    exit 1
 fi
 
 if [ -z "$model" ]; then
@@ -822,11 +841,6 @@ jq_has() { jq -e "$@" >/dev/null 2>&1; }
 # Output and errors are both discarded, so it is safe to pass to assert.
 # The vulnerability-alerts endpoint is the example, returning 204 when enabled and 404 when disabled.
 gh_ok() { gh api "$@" >/dev/null 2>&1; }
-
-# Call as `jqr FILTER...`: jq -r plus stripping a line's trailing \r that a native Windows jq (WinGet's jq-1.8.2) puts there.
-# The \r bash expands here, a literal byte rather than sed's own backslash-escape.
-# That is because sed's own escape is a GNU extension a BSD sed would not honor.
-jqr() { jq -r "$@" | sed $'s/\r$//'; }
 
 check_ruleset() { # payload-file - the live ruleset must match the committed policy, driven by the payload
     local file="$1" rname id live t want got want_enf
