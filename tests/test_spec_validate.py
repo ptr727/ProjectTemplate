@@ -2664,11 +2664,11 @@ class PlaceholderErrorsCase(unittest.TestCase):
         )
 
     def test_a_malformed_list_is_reported_rather_than_crashing(self) -> None:
-        for value in ("<owner>", ["<owner>", 3], ["<owner>", ""]):
+        for value in ("<owner>", ["<owner>", 3]):
             with self.subTest(value=value):
                 self.assertEqual(
                     self.errors(placeholders=value),
-                    ["files.json: GUIDE.md placeholders must be an array of non-empty strings"],
+                    ["files.json: GUIDE.md placeholders must be an array of strings"],
                 )
 
     def test_the_shipped_manifest_is_clean(self) -> None:

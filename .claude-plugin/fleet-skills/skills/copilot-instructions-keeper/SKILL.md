@@ -71,8 +71,7 @@ deleting it.
 1. Fetch the hub (`github.com/ptr727/ProjectTemplate`) `main` branch fresh. A stale local clone
    answers confidently instead of failing.
 2. Compare the target repo's `.github/copilot-instructions.md` against the hub's, section by
-   section, at **intent** fidelity, judged by meaning, not by byte match. A content-identical
-   file with different `<owner>`/`<repo>` placeholder fills is current, not drifted.
+   section, at **intent** fidelity, judged by meaning, not by byte match.
 3. Read the "Disproved Claims" section separately from the rest. Judge its **shape and rules**
    against the hub. Judge its **entries** only against what that repo itself carries (see
    above), never against the hub's own entries.

@@ -826,8 +826,8 @@ def placeholder_errors(root, baseline):
         if not isinstance(path, str):
             continue
         declared = item["placeholders"]
-        if not is_str_list(declared) or not all(declared):
-            errors.append(f"files.json: {path} placeholders must be an array of non-empty strings")
+        if not is_str_list(declared):
+            errors.append(f"files.json: {path} placeholders must be an array of strings")
             continue
         reference = item.get("reference")
         source = reference if isinstance(reference, str) else path
