@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import os
@@ -18,8 +19,11 @@ from unittest import mock
 
 from host_capability import requires_symlink
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
+sys.path.insert(0, str(REPO / "spec"))
 import docker_lint
+import git_env
 
 MOUNT_SOURCE = re.compile(r'^type=bind,"src=(.*)",dst=')
 
@@ -73,6 +77,7 @@ class DockerLintCase(unittest.TestCase):
     """Build a small tracked tree for each runner scenario."""
 
     def setUp(self) -> None:
+        self.enterContext(git_env.git_location_cleared())
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         subprocess.run(["git", "init", "-q", str(self.root)], check=True)
         # A separate temp dir, not self.root's own parent, which is the shared system temp root.
@@ -581,6 +586,68 @@ class DockerLintCase(unittest.TestCase):
             ),
         ):
             docker_lint.run_command(command, 90)
+
+
+class StandaloneTests(unittest.TestCase):
+    """The Lint tasks fetch the wrapper alone, so it runs with no hub file beside it."""
+
+    def setUp(self) -> None:
+        self.enterContext(git_env.git_location_cleared())
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        self.outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_the_wrapper_imports_only_the_standard_library(self) -> None:
+        tree = ast.parse((REPO / "scripts" / "docker_lint.py").read_text(encoding="utf-8"))
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imported.add("." if node.level else (node.module or "").split(".")[0])
+        self.assertEqual(sorted(imported - sys.stdlib_module_names - {"__future__"}), [])
+
+    def test_its_git_location_list_is_the_hub_s(self) -> None:
+        self.assertEqual(sorted(docker_lint.GIT_LOCATION_VARS), sorted(git_env.GIT_LOCATION_VARS))
+
+    def test_an_inherited_git_dir_does_not_move_the_snapshot(self) -> None:
+        """A git hook's GIT_DIR names the hook's repository, never the root this run lints."""
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
+            parent = docker_lint.snapshot_parent(self.root)
+        self.assertEqual((self.root / ".git").resolve(), parent.resolve())
+
+    def test_an_inherited_git_dir_does_not_move_the_targets(self) -> None:
+        """The snapshot's file list comes from the root too, never from a hook's repository."""
+        (self.root / "here.md").write_text("content\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "--", "here.md"], check=True)
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        (other / "there.md").write_text("content\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(other), "add", "--", "there.md"], check=True)
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
+            self.assertEqual(["here.md"], docker_lint.ls_files(self.root, include_untracked=False))
+
+    def test_its_rmtree_handler_is_local_review_s(self) -> None:
+        """Copied rather than imported, so the two bodies are held equal here instead."""
+
+        def body(name: str) -> str:
+            source = (REPO / "scripts" / f"{name}.py").read_text(encoding="utf-8")
+            for node in ast.parse(source).body:
+                if isinstance(node, ast.FunctionDef) and node.name == "unlink_read_only":
+                    return ast.dump(ast.Module(body=node.body[1:], type_ignores=[]))
+            raise AssertionError(f"{name}.py has no unlink_read_only")
+
+        self.assertEqual(body("local_review"), body("docker_lint"))
+
+    def test_a_root_outside_any_repository_is_a_snapshot_failure(self) -> None:
+        ceiling = {"GIT_CEILING_DIRECTORIES": str(self.outside.parent)}
+        with (
+            mock.patch.dict(os.environ, ceiling),
+            self.assertRaisesRegex(docker_lint.CommandFailed, "snapshot failed: git rev-parse"),
+        ):
+            docker_lint.snapshot_parent(self.outside)
 
 
 if __name__ == "__main__":
