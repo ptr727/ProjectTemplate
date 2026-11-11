@@ -177,7 +177,10 @@ decision "not yet", and its answer comment states the condition the work waits f
 count of open `deferred` issues rather than naming each one.
 Each ranking first re-reads the answer comment on every `deferred` issue, from an account with write access.
 Where the condition it states is checkable state, such as an issue closing, and it now holds, the ranking seat removes the label.
-That seat comments the evidence and ranks the issue like any other.
+That seat comments the evidence.
+Where the question the "not yet" postponed is still undetermined, the seat puts `decision` back in the same act.
+A group parked on it then stays parked, and a promotion it holds stays held.
+Otherwise the issue is ranked like any other.
 The report names each issue lifted this way.
 Any other condition, and a read that cannot be made, leaves the label on.
 
@@ -186,7 +189,8 @@ The round's report names it as stopped.
 That release is recorded in the group's claim comment before the issue is ranked again.
 A group an away-mode run parked is a stopped group, and its claim comment names the `decision` issue it waits on.
 It is ranked again once that issue's answer is recorded, as a resuming group, and "Away Mode" says when its release is recorded.
-An answer is recorded when a comment from an account with write access states it and the issue is closed or no longer carries `decision`.
+An answer is recorded when the issue is closed or no longer carries `decision`, and a comment from an account with write access states it.
+The reason an item left the queue at triage, recorded the same way, counts as its answer.
 `decision-triage` leaves an answered issue open where it still tracks work, so closing it is not the test.
 An open issue carrying `deferred` keeps its group parked all the same, since its answer is "not yet".
 A recorded answer never lifts the away-mode hold above on an edit under `host-setup/agent-safety/`. Such a group resumes only in an attended run, and the round's report names it as held.
@@ -838,7 +842,7 @@ subagents and holds only what they return.
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
    `decision`. It comments the question there, unless the issue already carries the label. It
    returns the round plan: each group's issues, branch, claimed files, and tier, then each held-back
-   issue with its reason. A promotion fix comes first, and a group resuming parked work names the
+   issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
    refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a clean tree with
@@ -993,7 +997,7 @@ reported as needing the maintainer present. An outsider's issue awaiting accepta
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
 request, awaiting promotion, and `deferred`, given by count. A held promotion is named too, with each `decision` issue holding
-it. An ending that cannot dispatch a promotion worker the run owes is named too. A dispatch failure meets the same harness error, and a session end leaves no seat to dispatch from. Where develop is ahead of main at either, the final message says no promotion worker ran and no promotion pull request was opened or updated. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
+it. An ending that cannot dispatch a promotion worker the run owes is named too. A dispatch failure meets the same harness error, and a session ending on a context limit has no room to run one. Where develop is ahead of main at either, the final message says no promotion worker ran and no promotion pull request was opened or updated. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State
 
