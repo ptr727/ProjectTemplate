@@ -42,7 +42,7 @@
         },
         "repo": {
             "type": "object",
-            "required": ["name", "url", "status"],
+            "required": ["name", "shortName", "url", "status"],
             "allOf": [
                 {
                     "$comment": "An operational repo must declare its line endings (release repos use the fleet LF default).",
@@ -66,6 +66,11 @@
                     "type": "string",
                     "minLength": 1,
                     "$comment": "Length alone here, and the field's real shape is stated by spec/validate.py, which requires the name to equal its own url's repo segment. JSON Schema cannot compare two sibling properties, so the rule can only live in the gate. Agreement is what gives the name a grammar: the url is held to GitHub's own repository-name characters, so a name equal to that segment carries nothing invisible without a pattern of its own."
+                },
+                "shortName": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]+(?![\\s\\S])",
+                    "$comment": "The exact string spec/validate.py declares as SHORT_NAME_PATTERN, which tests/test_spec_validate.py asserts. The owner token of a host consumer secret stem, and the name a maintainer uses for the repository in conversation. No `_`, since that is the stem's field separator. Uniqueness, the reserved tokens, and permanence are spec/validate.py's short_name_errors(), since a schema cannot state a rule across entries."
                 },
                 "url": { "type": "string", "format": "uri", "minLength": 1 },
                 "description": {
