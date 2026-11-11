@@ -392,12 +392,11 @@ def _trailing_definitions(lines, start, reader):
     Only a body running to the end of the file reaches them, and they belong to the whole document rather than to its last section.
     Copied into a skill, each one is a definition nothing there uses.
     The parser decides which lines open a definition, and a definition runs on to the next blank line or the next one's opening.
-    The HTML comments that group them by type belong to the block too, but an include marker does not.
+    The HTML comments that group them by type belong to the block too.
     The walk goes back from the end and stops at the first line that is none of these, or at `start`.
     """
     text = "\n".join(lines)
     opening = {d.line for d in reader.link_definitions(text)}
-    code = reader.code_lines(text)
     owner = {}
     current = None
     for index in range(start + 1, len(lines)):
@@ -410,15 +409,12 @@ def _trailing_definitions(lines, start, reader):
     cut = len(lines)
     found = False
     index = len(lines) - 1
-    while index > start and index not in code:
+    while index > start:
         stripped = lines[index].strip()
         if index in owner:
             cut = index = owner[index]
             found = True
         elif stripped.startswith("<!--") and stripped.endswith("-->"):
-            opens, closes = _marker(lines[index], False, f"line {index + 1}")
-            if opens or closes:
-                break
             cut = index
         elif stripped:
             break
@@ -435,7 +431,8 @@ def heading_body(lines, heading, key):
     a blockquote, or a list item is content to both, and so is a setext heading.
     They match on the parsed text case-folded, so a re-cased heading still resolves. Two matches are
     two answers to one question, refused rather than resolved to the first. A body ends at any
-    heading of its level or above, level one included. A fidelity region ends only at the next
+    heading of its level or above, level one included. One that runs to the end of the file ends
+    before the file's trailing link-reference definitions instead, which belong to the whole document. A fidelity region ends only at the next
     level-two heading.
     """
     reader = _fidelity_text()
