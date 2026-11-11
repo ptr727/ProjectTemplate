@@ -459,6 +459,7 @@ class DockerLintCase(unittest.TestCase):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
         self.addCleanup(run.wait, 30)
         self.addCleanup(run.kill)
