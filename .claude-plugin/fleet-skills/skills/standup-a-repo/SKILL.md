@@ -108,8 +108,9 @@ context-free agent, not just by the one that wrote it.
 ## Ship it
 
 One pull request per standup, branched from `develop` per step 2 above, into `develop`, never a
-direct push to a protected branch. A partly stood-up repository takes this same shape, the
-conversion pull request and then one standup pull request, while its instruction set is partial.
+direct push to a protected branch. While its instruction set is partial, a partly
+stood-up repository takes this same shape. That is any re-level and conversion pull requests,
+then one standup pull request.
 `RESYNC.md` section 6 applies once the set is whole. Close the review loop, per the `pr-review-conduct` skill,
 before asking the maintainer for merge permission. The maintainer merges, the agent drives to
 green and stops.
