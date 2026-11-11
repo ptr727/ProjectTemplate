@@ -114,8 +114,7 @@ Subcommands
            `+` and a `THREADS TRUNCATED` block naming a cut page. `suppressed=`,
            `previously_missed=`, and `cr_outside_diff=N (on_head=X earlier=Y)` count findings
            collapsed into review bodies over every round, split into the head's and earlier ones,
-           each printed whole with its acknowledgment key since no thread carries it, a trailing
-           `+` marking a cut reviews window. A tally holding a count the reader cannot believe reads `?`. `qodo_open=N`
+           each printed whole with its acknowledgment key since no thread carries it. A tally holding a count the reader cannot believe reads `?`. `qodo_open=N`
            counts Qodo's findings comment entries with no Resolved or Dismissed badge, `unknown`
            where that comment can sit behind the window. `overview=T/M` is the open findings the
            round covering the head states beside the threads that round opened, `?` where it
@@ -269,10 +268,9 @@ from pr_review_checks import (
 )
 from pr_review_copilot import has_prose
 from pr_review_digest import digest_refusal, render
-from pr_review_payload import POLICY_KEY
+from pr_review_payload import POLICY_KEY, page_files, page_reviews
 from pr_review_rounds import (
     ACK_MARKER,
-    FILES_UNREAD,
     REVIEWER,
     answered_outside_review,
     attested,
@@ -333,7 +331,6 @@ HUB = "ptr727/ProjectTemplate"
 WINDOW = 100
 
 FILES_WINDOW = 100
-FILES_CAP = 3000
 READ_RETRY_DELAYS = (2, 5)
 ATTEST_HEAD_DELAYS = (3, 5, 10, 15, 15, 12)
 _attest_sleep = time.sleep
@@ -431,6 +428,16 @@ query($o:String!,$r:String!,$n:Int!,$after:String){
     files(first:__FILES_WINDOW__, after:$after){ pageInfo{ hasNextPage endCursor } nodes{ path additions deletions changeType } }
   }}}
 """.replace("__FILES_WINDOW__", str(FILES_WINDOW))
+Q_REVIEWS = """
+query($o:String!,$r:String!,$n:Int!,$after:String){
+  repository(owner:$o,name:$r){ pullRequest(number:$n){
+    reviews(first:__WINDOW__, after:$after){ nodes{ __FIELDS__ } pageInfo{ hasNextPage endCursor } }
+  }}}
+""".replace("__WINDOW__", str(WINDOW))
+Q_REVIEWS_LIVE = Q_REVIEWS.replace("__FIELDS__", "author{login} state commit{oid} submittedAt")
+Q_REVIEWS_HELD = Q_REVIEWS.replace(
+    "__FIELDS__", "id author{login} state commit{oid} submittedAt body"
+)
 # Substituted rather than interpolated, because GraphQL is braces from end to end.
 
 
@@ -552,6 +559,8 @@ def gql(query: str, owner: str, repo: str, num: int, policy: bool = True) -> dic
         pr[POLICY_KEY] = review_policy.policy_for(
             owner, repo, pr["baseRefName"], reread, answered_absent
         )
+    pages = Q_REVIEWS_LIVE if query == Q_LIVE else Q_REVIEWS_HELD
+    page_reviews(pr, functools.partial(follow, pages, owner, repo, num, "reviews"))
     return pr
 
 
@@ -569,33 +578,6 @@ def follow(
     except shared.GraphQLError as exc:
         sys.stderr.write(exc.detail)
         raise SystemExit(str(exc)) from exc
-
-
-def page_files(owner: str, repo: str, num: int, pr: dict) -> None:
-    """Read the rest of `pr`'s changed-file list into it, past the full read's first page.
-
-    A list reaching `FILES_CAP` stays marked as cut short, and a page read at another head leaves
-    it unread under `FILES_UNREAD`. A list cut short or unread is compared against nothing. A
-    failed page read ends the run.
-    """
-    files = pr.get("files")
-    if not isinstance(files, dict):
-        return
-    page = files.get("pageInfo")
-    if not isinstance(page, dict) or page.get("hasNextPage") is not True:
-        return
-    nodes = files["nodes"]
-    for more in follow(Q_FILES, owner, repo, num, "files", page["endCursor"]):
-        if more["headRefOid"] != pr.get("headRefOid"):
-            files[FILES_UNREAD] = (
-                "the head moved while the changed-file list was paged, so the list describes "
-                "no one commit"
-            )
-            return
-        nodes.extend(more["files"]["nodes"])
-        if len(nodes) >= FILES_CAP:
-            return
-    files["pageInfo"] = {"hasNextPage": False}
 
 
 def copilot_history(owner: str, repo: str) -> list[tuple[int, dict]]:
@@ -784,7 +766,7 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
 
     def read(held: dict | None = None) -> dict:
         fresh = gql(Q_FULL, owner, repo, num) if held is None else held
-        page_files(owner, repo, num, fresh)
+        page_files(fresh, functools.partial(follow, Q_FILES, owner, repo, num, "files"))
         return fresh
 
     pr = backoff(read(pr), read, files_unread, delays=READ_RETRY_DELAYS)

@@ -13,7 +13,7 @@ import re
 from collections.abc import Iterator
 
 import pr_review_copilot as adapter
-from pr_review_payload import bot_entry, default_branch
+from pr_review_payload import FILES_UNREAD, bot_entry, default_branch
 
 # Read from the vocabulary, so a login rename is one edit that the reader and the queries share.
 REVIEWER = adapter.VOCABULARIES["copilot"]["login"]
@@ -25,7 +25,6 @@ KNOWN_REVIEWERS = (REVIEWER, *OTHER_REVIEWERS)
 # A login that reads as this reviewer without being the spelling every query filters on.
 # `copilot-swe-agent` is the coding agent and does not match.
 READS_AS_REVIEWER = re.compile(r"copilot.*review", re.IGNORECASE)
-FILES_UNREAD = "unread"
 ATTESTATION = re.compile(
     r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
     re.MULTILINE,
@@ -188,10 +187,10 @@ def threads_truncated(pr: dict) -> bool:
 
 
 def reviews_truncated(pr: dict) -> bool:
-    """True where the `reviews` connection cut off before this pull request's actual round count.
+    """True where a `reviews` connection reached a reader with its older rounds unread.
 
-    A finding count needs every round read, so an older windowed-out round can hide a suppressed or
-    outside-diff-range finding. `hasPreviousPage` means the unread reviews are the oldest.
+    `gql` pages every read whole, so this holds only for a payload built around it. A gate still
+    fails closed on it, since a partial round in an unread page would otherwise pass unseen.
     """
     return page_flag(pr, "reviews", "hasPreviousPage")
 
@@ -268,8 +267,7 @@ def head_review_done(pr: dict, min_rounds: int) -> bool:
     Positions are read off `reviewer_nodes(pr, "reviews")`, every review on any head, refusals
     included, oldest first, the list `status` counts for `rounds=`. One list is walked so the round
     satisfying `min_rounds` is the round satisfying coverage. A push adds to the list rather than
-    resetting it, so positions stay valid when the head moves. The `last:100` window can undercount
-    an aged-out round, which fails toward waiting longer. Passing 0 reduces to `reviewed_head`.
+    resetting it, so positions stay valid when the head moves. Passing 0 reduces to `reviewed_head`.
     """
     revs = reviewer_nodes(pr, "reviews")
     head = pr["headRefOid"]
@@ -335,7 +333,10 @@ def thread_ids(pr: dict) -> tuple[str, ...]:
 def reading(node: dict, login: str = REVIEWER, pr: dict | None = None) -> adapter.Reading:
     """The adapter's reading of one body, by the vocabulary for its author's login."""
     threads = thread_ids(pr) if pr is not None else None
-    return adapter.read(node.get("body") or "", adapter.LOGINS.get(login, "copilot"), threads)
+    carriers = adapter.carriers(((pr or {}).get("reviewThreads") or {}).get("nodes") or [])
+    return adapter.read(
+        node.get("body") or "", adapter.LOGINS.get(login, "copilot"), threads, carriers
+    )
 
 
 def opened_by(pr: dict, node: dict) -> list[dict]:
@@ -517,7 +518,7 @@ def collected(
     """Each section of `kind` in this login's rounds, where it was raised, its round, and the field.
 
     Every round rather than the head's, since an unanswered finding survives a push. The field
-    reads `N (on_head=X earlier=Y)`, a trailing `+` on N where the reviews window was cut. A tally
+    reads `N (on_head=X earlier=Y)`. A tally
     holding a count the reader cannot believe reads `?`.
     """
     head = pr["headRefOid"]
@@ -538,8 +539,7 @@ def collected(
         n = adapter.total(s.findings for w, s, _ in found if on is None or (w == "on head") == on)
         return "?" if n is None else str(n)
 
-    mark = "+" if reviews_truncated(pr) else ""
-    return found, f"{tally(None)}{mark} (on_head={tally(True)} earlier={tally(False)})"
+    return found, f"{tally(None)} (on_head={tally(True)} earlier={tally(False)})"
 
 
 def thread_author(t: dict) -> str:

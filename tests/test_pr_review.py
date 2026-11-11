@@ -148,7 +148,7 @@ CCR_MARKER = "<!-- ccr-overview-v2 -->"
 # A round in that format with no verdict, no count, and no statement of what it read.
 OVERVIEW = f"{CCR_MARKER}\n\nThe change is narrow.\n"
 # The machine-readable statement of a round that read every changed file.
-COVERED = "<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
+COVERED = "<!-- fleet-review: reviewed=3 changed=3 -->"
 # The wall-clock ceiling the backtracking cases read, stated once so they cannot drift apart.
 # Each case sizes its own input so that a regression finishes and trips this rather than running long enough to hang the suite.
 # Three seconds against readings of microseconds and milliseconds, which is the margin that makes a loaded runner a non-issue rather than the clock being trusted.
@@ -158,7 +158,7 @@ BACKTRACK_BOUND = 3.0
 def review(
     login: str = pr_review_rounds.REVIEWER,
     oid: str | None = HEAD,
-    body: str = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=1 findings=0 -->",
+    body: str = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=1 -->",
     at: str = EARLY,
     rid: str = "PRR_one",
 ) -> dict:
@@ -254,7 +254,7 @@ def ack(fp: str, association: str, text: str | None = None) -> dict:
 
 def overview_v2(
     open_count: str = "2 open findings",
-    covers: str = "<!-- fleet-review: reviewed=1 changed=1 findings=2 -->",
+    covers: str = "<!-- fleet-review: reviewed=1 changed=1 -->",
     effort: str = "<sub>Review effort: Lite</sub>",
     entries: int = 2,
     verdict: str = "### Changes recommended",
@@ -844,9 +844,8 @@ CROWDED_DIGEST = "\n".join(
         (
             "repo=o/r pr=7 head=aaaaaaaa rounds=2 review_on_head=yes effort=unknown "
             "effort_source=unknown coverage=full shapes=ok refusal=no threads=2+ unresolved=2+ "
-            f"({pr_review_rounds.REVIEWER}=1 other=1) suppressed=0+ (on_head=0 earlier=0) "
-            "previously_missed=0+ (on_head=0 earlier=0) overview=?/0 cr_outside_diff=0+ "
-            "(on_head=0 earlier=0) qodo_open=unknown answered_outside_review=unknown requested=no "
+            f"({pr_review_rounds.REVIEWER}=1 other=1) suppressed=0 (on_head=0 earlier=0) "
+            "overview=?/0 qodo_open=unknown answered_outside_review=unknown requested=no "
             "merge=BLOCKED checks=0/1 stuck=FAILED new=2"
         ),
         (
@@ -864,12 +863,6 @@ CROWDED_DIGEST = "\n".join(
             "than the oldest, exactly the ones most likely to still be open. `threads=` and "
             "`unresolved=` above undercount. Read the rest with `reply`'s own paginated walk before "
             "trusting either number"
-        ),
-        (
-            "  REVIEWS TRUNCATED: this pull request carries more reviews than the 100 read here, and "
-            "the connection reads newest-first, so the ones cut off are the oldest, exactly where an "
-            "unanswered suppressed or outside-diff-range finding is most likely to still sit "
-            "unresolved. `suppressed=` and `cr_outside_diff=` above undercount"
         ),
         "  NEW T1 a.py:1 First finding.",
         "  NEW T2 a.py:1 A finding.",
@@ -897,7 +890,6 @@ class TestDigestRenderIsPinned(GqlCase):
                 merge="BLOCKED",
                 comments=[comment(login="ptr727") for _ in range(pr_review.WINDOW)],
                 older=True,
-                older_reviews=True,
                 checks=[check(conclusion="FAILURE")],
                 more_threads=True,
             )
@@ -911,6 +903,69 @@ class TestDigestRenderIsPinned(GqlCase):
         out, unresolved = pr_review.digest("o", "r", 7, now=NOW)
         self.assertEqual(0, unresolved)
         self.assertEqual(QUIET_DIGEST, out)
+
+
+class TestReviewPaging(unittest.TestCase):
+    """Every page of a pull request's reviews is read, so answering threads cannot lose a round."""
+
+    @staticmethod
+    def windowed(*reviews: dict, older: bool = True) -> dict:
+        """The windowed read's response, holding `reviews` with older ones behind it where `older`."""
+        reviews_node = {"nodes": list(reviews), "pageInfo": {"hasPreviousPage": older}}
+        return {"repository": {"pullRequest": {"reviews": reviews_node}}}
+
+    @staticmethod
+    def page(*reviews: dict, cursor: str | None = None) -> dict:
+        """One page of the forward walk, claiming another past `cursor` where it names one."""
+        info = {"hasNextPage": cursor is not None, "endCursor": cursor}
+        return {
+            "repository": {"pullRequest": {"reviews": {"nodes": list(reviews), "pageInfo": info}}}
+        }
+
+    def read(self, query: str, *responses: object) -> tuple[dict, mock.Mock]:
+        """`gql` answered by `responses` in order, and the mock that recorded each read."""
+        with mock.patch.object(pr_review, "gh_graphql", side_effect=list(responses)) as sent:
+            return pr_review.gql(query, "o", "r", 7, policy=False), sent
+
+    def test_a_round_behind_the_window_is_read_in_order(self) -> None:
+        round_ = review(rid="PRR_round")
+        reply = review(login="ptr727", rid="PRR_reply")
+        pr, sent = self.read(
+            pr_review.Q_FULL,
+            self.windowed(reply),
+            self.page(round_, cursor="c1"),
+            self.page(reply),
+        )
+        self.assertEqual(["PRR_round", "PRR_reply"], [n["id"] for n in pr["reviews"]["nodes"]])
+        self.assertFalse(pr_review_rounds.reviews_truncated(pr))
+        self.assertEqual([round_], pr_review_rounds.reviewer_nodes(pr, "reviews"))
+        self.assertEqual({"o": "o", "r": "r", "n": 7, "after": "c1"}, sent.call_args_list[2].kwargs)
+
+    def test_each_read_pages_the_fields_its_window_selects(self) -> None:
+        for query, pages in (
+            (pr_review.Q_LIVE, pr_review.Q_REVIEWS_LIVE),
+            (pr_review.Q_HELD, pr_review.Q_REVIEWS_HELD),
+            (pr_review.Q_FULL, pr_review.Q_REVIEWS_HELD),
+        ):
+            with self.subTest(query=query[:60]):
+                _, sent = self.read(query, self.windowed(review()), self.page(review()))
+                self.assertEqual(pages, sent.call_args_list[1].args[0])
+                pick = re.compile(r"reviews\([^)]*\)\{ nodes\{ (.*?) \} pageInfo")
+                self.assertEqual(1, len(pick.findall(pages)))
+                self.assertEqual(pick.findall(query), pick.findall(pages))
+
+    def test_a_read_with_no_older_reviews_reads_one_page(self) -> None:
+        pr, sent = self.read(pr_review.Q_LIVE, self.windowed(review(), older=False))
+        self.assertEqual(1, sent.call_count)
+        self.assertEqual(1, len(pr["reviews"]["nodes"]))
+
+    def test_a_failed_page_read_ends_the_run_rather_than_answering_cut_short(self) -> None:
+        with self.assertRaises(SystemExit):
+            self.read(pr_review.Q_FULL, self.windowed(review()), SystemExit("gh failed"))
+
+    def test_a_query_with_no_reviews_connection_is_left_alone(self) -> None:
+        answer = {"repository": {"pullRequest": {"headRefOid": HEAD}}}
+        self.assertEqual({"headRefOid": HEAD}, self.read(pr_review.Q_CLAIMS, answer)[0])
 
 
 class TestOtherReviewers(GqlCase):
@@ -2344,7 +2399,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         return pr_review.main(["status", "7", "--repo", "o/r"])
 
     def test_a_head_round_stating_partial_coverage_exits_forty_two(self) -> None:
-        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
         self.assertEqual(42, self.status(payload([review(body=part)], files=["a.py"])))
         out = self.out.getvalue()
         self.assertIn("coverage=PARTIAL ", out)
@@ -2352,7 +2407,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertNotIn("may have no review", out)
 
     def test_an_earlier_partial_carries_to_a_head_stating_none(self) -> None:
-        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
         rounds = [review(oid=OLD, body=part, rid="A"), review(body=OVERVIEW, rid="B")]
         self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
         line = next(ln for ln in self.out.getvalue().splitlines() if ln.startswith("status="))
@@ -2362,8 +2417,8 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertNotIn("A re-request is not the remedy", line)
 
     def test_an_earlier_partial_carried_past_an_unbelievable_head_says_so(self) -> None:
-        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
-        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 -->"
         rounds = [review(oid=OLD, body=part, rid="A"), review(body=odd, rid="B")]
         self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
         line = next(ln for ln in self.out.getvalue().splitlines() if ln.startswith("status="))
@@ -2493,15 +2548,15 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn(f"coverage={want} ", self.out.getvalue())
 
     def test_an_unbelievable_marker_reads_unknown_and_leaves_a_note(self) -> None:
-        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 -->"
         self.assertEqual(0, self.status(payload([review(body=odd)], files=["a.py"])))
         out = self.out.getvalue()
         self.assertIn("coverage=UNKNOWN ", out)
         self.assertIn("note: no statement, file table, or attested local pass", out)
 
     def test_an_earlier_partial_outranks_an_unknown_head_reading(self) -> None:
-        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
-        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 -->"
         rounds = [review(oid=OLD, body=part, rid="A"), review(body=odd, rid="B")]
         self.assertEqual(42, self.status(payload(rounds, files=["a.py"])))
         out = self.out.getvalue()
@@ -2510,16 +2565,16 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn("a round on the head states a reading this cannot believe", out)
 
     def test_a_head_stating_full_still_beats_an_earlier_partial(self) -> None:
-        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
-        full = f"{OVERVIEW}\n<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
+        full = f"{OVERVIEW}\n<!-- fleet-review: reviewed=3 changed=3 -->"
         rounds = [review(oid=OLD, body=part, rid="A"), review(body=full, rid="B")]
         self.assertEqual(0, self.status(payload(rounds, files=["a.py"])))
         self.assertIn("coverage=full ", self.out.getvalue())
 
     def test_a_head_with_a_full_and_an_unknown_round_beside_a_partial_is_partial(self) -> None:
-        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 findings=0 -->"
-        full = f"{OVERVIEW}\n<!-- fleet-review: reviewed=3 changed=3 findings=0 -->"
-        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 findings=0 -->"
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
+        full = f"{OVERVIEW}\n<!-- fleet-review: reviewed=3 changed=3 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 -->"
         rounds = [
             review(oid=OLD, body=part, rid="A"),
             review(body=full, rid="B"),
@@ -2683,6 +2738,55 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 )
                 self.assertIn("    [thread at its line] **Moderate, P1 \u2014 `src/y.py:40`", out)
                 self.assertIn("    [no path:line code span] **Nit, P3:** Name the constant.", out)
+
+    def test_the_identified_list_counts_only_the_item_no_thread_carries(self) -> None:
+        text = overview_v2(open_count="0 open findings", entries=0).replace(
+            "- Narrow the reader.\n",
+            "- Narrow the reader.\n\nThe review identified these findings:\n"
+            "- `src/x.py`: **moderate**, P1, 1 vote \u2014 an entry should be judged against the "
+            "stored value.\n"
+            "- `docs/y.md`: **nit**, P2, 2 votes \u2014 avoid an incidental count.\n",
+            1,
+        )
+        carried = thread(
+            "T1",
+            path="src/x.py",
+            cid="4000000001",
+            body="An entry should be judged against the stored value, not the cached one.",
+        )
+        pr = payload([review(body=text)], [carried], files=["src/x.py", "docs/y.md"])
+        self.assertEqual(0, self.status(pr))
+        out = self.out.getvalue()
+        self.assertNotIn("REVIEWER OUTPUT NOTED", out)
+        self.assertRegex(out, r"FINDINGS WITH NO THREAD \(1\) \(?key=[0-9a-f]{12}")
+        self.assertIn("    [thread on its path] `src/x.py`: **moderate**", out)
+        self.assertIn("    [no thread on its path] `docs/y.md`: **nit**", out)
+
+    def test_a_review_notes_finding_prints_under_no_thread_and_a_filler_row_is_nothing(
+        self,
+    ) -> None:
+        table = (
+            "| File | Review notes |\n|---|---|\n"
+            "| `scripts/example.py` | **[P1]** Guard the empty input before indexing it \u2014 "
+            "moderate, 1 vote. |\n"
+            "| `scripts/other.py` | Reviewed. |\n"
+        )
+        text = overview_v2(
+            open_count="0 open findings", entries=0, verdict="### Approval recommended"
+        ).replace(
+            "| File | Description |\n| ---- | ----------- |\n| `a.py` | Narrows the reader. |\n",
+            table,
+            1,
+        )
+        pr = payload([review(body=text)], files=["scripts/example.py", "scripts/other.py"])
+        self.assertEqual(0, self.status(pr))
+        out = self.out.getvalue()
+        self.assertNotIn("REVIEWER OUTPUT NOTED", out)
+        self.assertIn("FINDINGS WITH NO THREAD (1)", out)
+        self.assertIn(
+            "    [no thread on its path] `scripts/example.py`: [P1] Guard the empty input", out
+        )
+        self.assertNotIn("Reviewed.", out)
 
     def test_a_listed_item_no_thread_sits_on_is_owed_though_the_counts_balance(self) -> None:
         text = overview_v2(open_count="1 open issue", entries=1).replace(
@@ -4177,7 +4281,7 @@ class TestCli(GqlCase):
         self,
     ) -> None:
         """Only a round stating partial coverage withdraws the attestation, table or no table."""
-        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 -->"
         table = summarized(["a.md"], covers="")
         rounds = [review(oid=OLD, body=part, rid="PRR_a"), review(body=table, rid="PRR_b")]
         self.answer(self.into(payload(rounds, files=["a.md", "b.md"]), attest=True))
@@ -4188,7 +4292,7 @@ class TestCli(GqlCase):
 
     def test_a_partial_on_record_beside_a_table_less_round_is_not_covered(self) -> None:
         """A round that read part of a diff sends the pull request to the maintainer."""
-        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 -->"
         for cmd in (["status", "7"], ["wait", "7", "--timeout", "0"]):
             with self.subTest(cmd=cmd[0]):
                 self.out.seek(0)
@@ -5336,7 +5440,7 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7", "--timeout", "0"]))
 
     def test_a_partial_on_record_requests_a_round_rather_than_holding(self) -> None:
-        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 -->"
         self.answer(self.into(payload([review(oid=OLD, body=part)]), attest=True))
         calls = self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
         with mock.patch.object(pr_review.time, "sleep"):
@@ -5417,7 +5521,7 @@ class TestCli(GqlCase):
         self.assertTrue(pr_review_rounds.local_cover(pr))
 
     def test_status_reads_an_attested_head_unless_a_partial_is_on_record(self) -> None:
-        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 -->"
         for rounds, field in (
             ([review(oid=OLD)], "review_on_head=local"),
             ([review(oid=OLD, body=part)], "review_on_head=NO"),
@@ -6963,13 +7067,18 @@ class TestContract(unittest.TestCase):
         text = RUNBOOK.read_text(encoding="utf-8")
         self.assertIn("Never suppress a finding", text)
 
-    def test_the_runbook_publishes_the_machine_readable_coverage_marker(self) -> None:
-        """The instructed shape is the one the adapter reads as a statement of full coverage."""
-        marker = "<!-- fleet-review: reviewed=N changed=N findings=N -->"
-        # Raw, since a marker split over two lines is not the one-line shape the skill asks for.
-        self.assertIn(marker, CODE_REVIEW_SKILL.read_text(encoding="utf-8"))
-        body = f"{OVERVIEW}\n{marker.replace('N', '1')}"
-        self.assertEqual("full", pr_review_rounds.adapter.read(body).coverage)
+    def test_no_review_instruction_asks_for_the_coverage_marker(self) -> None:
+        """Copilot never wrote the marker, so nothing asks for it and only its two counts read."""
+        for doc in (RUNBOOK, CODE_REVIEW_SKILL):
+            self.assertNotIn("fleet-review:", doc.read_text(encoding="utf-8"))
+        read = pr_review_rounds.adapter.read
+        self.assertEqual(
+            "full", read(f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=1 -->").coverage
+        )
+        self.assertEqual(
+            "none",
+            read(f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=1 findings=1 -->").coverage,
+        )
 
     def test_the_runbook_names_partial_coverage_as_a_state_that_blocks_a_merge(self) -> None:
         """A verify step reading `commit.oid` alone is what let five partial rounds merge.
