@@ -13,9 +13,12 @@ import contextlib
 import http.client
 import importlib.util
 import io
+import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 import urllib.error
@@ -471,6 +474,134 @@ class GitLookupTests(unittest.TestCase):
         for cause, run in cases:
             with self.subTest(cause=cause, run=run):
                 self.assertEqual(self.lookup(run), (None, cause))
+
+
+DOCKER_LINT = "scripts/docker_lint.py"
+LINT_TASKS = {
+    "Lint: EditorConfig": "editorconfig-checker",
+    "Lint: Workflows": "actionlint",
+    "Lint: Markdown": "markdownlint",
+    "Lint: Spelling": "cspell",
+}
+TASK_SNIPPETS = {
+    "vscode-tasks.json": ".husky/hub_fetch_run.py",
+    "vscode-tasks-python.json": "hub_fetch_run.py",
+}
+
+
+def snippet_tasks(name: str) -> dict[str, dict]:
+    """The named snippet's tasks by label. Its only JSONC is a comment on a line of its own."""
+    text = (ROOT / "catalog" / "snippets" / "configs" / name).read_text(encoding="utf-8")
+    plain = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("//"))
+    return {task["label"]: task for task in json.loads(plain)["tasks"]}
+
+
+class LintTaskTests(unittest.TestCase):
+    def forms(self, task: dict) -> list[list[str]]:
+        """Each command line a task can run, its Windows override included where it has one."""
+        forms = [[task["command"], *task["args"]]]
+        if "windows" in task:
+            forms.append([task["windows"]["command"], *task["windows"]["args"]])
+        return forms
+
+    def test_each_docker_lint_task_runs_the_wrapper_through_the_helper(self) -> None:
+        for name, helper in TASK_SNIPPETS.items():
+            tasks = snippet_tasks(name)
+            for label, linter in LINT_TASKS.items():
+                for form in self.forms(tasks[label]):
+                    with self.subTest(snippet=name, task=label, command=form[0]):
+                        self.assertIn(f"${{workspaceFolder}}/{helper}", form)
+                        self.assertEqual(form[-3:], [DOCKER_LINT, "--linter", linter])
+
+    def test_no_task_binds_the_live_tree_into_a_container(self) -> None:
+        """The wrapper's snapshot is the only mount, so no task may call Docker itself."""
+        for name in TASK_SNIPPETS:
+            for label, task in snippet_tasks(name).items():
+                if "command" in task:
+                    with self.subTest(snippet=name, task=label):
+                        self.assertNotEqual(task["command"], "docker")
+
+
+class FetchedWrapperTests(unittest.TestCase):
+    """Run the hub's real wrapper from where the helper fetches it, which is outside the tree."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.urls: list[str] = []
+        self.real_run = subprocess.run
+        self.stdout = ""
+        self.stderr = io.StringIO()
+        self.commit: str | None = SHA
+
+    def urlopen(self, target: str, timeout: float | None = None) -> FakeResponse:
+        self.urls.append(target)
+        _, _, path = target.partition(f"{hub.HUB_RAW_BASE}/{self.commit or 'main'}/")
+        return FakeResponse((ROOT / path).read_bytes())
+
+    def uv_as_python(self, cmd: list[str], env: dict[str, str], check: bool):
+        """Stand in for `uv run --no-project --script`, with nothing from this tree importable."""
+        clean = {k: v for k, v in env.items() if k != "PYTHONPATH"}
+        done = self.real_run(
+            [sys.executable, *cmd[4:]],
+            env=clean,
+            check=check,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            cwd=self.tmp,
+            timeout=TIMEOUT,
+        )
+        self.stdout = done.stdout + done.stderr
+        return done
+
+    def run_wrapper(self) -> int:
+        with (
+            mock.patch.object(urllib.request, "urlopen", self.urlopen),
+            mock.patch.object(hub.shutil, "which", return_value="uv"),
+            mock.patch.object(hub.subprocess, "run", self.uv_as_python),
+            mock.patch.object(hub, "resolve_main_commit", return_value=self.commit),
+            contextlib.redirect_stderr(self.stderr),
+        ):
+            return hub.main([DOCKER_LINT, "--help"])
+
+    def test_the_wrapper_imports_from_its_fetched_companions(self) -> None:
+        self.assertEqual(self.run_wrapper(), 0, self.stdout)
+
+    def test_the_wrapper_offers_every_linter_a_task_names(self) -> None:
+        self.assertEqual(self.run_wrapper(), 0, self.stdout)
+        choices = re.search(r"--linter \{([^}]+)\}", self.stdout)
+        assert choices is not None, self.stdout
+        self.assertLessEqual(set(LINT_TASKS.values()), set(choices.group(1).split(",")))
+
+    def test_a_planted_module_beside_the_scratch_directory_is_not_imported(self) -> None:
+        """A shared temporary root is writable by others, so nothing may be read from above it."""
+        planted = self.tmp / "spec"
+        planted.mkdir()
+        (planted / "git_env.py").write_text("raise SystemExit(99)\n", encoding="utf-8")
+        with mock.patch.object(tempfile, "tempdir", str(self.tmp)):
+            self.assertEqual(self.run_wrapper(), 0, self.stdout)
+
+    def fetched(self, ref: str) -> list[str]:
+        paths = ("scripts/local_review.py", "spec/git_env.py", DOCKER_LINT)
+        return [f"{hub.HUB_RAW_BASE}/{ref}/{path}" for path in paths]
+
+    def test_every_file_comes_from_the_one_resolved_commit(self) -> None:
+        self.assertEqual(self.run_wrapper(), 0, self.stdout)
+        self.assertEqual(self.urls, self.fetched(SHA))
+
+    def test_the_run_names_the_hub_commit_it_ran_from(self) -> None:
+        """A lint result names its hub commit, so two runs that disagree can be attributed."""
+        self.assertEqual(self.run_wrapper(), 0, self.stdout)
+        self.assertIn(f"ptr727/ProjectTemplate@{SHA}", self.stderr.getvalue())
+
+    def test_an_unresolved_commit_reads_main_twice_and_says_so(self) -> None:
+        """With no commit to pin to, the double read is what refuses a mixed set."""
+        self.commit = None
+        self.assertEqual(self.run_wrapper(), 0, self.stdout)
+        self.assertEqual(self.urls, self.fetched("main") * 2)
+        self.assertIn("ptr727/ProjectTemplate@main", self.stderr.getvalue())
 
 
 if __name__ == "__main__":

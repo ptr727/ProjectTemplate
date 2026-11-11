@@ -813,6 +813,43 @@ def carried_link_errors(root, baseline):
     return errors
 
 
+def hub_copy(item, path):
+    """The hub file a carrier adapts for this entry, its `reference` where it names one and otherwise its own path."""
+    reference = item.get("reference")
+    return reference if isinstance(reference, str) and reference else path
+
+
+def placeholder_errors(root, baseline):
+    """Reject a declared placeholder its canonical file does not contain.
+
+    A carrier fills each declared token per repository, so a token the hub's text has dropped asks for a substitution nothing can make.
+    The tokens sit in the hub copy a carrier adapts, its reference or else its own path, never the intentRef rationale.
+    """
+    errors = []
+    for item in baseline:
+        if not isinstance(item, dict) or "placeholders" not in item:
+            continue
+        path = item.get("path")
+        if not isinstance(path, str):
+            continue
+        declared = item["placeholders"]
+        if not is_str_list(declared):
+            errors.append(f"files.json: {path} placeholders must be an array of strings")
+            continue
+        source = hub_copy(item, path)
+        canonical = root / source
+        if not canonical.is_file():
+            errors.append(f"files.json: {path} declares placeholders but {source} is not a file")
+            continue
+        text = canonical.read_text(encoding="utf-8", errors="replace")
+        for token in declared:
+            if token not in text:
+                errors.append(
+                    f"files.json: {path} placeholder '{token}' does not occur in {source}"
+                )
+    return errors
+
+
 def version_literal_errors(root):
     """Reject a three-part version or commit SHA anywhere in the hub's own instruction documents.
 
@@ -1892,7 +1929,7 @@ def main(argv=()):
                     f"files.json: {path} reference '{ref}' is not a file in this checkout"
                 )
         if fid == "verbatim":
-            src = ref if isinstance(ref, str) else path
+            src = hub_copy(item, path)
             if isinstance(src, str) and not (ROOT / src).exists():
                 errors.append(
                     f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing"
@@ -1963,6 +2000,7 @@ def main(argv=()):
                     )
 
     errors.extend(carried_link_errors(ROOT, baseline))
+    errors.extend(placeholder_errors(ROOT, baseline))
     errors.extend(version_literal_errors(ROOT))
     errors.extend(model_tier_errors(ROOT))
 

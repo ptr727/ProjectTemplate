@@ -494,6 +494,7 @@ FLEET: dict[str, Any] = {
     "repos": [
         {
             "name": "ExampleRepo",
+            "shortName": "examplerepo",
             "url": "https://github.com/owner/ExampleRepo",
             "status": "cataloged",
             "types": ["python"],
@@ -501,18 +502,21 @@ FLEET: dict[str, Any] = {
         },
         {
             "name": "Other-Repo",
+            "shortName": "otherrepo",
             "url": "https://github.com/owner/Other-Repo",
             "status": "cataloged",
             "types": ["python"],
         },
         {
             "name": "Excluded-Repo",
+            "shortName": "excludedrepo",
             "url": "https://github.com/owner/Excluded-Repo",
             "status": "excluded",
             "types": ["python"],
         },
         {
             "name": "OldRepo",
+            "shortName": "oldrepo",
             "url": "https://github.com/owner/OldRepo",
             "status": "archived",
             "types": ["python"],
@@ -622,9 +626,72 @@ class ScaffoldCase(unittest.TestCase):
             (directory / "notes.txt").write_text("not a secret file\n", encoding="utf-8")
             created, _, strays, unclaimed, _ = self.run_scaffold(directory)
             self.assertEqual(strays, [])
-            self.assertEqual(unclaimed, ["github_oldrepo_codecov_token"])
+            self.assertEqual(unclaimed, ["github_oldrepo_codecov_token", "notes.txt"])
             self.assertTrue((directory / "github_oldrepo_codecov_token").exists())
             self.assertTrue(created)
+
+    def test_a_subdirectory_is_never_unclaimed_and_is_never_created_over(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            for name in ("notes", "github_oldrepo_codecov_token", "github_codegen_app_client_id"):
+                (directory / name).mkdir()
+            created, present, strays, unclaimed, _ = self.run_scaffold(directory)
+            self.assertEqual((strays, unclaimed), ([], []))
+            self.assertIn("github_codegen_app_client_id", present)
+            self.assertNotIn("github_codegen_app_client_id", created)
+            self.assertTrue(created)
+
+    def test_a_subdirectory_at_a_wrong_scope_name_stops_the_run_as_apply_would(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            (directory / "github_codecov_token").mkdir()
+            created, _, strays, _, _ = self.run_scaffold(directory)
+            self.assertEqual((created, strays), ([], ["github_codecov_token"]))
+
+    @unittest.skipUnless(POSIX_MODES, "creating a symlink on Windows needs a privilege")
+    def test_a_symlink_reads_as_a_file_at_its_name_whatever_it_resolves_to(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / ".secrets"
+            directory.mkdir(mode=0o700)
+            (Path(tmp) / "target").write_text("", encoding="utf-8")
+            (Path(tmp) / "folder").mkdir()
+            (directory / "github_codecov_token").symlink_to(Path(tmp) / "target")
+            (directory / "notes").symlink_to(Path(tmp) / "folder")
+            (directory / "github_codegen_app_client_id").symlink_to(Path(tmp) / "missing")
+            created, present, strays, unclaimed, _ = self.run_scaffold(directory)
+            self.assertEqual(created, [])
+            self.assertEqual((strays, unclaimed), (["github_codecov_token"], ["notes"]))
+            self.assertEqual(present, ["github_codegen_app_client_id"])
+
+    def test_a_consumer_file_opening_with_a_short_name_is_owned_not_unclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            owned = ["examplerepo_service_key", "otherrepo_github_api.curlrc", "oldrepo_app_id"]
+            for name in owned:
+                (directory / name).write_text("", encoding="utf-8")
+            created, present, strays, unclaimed, _ = self.run_scaffold(directory)
+            self.assertEqual((strays, unclaimed), ([], []))
+            self.assertFalse(set(owned) & set(present))
+            self.assertFalse(set(owned) & set(created))
+
+    def test_a_file_whose_first_field_names_no_short_name_is_unclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            names = [
+                "fleet_service_key",
+                "unknownrepo_service_key",
+                "ExampleRepo_service_key",
+                "examplerepo",
+            ]
+            for name in names:
+                (directory / name).write_text("", encoding="utf-8")
+            _, _, strays, unclaimed, _ = self.run_scaffold(directory)
+            self.assertEqual(strays, [])
+            self.assertEqual(unclaimed, sorted(names))
 
     def test_a_dry_run_creates_nothing_even_the_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

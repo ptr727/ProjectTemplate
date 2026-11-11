@@ -27,13 +27,19 @@ MOUNT_SOURCE = re.compile(r'^type=bind,"src=(.*)",dst=')
 class FakeRunner:
     """Record commands and return configured Docker results."""
 
-    def __init__(self, failure: int | None = None, timeout: bool = False) -> None:
+    def __init__(
+        self,
+        failure: int | None = None,
+        timeout: bool = False,
+        fail_on: tuple[str, ...] = ("docker", "run"),
+    ) -> None:
         self.commands: list[tuple[list[str], int]] = []
         self.mounted: list[dict[str, bool]] = []
         self.sources: list[Path] = []
         self.modes: list[int] = []
         self.failure = failure
         self.timeout = timeout
+        self.fail_on = fail_on
 
     def __call__(
         self, command: list[str], timeout: int, *, capture_output: bool = False
@@ -56,7 +62,9 @@ class FakeRunner:
         if command[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(command, 0, "example@sha256:123\n", "")
         returncode = (
-            self.failure if self.failure is not None and command[:2] == ["docker", "run"] else 0
+            self.failure
+            if self.failure is not None and tuple(command[: len(self.fail_on)]) == self.fail_on
+            else 0
         )
         return subprocess.CompletedProcess(command, returncode, "", "")
 
@@ -400,6 +408,117 @@ class DockerLintCase(unittest.TestCase):
             self.assertEqual(0, docker_lint.main(["--root", str(self.root)]))
         lint.assert_called_once()
         self.assertIs(docker_lint.exit_on_sigterm, signal.getsignal(signal.SIGTERM))
+
+    def test_main_registers_the_sighup_handler(self) -> None:
+        """Closing a VS Code task's terminal sends SIGHUP, which would otherwise kill at once."""
+        if not hasattr(signal, "SIGHUP"):
+            self.skipTest("this platform has no SIGHUP")
+        previous = signal.getsignal(signal.SIGHUP)
+        self.addCleanup(signal.signal, signal.SIGHUP, previous)
+        with mock.patch.object(docker_lint, "lint", return_value=0):
+            self.assertEqual(0, docker_lint.main(["--root", str(self.root)]))
+        self.assertIs(docker_lint.exit_on_sigterm, signal.getsignal(signal.SIGHUP))
+
+    def ended_run(self, body: str = "4242\n") -> tuple[Path, Path]:
+        """A snapshot and owner file as a killed run leaves them, the lock gone with the process."""
+        parent = docker_lint.snapshot_parent(self.root)
+        snapshot = parent / f"{docker_lint.SNAPSHOT_PREFIX}ended"
+        (snapshot / "docs").mkdir(parents=True)
+        (snapshot / "docs" / "README.md").write_text("content\n", encoding="utf-8")
+        owner = snapshot.with_name(snapshot.name + docker_lint.OWNER_SUFFIX)
+        owner.write_text(body, encoding="utf-8")
+        return snapshot, owner
+
+    def test_a_snapshot_an_ended_run_left_is_removed_by_the_next_run(self) -> None:
+        self.track("README.md")
+        snapshot, owner = self.ended_run()
+        result, output = self.invoke({"markdownlint"}, FakeRunner())
+        self.assertEqual(0, result, output)
+        self.assertIn("SWEPT 1 snapshot(s)", output)
+        self.assertFalse(snapshot.exists())
+        self.assertFalse(owner.exists())
+
+    def test_a_run_with_zero_targets_still_removes_an_ended_run_s_snapshot(self) -> None:
+        snapshot, owner = self.ended_run()
+        result, output = self.invoke({"markdownlint"}, FakeRunner())
+        self.assertEqual(0, result, output)
+        self.assertIn("SWEPT 1 snapshot(s)", output)
+        self.assertFalse(snapshot.exists())
+        self.assertFalse(owner.exists())
+
+    def test_a_run_whose_pull_fails_still_removes_an_ended_run_s_snapshot(self) -> None:
+        self.track("README.md")
+        snapshot, owner = self.ended_run()
+
+        runner = FakeRunner(failure=1, fail_on=("docker", "pull"))
+        result, output = self.invoke({"markdownlint"}, runner)
+        self.assertEqual(1, result, output)
+        self.assertIn("SWEPT 1 snapshot(s)", output)
+        self.assertFalse(snapshot.exists())
+        self.assertFalse(owner.exists())
+
+    def test_a_snapshot_whose_run_holds_its_lock_is_kept(self) -> None:
+        self.track("README.md")
+        snapshot, owner = self.ended_run()
+        with owner.open("r+", encoding="utf-8") as live:
+            self.assertTrue(docker_lint.lock_owner(live, wait=False))
+            try:
+                result, output = self.invoke({"markdownlint"}, FakeRunner())
+            finally:
+                docker_lint.unlock_owner(live)
+        self.assertEqual(0, result, output)
+        self.assertNotIn("SWEPT", output)
+        self.assertTrue((snapshot / "docs" / "README.md").exists())
+
+    def test_a_killed_run_is_kept_while_alive_and_removed_once_gone(self) -> None:
+        """The lock, not the process id, is what proves a run is gone, since an id can be reused."""
+        parent = docker_lint.snapshot_parent(self.root)
+        holder = (
+            "import sys\n"
+            f"sys.path.insert(0, {str(Path(docker_lint.__file__).parent)!r})\n"
+            "import docker_lint\n"
+            f"with docker_lint.owned_snapshot(docker_lint.Path({str(parent)!r})) as s:\n"
+            "    print(s, flush=True)\n"
+            "    sys.stdin.readline()\n"
+        )
+        run = subprocess.Popen(
+            [sys.executable, "-c", holder],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        self.addCleanup(run.wait, 30)
+        self.addCleanup(run.kill)
+        assert run.stdout is not None
+        snapshot = Path(run.stdout.readline().strip())
+        self.assertTrue(snapshot.is_dir())
+        self.assertEqual(0, docker_lint.remove_stale_snapshots(parent))
+        self.assertTrue(snapshot.is_dir())
+        run.kill()
+        run.wait(30)
+        self.assertEqual(1, docker_lint.remove_stale_snapshots(parent))
+        self.assertFalse(snapshot.exists())
+
+    def test_an_owner_file_its_run_has_not_written_yet_is_kept(self) -> None:
+        self.track("README.md")
+        snapshot, owner = self.ended_run(body="")
+        self.invoke({"markdownlint"}, FakeRunner())
+        self.assertTrue(snapshot.exists())
+        self.assertTrue(owner.exists())
+
+    def test_a_snapshot_with_no_owner_file_is_never_touched(self) -> None:
+        self.track("README.md")
+        snapshot, owner = self.ended_run()
+        owner.unlink()
+        self.invoke({"markdownlint"}, FakeRunner())
+        self.assertTrue(snapshot.exists())
+
+    def test_a_run_leaves_no_snapshot_or_owner_file_behind(self) -> None:
+        self.track("README.md")
+        self.invoke({"markdownlint"}, FakeRunner())
+        parent = docker_lint.snapshot_parent(self.root)
+        self.assertEqual([], sorted(parent.glob(f"{docker_lint.SNAPSHOT_PREFIX}*")))
 
     def test_snapshot_of_a_read_only_root_still_stages_and_takes_its_mode(self) -> None:
         self.track("README.md")

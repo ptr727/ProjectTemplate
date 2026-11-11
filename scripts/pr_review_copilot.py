@@ -64,9 +64,8 @@ KEYS = {
     "discussion_link": str,
 }
 
-# The machine-readable coverage marker the fleet's own review instructions ask the reviewer for.
 FLEET_REVIEW = re.compile(
-    r"<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s+findings=(\d+)\s*-->", re.IGNORECASE
+    r"<!--\s*fleet-review:\s*reviewed=(\d+)\s+changed=(\d+)\s*-->", re.IGNORECASE
 )
 TAG = re.compile(r"<(/?)(details|summary)(?=[\s/>])[^>]*>", re.IGNORECASE)
 ANY_TAG = re.compile(r"<[^<>]*>")
@@ -81,6 +80,9 @@ EXCUSED = ("ADDED", "MODIFIED", "RENAMED", "DELETED")
 # A count longer than this is an identifier rather than anything a review states.
 COUNT_DIGITS = 4
 FINGERPRINT_HEX = 12
+CARRIED_SHARE = 2 / 3
+CARRIED_MIN = 2
+CARRIED_WORD = re.compile(r"[a-z0-9]{5,}")
 EXCERPT_LINES = 12
 EXCERPT_WIDTH = 160
 
@@ -107,10 +109,14 @@ class Unplaced(NamedTuple):
 
 
 class Item(NamedTuple):
-    """One findings-list item: its text on one line, and each `path:line` range its code spans name."""
+    """One findings-list item: its text on one line, and each `path:line` range its code spans name.
+
+    `paths` is each code span that names no line, a path this reads only where the item has no range.
+    """
 
     text: str
     spans: tuple[tuple[str, int, int], ...]
+    paths: tuple[str, ...] = ()
 
 
 class Reading(NamedTuple):
@@ -118,10 +124,11 @@ class Reading(NamedTuple):
 
     `open` is the count of open findings the body states, None where it states none or one this
     reader cannot believe. `listed` is the larger of the items its findings lists hold and the
-    file table's findings, since both name the same findings. A filled cell counts each finding
-    marker it carries, and once where it carries none, so the table alone can still undercount.
-    `listed_items` is each findings-list item, each printed with a mark wherever the digest
-    prints its findings with no thread.
+    file table's findings, since both name the same findings. A `Findings` cell counts each finding
+    marker it carries, and once where it carries none, so the table alone can still undercount. A
+    notes cell counts its markers alone, so a filler row counts as nothing, and lists one item each.
+    `listed_items` is each findings-list item, or each notes cell where those name more. Each
+    prints with a mark wherever the digest prints its findings with no thread.
     `unthreaded` is how many findings it names that no thread on the pull request carries.
     `table` is the paths the body's file table names, None where it carries no table. `unplaced`
     is each part the reader cannot place, with its text, the subset of `notes` that can hold a
@@ -188,6 +195,7 @@ def compiled(vocabulary: dict) -> dict:
         "comment_heading": re.compile(vocabulary["comment_heading"] or r"(?!)", re.IGNORECASE),
         "effort": re.compile(vocabulary["effort"] or r"(?!)", re.IGNORECASE),
         "discussion_link": re.compile(vocabulary["discussion_link"] or r"(?!)"),
+        "table_findings": re.compile(vocabulary["table_findings"] or r"(?!)", re.IGNORECASE),
         "table_finding_marker": re.compile(vocabulary["table_finding_marker"] or r"(?!)"),
     }
 
@@ -333,14 +341,20 @@ def paths(token: Token) -> list[str]:
     return [cleaned for raw in named if (cleaned := bare(raw))]
 
 
-def read(body: str, reviewer: str = "copilot", threads: tuple[str, ...] | None = None) -> Reading:
+def read(
+    body: str,
+    reviewer: str = "copilot",
+    threads: tuple[str, ...] | None = None,
+    thread_texts: tuple[tuple[str, str], ...] = (),
+) -> Reading:
     """The reading of one body by `reviewer`'s vocabulary, never raising.
 
     `threads` is the database id of each thread's first comment on the pull request, which an
-    open entry's link names. None counts every linked entry as threaded.
+    open entry's link names. None counts every linked entry as threaded. `thread_texts` is each
+    thread's path and opening text, which an item naming no line is matched against.
     """
     try:
-        return _read(body or "", reviewer, threads)
+        return _read(body or "", reviewer, threads, thread_texts)
     except Exception as exc:  # noqa: BLE001
         failed = f"the reader failed on this body ({type(exc).__name__})"
         part = Unplaced(failed, (body or "").replace("\r\n", "\n").strip())
@@ -348,7 +362,12 @@ def read(body: str, reviewer: str = "copilot", threads: tuple[str, ...] | None =
 
 
 @functools.lru_cache(maxsize=512)
-def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
+def _read(
+    body: str,
+    reviewer: str,
+    threads: tuple[str, ...] | None,
+    thread_texts: tuple[tuple[str, str], ...],
+) -> Reading:
     vocab = VOCABULARIES[reviewer]
     text = body.replace("\r\n", "\n")
     lines = text.split("\n")
@@ -468,6 +487,7 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
     table: list[str] | None = None
     listed = tabled = 0
     listed_items: list[Item] = []
+    table_items: list[Item] = []
 
     def inside(token: Token, ranges: list[tuple[int, int]] = claimed) -> bool:
         return any(a <= (token.map or [0])[0] < b for a, b in ranges)
@@ -556,15 +576,29 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
         ):
             heads, rows = cells
             table = (table or []) + [p for row in rows if row for p in paths(row[0])]
-            if vocab["table_findings"] in heads:
-                column = heads.index(vocab["table_findings"])
-                marker = vocab["table_finding_marker"]
-                texts = [inline_text(row[column]) for row in rows if len(row) > column]
-                tabled += sum(
-                    max(1, len(marker.findall(text)))
-                    for text in texts
-                    if any(c.isalnum() for c in text)
-                )
+            column, kind = next(
+                (
+                    (n, m)
+                    for n, head in enumerate(heads)
+                    if (m := vocab["table_findings"].fullmatch(head))
+                ),
+                (0, None),
+            )
+            marker = vocab["table_finding_marker"]
+            by_marker = kind is not None and kind.groupdict().get("notes") is not None
+            for row in rows if kind is not None else []:
+                text = " ".join(inline_text(row[column]).split()) if len(row) > column else ""
+                marks = len(marker.findall(text))
+                if by_marker and marks:
+                    tabled += marks
+                    named_paths = tuple(paths(row[0]))
+                    starts = [0] + [m.start() for m in marker.finditer(text)][1:]
+                    table_items += [
+                        Item(f"`{', '.join(named_paths)}`: {text[a:b].strip()}", (), named_paths)
+                        for a, b in zip(starts, [*starts[1:], len(text)], strict=True)
+                    ]
+                elif not by_marker and any(c.isalnum() for c in text):
+                    tabled += max(1, marks)
         i += 1
 
     # A count stated in a top-level paragraph opening on it, never a list item, outside counted sections.
@@ -587,8 +621,11 @@ def _read(body: str, reviewer: str, threads: tuple[str, ...] | None) -> Reading:
             coverage, coverage_line = state, said
 
     open_count = total(opens) if opens else None
+    if tabled > listed and table_items:
+        listed_items = table_items
     listed = max(listed, tabled)
     named = max(open_count or 0, listed)
+    linked = max(linked, len(carried(listed_items, thread_texts)))
     return Reading(
         coverage=coverage,
         coverage_line=coverage_line,
@@ -717,11 +754,50 @@ def items_after(tokens: list[Token], start: int, lines: list[str]) -> list[Item]
             spans = []
             items.append(Item(text, ()))
         for child in token.children or []:
-            if child.type == "code_inline" and (m := SPOT.fullmatch(bare(child.content))):
+            if child.type != "code_inline":
+                continue
+            if m := SPOT.fullmatch(bare(child.content)):
                 first = int(m.group("start"))
                 spans.append((m.group("path"), first, max(first, int(m.group("end") or first))))
-                items[-1] = Item(items[-1].text, tuple(spans))
+                items[-1] = items[-1]._replace(spans=tuple(spans))
+            else:
+                items[-1] = items[-1]._replace(paths=(*items[-1].paths, bare(child.content)))
     return items
+
+
+def first_comment(thread: dict) -> dict:
+    """The thread's opening comment, which is the finding itself."""
+    return ((thread.get("comments") or {}).get("nodes") or [{}])[0]
+
+
+def carriers(threads: list[dict]) -> tuple[tuple[str, str], ...]:
+    """Each thread's path and opening text, what `carried` matches an item naming no line against."""
+    firsts = [first_comment(t) for t in threads]
+    return tuple((c.get("path") or "", c.get("body") or "") for c in firsts)
+
+
+def carried(items: Iterable[Item], texts: tuple[tuple[str, str], ...]) -> set[int]:
+    """The positions of the items naming no line that a thread carries, one thread to an item.
+
+    A thread carries an item where it sits on a path the item names and repeats `CARRIED_SHARE` of
+    the item's longer words. It repeats at least `CARRIED_MIN` of them too. A short word says nothing about
+    which finding it is. A path alone is no match, since one file can hold two findings. Falling
+    short leaves the item counted, and answering it costs less than a finding nothing shows.
+    """
+
+    def words(text: str) -> set[str]:
+        return set(CARRIED_WORD.findall(text.lower()))
+
+    free, found = list(texts), set[int]()
+    for n, item in enumerate(items):
+        wanted = words(item.text) - words(" ".join(item.paths))
+        for pair in free if wanted and not item.spans else []:
+            shared = len(wanted & words(pair[1]))
+            if pair[0] in item.paths and shared >= max(CARRIED_MIN, CARRIED_SHARE * len(wanted)):
+                free.remove(pair)
+                found.add(n)
+                break
+    return found
 
 
 def listed_lines(
@@ -732,9 +808,10 @@ def listed_lines(
     A span counts only where its path is a changed file or a thread's, so `node:20` is no line.
     A mark is a pointer rather than a match, since a thread on the same line can hold another
     finding. An outdated thread's lines predate the head, so one on an item's path says only
-    that. Where `cut`, the thread page was cut, so an item no read thread sits on is unknown.
+    that. Where `cut`, the thread page was cut, so an item no read thread sits on is unknown. An
+    item naming a path and no line is marked by `carried`.
     """
-    firsts = [((t.get("comments") or {}).get("nodes") or [{}])[0] for t in threads]
+    firsts = [first_comment(t) for t in threads]
     spots = {
         (c["path"], c.get("startLine") or c["line"], c["line"])
         for t, c in zip(threads, firsts, strict=True)
@@ -746,11 +823,17 @@ def listed_lines(
         if c.get("path") and t.get("isOutdated")
     }
     known = {n.get("path") for n in files} | {c.get("path") for c in firsts}
+    held = carried(items, carriers(threads))
     out = []
     unmatched = 0
-    for item in items:
+    for n, item in enumerate(items):
         named = [(p, a, b) for p, a, b in item.spans if p in known]
-        if not named:
+        if n in held:
+            mark = "thread on its path"
+        elif not named and known.intersection(item.paths) and not item.spans:
+            mark = "thread page cut, unknown" if cut else "no thread on its path"
+            unmatched += 1
+        elif not named:
             mark = "no path:line code span"
         elif any(p == q and a <= d and c <= b for p, a, b in named for q, c, d in spots):
             mark = "thread at its line"
