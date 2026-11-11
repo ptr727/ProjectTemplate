@@ -40,7 +40,7 @@ Each language defines a **clean-compile** verification: the combination of build
 This applies to every Bash and Python script. `CODESTYLE.md` "Interrupts in Python" and "Interrupts in Shell" state each language's mechanics.
 
 - **On SIGINT or SIGTERM, a script releases what it holds before it exits.** It removes the temporary paths it created, releases the locks it took, and stops the child processes it started. A path, lock, or child left behind can stop the next run from starting, or feed it a half-written input.
-- **A write to persistent state goes to a temporary path beside the target, then is renamed over it.** An interrupt then leaves the old content or the new, never a mix of both.
+- **A write to persistent state goes to a temporary path beside the target, then is renamed over it.** An interrupt then leaves the old content or the new, never a mix of both. A store with transactions of its own, such as an SQLite database, is written through those instead. A rename over an open database can corrupt it.
 - **An interrupted script prints one line naming the signal, with no traceback, and exits 130 for SIGINT or 143 for SIGTERM.** Each status is 128 plus the signal number, the status a shell reports for a process that signal ended.
 - **A script takes this rule when it is created or next edited.** An existing script is not edited for this rule alone.
 - **A script that holds a lock, temporary state, or a child process owes a test that signals it mid-run.** The test sends SIGINT or SIGTERM, then asserts the matching exit status and that nothing the script held remains. It is skipped on Windows, which cannot deliver either signal for a script to handle. A script holding none of these owes no such test.
