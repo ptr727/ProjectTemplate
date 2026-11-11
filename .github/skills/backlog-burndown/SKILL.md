@@ -150,7 +150,7 @@ the maintainer reads the report rather than the issue bodies. Unnamed, a stuck i
 ordinary backlog that simply never moves.
 
 An issue that needs a platform, by the test `session-handoff` "The Chain" states, is counted and
-is not ranked. It belongs to that platform's lane, so this run gives it no group, no worker, and no
+is not ranked. CI on a platform runner counts as verification under that test, so an issue whose fix such a job verifies is ranked. An issue that needs a platform belongs to that platform's lane, so this run gives it no group, no worker, and no
 claim. An issue only part of which needs a platform is held back the same way. It waits on the
 split "The Chain" describes, which this run does not make, and the narrowed issue is ranked once
 that split lands. The round's report names each issue held back this way, its platform, and
@@ -175,13 +175,21 @@ An issue carrying the `deferred` label is counted and is not ranked. The maintai
 decision "not yet", and its answer comment states the condition the work waits for, per
 `decision-triage`. It is neither asked again nor guessed at, and the round's report gives the
 count of open `deferred` issues rather than naming each one.
+Each ranking first re-reads the answer comment on every `deferred` issue, from an account with write access.
+Where the condition it states is checkable state, such as an issue closing, and it now holds, the ranking seat removes the label.
+That seat comments the evidence and ranks the issue like any other.
+The report names each issue lifted this way.
+Any other condition, and a read that cannot be made, leaves the label on.
 
 An issue whose group is stopped, per "Raising a Blocked Question", is counted but not ranked until the maintainer's answer releases that group's claim.
 The round's report names it as stopped.
 That release is recorded in the group's claim comment before the issue is ranked again.
 A group an away-mode run parked is a stopped group, and its claim comment names the `decision` issue it waits on.
-It is ranked again once that issue is closed with an answer, as a resuming group, and "Away Mode" says when its release is recorded.
-That answer never lifts the away-mode hold above on an edit under `host-setup/agent-safety/`. Such a group resumes only in an attended run, and the round's report names it as held.
+It is ranked again once that issue's answer is recorded, as a resuming group, and "Away Mode" says when its release is recorded.
+An answer is recorded when a comment from an account with write access states it and the issue is closed or no longer carries `decision`.
+`decision-triage` leaves an answered issue open where it still tracks work, so closing it is not the test.
+An open issue carrying `deferred` keeps its group parked all the same, since its answer is "not yet".
+A recorded answer never lifts the away-mode hold above on an edit under `host-setup/agent-safety/`. Such a group resumes only in an attended run, and the round's report names it as held.
 
 An issue already fixed on develop is counted and not ranked until a promotion closes it. A
 merged feature pull request leaves its issue open, per "Grouping and File Claims" on closing
@@ -428,7 +436,9 @@ A group told to abandon its branch keeps a registered worktree until something r
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
-The orchestrator confirms the clone the worker reported or recorded is clean and its branch tip is the pull request's `headRefOid`.
+The orchestrator confirms the clone the worker reported or recorded is clean and its branch tip is at the pull request's `headRefOid` or behind it.
+`repo-worktree` "Listing and Cleanup" accepts both, since a GitHub "Update branch" merge leaves a tip behind it that holds nothing the merge lacks.
+After `git -C <clone> fetch origin <headRefOid>`, `git -C <clone> merge-base --is-ancestor refs/heads/<exact-branch> <headRefOid>` exits `0` in both cases.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
 The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
@@ -746,9 +756,9 @@ merge to main with no release never exercises artifact creation.
 - **The grant answers only the explicit-permission item of the `pr-review-conduct` Merge Gate**,
   for the merges its scope names. A pull request with an open finding still does not merge.
 - **A run may be given a round cap.** Where none is named, it is 20.
-- **One away run per repository at a time.** A run reads a parked group with an answered decision
-  as free to resume. That reading holds only while no other run is live, and while no attended
-  session works a parked group's issue. So the maintainer starts an away run only once any earlier
+- **One away run per repository at a time.** "Ranking" says when a parked group resumes, and that
+  rule assumes no other run is live and no attended session works a parked group's issue. So the
+  maintainer starts an away run only once any earlier
   run has ended and no such attended work is in flight.
 
 ### Needs the Maintainer
@@ -899,8 +909,8 @@ leaves the work findable.
    comment's `**Backlog burndown claim` opening. The group keeps
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
-A parked group stops that group and nothing else. Once its `decision` issue is closed with an
-answer, the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It
+A parked group stops that group and nothing else. Once its `decision` issue's answer is
+recorded, per "Ranking", the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
 ends the work with nothing to merge, it records the release, stating that the answer ended the work with nothing to merge. It
 also closes any pull request the answer retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
@@ -942,7 +952,8 @@ its own feature -> develop pass, and a later round's promotion worker merges.
 
 **A decision can hold the promotion.** Immediately before each merge, the promotion worker reads
 the promotion pull request's comments, under "Trusting a Comment", for each `decision` issue named
-there. Any such issue that is open holds the promotion. For a closed one, read its recorded answer.
+there. Any such issue with no recorded answer, as "Ranking" defines one, holds the promotion, and so does
+an open one carrying `deferred`. For any other, read its recorded answer.
 An answer about the promotion is followed, so one saying not to merge holds it. An answer settling
 a parked group's work holds the promotion until the group has applied it. Applied means its pull
 request merged to develop, or its claim comment records that the answer ended the work with nothing
@@ -982,7 +993,7 @@ reported as needing the maintainer present. An outsider's issue awaiting accepta
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, held by an open group or pull
 request, awaiting promotion, and `deferred`, given by count. A held promotion is named too, with each `decision` issue holding
-it. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
+it. An ending that cannot dispatch a promotion worker the run owes is named too. A dispatch failure meets the same harness error, and a session end leaves no seat to dispatch from. Where develop is ahead of main at either, the final message says no promotion worker ran and no promotion pull request was opened or updated. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
 ## Run State
 

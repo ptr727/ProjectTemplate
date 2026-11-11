@@ -65,7 +65,7 @@ not know a chain exists never goes looking for one.
 - **A platform lane is for work that needs its platform.** A platform track is one kept for a single
   host platform, such as `wsl` or `windows`. It takes an issue only when its defect reproduces, or
   its fix can be verified, on that platform alone. It also needs that no Linux host outside WSL can
-  both fix the issue and verify the fix. An issue meeting each condition goes to its platform's lane. Any
+  both fix the issue and verify the fix. A Linux host reading a platform CI job's result verifies the fix, so a platform lane keeps only work needing an interactive session there. An issue meeting each condition goes to its platform's lane. Any
   other issue goes to the ordinary backlog, since a lane costs a separate chain and a host-bound
   session. A defect in WSL interop, the `WSLInterop` binfmt handler, `/mnt/<drive>` paths, or
   `wslpath` reproduces only inside WSL. So does running a Windows `.exe` from Linux, although WSL
@@ -295,7 +295,11 @@ it.
    Record each answer given on its issue, where one was asked and answered. Where a handoff was
    written, comment those answers onto its issue, with the queue's count and list after them. That
    is because the body keeps the count it was written with, and a resume reads the issue's comments.
-4. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
+4. **Remove the hub clone** "The Attended Session" step 0 made, where it made one, once no step
+   above still needs `$handoff`. No other step or sweep reaches that clone. From outside it, confirm
+   `git -C <clone> status --porcelain` prints nothing, then delete that exact directory. A clone
+   holding uncommitted work is left in place and named in the session's closing message.
+5. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory. A quirk of
    this machine or this account is one such nuance. What goes there is saved as the session's final
    act. Never
