@@ -72,7 +72,9 @@ repo, or agent memory.
 
 A repository still on the old CRLF default converts first. Where `docs/eol-lf-rollout.md`
 "Per-Repo Conversion" says the repository needs the conversion, land it as its own merged pull
-request before step 1, carrying `.editorconfig` and `.gitattributes` itself. Once it merges,
+request before step 1, carrying `.editorconfig` and `.gitattributes` itself. Where `main` holds
+content `develop` lacks, re-level `develop` first with the squash pull request `RESYNC.md`
+section 3 describes. Once it merges,
 re-measure against `develop` and base the branch for the steps below on `develop`.
 
 1. **The instruction set first.** `CLAUDE.md`, then `AGENTS.md` and `GOVERNANCE.md` verbatim sections, then `CODESTYLE.md` and `WORKFLOW.md`. Include the `AGENTS.md` skill-dependency pointer paragraph in this same step, as one more verbatim unit and not a separate pass. The paragraph names `scripts/skills_install.py` and where the fleet's Skills live. `CLAUDE.md` is the single `@AGENTS.md`-import file that gets `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured. **Before touching `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or `WORKFLOW.md` in this step, run the `carried-instruction-file-guard` skill's distinctive-phrase probe against the target file, every time, without exception.** **This holds regardless of whether the update is a verbatim re-vendor or an intent-fidelity edit.** This is not advisory language to weigh against how routine the diff looks. A diff that looks routine is exactly the shape the AGENTS.md-overwrite incident took. Do not proceed to the re-vendor until the probe has run and any local addition it finds has a destination. That gate follows that skill's own procedure. `CLAUDE.md` is outside that guard's scope. It carries no mixed or repo-specific content by design, so its re-vendor is an ordinary verbatim-fidelity copy, no probe needed.
@@ -96,7 +98,12 @@ rather than leaving it standing.
 
 ## Ship it
 
-One focused pull request per drift class, branched from the target's `develop`. It is never a direct
+One focused pull request per drift class, branched from the target's `develop`, with one grouping.
+The instruction set (step 1) and the carried Skills tree (step 3) land in one pull request, with
+the `.github/copilot-instructions.md` skill paths. Each half cites the other's text, so either
+one alone contradicts itself until the other merges. Every other class takes its own pull
+request, branched from `develop` only after that one merges and in step order, per `RESYNC.md`
+section 6. A pull request is never a direct
 push to a protected branch and never a hand edit outside a pull request. Close the review loop,
 per the `pr-review-conduct` skill, before asking the maintainer for merge permission. The
 maintainer merges, the agent drives to green and stops. Re-run the audit after the merge.

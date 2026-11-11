@@ -813,6 +813,37 @@ def carried_link_errors(root, baseline):
     return errors
 
 
+def placeholder_errors(root, baseline):
+    """Reject a declared placeholder its canonical file does not contain.
+
+    A carrier fills each declared token per repository, so a token the hub's text has dropped asks for a substitution nothing can make.
+    """
+    errors = []
+    for item in baseline:
+        if not isinstance(item, dict) or "placeholders" not in item:
+            continue
+        path = item.get("path")
+        if not isinstance(path, str):
+            continue
+        declared = item["placeholders"]
+        if not is_str_list(declared) or not all(declared):
+            errors.append(f"files.json: {path} placeholders must be an array of non-empty strings")
+            continue
+        reference = item.get("reference")
+        source = reference if isinstance(reference, str) else path
+        canonical = root / source
+        if not canonical.is_file():
+            errors.append(f"files.json: {path} declares placeholders but {source} is not a file")
+            continue
+        text = canonical.read_text(encoding="utf-8", errors="replace")
+        for token in declared:
+            if token not in text:
+                errors.append(
+                    f"files.json: {path} placeholder '{token}' does not occur in {source}"
+                )
+    return errors
+
+
 def version_literal_errors(root):
     """Reject a three-part version or commit SHA anywhere in the hub's own instruction documents.
 
@@ -1963,6 +1994,7 @@ def main(argv=()):
                     )
 
     errors.extend(carried_link_errors(ROOT, baseline))
+    errors.extend(placeholder_errors(ROOT, baseline))
     errors.extend(version_literal_errors(ROOT))
     errors.extend(model_tier_errors(ROOT))
 

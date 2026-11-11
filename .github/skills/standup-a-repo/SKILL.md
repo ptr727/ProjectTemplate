@@ -53,11 +53,13 @@ maintainer can supply what section 0A lists.
 
 4. **The instruction set, before authoring anything.** STANDUP.md section 1A. An existing
    repository that `docs/eol-lf-rollout.md` "Per-Repo Conversion" says needs a line-ending
-   conversion lands that conversion first, as its own merged pull request. In that case, the feature
+   conversion lands that conversion first, as its own merged pull request. Where `main` holds
+   content `develop` lacks, `develop` is re-leveled first, per that section. In that case, the feature
    branch from step 2 is cut again from `develop` after that pull request merges. Then carry `CLAUDE.md`,
    `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather
    than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
-   `cspell.json`. `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
+   `cspell.json`. A downstream `AUDIT.md` is the short, repository-scoped form that says how the
+   repository reaches the hub for its audit and configuration check. `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
    `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from
    `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured.
    Read `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules before writing any repo
@@ -104,6 +106,8 @@ context-free agent, not just by the one that wrote it.
 ## Ship it
 
 One pull request per standup, branched from `develop` per step 2 above, into `develop`, never a
-direct push to a protected branch. Close the review loop, per the `pr-review-conduct` skill,
+direct push to a protected branch. A partly stood-up repository takes this same shape, the
+conversion pull request and then one standup pull request, while its instruction set is partial.
+`RESYNC.md` section 6 applies once the set is whole. Close the review loop, per the `pr-review-conduct` skill,
 before asking the maintainer for merge permission. The maintainer merges, the agent drives to
 green and stops.

@@ -35,7 +35,7 @@ reason is that Windows GUI editors (VS Code, Visual Studio, Notepad, WordPad) al
 cleanly. Pin
 CRLF only for a type Windows itself requires it for: `*.bat` and `*.cmd`. Everything else
 takes the `[*]` default with no override. That includes YAML, `.gitignore`, `.dockerignore`, and a
-tool-owned format with a native LF ending (KiCad). No distinction is needed between workflow and
+tool-owned format that writes LF on every platform. No distinction is needed between workflow and
 non-workflow YAML, now that both are LF.
 
 ## Operational (config) repos
@@ -74,14 +74,30 @@ files only for scripts it executes on POSIX.
 For a type that genuinely needs an ending the `[*]` default no longer supplies, still pair a
 `.gitattributes` pin with a matching `.editorconfig` override. That is because the git pin alone is not enough for such a type. `.gitattributes`
 governs git while the editor follows `.editorconfig`. That type is a Windows-native
-tool-owned format outside `.bat`/`.cmd`, or a byte-preserve data directory whose exact bytes the
-consumer may depend on. For a byte-preserve directory, disable all
+tool-owned format outside `.bat`/`.cmd`, a format a tool writes in text mode, or byte-preserved
+data. Byte-preserved data is a directory or a file type whose exact bytes the consumer may depend
+on. For a byte-preserve directory, disable all
 editor normalization, not just EOL: `[<dir>/**]` with `charset = unset`, `end_of_line = unset`,
 `insert_final_newline =
 unset`, `trim_trailing_whitespace = false`. `unset` is EditorConfig's spec-defined
 special value that removes an inherited property. The glob needs `**` rather than
 `*` so a nested file under the directory is covered too. That is because `*` excludes `/` and only
 matches one path component.
+
+A byte-preserved file type takes the same four properties, under a section for its extension.
+STEP models are the worked example. They are text-shaped third-party files that arrive CRLF or
+LF. So each extension takes a `-text` pin in `.gitattributes`, one pattern per extension and
+case a vendor ships. `end_of_line = unset` alone is not enough, since the `[*]` section still
+applies `charset`, `insert_final_newline`, and `trim_trailing_whitespace` to such a file. The
+pair stays in the repository carrying the models rather than in the hub's own files.
+
+A tool that writes in text mode needs the platform's own ending rather than a fixed one. KiCad's
+`.kicad_sch`, `.kicad_pcb`, `.kicad_sym`, `.kicad_mod`, `fp-lib-table`, and `sym-lib-table` are
+that case, CRLF on Windows and LF elsewhere. Its `.kicad_pro`, `.kicad_prl`, and `.kicad_dru`
+write LF everywhere and stay on the default. Pin the text-mode set `text !eol` in
+`.gitattributes` and `end_of_line = unset` in `.editorconfig`. The index stays LF, and a checkout
+uses Git's native line endings. That holds when `core.eol` is unset and `core.autocrlf` is false,
+or true on Windows.
 
 ## Editing discipline
 
