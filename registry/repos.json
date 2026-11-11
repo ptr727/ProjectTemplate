@@ -143,7 +143,7 @@
                     }
                 }
             },
-            "driftNotes": ["Carries ARCHITECTURE.md and codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config, PlexCleaner#855). python.uvlock.pinned is N/A for that subtree (no uv project). codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
+            "driftNotes": ["Carries ARCHITECTURE.md and .codecov.yml beyond the baseline.", "First csharp+python repo: a .NET application at the root plus a stdlib-only Python tooling subtree (RegressionTests/, uvx scripts profile - no uv.lock, pyproject carries only ruff+mypy config, PlexCleaner#855). python.uvlock.pinned is N/A for that subtree (no uv project). the .codecov.yml stays required for the C# side. Reference for the csharp+python shape (issue #339)."]
         },
         {
             "name": "ESPHome-NonRoot",
