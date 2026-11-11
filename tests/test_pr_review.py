@@ -76,6 +76,7 @@ GATE_SOURCES = (
     "pr_review_digest.py",
     "pr_review_answers.py",
     "pr_review_payload.py",
+    "pr_review_promotion.py",
 )
 WRITE_SCANNED = (*GATE_SOURCES, "pr_review_side.py", "pr_review_policy.py")
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
@@ -92,6 +93,7 @@ READER_IMPORTS = frozenset(
         "pr_review_checks",
         "pr_review_check_lines",
         "pr_review_payload",
+        "pr_review_promotion",
         "pr_review_rounds",
     }
 )
@@ -103,6 +105,7 @@ READER_FLOORS = {
     "pr_review_digest": "pr_review_answers",
     "pr_review_answers": "pr_review_rounds",
     "pr_review_payload": "typing",
+    "pr_review_promotion": "pr_review_rounds",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
@@ -2443,10 +2446,21 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertIn("coverage=none ", self.out.getvalue())
                 self.assertNotIn("left out", self.out.getvalue())
 
-    def test_a_lineless_rename_is_not_left_out(self) -> None:
+    def test_a_lineless_rename_is_left_out(self) -> None:
+        """A rename with no changed line GitHub counts may go unnamed, as a lineless binary may."""
         pr = payload([review(body=summarized(["docs/a.md"], covers=""))], files=["docs/a.md"])
         pr["files"]["nodes"].append(
             {"path": "hooks/b.sh", "additions": 0, "deletions": 0, "changeType": "RENAMED"}
+        )
+        self.assertEqual(0, self.status(pr))
+        out = self.out.getvalue()
+        self.assertIn("coverage=table ", out)
+        self.assertIn("1 more with no changed line left out", out)
+
+    def test_a_rename_with_a_changed_line_is_not_left_out(self) -> None:
+        pr = payload([review(body=summarized(["docs/a.md"], covers=""))], files=["docs/a.md"])
+        pr["files"]["nodes"].append(
+            {"path": "hooks/b.sh", "additions": 1, "deletions": 0, "changeType": "RENAMED"}
         )
         self.assertEqual(0, self.status(pr))
         self.assertIn("coverage=none ", self.out.getvalue())
@@ -4142,8 +4156,8 @@ class TestCli(GqlCase):
             self.cli(["wait", "7", "--timeout", "0", "--min-rounds", "2"])
         self.assertEqual(0, len([c for c in calls if "requestReviews" in c[0]]))
 
-    def test_an_attested_head_beside_a_round_whose_table_skips_a_file_is_not_covered(self) -> None:
-        """A table naming fewer files than the diff is the round's own word that it skipped one."""
+    def test_an_attested_head_beside_a_round_whose_table_skips_a_file_is_covered(self) -> None:
+        """A table naming fewer files states no partial coverage, so the attestation still holds."""
         table = overview_v2(
             open_count="0 open findings",
             covers="",
@@ -4155,8 +4169,22 @@ class TestCli(GqlCase):
         self.answer(self.into(payload(rounds, files=["a.md", "b.md"]), attest=True))
         self.assertEqual(0, self.cli(["status", "7"]))
         out = self.out.getvalue()
-        self.assertIn("coverage=none", out)
+        self.assertIn("coverage=local", out)
+        self.assertIn("COVERAGE IS LOCAL", out)
+        self.assertNotIn("coverage=none", out)
+
+    def test_a_stated_partial_round_beside_a_round_whose_table_skips_a_file_is_not_covered(
+        self,
+    ) -> None:
+        """Only a round stating partial coverage withdraws the attestation, table or no table."""
+        part = OVERVIEW + "\n<!-- fleet-review: reviewed=1 changed=2 findings=0 -->"
+        table = summarized(["a.md"], covers="")
+        rounds = [review(oid=OLD, body=part, rid="PRR_a"), review(body=table, rid="PRR_b")]
+        self.answer(self.into(payload(rounds, files=["a.md", "b.md"]), attest=True))
+        self.cli(["status", "7"])
+        out = self.out.getvalue()
         self.assertNotIn("coverage=local", out)
+        self.assertIn("PARTIAL", out)
 
     def test_a_partial_on_record_beside_a_table_less_round_is_not_covered(self) -> None:
         """A round that read part of a diff sends the pull request to the maintainer."""

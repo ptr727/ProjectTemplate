@@ -16,6 +16,7 @@ jobs:
     uses: ./.github/workflows/validate-task.yml
     permissions:
       contents: read
+      pull-requests: read
     with:
       python-directories: .
     secrets:

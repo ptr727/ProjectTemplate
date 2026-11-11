@@ -9,6 +9,7 @@
     "repos": [
         {
             "name": "ProjectTemplate",
+            "shortName": "hub",
             "url": "https://github.com/ptr727/ProjectTemplate",
             "description": "Agent enablement for a fleet of repositories: autonomy and repeatable quality inside guardrails.",
             "status": "cataloged",
@@ -33,6 +34,7 @@
         },
         {
             "name": "Utilities",
+            "shortName": "utilities",
             "url": "https://github.com/ptr727/Utilities",
             "status": "cataloged",
             "types": ["csharp", "nuget"],
@@ -45,6 +47,7 @@
         },
         {
             "name": "LanguageTags",
+            "shortName": "languagetags",
             "url": "https://github.com/ptr727/LanguageTags",
             "status": "cataloged",
             "types": ["csharp", "nuget", "codegen"],
@@ -58,6 +61,7 @@
         },
         {
             "name": "aiopurpleair",
+            "shortName": "aiopurpleair",
             "url": "https://github.com/ptr727/aiopurpleair",
             "status": "cataloged",
             "types": ["python", "pypi"],
@@ -72,6 +76,7 @@
         },
         {
             "name": "homeassistant-purpleair",
+            "shortName": "hapurpleair",
             "url": "https://github.com/ptr727/homeassistant-purpleair",
             "status": "cataloged",
             "types": ["python", "homeassistant"],
@@ -89,6 +94,7 @@
         },
         {
             "name": "Financial-Modeling",
+            "shortName": "finmod",
             "url": "https://github.com/ptr727/Financial-Modeling",
             "status": "cataloged",
             "types": ["python", "source-only"],
@@ -115,6 +121,7 @@
         },
         {
             "name": "PlexCleaner",
+            "shortName": "plexcleaner",
             "url": "https://github.com/ptr727/PlexCleaner",
             "status": "cataloged",
             "types": ["csharp", "dotnet-publish", "docker", "python"],
@@ -140,6 +147,7 @@
         },
         {
             "name": "ESPHome-NonRoot",
+            "shortName": "esphomenonroot",
             "url": "https://github.com/ptr727/ESPHome-NonRoot",
             "status": "cataloged",
             "types": ["docker", "upstream-wrapper"],
@@ -153,6 +161,7 @@
         },
         {
             "name": "VSCode-Server-DotNetCore",
+            "shortName": "vscodedotnet",
             "url": "https://github.com/ptr727/VSCode-Server-DotNetCore",
             "status": "cataloged",
             "types": ["docker"],
@@ -165,6 +174,7 @@
         },
         {
             "name": "NxWitness",
+            "shortName": "nxwitness",
             "url": "https://github.com/ptr727/NxWitness",
             "status": "cataloged",
             "types": ["docker", "upstream-wrapper", "codegen", "csharp"],
@@ -178,6 +188,7 @@
         },
         {
             "name": "HomeAutomation-Config",
+            "shortName": "homelab",
             "url": "https://github.com/ptr727/HomeAutomation-Config",
             "status": "cataloged",
             "types": ["source-only", "python"],
@@ -202,6 +213,7 @@
         },
         {
             "name": "KiCadLibrary",
+            "shortName": "kicad",
             "url": "https://github.com/ptr727/KiCadLibrary",
             "status": "cataloged",
             "types": ["eda", "python"],
@@ -215,6 +227,7 @@
         },
         {
             "name": "EspDinIoT",
+            "shortName": "espdin",
             "url": "https://github.com/ptr727/EspDinIoT",
             "status": "cataloged",
             "types": ["eda"],
@@ -228,6 +241,7 @@
         },
         {
             "name": "ESPHome-Config",
+            "shortName": "esphomeconfig",
             "url": "https://github.com/ptr727/ESPHome-Config",
             "status": "cataloged",
             "types": ["source-only", "python", "cpp"],
@@ -244,6 +258,7 @@
         },
         {
             "name": "HomeAssistant-Config",
+            "shortName": "haconfig",
             "url": "https://github.com/ptr727/HomeAssistant-Config",
             "status": "cataloged",
             "types": ["source-only"],
@@ -259,6 +274,7 @@
         },
         {
             "name": "DevKitCIoT",
+            "shortName": "devkitc",
             "url": "https://github.com/ptr727/DevKitCIoT",
             "description": "ESP32-DevKitC IoT controller board with a PSU, AC relay, dry contact inputs, and temperature sensor.",
             "status": "cataloged",
@@ -273,6 +289,7 @@
         },
         {
             "name": "PhotoCleaner",
+            "shortName": "photocleaner",
             "url": "https://github.com/ptr727/PhotoCleaner",
             "status": "cataloged",
             "types": ["csharp", "dotnet-publish", "docker"],
@@ -285,6 +302,7 @@
         },
         {
             "name": "MediaTools",
+            "shortName": "mediatools",
             "url": "https://github.com/ptr727/MediaTools",
             "status": "cataloged",
             "types": ["csharp", "nuget"],
@@ -298,6 +316,7 @@
         },
         {
             "name": "AudioCleaner",
+            "shortName": "audiocleaner",
             "url": "https://github.com/ptr727/AudioCleaner",
             "status": "cataloged",
             "types": ["csharp", "dotnet-publish"],
@@ -311,22 +330,25 @@
         },
         {
             "name": "Vantage-Config",
+            "shortName": "vantage",
             "url": "https://github.com/ptr727/Vantage-Config",
             "description": "Design Center configuration for Vantage InFusion controller.",
             "status": "cataloged",
-            "types": ["source-only"],
+            "types": ["source-only", "python"],
             "groundTruthBranch": "main",
             "workflowModel": "operational",
             "lineEndings": "lf",
             "hasDevelop": true,
             "publish": [{ "target": "github-release", "mechanism": "none" }],
-            "requiredSecrets": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
+            "pythonDirectories": ["scripts"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
             "driftNotes": ["Follows the fleet LF default and pins only `*.dc` to CRLF (`.gitattributes` `*.dc text eol=crlf`, `.editorconfig` `[*.dc] end_of_line = crlf`), a repo-local exception for Design Center's own Windows-native XML export format (ptr727/Vantage-Config#28).", "Recreated lean and single-platform: Design Center is freely available, so no installer archives are kept. Split out of HomeAutomation-Config.", "Operational onboarding completed 2026-07-16 (Vantage-Config #9): baseline docs, advisory lint CI, dispatch-only publisher, repo-config operational carry (rulesets/settings applied and verified in sync), Dependabot + App merge-bot with the secret pair in both stores, adapted self-audit (AUDIT.md + spec/secrets.json)."]
         },
         {
             "name": "HolidayLights",
+            "shortName": "holidaylights",
             "url": "https://github.com/ptr727/HolidayLights",
             "description": "Holiday light show configuration for xLights, FPP, and WLED.",
             "status": "cataloged",
@@ -342,12 +364,12 @@
             "driftNotes": [
                 "xLights show folders, one per year and season (for example 2026/Halloween), edited in place by xLights on develop and uploaded to the FPP controllers with FPP Connect. Rendered .fseq files are tracked, and xLights save backups (*.xbkp, *.jbkp), per-session Backup/ folders, and FPP controller backups (FPP/) stay local.",
                 "Follows the fleet LF default, since xLights writes its XML files LF, and pins only xlights_effectpresets.json to CRLF, which xLights writes CRLF (ptr727/HolidayLights#10).",
-                "main carries the 2021-2024 show folders and the original lint gate. The 2025 and 2026 show folders and the fleet baseline (ptr727/HolidayLights#11 and #13-#16) are on develop pending a develop->main promotion, so an audit of main reports them missing until that promotion lands.",
                 "A rename to HolidayLights-Config, matching the fleet's *-Config naming for config repos, is planned as a follow-up."
             ]
         },
         {
             "name": "Blog",
+            "shortName": "blog",
             "url": "https://github.com/ptr727/Blog",
             "status": "cataloged",
             "types": ["hugo", "source-only", "python", "host-secrets"],
@@ -364,31 +386,54 @@
             "driftNotes": ["Hugo static site migrated off WordPress.com, stood up 2026-08-01. Release model with a dispatch-only publisher that cuts the tag and a source archive.", "content/ is an imported WordPress archive, so the prose, spelling, and style gates are scoped to exclude it.", "Deploy credentials are per-environment GitHub Environment secrets and variables, which the audit does not check, so requiredSecrets leaves them out. Listing them in requiredSecrets would make the audit demand them in the repository secrets stores.", "Neither deployment environment carries a branch policy, deliberately: the ref gate that admits production from the default branch only runs as a job in the deploy workflow, before anything is installed or written (WORKFLOW.md D2.1). branchPolicy none records that, so a policy appearing later reads as a change rather than as the gate arriving.", "capture/ is one-shot WordPress migration tooling that has already run, so the maintainer kept it out of pythonDirectories (Blog #356, 2026-10-01), forgoing the lint, format, type-check, test, and coverage obligations every Python directory owes. The audit's python-directories drift naming capture/ files is therefore expected."]
         },
         {
+            "name": "Employment",
+            "shortName": "employment",
+            "url": "https://github.com/ptr727/Employment",
+            "status": "cataloged",
+            "types": ["source-only", "python"],
+            "groundTruthBranch": "main",
+            "workflowModel": "operational",
+            "lineEndings": "lf",
+            "hasDevelop": true,
+            "pullRequestCheck": false,
+            "publish": [],
+            "requiredSecrets": ["CODECOV_TOKEN"],
+            "consumerModel": "pull",
+            "releaseTrigger": "none",
+            "pythonDirectories": ["scripts"],
+            "driftNotes": ["Private document repository the maintainer edits directly on develop. Its maintained Python is the scripts tree, which has no root pyproject.toml or uv.lock.", "Anything under an Archive directory is verbatim source material that is never modified, so the repository's own style and Markdown checks skip it. One archived .py file sits outside pythonDirectories for that reason, so the audit's python-directories drift naming it is expected.", "It carries no workflows today, so pullRequestCheck is false, publish is empty, and releaseTrigger is none. Its standup updates each field when the workflow it describes lands."]
+        },
+        {
             "name": "DiskSpeedTest",
+            "shortName": "diskspeedtest",
             "url": "https://github.com/ptr727/DiskSpeedTest",
             "status": "archived",
             "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "GEM-Echo-Server",
+            "shortName": "gemecho",
             "url": "https://github.com/ptr727/GEM-Echo-Server",
             "status": "archived",
             "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "GoogleTo1Password",
+            "shortName": "google1password",
             "url": "https://github.com/ptr727/GoogleTo1Password",
             "status": "archived",
             "driftNotes": ["Archived on GitHub. Found missing from the registry by the fleet membership check (ptr727/ProjectTemplate#550). No further conformance work is expected while archived."]
         },
         {
             "name": "coderabbit",
+            "shortName": "coderabbit",
             "url": "https://github.com/ptr727/coderabbit",
             "status": "excluded",
             "exclusionReason": "CodeRabbit's central configuration for the owner, not a fleet project. Its whole content is written by scripts/central_config.py, which docs/repo-config.md \"Central Bot Settings\" describes, so it owes no fleet baseline."
         },
         {
             "name": "pr-agent-settings",
+            "shortName": "pragent",
             "url": "https://github.com/ptr727/pr-agent-settings",
             "status": "excluded",
             "exclusionReason": "Qodo's central configuration for the owner, not a fleet project. Its whole content is written by scripts/central_config.py, which docs/repo-config.md \"Central Bot Settings\" describes, so it owes no fleet baseline."

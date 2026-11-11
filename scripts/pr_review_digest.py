@@ -15,6 +15,7 @@ import pr_review_answers as answers
 import pr_review_copilot as adapter
 from pr_review_check_lines import check_lines
 from pr_review_checks import checks_stuck, checks_tally
+from pr_review_promotion import coverage
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     KNOWN_REVIEWERS,
@@ -23,7 +24,6 @@ from pr_review_rounds import (
     REVIEWER,
     answered_outside_review,
     collected,
-    coverage,
     excluded_refusal,
     first_comment,
     head_nodes,
@@ -289,7 +289,7 @@ def render(
             "which nothing here tells apart, so this is advisory and changes no exit code"
         )
         lines.append(f"    {advisory[1]}")
-    if cover in ("table", "carried:table", "local", "partial", "unknown"):
+    if cover in ("table", "carried:table", "local", "dependabot", "partial", "unknown"):
         lines.append(f"  COVERAGE IS {cover.upper()}: {cover_why}")
     elif cover == "none" and on_head:
         lines.append(

@@ -576,15 +576,14 @@ class TestLeftOut(unittest.TestCase):
     def node(path: str, kind: str = "ADDED", added: int = 0, deleted: int = 0) -> dict:
         return {"path": path, "changeType": kind, "additions": added, "deletions": deleted}
 
-    def test_a_lineless_added_modified_or_deleted_file_may_be_left_out(self) -> None:
-        for kind in ("ADDED", "MODIFIED", "DELETED"):
+    def test_a_lineless_added_modified_renamed_or_deleted_file_may_be_left_out(self) -> None:
+        for kind in ("ADDED", "MODIFIED", "RENAMED", "DELETED"):
             with self.subTest(kind=kind):
                 files = [self.node("a.md", added=3), self.node("b.png", kind)]
                 self.assertEqual({"b.png"}, adapter.left_out(("a.md",), files))
 
-    def test_a_rename_a_copy_a_type_change_or_a_missing_count_is_never_left_out(self) -> None:
+    def test_a_copy_a_type_change_or_a_missing_count_is_never_left_out(self) -> None:
         for odd in (
-            self.node("b.sh", "RENAMED"),
             self.node("b.sh", "COPIED"),
             self.node("b.sh", "CHANGED"),
             {"path": "b.png", "changeType": "ADDED"},
