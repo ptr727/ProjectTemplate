@@ -532,10 +532,12 @@ class FetchedWrapperTests(unittest.TestCase):
         self.urls: list[str] = []
         self.real_run = subprocess.run
         self.stdout = ""
+        self.stderr = io.StringIO()
+        self.commit: str | None = SHA
 
     def urlopen(self, target: str, timeout: float | None = None) -> FakeResponse:
         self.urls.append(target)
-        _, _, path = target.partition(f"{hub.HUB_RAW_BASE}/main/")
+        _, _, path = target.partition(f"{hub.HUB_RAW_BASE}/{self.commit or 'main'}/")
         return FakeResponse((ROOT / path).read_bytes())
 
     def uv_as_python(self, cmd: list[str], env: dict[str, str], check: bool):
@@ -558,6 +560,8 @@ class FetchedWrapperTests(unittest.TestCase):
             mock.patch.object(urllib.request, "urlopen", self.urlopen),
             mock.patch.object(hub.shutil, "which", return_value="uv"),
             mock.patch.object(hub.subprocess, "run", self.uv_as_python),
+            mock.patch.object(hub, "resolve_main_commit", return_value=self.commit),
+            contextlib.redirect_stderr(self.stderr),
         ):
             return hub.main([DOCKER_LINT, "--help"])
 
@@ -578,14 +582,25 @@ class FetchedWrapperTests(unittest.TestCase):
         with mock.patch.object(tempfile, "tempdir", str(self.tmp)):
             self.assertEqual(self.run_wrapper(), 0, self.stdout)
 
-    def test_every_file_comes_from_two_matching_reads_of_main(self) -> None:
-        """The wrapper resolves no commit, so the double read is what refuses a mixed set."""
+    def fetched(self, ref: str) -> list[str]:
+        paths = ("scripts/local_review.py", "spec/git_env.py", DOCKER_LINT)
+        return [f"{hub.HUB_RAW_BASE}/{ref}/{path}" for path in paths]
+
+    def test_every_file_comes_from_the_one_resolved_commit(self) -> None:
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
-        expected = [
-            f"{hub.HUB_RAW_BASE}/main/{path}"
-            for path in ("scripts/local_review.py", "spec/git_env.py", DOCKER_LINT)
-        ]
-        self.assertEqual(self.urls, expected * 2)
+        self.assertEqual(self.urls, self.fetched(SHA))
+
+    def test_the_run_names_the_hub_commit_it_ran_from(self) -> None:
+        """A lint result names its hub commit, so two runs that disagree can be attributed."""
+        self.assertEqual(self.run_wrapper(), 0, self.stdout)
+        self.assertIn(f"ptr727/ProjectTemplate@{SHA}", self.stderr.getvalue())
+
+    def test_an_unresolved_commit_reads_main_twice_and_says_so(self) -> None:
+        """With no commit to pin to, the double read is what refuses a mixed set."""
+        self.commit = None
+        self.assertEqual(self.run_wrapper(), 0, self.stdout)
+        self.assertEqual(self.urls, self.fetched("main") * 2)
+        self.assertIn("ptr727/ProjectTemplate@main", self.stderr.getvalue())
 
 
 if __name__ == "__main__":

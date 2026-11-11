@@ -60,7 +60,6 @@ Use each tool's official casing in task labels, docs, and prose: `.NET` (not `.N
   `words` list, never to a `.code-workspace`'s own `cspell.words` block.
 - **CI's spelling gate covers `README.md` and `HISTORY.md` only**, deliberately not every `.md`
   file. So a new topical doc is not spell-gated in CI (the editor extension still flags it live).
-  A repo may widen its own CI list, README plus HISTORY is the default.
 - **`HISTORY.md` mirrors the README's opening**: the same `# <Title>`, the same tagline verbatim
   (the first line after the README's H1), then its own `## Release History`. It never repeats a
   paragraph below the README's tagline.
