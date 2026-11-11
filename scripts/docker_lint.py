@@ -155,6 +155,15 @@ def run_command(
         raise CommandFailed(f"could not start command: {error}") from error
 
 
+def git_environment() -> dict[str, str]:
+    """Return this process's environment without the variables a git hook sets.
+
+    One of them would name the hook's repository or index rather than the root this run lints.
+    The list is `spec/git_env.py`'s, copied so the fetched wrapper runs with no hub file beside it.
+    """
+    return {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
+
+
 def ls_files(
     root: Path, patterns: Sequence[str] = (), *, include_untracked: bool = True
 ) -> list[str]:
@@ -178,7 +187,7 @@ def ls_files(
         command.extend(["--others", "--exclude-standard"])
     command.extend(["--", *patterns, NODE_MODULES_EXCLUDE])
     try:
-        result = subprocess.run(command, check=True, capture_output=True)
+        result = subprocess.run(command, env=git_environment(), check=True, capture_output=True)
     except FileNotFoundError as error:
         raise CommandFailed("target discovery failed: git was not found") from error
     except subprocess.CalledProcessError as error:
@@ -298,14 +307,16 @@ def snapshot_parent(root: Path) -> Path:
     Any Docker setup that can mount the checkout reaches it, and git never lists it.
     The system temporary directory is outside Docker Desktop for Linux's default file sharing.
     `--absolute-git-dir` resolves per worktree, so two worktrees of one repository never share it.
-    A git hook sets some of `GIT_LOCATION_VARS`, which would name the hook's repository instead.
-    That list is `spec/git_env.py`'s, copied so the fetched wrapper runs with no hub file beside it.
     """
     command = ["git", "rev-parse", "--absolute-git-dir"]
-    env = {k: v for k, v in os.environ.items() if k not in GIT_LOCATION_VARS}
     try:
         result = subprocess.run(
-            command, cwd=root, env=env, capture_output=True, check=False, timeout=GIT_TIMEOUT
+            command,
+            cwd=root,
+            env=git_environment(),
+            capture_output=True,
+            check=False,
+            timeout=GIT_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError) as error:
         raise CommandFailed(

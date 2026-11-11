@@ -616,6 +616,29 @@ class StandaloneTests(unittest.TestCase):
             parent = docker_lint.snapshot_parent(self.root)
         self.assertEqual((self.root / ".git").resolve(), parent.resolve())
 
+    def test_an_inherited_git_dir_does_not_move_the_targets(self) -> None:
+        """The snapshot's file list comes from the root too, never from a hook's repository."""
+        (self.root / "here.md").write_text("content\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", "--", "here.md"], check=True)
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        subprocess.run(["git", "init", "-q", str(other)], check=True)
+        (other / "there.md").write_text("content\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(other), "add", "--", "there.md"], check=True)
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
+            self.assertEqual(["here.md"], docker_lint.ls_files(self.root, include_untracked=False))
+
+    def test_its_rmtree_handler_is_local_review_s(self) -> None:
+        """Copied rather than imported, so the two bodies are held equal here instead."""
+
+        def body(name: str) -> str:
+            source = (REPO / "scripts" / f"{name}.py").read_text(encoding="utf-8")
+            for node in ast.parse(source).body:
+                if isinstance(node, ast.FunctionDef) and node.name == "unlink_read_only":
+                    return ast.dump(ast.Module(body=node.body[1:], type_ignores=[]))
+            raise AssertionError(f"{name}.py has no unlink_read_only")
+
+        self.assertEqual(body("local_review"), body("docker_lint"))
+
     def test_a_root_outside_any_repository_is_a_snapshot_failure(self) -> None:
         ceiling = {"GIT_CEILING_DIRECTORIES": str(self.outside.parent)}
         with (
