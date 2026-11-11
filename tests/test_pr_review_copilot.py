@@ -470,6 +470,12 @@ class TestOpenFindings(unittest.TestCase):
         found = adapter.read(body(sections=what_changed(extra=item)), thread_texts=other)
         self.assertEqual(1, found.unthreaded)
 
+    def test_an_item_with_one_longer_word_is_never_carried(self) -> None:
+        item = "**Review findings:**\n- `a.py`: **nit**, P3 - name the constant.\n\n"
+        other = (("a.py", "This constant is read before it is assigned."),)
+        found = adapter.read(body(sections=what_changed(extra=item)), thread_texts=other)
+        self.assertEqual(1, found.unthreaded)
+
     def test_one_thread_carries_one_item(self) -> None:
         twice = "**Review findings:**\n- `a.py`: guard the entry.\n- `a.py`: guard the entry.\n\n"
         one = (("a.py", "Please guard the entry."),)

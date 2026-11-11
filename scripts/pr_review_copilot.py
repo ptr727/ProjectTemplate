@@ -81,6 +81,7 @@ EXCUSED = ("ADDED", "MODIFIED", "RENAMED", "DELETED")
 COUNT_DIGITS = 4
 FINGERPRINT_HEX = 12
 CARRIED_SHARE = 2 / 3
+CARRIED_MIN = 2
 CARRIED_WORD = re.compile(r"[a-z0-9]{5,}")
 EXCERPT_LINES = 12
 EXCERPT_WIDTH = 160
@@ -775,7 +776,8 @@ def carried(items: Iterable[Item], texts: tuple[tuple[str, str], ...]) -> set[in
     """The positions of the items naming no line that a thread carries, one thread to an item.
 
     A thread carries an item where it sits on a path the item names and repeats `CARRIED_SHARE` of
-    the item's longer words. A short word says nothing about which finding it is. A path alone is no match, since one file can hold two findings. Falling
+    the item's longer words. It repeats at least `CARRIED_MIN` of them too. A short word says nothing about
+    which finding it is. A path alone is no match, since one file can hold two findings. Falling
     short leaves the item counted, and answering it costs less than a finding nothing shows.
     """
 
@@ -786,9 +788,8 @@ def carried(items: Iterable[Item], texts: tuple[tuple[str, str], ...]) -> set[in
     for n, item in enumerate(items):
         wanted = words(item.text) - words(" ".join(item.paths))
         for pair in free if wanted and not item.spans else []:
-            if pair[0] in item.paths and len(wanted & words(pair[1])) >= CARRIED_SHARE * len(
-                wanted
-            ):
+            shared = len(wanted & words(pair[1]))
+            if pair[0] in item.paths and shared >= max(CARRIED_MIN, CARRIED_SHARE * len(wanted)):
                 free.remove(pair)
                 found.add(n)
                 break
