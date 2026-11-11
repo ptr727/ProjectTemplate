@@ -2012,18 +2012,14 @@ class ShortNameCase(unittest.TestCase):
         )
 
     def test_the_live_registry_is_clean_and_every_entry_is_pinned(self) -> None:
-        registry = json.loads(
-            (validate.ROOT / "registry" / "repos.json").read_text(encoding="utf-8")
-        )
+        registry = validate.load("registry/repos.json")
         self.assertEqual(validate.short_name_errors(registry["repos"]), [])
         self.assertEqual(
             {e["name"]: e["shortName"] for e in registry["repos"]}, validate.SHORT_NAME_PINS
         )
 
     def test_the_schema_requires_the_field(self) -> None:
-        schema = json.loads(
-            (validate.ROOT / "registry" / "repos.schema.json").read_text(encoding="utf-8")
-        )
+        schema = validate.load("registry/repos.schema.json")
         self.assertIn("shortName", schema["$defs"]["repo"]["required"])
 
     def test_the_gate_reports_a_refused_short_name_from_main(self) -> None:
