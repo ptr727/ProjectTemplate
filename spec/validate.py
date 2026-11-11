@@ -143,6 +143,7 @@ SHORT_NAME_PINS = {
     "Vantage-Config": "vantage",
     "HolidayLights": "holidaylights",
     "Blog": "blog",
+    "Employment": "employment",
     "DiskSpeedTest": "diskspeedtest",
     "GEM-Echo-Server": "gemecho",
     "GoogleTo1Password": "google1password",
