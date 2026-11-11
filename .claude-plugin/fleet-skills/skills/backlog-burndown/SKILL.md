@@ -180,8 +180,7 @@ Where the condition it states is checkable state, such as an issue closing, and 
 That seat comments the evidence.
 Where the question the "not yet" postponed is still undetermined, the seat puts `decision` back in the same act.
 A group parked on it then stays parked, and a promotion it holds stays held.
-Where the question is settled, an issue that held nothing but it and has a parked group waiting joins that group's issues.
-Any other lifted issue is ranked like any other.
+Otherwise the issue is ranked like any other.
 The report names each issue lifted this way.
 Any other condition, and a read that cannot be made, leaves the label on.
 
@@ -194,6 +193,7 @@ An answer is recorded when the issue is closed or no longer carries `decision`, 
 The reason an item left the queue at triage, recorded the same way, counts as its answer.
 `decision-triage` leaves an answered issue open where it still tracks work, so closing it is not the test.
 An open issue carrying `deferred` keeps its group parked all the same, since its answer is "not yet".
+An open issue a claim comment names this way, holding nothing but its question, joins the resuming group's issues rather than ranking alone.
 A recorded answer never lifts the away-mode hold above on an edit under `host-setup/agent-safety/`. Such a group resumes only in an attended run, and the round's report names it as held.
 
 An issue already fixed on develop is counted and not ranked until a promotion closes it. A
