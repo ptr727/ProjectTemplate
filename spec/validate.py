@@ -813,6 +813,12 @@ def carried_link_errors(root, baseline):
     return errors
 
 
+def hub_copy(item, path):
+    """The hub file a carrier adapts for this entry, its `reference` where it names one and otherwise its own path."""
+    reference = item.get("reference")
+    return reference if isinstance(reference, str) else path
+
+
 def placeholder_errors(root, baseline):
     """Reject a declared placeholder its canonical file does not contain.
 
@@ -831,8 +837,7 @@ def placeholder_errors(root, baseline):
         if not is_str_list(declared):
             errors.append(f"files.json: {path} placeholders must be an array of strings")
             continue
-        reference = item.get("reference")
-        source = reference if isinstance(reference, str) and reference else path
+        source = hub_copy(item, path)
         canonical = root / source
         if not canonical.is_file():
             continue
@@ -1924,7 +1929,7 @@ def main(argv=()):
                     f"files.json: {path} reference '{ref}' is not a file in this checkout"
                 )
         if fid == "verbatim":
-            src = ref if isinstance(ref, str) else path
+            src = hub_copy(item, path)
             if isinstance(src, str) and not (ROOT / src).exists():
                 errors.append(
                     f"files.json: {path} fidelity 'verbatim' but its canonical source {src} is missing"

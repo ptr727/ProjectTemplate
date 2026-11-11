@@ -42,7 +42,8 @@ The conversion lands before any carried instruction file or baseline file. A res
 that carries LF files into a repo still on the CRLF default fails `editorconfig-checker` on every
 one of them. Converting each carried file to CRLF to pass is churn the conversion then
 reverts. `RESYNC.md` section 3 and `STANDUP.md` section 1A order it first for that reason. Where
-`main` holds content `develop` lacks, those sections re-level `develop` before the conversion.
+a `branch:` audit finding counts paths that differ between `main` and `develop`, those sections
+re-level `develop` before the conversion.
 
 The conversion pull request carries the renormalization, `.editorconfig`, and `.gitattributes`,
 and nothing else. A `develop` ruleset that allows only squash merges collapses the pull request to
