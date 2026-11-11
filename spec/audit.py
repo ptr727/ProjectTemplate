@@ -1677,7 +1677,18 @@ def hub_last_change(rel_path, anchor=None):
     return date, sha[:7]
 
 
-intent_ref = validate.intent_ref
+def intent_ref(item, path):
+    """`(canonical, anchor)`: the hub path an intent unit's copy is judged against, and its intentRef's `#anchor` or None."""
+    # Validation in spec/validate.py shape-checks these fields, but this engine runs standalone and does not invoke it first.
+    ref = item.get("reference")
+    if isinstance(ref, str) and ref:
+        return ref, None
+    intent = item.get("intentRef")
+    if isinstance(intent, str) and intent:
+        canonical, _, anchor = intent.partition("#")
+        if canonical:
+            return canonical, anchor or None
+    return path, None
 
 
 def declared_alternatives(baseline):

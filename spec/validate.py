@@ -813,27 +813,12 @@ def carried_link_errors(root, baseline):
     return errors
 
 
-def intent_ref(item, path):
-    """`(canonical, anchor)`: the hub path an intent unit's copy is judged against, and its intentRef's `#anchor` or None.
-
-    spec/audit.py resolves through this too, and runs standalone without main() having shape-checked these fields first.
-    """
-    ref = item.get("reference")
-    if isinstance(ref, str) and ref:
-        return ref, None
-    intent = item.get("intentRef")
-    if isinstance(intent, str) and intent:
-        canonical, _, anchor = intent.partition("#")
-        if canonical:
-            return canonical, anchor or None
-    return path, None
-
-
 def placeholder_errors(root, baseline):
     """Reject a declared placeholder its canonical file does not contain.
 
     A carrier fills each declared token per repository, so a token the hub's text has dropped asks for a substitution nothing can make.
-    A missing canonical is skipped, since the manifest checks in main() already report a missing reference or intentRef.
+    The tokens sit in the hub copy a carrier adapts, its reference or else its own path, never the intentRef rationale.
+    A missing canonical is skipped, since the manifest checks in main() already report a missing reference.
     """
     errors = []
     for item in baseline:
@@ -846,7 +831,8 @@ def placeholder_errors(root, baseline):
         if not is_str_list(declared):
             errors.append(f"files.json: {path} placeholders must be an array of strings")
             continue
-        source, _ = intent_ref(item, path)
+        reference = item.get("reference")
+        source = reference if isinstance(reference, str) and reference else path
         canonical = root / source
         if not canonical.is_file():
             continue
@@ -1945,21 +1931,21 @@ def main(argv=()):
                 )
 
         # The audit engine's intent_ref() trusts this is a string once validated, the same way it trusts reference above.
-        intent_value = item.get("intentRef")
-        if intent_value is not None and not isinstance(intent_value, str):
+        intent_ref = item.get("intentRef")
+        if intent_ref is not None and not isinstance(intent_ref, str):
             errors.append(f"files.json: {path} intentRef must be a string")
-        elif isinstance(intent_value, str):
+        elif isinstance(intent_ref, str):
             # The audit engine strips a trailing #anchor before ever joining this with ROOT, so validate the same part it will actually read.
-            intent_path = intent_value.split("#", 1)[0]
+            intent_path = intent_ref.split("#", 1)[0]
             if escapes_repo_root(intent_path):
                 errors.append(
-                    f"files.json: {path} intentRef '{intent_value}' must be a repo-relative path"
+                    f"files.json: {path} intentRef '{intent_ref}' must be a repo-relative path"
                 )
             elif not canonical_file_in_root(intent_path):
                 # A directory such as "." exists but is not a file.
                 # The staleness check would then read the whole repo's most recent commit as this one file's, false-flagging every intent unit as stale.
                 errors.append(
-                    f"files.json: {path} intentRef '{intent_value}' canonical {intent_path} is not a file in this checkout"
+                    f"files.json: {path} intentRef '{intent_ref}' canonical {intent_path} is not a file in this checkout"
                 )
 
         sections = item.get("sections", [])
