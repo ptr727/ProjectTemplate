@@ -137,8 +137,6 @@
         // Pre-commit already runs the prose gate diff-scoped and the EOL gate over the whole tree.
         // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the hook's own EOL check on demand.
         // Every Lint task is language-agnostic, the same check as in the .NET snippet's Lint group.
-        // Each assumes the pre-commit-framework layout (hub_fetch_run.py at the workspace root).
-        // A repo using the Husky.Net snippet instead points them at .husky/hub_fetch_run.py.
         {
             "label": "Lint: EditorConfig",
             "type": "process",

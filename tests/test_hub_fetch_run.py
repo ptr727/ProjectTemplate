@@ -483,10 +483,9 @@ LINT_TASKS = {
     "Lint: Markdown": "markdownlint",
     "Lint: Spelling": "cspell",
 }
-TASK_SNIPPETS = {
-    "vscode-tasks.json": ".husky/hub_fetch_run.py",
-    "vscode-tasks-python.json": "hub_fetch_run.py",
-}
+HELPER = "${workspaceFolder}/hub_fetch_run.py"
+TASK_SNIPPETS = ("vscode-tasks.json", "vscode-tasks-python.json")
+HUSKY_HOOK = ROOT / "catalog" / "snippets" / "husky" / "pre-commit"
 
 
 def snippet_tasks(name: str) -> dict[str, dict]:
@@ -505,13 +504,31 @@ class LintTaskTests(unittest.TestCase):
         return forms
 
     def test_each_docker_lint_task_runs_the_wrapper_through_the_helper(self) -> None:
-        for name, helper in TASK_SNIPPETS.items():
+        for name in TASK_SNIPPETS:
             tasks = snippet_tasks(name)
             for label, linter in LINT_TASKS.items():
                 for form in self.forms(tasks[label]):
                     with self.subTest(snippet=name, task=label, command=form[0]):
-                        self.assertIn(f"${{workspaceFolder}}/{helper}", form)
+                        self.assertIn(HELPER, form)
                         self.assertEqual(form[-3:], [DOCKER_LINT, "--linter", linter])
+
+    def test_every_helper_reference_names_the_root_copy(self) -> None:
+        """A task naming the helper anywhere but the root fails in a repo that keeps it there."""
+        for name in TASK_SNIPPETS:
+            for label, task in snippet_tasks(name).items():
+                for form in self.forms(task) if "command" in task else []:
+                    for arg in form:
+                        if arg.endswith("hub_fetch_run.py"):
+                            with self.subTest(snippet=name, task=label, arg=arg):
+                                self.assertEqual(arg, HELPER)
+
+    def test_husky_hook_calls_the_root_copy_after_moving_to_the_top_level(self) -> None:
+        """The hook resolves the helper from the repo root, so the move to the top level comes first."""
+        lines = HUSKY_HOOK.read_text(encoding="utf-8").splitlines()
+        cd = lines.index('cd "$(git rev-parse --show-toplevel)" || exit 1')
+        helper = lines.index('hub_fetch_run="$PWD/hub_fetch_run.py"')
+        self.assertLess(cd, helper)
+        self.assertNotIn("dirname", lines[helper])
 
     def test_no_task_binds_the_live_tree_into_a_container(self) -> None:
         """The wrapper's snapshot is the only mount, so no task may call Docker itself."""
