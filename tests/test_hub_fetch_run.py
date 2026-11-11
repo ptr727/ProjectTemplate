@@ -549,6 +549,7 @@ class FetchedWrapperTests(unittest.TestCase):
             check=check,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             cwd=self.tmp,
             timeout=TIMEOUT,
         )
