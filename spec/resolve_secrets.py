@@ -257,21 +257,25 @@ def scaffold(
     A consumer file is `<shortName>_<purpose>[_<part>]`, so its first field is its owner's registry short name.
     The name is the ownership record, so a file whose first field is no short name is unclaimed.
     A `github_` file is a provisioning file.
+    A subdirectory is no secret file, so it is never a stray or unclaimed, though its name is still taken.
+    A symlink, whatever it resolves to, reads as a file at its name, the one `lib/sh/secrets.sh` refuses.
     """
     expected, held, wrong_scope, skipped = fleet_expectations(secrets, registry, tree_reader)
-    on_disk = set()
+    on_disk, folders = set[str](), set[str]()
     if directory.is_dir():
         short_names = registry_short_names(registry)
-        on_disk = {
-            e.name
-            for e in os.scandir(directory)
-            if e.name.startswith(secret_names.FILE_PREFIX)
-            or e.name.partition("_")[0] not in short_names
-            or "_" not in e.name
-        }
-    strays = sorted(on_disk & wrong_scope)
+        for e in os.scandir(directory):
+            if (
+                e.name.startswith(secret_names.FILE_PREFIX)
+                or e.name.partition("_")[0] not in short_names
+                or "_" not in e.name
+            ):
+                on_disk.add(e.name)
+                if e.is_dir(follow_symlinks=False):
+                    folders.add(e.name)
+    strays = sorted((on_disk - folders) & wrong_scope)
     present = sorted(on_disk & (set(expected) | held))
-    unclaimed = sorted(on_disk - set(expected) - held - wrong_scope)
+    unclaimed = sorted(on_disk - folders - set(expected) - held - wrong_scope)
     if strays:
         return [], present, strays, unclaimed, skipped
     created = sorted(set(expected) - on_disk)
