@@ -418,7 +418,7 @@ def table_cover(pr: dict, gone: frozenset[str] = frozenset()) -> tuple[str, str]
     changed, cut = changed_paths(pr)
     if cut or files_unread(pr) or not changed:
         return "", "the changed-file list is incomplete or empty, so no table can be matched"
-    named = tuple(e for e in reading(node).table or () if e not in gone)
+    named = adapter.rows_left(reading(node).table or (), changed, gone)
     where = (commit_oid(node) or "")[:8] or "a commit this cannot name"
     skip = adapter.left_out(named, (pr.get("files") or {}).get("nodes") or [])
     kept = [p for p in changed if p not in skip]

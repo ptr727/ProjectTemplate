@@ -778,6 +778,15 @@ def row_names(entry: str, path: str) -> bool:
     )
 
 
+def rows_left(named: tuple[str, ...], changed: list[str], gone: frozenset[str]) -> tuple[str, ...]:
+    """The rows of `named` still to match, a row naming only a path in `gone` having left."""
+
+    def names(row: str, paths: Iterable[str]) -> bool:
+        return any(row_names(row, p) for p in paths)
+
+    return tuple(e for e in named if names(e, changed) or not names(e, gone))
+
+
 def left_out(named: tuple[str, ...], files: list[dict]) -> set[str]:
     """The changed files a file table may leave out: each one GitHub counts no changed line in.
 

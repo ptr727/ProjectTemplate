@@ -21,6 +21,7 @@ import test_pr_review as fixtures
 HEAD = fixtures.HEAD
 BUMP = "c" * 40
 FEATURE = "d" * 40
+TIP = "9" * 40
 
 
 def landed(
@@ -47,7 +48,12 @@ def landed(
                             "pageInfo": {"hasNextPage": more},
                             "nodes": [{"path": p} for p in paths],
                         },
-                        "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": state}}}]},
+                        "headRefOid": TIP,
+                        "commits": {
+                            "nodes": [
+                                {"commit": {"oid": TIP, "statusCheckRollup": {"state": state}}}
+                            ]
+                        },
                     }
                 ]
             },
@@ -262,6 +268,14 @@ class TestDigestReading(fixtures.GqlCase):
         out = self.out.getvalue()
         self.assertIn("coverage=dependabot ", out)
         self.assertIn("with 2 changed only by", out)
+
+    def test_a_glob_row_naming_only_the_bump_leaves_the_match(self) -> None:
+        pr = promotion_pr(["a.py", "pkg/uv.lock", "pyproject.toml"], table=["a.py", "pkg/*.lock"])
+        pages = page(
+            landed(BUMP, ["pkg/uv.lock", "pyproject.toml"]), landed(FEATURE, ["a.py"], login="m")
+        )
+        self.assertEqual(0, self.status(pr, pages))
+        self.assertIn("coverage=dependabot ", self.out.getvalue())
 
     def test_a_table_missing_a_file_beside_the_bump_reads_none(self) -> None:
         pr = promotion_pr(["a.py", "b.py", "uv.lock"], table=["a.py"])

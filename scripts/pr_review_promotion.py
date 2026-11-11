@@ -17,6 +17,7 @@ from collections.abc import Callable, Iterator
 from typing import NamedTuple
 
 import pr_review_rounds as rounds
+from pr_review_checks import head_commit
 from pr_review_payload import default_branch
 
 BUMPS_KEY = "_dependabotBumps"
@@ -34,7 +35,7 @@ query($o:String!,$r:String!,$n:Int!,$after:String){
       associatedPullRequests(first:5){ nodes{ number baseRefName mergeCommit{ oid }
         author{ login }
         files(first:100){ pageInfo{ hasNextPage } nodes{ path } }
-        commits(last:1){ nodes{ commit{ statusCheckRollup{ state } } } }
+        headRefOid commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state } } } }
       }}
     }}}
   }}}
@@ -63,11 +64,9 @@ def green_bump(landed: dict, paths: set[str]) -> bool:
     maintainer, the safe side of that gap.
     """
     author = landed.get("author") or {}
-    tips = (landed.get("commits") or {}).get("nodes") or []
-    rollup = ((tips[-1].get("commit") or {}).get("statusCheckRollup") or {}) if tips else {}
+    rollup = head_commit(landed).get("statusCheckRollup") or {}
     return (
         author.get("login") == DEPENDABOT
-        and bool(paths)
         and all(is_manifest(p) for p in paths)
         and rollup.get("state") == "SUCCESS"
     )
