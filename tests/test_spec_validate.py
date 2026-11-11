@@ -1947,7 +1947,7 @@ class GroundBranchReaderCase(unittest.TestCase):
 
 
 class ShortNameCase(unittest.TestCase):
-    """A registry shortName is the owner token of a host secret stem, so the gate holds its shape and its value."""
+    """A registry shortName is the planned owner token of a host secret stem, so the gate holds its shape and value."""
 
     PINS: ClassVar[dict[str, str]] = {"Alpha-Repo": "alpha", "Beta": "beta"}
 
@@ -2028,38 +2028,24 @@ class ShortNameCase(unittest.TestCase):
 
     def test_the_gate_reports_a_refused_short_name_from_main(self) -> None:
         """Calling the helper proves the rules and leaves the wiring unproven, so the real script runs here."""
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            shutil.copytree(validate.ROOT / "spec", root / "spec")
-            (root / "registry").mkdir()
-            shutil.copy(
-                validate.ROOT / "registry" / "repos.schema.json",
-                root / "registry" / "repos.schema.json",
-            )
-            fixture = {
-                "defaults": {"workflowModel": "release"},
-                "repos": [
-                    {
-                        "name": "Fixture",
-                        "shortName": "NotValid",
-                        "url": "https://github.com/owner/Fixture",
-                        "status": "backlog",
-                        "classificationPending": True,
-                    }
-                ],
-            }
+        fixture = {
+            "defaults": {"workflowModel": "release"},
+            "repos": [
+                {
+                    "name": "Fixture",
+                    "shortName": "NotValid",
+                    "url": "https://github.com/owner/Fixture",
+                    "status": "backlog",
+                    "classificationPending": True,
+                }
+            ],
+        }
+
+        def write_registry(root: Path) -> None:
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
-            result = subprocess.run(
-                [sys.executable, str(root / "spec" / "validate.py")],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=60,
-                check=False,
-            )
-        self.assertIn(
-            f"Fixture: shortName 'NotValid' must be {validate.SHORT_NAME_SHAPE}", result.stdout
-        )
+
+        output = run_gate_on_files({}, write_registry)
+        self.assertIn(f"Fixture: shortName 'NotValid' must be {validate.SHORT_NAME_SHAPE}", output)
 
 
 class RegistrySchemaMirrorCase(unittest.TestCase):
