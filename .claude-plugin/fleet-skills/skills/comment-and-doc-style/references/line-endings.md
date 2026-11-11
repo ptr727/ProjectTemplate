@@ -96,7 +96,8 @@ A tool that writes in text mode needs the platform's own ending rather than a fi
 `.kicad_sch`, `.kicad_pcb`, `.kicad_sym`, `.kicad_mod`, `fp-lib-table`, and `sym-lib-table` are
 that case, CRLF on Windows and LF elsewhere. Its `.kicad_pro`, `.kicad_prl`, and `.kicad_dru`
 write LF everywhere and stay on the default. Pin the text-mode set `text !eol` in
-`.gitattributes` and `end_of_line = unset` in `.editorconfig`. The index stays LF, and a checkout
+`.gitattributes` and `end_of_line = unset` in `.editorconfig`. A file committed CRLF before the pin
+keeps that index copy until `git add --renormalize` rewrites it. After that the index stays LF, and a checkout
 uses Git's native line endings. That holds when `core.eol` is unset and `core.autocrlf` is false,
 or true on Windows.
 
