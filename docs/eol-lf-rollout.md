@@ -133,8 +133,9 @@ the row is checked without a conversion pull request of its own.
 - [x] **Vantage-Config** (`operational`, `lineEndings: lf` since its ptr727/Vantage-Config#28
       conversion): converted outside this rollout, with only its Design Center `.dc` exports
       pinned CRLF. It is not the "not applicable" case above
-- [ ] **HolidayLights** (`release`): `.editorconfig` sets `[*] end_of_line = lf`, but
-      `.gitattributes` still sets `* -text`
+- [x] **HolidayLights** (`operational` since its 2026-10-24 reclassification from `release`,
+      `lineEndings: lf`): converted in ptr727/HolidayLights#10, with `xlights_effectpresets.json`
+      pinned CRLF
 - [x] **Blog** (`release`, `lineEndings: lf`): defaults in place
 
 <!-- Repo -->
