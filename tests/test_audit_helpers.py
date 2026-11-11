@@ -721,7 +721,7 @@ class CheckInterfaceCase(unittest.TestCase):
         self.assertIn("job 'check-workflow-status'", message)
         self.assertIn("on a run other than pull_request", message)
 
-    def test_a_gate_no_pull_request_starts_takes_the_trigger_finding(self) -> None:
+    def test_a_gate_without_a_pull_request_trigger_gets_the_trigger_finding(self) -> None:
         on = "on:\n  push:\n    branches: ['**']\n  workflow_dispatch:\n"
         for label, check, others in (
             ("literal name", PR_CHECK, ["on a run other than pull_request"]),
