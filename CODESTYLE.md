@@ -112,7 +112,7 @@ This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codes
 
 - **SIGINT and SIGTERM take one path.** Python raises `KeyboardInterrupt` on SIGINT. The entry point installs a SIGTERM handler with `signal.signal` that records the signal and raises `KeyboardInterrupt`.
 - **The entry point catches `KeyboardInterrupt` once, and any handler below it that catches the exception re-raises it.** It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 143 where the SIGTERM handler recorded a signal and 130 otherwise.
-- **What the script holds is released by `with` blocks and `finally` clauses as the exception unwinds.** A `subprocess.Popen` child is stopped in a `finally` clause with `terminate()`, then `wait()`, since leaving its `with` block does not stop it.
+- **What the script holds is released by `with` blocks and `finally` clauses as the exception unwinds.** A `subprocess.Popen` child is stopped in a `finally` clause with `terminate()`, then `wait()`, since leaving its `with` block does not stop it. That child runs without `shell=True`, so `terminate()` reaches the command rather than a shell around it.
 - **The rename over persistent state uses `os.replace`.** `os.rename` and `Path.rename` fail on Windows when the target exists.
 
 ## Shell
@@ -123,7 +123,7 @@ Bash, and only where a program cannot be Python: a bootstrap that installs the i
 
 - **Cleanup of temporary paths and locks runs in the script's `EXIT` trap.** Bash runs that trap when SIGINT or SIGTERM ends the script, as well as on a normal exit.
 - **Every script sets an `INT` trap and a `TERM` trap, which stop its children and keep the status.** Each one sends SIGTERM with `kill` to the children the script started, then waits for them with `wait`. It then prints the line `CODESTYLE.md` "Interrupts" requires and exits 130 or 143. The children's process IDs are held in an array, such as `pids`, set to `()` before the traps are set. A trap skips the `kill` and the `wait` while `${#pids[@]}` is 0, a test `set -u` allows on an empty array in every Bash version. Under `set -u`, an unset one would end the trap before the line prints. The `kill` takes `2>/dev/null`, since a child that already exited makes it print an error. Both take `|| :`, since under `set -e` a non-zero status from either ends the trap before the line prints. SIGTERM is the signal sent because a background child ignores SIGINT. Other cleanup stays in the `EXIT` trap.
-- **A long-running child runs in the background, and the script waits for it with `wait "$pid"`, so its exit status reaches `set -e`.** Bash runs a trap only after a foreground command returns, while a trapped signal ends a `wait` at once. A background child that reads standard input takes `<&0`, since bash otherwise gives it `/dev/null`.
+- **A long-running child runs in the background, and the script waits for it with `wait "$pid"`, so its exit status reaches `set -e`.** Bash runs a trap only after a foreground command returns, while a trapped signal ends a `wait` at once. A background child that reads standard input takes `<&0`, since bash otherwise gives it `/dev/null`. The child is one external command rather than a function, a group, or a subshell. A SIGTERM to such a subshell ends it and leaves its own command running.
 
 <!-- Repo -->
 
