@@ -28,7 +28,7 @@ PROSE_GATE_PATH = ".github/actions/prose-gate/prose_lint.py"
 # The files a script reads or imports from the hub tree, fetched before it runs.
 COMPANIONS = {
     PROSE_GATE_PATH: (".github/actions/prose-gate/prose-gate.json",),
-    "scripts/docker_lint.py": ("scripts/local_review.py", "spec/git_env.py"),
+    "scripts/docker_lint.py": (),
 }
 PROBE_TIMEOUT = 30
 LOOKUP_TIMEOUT = 5
@@ -193,9 +193,9 @@ def main(argv: list[str]) -> int:
     env = dict(os.environ)
     if is_prose_gate and not env.get(PROVENANCE_VAR, "").strip():
         if commit:
-            env[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub-fetch-run main)"
+            env[PROVENANCE_VAR] = f"{HUB_REPO}@{commit} (hub_fetch_run.py main)"
         else:
-            env[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub-fetch-run, commit unresolved)"
+            env[PROVENANCE_VAR] = f"{HUB_REPO}@main (hub_fetch_run.py, commit unresolved)"
     with tempfile.TemporaryDirectory() as scratch:
         paths = (*COMPANIONS.get(hub_path, ()), hub_path)
         try:

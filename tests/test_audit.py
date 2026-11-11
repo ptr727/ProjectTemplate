@@ -25,8 +25,7 @@ CARRIED = {"pyproject.toml", "tests/test_a.py"}
 HEAD_SHA = "c0ffee"
 HEAD = {"commit": {"sha": HEAD_SHA, "commit": {"tree": {"sha": "feed"}}}}
 CODECOV = {
-    "path": "codecov.yml",
-    "alternatives": [".codecov.yml"],
+    "path": ".codecov.yml",
     "appliesTo": ["python"],
 }
 
@@ -93,7 +92,7 @@ def run_audit(
     texts: dict[str, str] | None = None,
     moved: frozenset[str] = frozenset(),
 ) -> tuple[list[tuple[str, str]], FakeGh]:
-    """Audit a Python repository carrying `tree`, where a test module makes codecov.yml owed.
+    """Audit a Python repository carrying `tree`, where a test module makes .codecov.yml owed.
 
     The hub's tracked paths come from a fetch of its origin. Answering them with `hub` keeps the
     run offline and leaves the checkout the suite runs in untouched. The repo-owned trees and the
@@ -118,35 +117,23 @@ def run_audit(
     return findings, fake
 
 
-class AuditRepoAlternativesCase(unittest.TestCase):
-    """audit_repo's baseline loop passes each path's declared alternatives into the shared reader.
+class AuditRepoCodecovNameCase(unittest.TestCase):
+    """audit_repo reads the Codecov configuration at `.codecov.yml`, the one name the fleet accepts."""
 
-    The reader's own handling of alternatives is covered by tests/test_audit_helpers.py, so what this
-    adds is the call site. Were it to stop passing them, a repository holding only an alternative
-    would read as missing the declared path while that self-test still passed.
-    """
+    ABSENT = ("LETTER", "file: .codecov.yml absent on main (verify intent per AUDIT.md section 7)")
 
-    def test_a_repository_holding_only_the_alternative_carries_the_file(self) -> None:
+    def test_a_repository_holding_the_dotfile_carries_the_file(self) -> None:
         findings, fake = run_audit(CARRIED | {".codecov.yml"})
 
         self.assertIn(f"repos/{SLUG}/contents/.codecov.yml?ref={HEAD_SHA}", fake.paths)
-        absent = [text for _, text in findings if text.startswith("file: codecov.yml")]
-        self.assertEqual(absent, [])
+        self.assertNotIn(self.ABSENT, findings)
 
-    def test_a_repository_holding_neither_is_reported_under_both_names(self) -> None:
-        """The control, showing the loop under test ran and reports an absence it sees."""
-        findings, _ = run_audit(CARRIED)
+    def test_a_repository_holding_only_the_bare_name_is_reported(self) -> None:
+        """Codecov would read the bare name, but the fleet accepts only the dotfile."""
+        findings, fake = run_audit(CARRIED | {"codecov.yml"})
 
-        self.assertIn(
-            (
-                "LETTER",
-                (
-                    "file: codecov.yml or .codecov.yml absent on main "
-                    "(verify intent per AUDIT.md section 7)"
-                ),
-            ),
-            findings,
-        )
+        self.assertIn(self.ABSENT, findings)
+        self.assertFalse([p for p in fake.paths if "/contents/codecov.yml" in p])
 
 
 class AuditRepoNamingCase(unittest.TestCase):
@@ -259,7 +246,9 @@ class AuditRepoHeadCommitCase(unittest.TestCase):
             any("bin/Run_Backup (an executable with no shebang)" in text for _, text in findings),
             findings,
         )
-        self.assertEqual([text for _, text in findings if text.startswith("file: codecov.yml")], [])
+        self.assertEqual(
+            [text for _, text in findings if text.startswith("file: .codecov.yml")], []
+        )
 
     def test_every_content_read_names_the_head_commit(self) -> None:
         _, fake = run_audit(CARRIED | {".codecov.yml", "cspell.json", ".github/dependabot.yml"})

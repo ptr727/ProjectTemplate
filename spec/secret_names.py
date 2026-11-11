@@ -97,7 +97,7 @@ def coverage_candidate_types(types: list[str], repo_profiles: Any) -> list[str]:
 def coverage_claiming_types(
     types: list[str], type_mechanisms: dict[str, Any], tree: set[str] | None
 ) -> list[str]:
-    """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and codecov.yml.
+    """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and .codecov.yml.
 
     `tree` is the blob path set, or None when unread, and then every candidate keeps its claim.
     """
@@ -122,7 +122,7 @@ def coverage_types(
 ) -> list[str]:
     """The declared types of ENTRY that owe Codecov coverage, the one composition the audit and provisioning share.
 
-    So the audit's codecov.yml check and the CODECOV_TOKEN it owes cannot disagree.
+    So the audit's .codecov.yml check and the CODECOV_TOKEN it owes cannot disagree.
     """
     candidates = coverage_candidate_types(declared_types(entry), entry.get("profiles", {}))
     return coverage_claiming_types(candidates, secrets.get("typeMechanisms", {}), tree)

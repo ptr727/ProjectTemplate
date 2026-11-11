@@ -2,7 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Ruff Format",
+            "label": "ruff format",
             "type": "process",
             "command": "uvx",
             "args": [
@@ -18,7 +18,7 @@
             }
         },
         {
-            "label": "Ruff Check",
+            "label": "ruff check",
             "type": "process",
             "command": "uvx",
             "args": [
@@ -50,8 +50,8 @@
             "label": "Python Format",
             "dependsOrder": "sequence",
             "dependsOn": [
-                "Ruff Format",
-                "Ruff Check",
+                "ruff format",
+                "ruff check",
                 "Python Types"
             ],
             "group": { "kind": "build", "isDefault": true },

@@ -36,13 +36,13 @@ A language type is present at one of two **depths**, declared as its `profile`:
 
 Python's profile belongs to each declared Python directory rather than to the repository, per [CODESTYLE.md][codestyle] "Python", so one repository may hold both depths. The registry therefore declares no `python` profile. The registry's `pythonDirectories` lists the directories, and each one's `pyproject.toml` shape states its profile.
 
-Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile. A check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build and package checks set `build`. A coverage check for a language other than Python sets it too. The coverage requirement (the CODECOV_TOKEN secret and the codecov.yml file, or its .codecov.yml alternative) is N/A for a lint-only language other than Python. Otherwise it follows tests: the audit reads the repo's tree for tests and holds the requirement N/A where it finds none.
+Each check may declare the **minimum profile** it needs via a `minProfile` field. A check without one applies at every profile. A check with `minProfile: build` applies only at `build`. So lint/style/type-check checks omit it, while build and package checks set `build`. A coverage check for a language other than Python sets it too. The coverage requirement (the CODECOV_TOKEN secret and the .codecov.yml file) is N/A for a lint-only language other than Python. Otherwise it follows tests: the audit reads the repo's tree for tests and holds the requirement N/A where it finds none.
 
 A registry profile is **declared and validated**, not merely detected. Python is the exception, because its structural read of each directory's `pyproject.toml` already is the profile. A repository-wide value could not describe a repository holding both depths. It would also be a second classification of a shape that already states one. So [validate.py][validate] refuses a `python` entry in `profiles`.
 
 ### Consequence for cross-cutting checks
 
-A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `codecov.yml` or `.codecov.yml` file presence) are **tests-aware**. They are N/A for a lint-only language other than Python, and for any language the repo carries no tests for. A language with no tests here must never manufacture a coverage finding. That holds whether the language is lint-only or a package-only build language whose tests live elsewhere or are not yet written.
+A cross-cutting check that presumes a built, tested language must respect the profile. In particular the coverage checks (the `CODECOV_TOKEN` secret and the `.codecov.yml` file presence) are **tests-aware**. They are N/A for a lint-only language other than Python, and for any language the repo carries no tests for. A language with no tests here must never manufacture a coverage finding. That holds whether the language is lint-only or a package-only build language whose tests live elsewhere or are not yet written.
 
 ## Languages
 
