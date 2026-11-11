@@ -80,8 +80,8 @@ EXCUSED = ("ADDED", "MODIFIED", "RENAMED", "DELETED")
 # A count longer than this is an identifier rather than anything a review states.
 COUNT_DIGITS = 4
 FINGERPRINT_HEX = 12
-CARRIED_SHARE = 0.5
-CARRIED_WORD = re.compile(r"[a-z0-9]{4,}")
+CARRIED_SHARE = 2 / 3
+CARRIED_WORD = re.compile(r"[a-z0-9]{5,}")
 EXCERPT_LINES = 12
 EXCERPT_WIDTH = 160
 
@@ -760,9 +760,14 @@ def items_after(tokens: list[Token], start: int, lines: list[str]) -> list[Item]
     return items
 
 
+def first_comment(thread: dict) -> dict:
+    """The thread's opening comment, which is the finding itself."""
+    return ((thread.get("comments") or {}).get("nodes") or [{}])[0]
+
+
 def carriers(threads: list[dict]) -> tuple[tuple[str, str], ...]:
     """Each thread's path and opening text, what `carried` matches an item naming no line against."""
-    firsts = [((t.get("comments") or {}).get("nodes") or [{}])[0] for t in threads]
+    firsts = [first_comment(t) for t in threads]
     return tuple((c.get("path") or "", c.get("body") or "") for c in firsts)
 
 
@@ -770,7 +775,7 @@ def carried(items: Iterable[Item], texts: tuple[tuple[str, str], ...]) -> set[in
     """The positions of the items naming no line that a thread carries, one thread to an item.
 
     A thread carries an item where it sits on a path the item names and repeats `CARRIED_SHARE` of
-    the item's words. A path alone is no match, since one file can hold two findings. Falling
+    the item's longer words. A short word says nothing about which finding it is. A path alone is no match, since one file can hold two findings. Falling
     short leaves the item counted, and answering it costs less than a finding nothing shows.
     """
 
@@ -801,7 +806,7 @@ def listed_lines(
     that. Where `cut`, the thread page was cut, so an item no read thread sits on is unknown. An
     item naming a path and no line is marked by `carried`.
     """
-    firsts = [((t.get("comments") or {}).get("nodes") or [{}])[0] for t in threads]
+    firsts = [first_comment(t) for t in threads]
     spots = {
         (c["path"], c.get("startLine") or c["line"], c["line"])
         for t, c in zip(threads, firsts, strict=True)

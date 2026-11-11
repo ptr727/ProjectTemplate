@@ -462,6 +462,14 @@ class TestOpenFindings(unittest.TestCase):
         found = adapter.read(body(sections=what_changed(extra=self.IDENTIFIED)), thread_texts=other)
         self.assertEqual(2, found.unthreaded)
 
+    def test_a_long_thread_sharing_common_words_carries_nothing(self) -> None:
+        item = "**Review findings:**\n- `a.py`: moderate - this should return when the value is missing.\n\n"
+        other = (
+            ("a.py", "This should check the value type when the list is empty, or return wrong."),
+        )
+        found = adapter.read(body(sections=what_changed(extra=item)), thread_texts=other)
+        self.assertEqual(1, found.unthreaded)
+
     def test_one_thread_carries_one_item(self) -> None:
         twice = "**Review findings:**\n- `a.py`: guard the entry.\n- `a.py`: guard the entry.\n\n"
         one = (("a.py", "Please guard the entry."),)

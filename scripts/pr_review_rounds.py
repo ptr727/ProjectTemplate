@@ -13,6 +13,7 @@ import re
 from collections.abc import Iterator
 
 import pr_review_copilot as adapter
+from pr_review_copilot import first_comment
 from pr_review_payload import FILES_UNREAD, bot_entry, default_branch
 
 # Read from the vocabulary, so a login rename is one edit that the reader and the queries share.
@@ -545,11 +546,6 @@ def collected(
 def thread_author(t: dict) -> str:
     """The login on a thread's opening comment, or `""` where there is none to read."""
     return (first_comment(t).get("author") or {}).get("login") or ""
-
-
-def first_comment(thread: dict) -> dict:
-    """The thread's opening comment, which is the finding itself."""
-    return ((thread.get("comments") or {}).get("nodes") or [{}])[0]
 
 
 def describe(thread: dict) -> str:
