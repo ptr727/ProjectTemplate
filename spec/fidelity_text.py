@@ -61,11 +61,12 @@ class CodeBlock(NamedTuple):
 
 
 class LinkDefinition(NamedTuple):
-    """A reference definition: its label and destination as written, and its zero-based line."""
+    """A reference definition: its label and destination as written, its zero-based line, and the line after its last."""
 
     label: str
     url: str
     line: int
+    end: int
 
 
 def normalize(text):
@@ -151,7 +152,7 @@ def link_definitions(text):
         start, end = t.map
         m = _DESTINATION.search("\n".join(lines[start:end]))
         url = m.group(2) if m.group(1) is None else m.group(1)
-        found.append(LinkDefinition(t.meta["label"], url, start))
+        found.append(LinkDefinition(t.meta["label"], url, start, end))
     return found
 
 

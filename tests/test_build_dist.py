@@ -958,6 +958,14 @@ class IncludeCase(TreeCase):
             "<!-- include: RULES.md > Last -->\n\nLast text.\n\n<!-- /include -->\n",
         )
 
+    def test_a_line_the_parser_ends_a_definition_before_is_kept(self) -> None:
+        (self.tmp / "RULES.md").write_text(
+            "## Last\n\nLast text.\n\n[b]: ./B.md\nKeep the backups.\n", encoding="utf-8"
+        )
+        self.make_skill("foo", self.region("RULES.md > Last"))
+        build_dist.regenerate()
+        self.assertIn("Keep the backups.", self.skill_text())
+
     def test_a_body_with_no_trailing_definitions_keeps_its_last_comment(self) -> None:
         (self.tmp / "RULES.md").write_text(
             "## Last\n\nLast text.\n\n<!-- kept -->\n", encoding="utf-8"

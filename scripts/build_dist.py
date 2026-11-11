@@ -391,21 +391,12 @@ def _trailing_definitions(lines, start, reader):
 
     Only a body running to the end of the file reaches them, and they belong to the whole document rather than to its last section.
     Copied into a skill, each one is a definition nothing there uses.
-    The parser decides which lines open a definition, and a definition runs on to the next blank line or the next one's opening.
+    The parser decides which lines a definition spans, so a line it ends a definition before is content.
     The HTML comments that group them by type belong to the block too.
     The walk goes back from the end and stops at the first line that is none of these, or at `start`.
     """
     text = "\n".join(lines)
-    opening = {d.line for d in reader.link_definitions(text)}
-    owner = {}
-    current = None
-    for index in range(start + 1, len(lines)):
-        if index in opening:
-            current = index
-        elif not lines[index].strip():
-            current = None
-        if current is not None:
-            owner[index] = current
+    owner = {index: d.line for d in reader.link_definitions(text) for index in range(d.line, d.end)}
     cut = len(lines)
     found = False
     index = len(lines) - 1
