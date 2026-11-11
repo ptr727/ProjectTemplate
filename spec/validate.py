@@ -119,7 +119,7 @@ RESERVED_SHORT_NAMES = frozenset(
 )
 # A short name is permanent once a host secret uses it, because changing it renames files on every host.
 # So a change to one is a migration, and only the maintainer's go-ahead edits a line here.
-# A table rather than a comparison against an earlier revision, since a shallow clone has no revision to compare.
+# It is a table rather than a comparison against an earlier revision, since a shallow clone has no revision to compare.
 SHORT_NAME_PINS = {
     "ProjectTemplate": "hub",
     "Utilities": "utilities",

@@ -1985,11 +1985,11 @@ class ShortNameCase(unittest.TestCase):
         errors = self.check(self.alpha(), {"name": "Beta", "shortName": "alpha"})
         self.assertIn("Beta: shortName 'alpha' is already held by Alpha-Repo", errors)
 
-    def test_another_entrys_lowercased_name_is_refused(self) -> None:
+    def test_the_lowercased_name_of_another_entry_is_refused(self) -> None:
         errors = self.check(self.alpha(shortName="beta"), {"name": "Beta", "shortName": "other"})
         self.assertIn("Alpha-Repo: shortName 'beta' is another entry's repository name", errors)
 
-    def test_an_entrys_own_lowercased_name_is_allowed(self) -> None:
+    def test_the_own_lowercased_name_of_an_entry_is_allowed(self) -> None:
         pins = {"Beta": "beta"}
         self.assertEqual(
             validate.short_name_errors([{"name": "Beta", "shortName": "beta"}], pins), []
