@@ -372,12 +372,13 @@
             "workflowModel": "operational",
             "lineEndings": "lf",
             "hasDevelop": true,
-            "publish": [{ "target": "github-release", "mechanism": "none" }],
+            "pullRequestCheck": false,
+            "publish": [],
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "dispatch-only",
+            "releaseTrigger": "none",
             "pythonDirectories": ["scripts"],
-            "driftNotes": ["Private document repository the maintainer edits directly on develop. Its Python is a scripts tree with no root pyproject.toml or uv.lock.", "Anything under an Archive directory is verbatim source material that is never modified, so the prose, spelling, and style gates are scoped to exclude it."]
+            "driftNotes": ["Private document repository the maintainer edits directly on develop. Its maintained Python is the scripts tree, which has no root pyproject.toml or uv.lock.", "Anything under an Archive directory is verbatim source material that is never modified, so the repository's own style and Markdown checks skip it. One archived .py file sits outside pythonDirectories for that reason, so the audit's python-directories drift naming it is expected.", "It carries no workflows today, so pullRequestCheck is false, publish is empty, and releaseTrigger is none. Its standup updates each field when the workflow it describes lands."]
         },
         {
             "name": "DiskSpeedTest",
