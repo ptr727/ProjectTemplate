@@ -494,6 +494,7 @@ FLEET: dict[str, Any] = {
     "repos": [
         {
             "name": "ExampleRepo",
+            "shortName": "examplerepo",
             "url": "https://github.com/owner/ExampleRepo",
             "status": "cataloged",
             "types": ["python"],
@@ -501,18 +502,21 @@ FLEET: dict[str, Any] = {
         },
         {
             "name": "Other-Repo",
+            "shortName": "otherrepo",
             "url": "https://github.com/owner/Other-Repo",
             "status": "cataloged",
             "types": ["python"],
         },
         {
             "name": "Excluded-Repo",
+            "shortName": "excludedrepo",
             "url": "https://github.com/owner/Excluded-Repo",
             "status": "excluded",
             "types": ["python"],
         },
         {
             "name": "OldRepo",
+            "shortName": "oldrepo",
             "url": "https://github.com/owner/OldRepo",
             "status": "archived",
             "types": ["python"],
@@ -622,9 +626,37 @@ class ScaffoldCase(unittest.TestCase):
             (directory / "notes.txt").write_text("not a secret file\n", encoding="utf-8")
             created, _, strays, unclaimed, _ = self.run_scaffold(directory)
             self.assertEqual(strays, [])
-            self.assertEqual(unclaimed, ["github_oldrepo_codecov_token"])
+            self.assertEqual(unclaimed, ["github_oldrepo_codecov_token", "notes.txt"])
             self.assertTrue((directory / "github_oldrepo_codecov_token").exists())
             self.assertTrue(created)
+
+    def test_a_consumer_file_opening_with_a_short_name_is_owned_not_unclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            owned = ["examplerepo_service_key", "otherrepo_github_api.curlrc", "oldrepo_app_id"]
+            for name in owned:
+                (directory / name).write_text("", encoding="utf-8")
+            created, present, strays, unclaimed, _ = self.run_scaffold(directory)
+            self.assertEqual((strays, unclaimed), ([], []))
+            self.assertFalse(set(owned) & set(present))
+            self.assertFalse(set(owned) & set(created))
+
+    def test_a_file_whose_first_field_names_no_short_name_is_unclaimed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            directory.chmod(0o700)
+            names = [
+                "fleet_service_key",
+                "unknownrepo_service_key",
+                "ExampleRepo_service_key",
+                "examplerepo",
+            ]
+            for name in names:
+                (directory / name).write_text("", encoding="utf-8")
+            _, _, strays, unclaimed, _ = self.run_scaffold(directory)
+            self.assertEqual(strays, [])
+            self.assertEqual(unclaimed, sorted(names))
 
     def test_a_dry_run_creates_nothing_even_the_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

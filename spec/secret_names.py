@@ -18,7 +18,7 @@ STORES = ("actions", "dependabot")
 SECRET_SCOPES = ("fleet", "repository")
 
 
-# Every host secret file name starts with this, and scaffold reads its strays from the files that do.
+# Every provisioned host secret file name starts with this, and scaffold reads its strays from the files that do.
 FILE_PREFIX = "github_"
 
 
