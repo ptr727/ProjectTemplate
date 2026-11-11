@@ -25,8 +25,11 @@ HUB_MAIN_SHA_URL = f"https://api.github.com/repos/{HUB_REPO}/commits/main"
 HUB_GIT_URL = f"https://github.com/{HUB_REPO}"
 PROVENANCE_VAR = "PROSE_GATE_PROVENANCE"
 PROSE_GATE_PATH = ".github/actions/prose-gate/prose_lint.py"
-# The files a script reads beside itself, fetched into the same directory before it runs.
-COMPANIONS = {PROSE_GATE_PATH: (".github/actions/prose-gate/prose-gate.json",)}
+# The files a script reads or imports from the hub tree, fetched before it runs.
+COMPANIONS = {
+    PROSE_GATE_PATH: (".github/actions/prose-gate/prose-gate.json",),
+    "scripts/docker_lint.py": ("scripts/local_review.py", "spec/git_env.py"),
+}
 PROBE_TIMEOUT = 30
 LOOKUP_TIMEOUT = 5
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -207,9 +210,12 @@ def main(argv: list[str]) -> int:
             print(f"hub_fetch_run: could not fetch {exc.url}: {exc.cause}", file=sys.stderr)
             print("hub_fetch_run: the gate did not run.", file=sys.stderr)
             return 1
+        # A file keeps its hub-relative path, so a sys.path entry derived from it stays in here.
         for path, content in fetched.items():
-            (Path(scratch) / Path(path).name).write_bytes(content)
-        script = Path(scratch) / Path(hub_path).name
+            target = Path(scratch) / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        script = Path(scratch) / hub_path
         cmd = [uv, "run", "--no-project", "--script", str(script), *script_args]
         return subprocess.run(cmd, env=env, check=False).returncode
 
