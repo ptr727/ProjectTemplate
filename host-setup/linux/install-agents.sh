@@ -5,8 +5,15 @@
 # For the same reason it drives each tool's updater rather than replacing it.
 # An upgrade touches only a tool already present, so a host where nobody installed codex never gets codex from a nightly run.
 #
-# A tool installed through a package manager (npm, Homebrew, mise, Nix, apt) is reported and left to that manager.
-# This is because running the tool's own updater over it would fight the manager for the same files.
+# A tool installed through a package manager is never given its own updater, which would fight the manager for the same files.
+# An upgrade runs that manager's own upgrade for that one package instead: npm, bun, Homebrew, and mise.
+# Nix is declarative and apt is upgraded by upgrade-host.sh, so each is reported and nothing is run.
+# Nothing here elevates, so an npm prefix this user cannot write to is reported with its command and left.
+# The package name is a per-tool record in this file (npm_package), because a manager's files do not always carry it.
+# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
+# The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
+# The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 set -Eeuo pipefail
@@ -155,8 +162,11 @@ With no tool named, --report and --upgrade select every managed tool, while --in
 none, so an install always names what it installs, or says --all.
 
 A tool reads as "self" when no package manager owns it, so this script runs the tool's own
-updater, and as the name of a package manager when one owns it, which --upgrade leaves to that
-manager. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
+updater, and as the name of a package manager when one owns it. --upgrade then runs that
+manager's upgrade for that one package: npm or bun install the latest tag, Homebrew upgrades the
+formula or cask, and mise upgrades the tool. apt is upgraded by upgrade-host.sh, and Nix is
+declarative, so neither is run. An npm directory this user cannot write is reported with its
+command rather than run, and nothing here ever uses sudo. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
 one outdated, and a herdr server still running the previous binary is left running and reported
 as needing a restart, since stopping it would end every pane inside it.
 
@@ -239,15 +249,56 @@ tool_version() {
     return 0
 }
 
+# The npm registry name of a tool, which npm and bun both install from, or nothing where none is recorded.
+# These are the names each tool's own documentation gives, and herdr and cswap are not published there.
+npm_package() {
+    case "$1" in
+    claude) printf '@anthropic-ai/claude-code' ;;
+    codex) printf '@openai/codex' ;;
+    opencode) printf 'opencode-ai' ;;
+    esac
+}
+
+# The global root of the npm on PATH, real-pathed, and empty where npm cannot say.
+# Every caller runs this inside $(...), so nothing it set would outlive the call, and it caches nothing.
+npm_root() {
+    local root=""
+    if command -v npm >/dev/null; then
+        root=$(timeout 30 npm root -g 2>/dev/null </dev/null) || root=""
+        [[ -z $root ]] || root=$(readlink -f -- "$root" 2>/dev/null) || root=""
+    fi
+    printf '%s' "$root"
+}
+
 # What owns the installed copy, read from where the command resolves to rather than from how it was meant to be installed.
 tool_manager() {
     local path="$1" real
     real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
     case "$real" in
     */.bun/*) printf 'bun' ;;
-    */node_modules/*) printf 'npm' ;;
-    */linuxbrew/* | /opt/homebrew/* | */Cellar/* | */Caskroom/*) printf 'brew' ;;
+    *)
+        # The npm on PATH is asked first, since an ordinary npm global can sit under a node that mise or Homebrew manages.
+        # Upgrading that node would leave the tool behind, so what npm holds is npm's whatever else the path looks like.
+        local root
+        root=$(npm_root)
+        if [[ -n $root && $real == "$root"/* ]]; then
+            printf 'npm'
+            return 0
+        fi
+        tool_manager_by_path "$real"
+        ;;
+    esac
+}
+
+# The manager a path suggests once npm has declined it.
+tool_manager_by_path() {
+    local real="$1"
+    case "$real" in
+    # A mise or Homebrew directory can hold a node_modules of its own, so each is read before the generic npm shape.
     */mise/installs/*) printf 'mise' ;;
+    */Cellar/* | */Caskroom/*) printf 'brew' ;;
+    */node_modules/*) printf 'npm' ;;
+    */linuxbrew/* | /opt/homebrew/*) printf 'brew' ;;
     /nix/store/*) printf 'nix' ;;
     *)
         if [[ $real == /usr/* && $real != /usr/local/* ]] && command -v dpkg >/dev/null && dpkg -S "$real" >/dev/null 2>&1; then
@@ -255,6 +306,119 @@ tool_manager() {
         else
             printf 'self'
         fi
+        ;;
+    esac
+}
+
+# The key mise lists the tool under, such as npm:opencode-ai, for the entry whose install path holds the given real path.
+# Prints nothing where mise, jq, or a matching entry is missing, so nothing is upgraded on a guess.
+mise_key() {
+    local real="$1" out key install
+    command -v mise >/dev/null && command -v jq >/dev/null || return 0
+    out=$(timeout 30 mise ls --json 2>/dev/null </dev/null) || return 0
+    while IFS=$'\t' read -r key install; do
+        [[ -n $install ]] || continue
+        install=$(readlink -f -- "$install" 2>/dev/null) || continue
+        if [[ $real == "$install"/* ]]; then
+            printf '%s' "$key"
+            return 0
+        fi
+    done < <(jq -r 'to_entries[] | .key as $k | .value[]? | select(.install_path != null) | [$k, .install_path] | @tsv' <<<"$out" 2>/dev/null)
+    return 0
+}
+
+# What an upgrade does for a tool a package manager owns, as PLAN_CMD (the command to run) or PLAN_WHY (why none runs).
+# Never both.
+# The reason names the command where one exists, so the person can run it where this script may not.
+PLAN_CMD=()
+PLAN_WHY=""
+
+manager_plan() {
+    local tool="$1" path="$2" manager="$3" real pkg dir name
+    PLAN_CMD=()
+    PLAN_WHY=""
+    real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
+    case "$manager" in
+    apt)
+        PLAN_WHY="apt owns it and upgrade-host.sh upgrades it"
+        ;;
+    nix)
+        PLAN_WHY="Nix is declarative, so update it where it is declared, for example with nix profile upgrade or in your flake or home configuration"
+        ;;
+    npm | bun)
+        pkg=$(npm_package "$tool")
+        if [[ -z $pkg ]]; then
+            PLAN_WHY="no $manager package name is recorded for $tool, so upgrade it with $manager by hand"
+            return 0
+        fi
+        if ! command -v "$manager" >/dev/null; then
+            PLAN_WHY="$manager is not on PATH, so run: $manager install -g $pkg@latest"
+            return 0
+        fi
+        # The recorded package must be the one that owns the file, so a fork providing the same command is never replaced by it.
+        if [[ $manager == "bun" ]]; then
+            dir=$(readlink -f -- "${BUN_INSTALL:-$HOME/.bun}/install/global/node_modules" 2>/dev/null) || dir=""
+            if [[ -z $dir || $real != "$dir/$pkg"/* ]]; then
+                PLAN_WHY="its files at $(hide_home "$real") are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
+                return 0
+            fi
+        fi
+        if [[ $manager == "npm" ]]; then
+            # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
+            dir=$(npm_root)
+            if [[ -z $dir || $real != "$dir"/* ]]; then
+                PLAN_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
+                return 0
+            fi
+            if [[ $real != "$dir/$pkg"/* ]]; then
+                PLAN_WHY="its files at $(hide_home "$real") are not under the npm package $pkg, so that package does not own it, upgrade it where it was installed"
+                return 0
+            fi
+            if [[ ! -w $dir ]]; then
+                PLAN_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: npm install -g $pkg@latest"
+                return 0
+            fi
+        fi
+        # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
+        PLAN_CMD=("$manager" install -g "$pkg@latest")
+        ;;
+    brew)
+        if [[ $real == */Caskroom/* ]]; then
+            name="${real#*/Caskroom/}"
+            name="${name%%/*}"
+            PLAN_CMD=(brew upgrade --cask "$name")
+        elif [[ $real == */Cellar/* ]]; then
+            name="${real#*/Cellar/}"
+            name="${name%%/*}"
+            if [[ $name == "node" || $name == node@* ]]; then
+                PLAN_WHY="it sits inside Homebrew's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
+                return 0
+            fi
+            PLAN_CMD=(brew upgrade "$name")
+        else
+            PLAN_WHY="Homebrew's name for $tool could not be read from $(hide_home "$real"), so run brew upgrade with it by hand"
+            return 0
+        fi
+        command -v brew >/dev/null || {
+            PLAN_WHY="brew is not on PATH, so run: ${PLAN_CMD[*]}"
+            PLAN_CMD=()
+        }
+        ;;
+    mise)
+        # The tool is named by mise's own listing, matched on install path, rather than read from the directory name.
+        name=$(mise_key "$real")
+        if [[ -z $name ]]; then
+            PLAN_WHY="mise and jq must both be on PATH and mise's listing must hold an entry whose install path holds $(hide_home "$real"), and none does, so upgrade it with mise by hand"
+            return 0
+        fi
+        # A Node runtime is never upgraded for an agent in it, which would leave the agent behind in the old Node.
+        case "$name" in
+        node | core:node | nodejs)
+            PLAN_WHY="it sits inside mise's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
+            return 0
+            ;;
+        esac
+        PLAN_CMD=(mise upgrade "$name")
         ;;
     esac
 }
@@ -385,7 +549,12 @@ report() {
             manager=$(tool_manager "$path")
             status="present"
             if [[ $manager != "self" ]]; then
-                note "$tool" "installed through $manager, which upgrades it, so --upgrade leaves it alone"
+                manager_plan "$tool" "$path" "$manager"
+                if ((${#PLAN_CMD[@]} > 0)); then
+                    note "$tool" "installed through $manager, --upgrade runs: ${PLAN_CMD[*]}"
+                else
+                    note "$tool" "installed through $manager, --upgrade does not run it: $PLAN_WHY"
+                fi
             elif [[ $tool == "herdr" ]]; then
                 herdr_note
             fi
@@ -436,7 +605,7 @@ upgrade_tool() {
     manager=$(tool_manager "$path")
     installed=$(tool_version "$path")
     if [[ $manager != "self" ]]; then
-        log "$tool: installed through $manager, leaving it to $manager"
+        manager_upgrade "$tool" "$path" "$manager" "$installed"
         return 0
     fi
 
@@ -472,6 +641,27 @@ upgrade_tool() {
             esac
         fi
     fi
+}
+
+# Upgrades a tool through the package manager that owns it, or says why nothing runs.
+# A failing manager is recorded and the other tools still run, as a failing updater is.
+manager_upgrade() {
+    local tool="$1" path="$2" manager="$3" installed="$4" now
+    manager_plan "$tool" "$path" "$manager"
+    if ((${#PLAN_CMD[@]} == 0)); then
+        log "$tool: installed through $manager, not run here: $PLAN_WHY"
+        return 0
+    fi
+    log "$tool: at ${installed:-an unreadable version}, installed through $manager, running: ${PLAN_CMD[*]}"
+    if ! run "${PLAN_CMD[@]}"; then
+        warn "$tool: $manager failed to upgrade it"
+        FAILED+=("$tool")
+        return 0
+    fi
+    path=$(tool_path "$tool")
+    now=""
+    [[ -z $path ]] || now=$(tool_version "$path")
+    [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
 }
 
 install_tool() {
