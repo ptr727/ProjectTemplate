@@ -10,7 +10,8 @@ Keep Codex's own sandbox and execution policies enabled. The host-wide rules rea
 blocks the Claude kit renders. A Codex `AGENTS.override.md` that is not blank takes precedence over
 that file, so the rules do not reach Codex while one exists. The status then reports them as
 SHADOWED and not current. The carried repository rules and those host-wide rules remain the
-only behavioral layer in a fleet checkout until a hook exists. They include `GOVERNANCE.md`
+fleet's only behavioral layer in a fleet checkout until a hook exists. Where an override shadows
+the host-wide rules, the override is Codex's instruction layer in their place. They include `GOVERNANCE.md`
 "Repository Boundaries and Write Safety" and the rest of the fleet's prose. There is no mechanical
 backstop for Codex today. That means a mistake that the Claude Code hook would deny goes through
 unblocked in a Codex session.
