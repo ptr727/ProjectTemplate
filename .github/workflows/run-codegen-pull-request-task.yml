@@ -45,7 +45,7 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       # The SDK step follows the checkout, since it reads the caller's global.json.
-      # The caller's global.json selects the SDK line, with 10.x for a caller carrying none yet.
+      # The caller's global.json selects the SDK line, or the dotnet-sdk action's fallback line where it carries none yet.
       - name: Setup .NET SDK step
         uses: $/.github/actions/dotnet-sdk
 

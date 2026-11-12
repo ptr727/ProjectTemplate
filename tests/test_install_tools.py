@@ -26,6 +26,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from sdk_baseline import baseline_line
+
 ROOT = Path(__file__).resolve().parent.parent
 LINUX_INSTALLER = ROOT / "host-setup" / "linux" / "install-tools.sh"
 WINDOWS_INSTALLER = ROOT / "host-setup" / "windows" / "install-tools.ps1"
@@ -350,16 +352,6 @@ if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
                 "PAST REMOVAL",
             ],
         )
-
-
-BASELINE = ROOT / "catalog" / "snippets" / "configs" / "global.json"
-
-
-def baseline_line() -> tuple[int, int]:
-    """The major and minor of the SDK line the fleet's global.json baseline selects."""
-    version = json.loads(BASELINE.read_text(encoding="utf-8"))["sdk"]["version"]
-    major, minor = version.split(".")[:2]
-    return int(major), int(minor)
 
 
 class TestInstallersNameTheBaselineLine(unittest.TestCase):

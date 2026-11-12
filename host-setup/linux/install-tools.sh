@@ -36,7 +36,7 @@ MANAGED_TOOLS=("${TOOLS[@]}")
 readonly PYTHON_PACKAGES=(build-essential ca-certificates curl python3 python3-dev python3-venv python3-pip)
 readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-setuptools python3-wheel)
 
-# The SDK line every fleet .NET repository's global.json selects, which the dotnet default set always carries.
+# The SDK line every fleet .NET repository's global.json selects, which the dotnet default set carries wherever the feed does.
 # It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
 # The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
 readonly DOTNET_FLEET_LINE="10.0"

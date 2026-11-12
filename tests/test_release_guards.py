@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 from host_capability import bash_or_skip
 from runner_commands import forged_lines
+from sdk_baseline import baseline_line
 from workflow_steps import step_script, step_script_text, yaml_step, yaml_value
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
@@ -2348,12 +2349,6 @@ gh() {
                     )
 
 
-def baseline_major() -> int:
-    """The SDK major the fleet's global.json baseline selects."""
-    baseline = REPO / "catalog/snippets/configs/global.json"
-    return int(json.loads(baseline.read_text(encoding="utf-8"))["sdk"]["version"].split(".")[0])
-
-
 class DotnetSdkLineCase(unittest.TestCase):
     """The hub's .NET SDK steps install the line the caller's global.json selects, else 10.x."""
 
@@ -2390,13 +2385,13 @@ class DotnetSdkLineCase(unittest.TestCase):
 
     def test_a_caller_without_an_sdk_version_gets_10x(self) -> None:
         runner_only = json.dumps({"test": {"runner": "Microsoft.Testing.Platform"}})
-        fallback = f"dotnet-version={baseline_major()}.x"
+        fallback = f"dotnet-version={baseline_line()[0]}.x"
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
 
     def test_every_10x_fallback_is_the_baseline_major(self) -> None:
         """A TFM move fails here until each hub-authored fallback names the new major."""
-        major = baseline_major()
+        major = baseline_line()[0]
         for path in (
             "catalog/snippets/workflows/publish-release.yml",
             "docs/reusable-workflows.md",
@@ -2411,17 +2406,15 @@ class DotnetSdkLineCase(unittest.TestCase):
         The two release defaults carry no SDK step of their own. The release task runs the shared
         action ahead of each, under the condition that selects the default.
         """
-        for workflow in (
-            "validate-task.yml",
-            "get-version-task.yml",
-            "run-codegen-pull-request-task.yml",
-            "build-release-task.yml",
-        ):
-            text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
-            self.assertNotIn("actions/setup-dotnet@", text, workflow)
-        for name in ("nuget-build-default", "dotnet-publish-default"):
-            text = (REPO / ".github/actions" / name / "action.yml").read_text(encoding="utf-8")
-            self.assertNotIn("actions/setup-dotnet@", text, name)
+        hub_files = [
+            *(REPO / ".github/workflows").glob("*.yml"),
+            *(REPO / ".github/actions").glob("*/action.yml"),
+        ]
+        self.assertIn(self.ACTION, hub_files)
+        for path in hub_files:
+            if path != self.ACTION:
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("actions/setup-dotnet@", text, path.relative_to(REPO))
         release = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         for job, default in (
             ("dotnet-publish", "Run hub dotnet-publish default step"),

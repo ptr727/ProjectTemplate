@@ -252,7 +252,7 @@ jobs:
 
       # Language lint by tree detection: a caller carries a language marker file or it does not.
       # Python is the one exception, gated in the directories the python-directories input declares.
-      # The caller's global.json selects the SDK line, with 10.x for a caller carrying none yet.
+      # The caller's global.json selects the SDK line, or the dotnet-sdk action's fallback line where it carries none yet.
       - name: Setup .NET SDK step
         if: hashFiles('**/*.csproj') != ''
         uses: $/.github/actions/dotnet-sdk
@@ -623,7 +623,7 @@ jobs:
             exit 1
           fi
 
-      # The caller's global.json selects the SDK line, with 10.x for a caller carrying none yet.
+      # The caller's global.json selects the SDK line, or the dotnet-sdk action's fallback line where it carries none yet.
       - name: Setup .NET SDK step
         if: hashFiles('**/*Tests*.csproj') != ''
         uses: $/.github/actions/dotnet-sdk
