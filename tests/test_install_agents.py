@@ -65,6 +65,11 @@ exit 0
 """
 
 
+RELOCATING_FAILING_STUB = RELOCATING_STUB.replace(
+    "    ;;\nesac\nexit 0\n", "    exit 1\n    ;;\nesac\nexit 0\n"
+)
+
+
 @unittest.skipUnless(sys.platform == "linux", "runs the Linux updater")
 @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "the updater refuses root by design")
 class TestInstallAgents(unittest.TestCase):
@@ -145,6 +150,15 @@ class TestInstallAgents(unittest.TestCase):
         result = self.run_script("--upgrade", "--yes", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
+
+    def test_a_failed_upgrade_that_moved_the_version_is_still_listed_as_changed(self) -> None:
+        stub = self.bin / "claude"
+        stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("claude: its updater failed", result.stderr)
+        self.assertIn("Changed:\n  claude 2.1.0 -> 2.2.0", result.stdout)
 
     def codex_in_npm(self) -> Path:
         node_modules = self.dir / "lib" / "node_modules"
@@ -1180,6 +1194,31 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
 
+    def test_a_failed_upgrade_that_moved_the_version_is_still_listed_as_changed(self) -> None:
+        stub = self.bin / "claude"
+        stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=self.dir / "front")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("claude: its updater failed", result.stderr)
+        self.assertIn("Changed:\n  claude 2.1.0 -> 2.2.0", result.stdout)
+
+    def test_cswap_is_skipped_while_a_running_cswap_holds_its_launcher(self) -> None:
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("needs bash to stand in for a running cswap")
+        launcher = self.bin / "cswap"
+        shutil.copy(os.path.realpath(bash), launcher)
+        launcher.chmod(0o755)
+        self.stub("uv", "uv 0.5.0")
+        running = subprocess.Popen([str(launcher), "-c", "sleep 120; :"])
+        self.addCleanup(running.wait, 10)
+        self.addCleanup(running.kill)
+        result = self.run_script("-Upgrade", "-Yes", "cswap")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"a running cswap (process {running.pid}) holds its launcher", result.stdout)
+        self.assertNotIn("uv tool upgrade claude-swap", self.recorded())
+
     def test_restart_pending_is_null_when_unreadable(self) -> None:
         self.stub("herdr", "herdr 0.9.4")
         for unreadable in (
@@ -1226,7 +1265,7 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
             "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
             f"'{script}', [ref]$null, [ref]$null)\n"
             "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
-            " if ($f.Name -in 'Resolve-FinalPath', 'Test-PathUnder', 'Test-ProtectedPath', 'Hide-Home') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
+            " if ($f.Name -in 'Resolve-FinalPath', 'Test-PathUnder', 'Test-ProtectedPath', 'Hide-Home', 'Get-CswapLauncherHolder') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
             + body
         )
         return subprocess.run(
@@ -1246,6 +1285,21 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
         inside, sibling = result.stdout.split("\n")[:2]
         self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
         self.assertEqual(sibling, "sibling-kept=True")
+
+    def test_a_cswap_launcher_holder_is_either_launcher_in_any_case_and_nothing_else(self) -> None:
+        body = (
+            f"$dir = '{self.dir}'\n"
+            "function Get-Process {\n"
+            "  [pscustomobject]@{ Id = 41; Path = (Join-Path $dir 'cswap.exe') }\n"
+            "  [pscustomobject]@{ Id = 42; Path = (Join-Path $dir.ToUpperInvariant() 'CLAUDE-SWAP.EXE') }\n"
+            "  [pscustomobject]@{ Id = 43; Path = (Join-Path $dir 'cswap-other.exe') }\n"
+            "  [pscustomobject]@{ Id = 44; Path = $null }\n"
+            "}\n"
+            "(Get-CswapLauncherHolder (Join-Path $dir 'cswap.exe')) -join ','\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "41,42", result.stderr)
 
     def test_install_tools_hides_home_the_same_way_and_the_two_copies_are_identical(self) -> None:
         tools = ROOT / "host-setup" / "windows" / "install-tools.ps1"

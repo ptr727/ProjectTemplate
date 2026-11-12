@@ -743,6 +743,27 @@ function Show-Report {
 
 # --- Apply ---
 
+function Add-VersionChange {
+    param([string]$ToolName, [string]$Installed)
+    $path = Get-ToolPath $ToolName
+    $now = if ($path) { Get-ToolVersion $path } else { '' }
+    if ($now -eq $Installed) { return }
+    $before = if ($Installed) { $Installed } else { '-' }
+    $after = if ($now) { $now } else { '-' }
+    $script:CHANGED.Add("$ToolName $before -> $after")
+}
+
+function Get-CswapLauncherHolder {
+    param([string]$Path)
+    $directory = Split-Path -Parent $Path
+    $extension = [IO.Path]::GetExtension($Path)
+    $launchers = @('cswap', 'claude-swap') | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $directory "$_$extension")) }
+    return @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $running = $_.Path
+            $running -and ($launchers | Where-Object { [string]::Equals($_, [IO.Path]::GetFullPath($running), [StringComparison]::OrdinalIgnoreCase) })
+        } | ForEach-Object { $_.Id })
+}
+
 function Invoke-ToolUpgrade {
     param([string]$ToolName)
     $tool = Get-Tool $ToolName
@@ -767,20 +788,22 @@ function Invoke-ToolUpgrade {
         return
     }
 
+    if ($ToolName -eq 'cswap' -and -not $script:DRY_RUN) {
+        $holders = @(Get-CswapLauncherHolder $path)
+        if ($holders.Count -gt 0) {
+            log "cswap: at $shownVersion, and a running cswap (process $($holders -join ', ')) holds its launcher, which uv cannot replace while it runs, close it and run this again to update it"
+            return
+        }
+    }
+
     log "${ToolName}: at $shownVersion, running its updater"
     if ((& $tool.Upgrade) -ne 0) {
         warn "${ToolName}: its updater failed"
         $script:FAILED.Add($ToolName)
+        Add-VersionChange -ToolName $ToolName -Installed $installed
         return
     }
-    # Resolved again, since an updater may put the new binary somewhere that now comes first on PATH.
-    $path = Get-ToolPath $ToolName
-    $now = if ($path) { Get-ToolVersion $path } else { '' }
-    if ($now -ne $installed) {
-        $before = if ($installed) { $installed } else { '-' }
-        $after = if ($now) { $now } else { '-' }
-        $script:CHANGED.Add("$ToolName $before -> $after")
-    }
+    Add-VersionChange -ToolName $ToolName -Installed $installed
 
     if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
@@ -813,15 +836,10 @@ function Invoke-ManagerUpgrade {
     if ((Invoke-Step -Command $plan.Command -Arguments $plan.Arguments) -ne 0) {
         warn "${ToolName}: $Manager failed to upgrade it"
         $script:FAILED.Add($ToolName)
+        Add-VersionChange -ToolName $ToolName -Installed $Installed
         return
     }
-    $newPath = Get-ToolPath $ToolName
-    $now = if ($newPath) { Get-ToolVersion $newPath } else { '' }
-    if ($now -ne $Installed) {
-        $before = if ($Installed) { $Installed } else { '-' }
-        $after = if ($now) { $now } else { '-' }
-        $script:CHANGED.Add("$ToolName $before -> $after")
-    }
+    Add-VersionChange -ToolName $ToolName -Installed $Installed
     if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
 

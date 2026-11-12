@@ -1729,7 +1729,12 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self,
     ) -> None:
         expected = stand_up_steps()
-        for fail_step in expected[: expected.index("install-skills.sh")]:
+        stopping = [
+            step
+            for step in expected[: expected.index("install-skills.sh")]
+            if step != "install-agents.sh --upgrade"
+        ]
+        for fail_step in stopping:
             with self.subTest(fail_step=fail_step):
                 shutil.rmtree(self.data)
                 self.data.mkdir()
@@ -1838,6 +1843,18 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         result = self.run_main("install-safety-kit.sh", action="--agent-setup")
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertNotIn("install-global-rules.sh", self.agents_steps())
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_setup_whose_tools_step_fails_runs_every_later_step_and_still_fails(
+        self,
+    ) -> None:
+        result = self.run_main("install-agents.sh --upgrade", action="--agent-setup")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.agents_steps(), list(AGENT_SETUP_STEPS), result.stderr)
+        self.assertIn("Not current: agent tools (an upgrade failed, see above)", result.stdout)
+        self.assertIn("The agent tools step failed", result.stderr)
 
     @unittest.skipIf(
         hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
@@ -2255,6 +2272,18 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("install-global-rules.ps1", self.steps())
+
+    def test_an_agent_setup_whose_tools_step_fails_runs_every_later_step_and_still_fails(
+        self,
+    ) -> None:
+        result = self.run_handoff(
+            "$script:FROM_TREE = $env:FIXTURE_TREE\nInvoke-AgentSetup",
+            fail_step="install-agents.ps1 -Upgrade",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_AGENT_SETUP_STEPS), result.stdout)
+        self.assertIn("Not current: agent tools (an upgrade failed, see above)", result.stdout)
+        self.assertIn("The agent tools step failed", result.stderr)
 
     def resolve_mode(self, given: str, from_tree: str) -> subprocess.CompletedProcess[str]:
         """Runs the loader's own Resolve-Mode with `given` the only action set and `from_tree` the -FromTree value."""

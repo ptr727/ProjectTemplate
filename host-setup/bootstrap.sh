@@ -385,12 +385,19 @@ install_skills() {
 # The whole action is therefore safe on a host with any of them.
 # The commit is handed to the kit because a fetched tree has no .git to answer for it.
 agent_setup() {
+    local tools_failed=false
     if agents_user; then
-        run_tool install-agents.sh --upgrade
+        if ! run_tool install-agents.sh --upgrade; then
+            tools_failed=true
+        fi
     fi
     install_skills
     AGENT_SAFETY_SOURCE_COMMIT="$RESOLVED" run_tool install-safety-kit.sh
     run_tool install-global-rules.sh
+    if [[ $tools_failed == true ]]; then
+        info "Not current: agent tools (an upgrade failed, see above)"
+        die "The agent tools step failed, and the steps after it still ran"
+    fi
 }
 
 # The read-only counterpart of agent_setup, one report per step in the same order.
