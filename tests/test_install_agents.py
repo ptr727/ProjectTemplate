@@ -695,7 +695,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
             "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
             f"'{SCRIPT_PS}', [ref]$null, [ref]$null)\n"
             "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
-            " if ($f.Name -in 'Resolve-DirectoryTarget', 'Test-ProtectedPath') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
+            " if ($f.Name -in 'Resolve-FinalPath', 'Test-ProtectedPath') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
             + body
         )
         return subprocess.run(
@@ -717,7 +717,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         (protected / "nodejs").symlink_to(appdata, target_is_directory=True)
         body = (
             f"$link = '{protected / 'nodejs'}'\n"
-            "$real = Resolve-DirectoryTarget -Directory $link\n"
+            "$real = Resolve-FinalPath -Path $link\n"
             f"'resolved=' + ($real -eq '{appdata}')\n"
             f"'link-protected=' + (Test-ProtectedPath -Directory $link -Roots @('{protected}'))\n"
             f"'target-protected=' + (Test-ProtectedPath -Directory $real -Roots @('{protected}'))\n"

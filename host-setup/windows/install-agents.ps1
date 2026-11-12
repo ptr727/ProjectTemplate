@@ -271,20 +271,9 @@ function Get-NpmPackage {
     return $null
 }
 
-# A directory followed through any link or junction to the directory it really is.
-# The nvm-windows install points C:\Program Files\nodejs into a user-writable directory, so the link target decides, not the link.
-function Resolve-DirectoryTarget {
-    param([string]$Directory)
-    $item = Get-Item -LiteralPath $Directory -ErrorAction SilentlyContinue
-    if ($item -and $item.LinkTarget) {
-        $target = $item.ResolveLinkTarget($true)
-        if ($target) { return $target.FullName }
-    }
-    return $Directory
-}
-
 # A path with every link along it followed to its final target, or the path as given where it cannot be read.
 # Each component is resolved, since a link can sit above the last one, as scoop's current junction does.
+# It is the one link resolver here, so ownership, writability, and the manager read all see the same real path.
 function Resolve-FinalPath {
     param([string]$Path, [int]$Depth = 0)
     # A bound on the walk, so a link cycle ends in the path as given rather than in a stack overflow.
@@ -311,9 +300,10 @@ function Test-ProtectedPath {
 
 # Whether this user can write a directory, without elevating to find out.
 # Windows keeps a per-user directory writable, and one under Program Files or ProgramData needs an elevated shell.
+# The nvm-windows install points C:\Program Files\nodejs into a user-writable directory, so the link target decides, not the link.
 function Test-DirectoryWritable {
     param([string]$Directory)
-    $real = Resolve-DirectoryTarget -Directory $Directory
+    $real = Resolve-FinalPath -Path $Directory
     if ($IsWindows) {
         return -not (Test-ProtectedPath -Directory $real -Roots @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData))
     }
@@ -429,7 +419,10 @@ function Get-ToolManager {
     # Separators are unified so one set of patterns reads a Windows path and the stub path of a test on another host alike.
     $p = $Path -replace '/', '\'
     $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
-    if ($item -and $item.LinkTarget) { $p = "$p`n" + (($item.LinkTarget -replace '/', '\')) }
+    if ($item) {
+        $final = Resolve-FinalPath -Path $Path
+        if ($final -ne $Path) { $p = "$p`n" + ($final -replace '/', '\') }
+    }
     foreach ($candidate in ($p -split "`n")) {
         # The npm on PATH is asked first where it installs, since its shims sit directly in the prefix, as in Program Files\nodejs.
         # It comes before every path shape, because a Node that scoop, choco, or winget installed puts npm's prefix under that manager's tree.
