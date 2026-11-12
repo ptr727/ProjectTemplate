@@ -294,8 +294,11 @@ function Resolve-FinalPath {
 # Whether a directory sits under one of the roots a normal user cannot write.
 function Test-ProtectedPath {
     param([string]$Directory, [string[]]$Roots)
+    $where = ($Directory -replace '/', '\').TrimEnd('\')
     foreach ($root in ($Roots | Where-Object { $_ })) {
-        if (($Directory -replace '/', '\').StartsWith(($root -replace '/', '\'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        # The match ends at a path component, so a sibling such as Program FilesPortable is not read as under Program Files.
+        $base = ($root -replace '/', '\').TrimEnd('\')
+        if ($where -ieq $base -or $where.StartsWith("$base\", [StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
     return $false
 }

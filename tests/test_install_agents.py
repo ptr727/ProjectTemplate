@@ -883,6 +883,17 @@ class TestInstallAgentsWindows(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
         )  # fmt: skip
 
+    def test_a_protected_root_matches_only_at_a_path_component(self) -> None:
+        root = self.dir / "Program Files"
+        body = (
+            f"'root=' + (Test-ProtectedPath -Directory '{root}' -Roots @('{root}'))\n"
+            f"'child=' + (Test-ProtectedPath -Directory '{root / 'nodejs'}' -Roots @('{root}'))\n"
+            f"'sibling=' + (Test-ProtectedPath -Directory '{self.dir / 'Program FilesPortable' / 'npm'}' -Roots @('{root}'))\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["root=True", "child=True", "sibling=False"])
+
     def test_a_link_into_a_user_writable_directory_is_resolved_before_the_protected_rule(
         self,
     ) -> None:
