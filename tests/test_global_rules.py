@@ -44,6 +44,8 @@ class Case(unittest.TestCase):
             # No codex or opencode CLI is on this PATH, so presence is decided by the directories alone.
             "PATH": str(self.empty_bin),
             "HOME": str(self.root / "home"),
+            # Path.home() reads USERPROFILE on Windows rather than HOME.
+            "USERPROFILE": str(self.root / "home"),
         }
 
     def run_script(self, *args: str) -> subprocess.CompletedProcess[str]:
@@ -82,7 +84,8 @@ class TestPresence(Case):
         self.assertFalse(self.opencode.exists())
 
     def test_a_cli_on_path_makes_an_agent_present_and_creates_its_directory(self) -> None:
-        cli = self.empty_bin / "opencode"
+        # Windows finds a command on PATH only through a PATHEXT extension.
+        cli = self.empty_bin / ("opencode.cmd" if os.name == "nt" else "opencode")
         cli.write_text("#!/bin/sh\n", encoding="utf-8")
         cli.chmod(0o755)
         result = self.run_script("--agent", "opencode")
