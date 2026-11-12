@@ -77,7 +77,8 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   declares every dependency version once as a `PackageVersion` item. As a result, a `.csproj`'s
   `PackageReference` items are versionless. One file to review on a bump, one Dependabot surface,
   no version skew between projects.
-- **`global.json`** is required in every .NET repo. It selects the SDK line with an `sdk` block.
+- **`global.json`** is required in every .NET repo, carried from the hub's
+  `catalog/snippets/configs/global.json`. It selects the SDK line with an `sdk` block.
   The example also carries the `test` runner key, which only a repo with an MTP-based test project
   adds (see Testing conventions below). A repo still on VSTest leaves the `test` key out, since it
   switches `dotnet test` to the MTP driver:
@@ -104,7 +105,7 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
 
   The major tracks the repo's .NET TFM (`net10.0`), never a `netstandard` target an analyzer or
   source-generator project carries beside it. It moves only with that TFM (`11.0.100` alongside
-  `net11.0`). The hub's workflows and composite actions install the SDK line through
+  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows and composite actions install the SDK line through
   `setup-dotnet`'s `dotnet-version`, and the hub's devcontainer snippet through its image tag. A
   repo calling them therefore cannot move to a new major alone, since CI would then find no
   compatible SDK. Such a move starts in the hub, as a fleet-wide change. The hub's steps and image
