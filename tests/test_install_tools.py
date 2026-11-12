@@ -44,9 +44,8 @@ def linux_functions() -> str:
     return "\n".join(lines[:-1]) + "\n"
 
 
-@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
-class TestLinuxJsonReport(unittest.TestCase):
-    """`install-tools.sh --json`, driven through the script's own functions."""
+class LinuxFunctionsCase(unittest.TestCase):
+    """A case that sources the Linux installer's functions into a fresh bash for each body it runs."""
 
     def setUp(self) -> None:
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -63,6 +62,11 @@ class TestLinuxJsonReport(unittest.TestCase):
             check=False,
             timeout=30,
         )
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxJsonReport(LinuxFunctionsCase):
+    """`install-tools.sh --json`, driven through the script's own functions."""
 
     def test_json_string_round_trips_every_escaped_character(self) -> None:
         result = self.run_bash('json_string "$1"', AWKWARD)
@@ -373,34 +377,27 @@ class TestInstallersNameTheBaselineLine(unittest.TestCase):
 
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
-class TestLinuxDotnetSets(unittest.TestCase):
+class TestLinuxDotnetSets(LinuxFunctionsCase):
     """The dotnet sets carry the fleet line beside the newest line, and the report reads the fleet line."""
 
     def setUp(self) -> None:
-        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.functions = self.dir / "functions.sh"
-        self.functions.write_text(linux_functions(), encoding="utf-8")
+        super().setUp()
         major, minor = baseline_line()
         self.fleet = f"dotnet-sdk-{major}.{minor}"
         self.older = f"dotnet-sdk-{major - 1}.0"
         self.newer = f"dotnet-sdk-{major + 1}.0"
 
-    def run_bash(self, body: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["bash", "-c", f'source "{self.functions}"\n{body}'],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=30,
-        )
+    def install(
+        self, feed: list[str], optional: bool = False, apt_install: str = 'echo "INSTALL $*"'
+    ) -> subprocess.CompletedProcess[str]:
+        """Run `dotnet_install` with `feed` as the packages apt sees and `apt_install` as its body.
 
-    def install(self, feed: list[str], optional: bool = False) -> subprocess.CompletedProcess[str]:
-        """Run `dotnet_install` with `feed` as the packages apt sees and apt_install recording each call."""
+        The default body records each call, so the run's exit status is `dotnet_install`'s own.
+        """
         return self.run_bash(f"""
 apt_refresh() {{ :; }}
 dotnet_feed() {{ return 0; }}
-apt_install() {{ echo "INSTALL $*"; }}
+apt_install() {{ {apt_install}; }}
 dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
 WITH_OPTIONAL={"true" if optional else "false"}
 dotnet_install
@@ -421,30 +418,24 @@ dotnet_install
 
     def test_a_failed_default_install_fails_the_tool(self) -> None:
         """apply_tool runs the install with set -e off, so the status has to be the function's own."""
-        result = self.run_bash(f"""
-apt_refresh() {{ :; }}
-dotnet_feed() {{ return 0; }}
-apt_install() {{ echo "INSTALL $*"; [[ " $* " != *" {self.fleet} "* ]]; }}
-dotnet_sdk_packages() {{ printf '%s\\n' {self.older} {self.fleet} {self.newer}; }}
-WITH_OPTIONAL=true
-if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
-""")
-        self.assertEqual(
-            result.stdout.splitlines(), [f"INSTALL {self.fleet} {self.newer}", "STATUS 1"]
+        result = self.install(
+            [self.older, self.fleet, self.newer],
+            optional=True,
+            apt_install=f'echo "INSTALL $*"; [[ " $* " != *" {self.fleet} "* ]]',
         )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet} {self.newer}"])
 
     def test_a_failed_optional_install_fails_the_tool(self) -> None:
-        result = self.run_bash(f"""
-apt_refresh() {{ :; }}
-dotnet_feed() {{ return 0; }}
-apt_install() {{ echo "INSTALL $*"; [[ " $* " != *" {self.older} "* ]]; }}
-dotnet_sdk_packages() {{ printf '%s\\n' {self.older} {self.fleet} {self.newer}; }}
-WITH_OPTIONAL=true
-if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
-""")
+        result = self.install(
+            [self.older, self.fleet, self.newer],
+            optional=True,
+            apt_install=f'echo "INSTALL $*"; [[ " $* " != *" {self.older} "* ]]',
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(
             result.stdout.splitlines(),
-            [f"INSTALL {self.fleet} {self.newer}", f"INSTALL {self.older}", "STATUS 1"],
+            [f"INSTALL {self.fleet} {self.newer}", f"INSTALL {self.older}"],
         )
 
     def test_a_fleet_line_that_is_the_newest_installs_once(self) -> None:
@@ -452,9 +443,9 @@ if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet}"])
 
-    def test_a_feed_without_the_fleet_line_is_named(self) -> None:
+    def test_a_feed_without_the_fleet_line_installs_the_newest_and_fails_the_tool(self) -> None:
         result = self.install([self.newer])
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.newer}"])
         self.assertIn(f"carries no {self.fleet}", result.stderr)
 

@@ -119,7 +119,8 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
   rather than silently drifting. The hub's host installers install the line's SDK by default. On
-  Linux, a package feed carrying no package for the line is named in a warning.
+  Linux, a package feed carrying no package for the line fails the `dotnet` tool and is named in a
+  warning.
 
 **`LangVersion` is left unset** in every `.props` or `.targets` file the repo holds and every
 project targeting a .NET TFM. The SDK's own targets derive it, which is the point. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it

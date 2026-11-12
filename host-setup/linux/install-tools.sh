@@ -960,15 +960,21 @@ dotnet_install() {
     # That matters because apply_tool runs this function with set -e off, where a failed call in a sequence would be passed over.
     apt_install "${packages[@]}" || return 1
 
-    [[ $WITH_OPTIONAL == true ]] || return 0
-    local -a optional=()
-    local package
-    while read -r package; do
-        if [[ $package != "$latest" && $package != "$fleet" ]]; then
-            optional+=("$package")
+    if [[ $WITH_OPTIONAL == true ]]; then
+        local -a optional=()
+        local package
+        while read -r package; do
+            if [[ $package != "$latest" && $package != "$fleet" ]]; then
+                optional+=("$package")
+            fi
+        done < <(dotnet_sdk_packages)
+        if [[ ${#optional[@]} -gt 0 ]]; then
+            apt_install "${optional[@]}" || return 1
         fi
-    done < <(dotnet_sdk_packages)
-    [[ ${#optional[@]} -eq 0 ]] || apt_install "${optional[@]}"
+    fi
+
+    # A host left without the fleet line fails the tool, with the newest line it could install already in place.
+    [[ -n $fleet ]]
 }
 
 # --- powershell ---

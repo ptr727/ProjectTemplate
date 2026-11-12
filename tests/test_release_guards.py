@@ -2359,7 +2359,7 @@ class DotnetSdkLineCase(unittest.TestCase):
         """The outputs the selection step writes in a workspace holding `global_json`, or none."""
         if shutil.which("jq") is None:
             self.skipTest("the selection step reads global.json with jq, which this host lacks")
-        script = step_script_text(self.ACTION.read_text(encoding="utf-8"), self.SELECT)
+        script = step_script(self.ACTION, self.SELECT)
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
             if global_json is not None:
