@@ -105,18 +105,20 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   The major tracks the repo's .NET TFM (`net10.0`), never a `netstandard` target an analyzer or
   source-generator project carries beside it. It moves only with that TFM (`11.0.100` alongside
   `net11.0`). The hub's workflows and composite actions install the SDK line through
-  `setup-dotnet`'s `dotnet-version`. A repo calling them therefore cannot move to a new major
-  alone, since CI would then find no compatible SDK. Such a move starts in the hub, as a fleet-wide
-  change. The hub's steps install both lines until every repo has moved. A repo still on
+  `setup-dotnet`'s `dotnet-version`, and the hub's devcontainer snippet through its image tag. A
+  repo calling them therefore cannot move to a new major alone, since CI would then find no
+  compatible SDK. Such a move starts in the hub, as a fleet-wide change. The hub's steps and image
+  provide both lines until every repo has moved. A repo still on
   `10.0.100` would otherwise find no compatible SDK once the hub installs only the new line.
 
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
   rather than silently drifting. Install the line's SDK beside the newer one.
 
-**`LangVersion` is left unset** in every `.props` or `.targets` file and every project targeting a
-.NET TFM. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it
-anywhere to `latest`, `latestMajor`, or `preview`. Those float with the installed SDK's compiler. A newer
+**`LangVersion` is left unset** in every `.props` or `.targets` file the repo holds and every
+project targeting a .NET TFM. The SDK's own targets derive it, which is the point. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it
+anywhere to `latest`, `latestMajor`, or `preview`, and never set `EnablePreviewFeatures`, which
+reaches `preview` through the SDK. Those float with the installed SDK's compiler. A newer
 SDK then has IDE0028 suggest a syntax the older SDK cannot compile (CS8652), so no single source
 text passes `dotnet format style --verify-no-changes --severity=info` on both. A `netstandard`
 analyzer or source-generator project is the one exception to leaving it unset. Unset, it compiles
@@ -130,10 +132,11 @@ Analyzer output can still differ between feature bands on one line, such as a di
 A repo whose projects still carry per-project analyzer settings or versioned `PackageReference`
 items is drifted. Move the shared property or version up to the root file rather than editing it
 in place. A repo with no `global.json`, a `global.json` with no `sdk` block, or a `LangVersion`
-the rule above does not allow is drifted too. So is an `sdk` block whose `version` is not the
-TFM major's `100` band (`10.0.100`). So is one whose `rollForward` is not `latestFeature` or whose
-`allowPrerelease` is not `false`. A higher band, such as the `10.0.3xx` that
-`dotnet new globaljson` writes on a newer host, refuses a host holding only an older band.
+the rule above does not allow is drifted too. So is an `sdk` block whose `version` is not exactly
+the TFM major's `.0.100` (`10.0.100`). So is one whose `rollForward` is not `latestFeature` or whose
+`allowPrerelease` is not `false`. Any later version is a higher floor, such as the `10.0.404` that
+`dotnet new globaljson` writes on a newer host. It refuses a host whose newest SDK on the line is
+older, such as a lagging distro-packaged one.
 
 ### Build tasks
 
