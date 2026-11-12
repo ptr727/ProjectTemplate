@@ -422,6 +422,25 @@ if dotnet_install; then printf '%s\\n' "${{CHANGED[@]}}"; else exit "$?"; fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"{self.newer} - -> 1.0"])
 
+    def test_without_a_fleet_line_the_newest_line_is_recorded_once(self) -> None:
+        """The row reads the newest line then, so apply_tool records it and dotnet_install does not."""
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+INSTALLED=""
+apt_install() {{ INSTALLED="$*"; }}
+apt_installed_version() {{ [[ " $INSTALLED " == *" $1 "* ]] && printf '1.0'; return 0; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.newer}; }}
+WITH_OPTIONAL=false
+DISTRO_ID=debian
+DISTRO_VERSION=13
+CHANGED=()
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+[[ ${{#CHANGED[@]}} -eq 0 ]] || printf '%s\\n' "${{CHANGED[@]}}"
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["STATUS 0"])
+
     def test_a_failed_optional_install_still_records_the_default_move(self) -> None:
         result = self.run_bash(f"""
 apt_refresh() {{ :; }}
@@ -531,6 +550,16 @@ tool_note dotnet
                     f"dotnet: {self.newer} is at {self.newer} and the feed carries"
                     f" {self.newer}-next, --upgrade moves it"
                 ),
+            ],
+        )
+
+    def test_without_a_fleet_line_a_pending_upgrade_is_the_row_s_alone(self) -> None:
+        self.assertEqual(
+            self.report([self.newer], pending=self.newer),
+            [
+                self.newer,
+                f"{self.newer}-next",
+                f"dotnet: the feed carries no {self.fleet}, the line fleet .NET repositories select",
             ],
         )
 

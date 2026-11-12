@@ -2354,11 +2354,12 @@ class DotnetSdkLineCase(unittest.TestCase):
 
     ACTION = REPO / ".github/actions/dotnet-sdk/action.yml"
     SELECT = "Select .NET SDK line step"
+    last_stdout = ""
 
-    def select(self, global_json: str | None, status: int = 0) -> list[str]:
+    def select(self, global_json: str | None) -> list[str]:
         """The outputs the selection step writes in a workspace holding `global_json`, or none.
 
-        The step is held to exit with `status`.
+        The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
         """
         if shutil.which("jq") is None:
             self.skipTest("the selection step reads global.json with jq, which this host lacks")
@@ -2379,7 +2380,8 @@ class DotnetSdkLineCase(unittest.TestCase):
                 check=False,
                 timeout=30,
             )
-            self.assertEqual(result.returncode, status, result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.last_stdout = result.stdout
             return output.read_text(encoding="utf-8").splitlines()
 
     def test_a_global_json_selecting_a_line_is_read(self) -> None:
@@ -2392,10 +2394,11 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
 
-    def test_a_global_json_jq_cannot_read_fails_the_step(self) -> None:
-        """A comment is valid to the dotnet host and not to jq, so it fails here rather than reading as no line."""
+    def test_a_global_json_jq_cannot_read_falls_back_with_a_warning(self) -> None:
+        """A comment is valid to the dotnet host and not to jq, so the fallback names the cause rather than failing."""
         commented = '// the fleet line\n{"sdk": {"version": "11.0.100"}}'
-        self.assertEqual(self.select(commented, status=1), [])
+        self.assertEqual(self.select(commented), [f"dotnet-version={baseline_line()[0]}.x"])
+        self.assertIn("::warning::jq could not read global.json", self.last_stdout)
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.

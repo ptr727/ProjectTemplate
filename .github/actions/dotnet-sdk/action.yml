@@ -18,14 +18,16 @@ runs:
           status=0
           jq -e '.sdk.version' global.json >/dev/null || status=$?
         fi
-        case "$status" in
-          0) echo "global-json-file=global.json" >> "$GITHUB_OUTPUT" ;;
-          1) echo "dotnet-version=10.x" >> "$GITHUB_OUTPUT" ;;
-          *)
-            echo "::error::jq could not read global.json (exit $status), so the SDK line it selects is unknown. Keep it plain JSON."
-            exit 1
-            ;;
-        esac
+        if [[ $status -eq 0 ]]; then
+          echo "global-json-file=global.json" >> "$GITHUB_OUTPUT"
+        else
+          # The dotnet host accepts a global.json jq cannot read, such as one holding a comment, so this warns rather than fails.
+          # A wrong line then fails the first dotnet command loudly, and this warning names the cause.
+          if [[ $status -gt 1 ]]; then
+            echo "::warning::jq could not read global.json (exit $status), so this installs the 10.x fallback rather than the line it selects."
+          fi
+          echo "dotnet-version=10.x" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Setup .NET SDK step
       uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0

@@ -949,7 +949,7 @@ dotnet_install() {
     local -a packages=()
     if [[ -z $fleet ]]; then
         # The run carries on, so a stand-up on a distro that lags the fleet line still completes, and the warning and report name the gap.
-        warn "The feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so a fleet .NET repository selecting it will not build here until a feed carrying it is added"
+        warn "The feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so a fleet .NET repository selecting it will not build here. Adding Microsoft's feed beside the distro's .NET packages is the mixing that breaks a host, so install that line by hand from a source that does not mix with them"
     else
         packages+=("$fleet")
     fi
@@ -959,8 +959,9 @@ dotnet_install() {
 
     # The dotnet row reads the fleet line, so apply_tool's summary does not see the newest line move.
     # It is recorded here instead, where the newest line is a package of its own.
+    # Without a fleet line the row reads the newest line itself, so apply_tool already records it.
     local before=""
-    if [[ $latest != "$fleet" ]]; then
+    if [[ -n $fleet && $latest != "$fleet" ]]; then
         before=$(apt_installed_version "$latest")
     fi
     local row_before
@@ -970,7 +971,7 @@ dotnet_install() {
     # That matters because apply_tool runs this function with set -e off, where a failed call in a sequence would be passed over.
     apt_install "${packages[@]}" || return 1
 
-    if [[ $latest != "$fleet" ]]; then
+    if [[ -n $fleet && $latest != "$fleet" ]]; then
         local now
         now=$(apt_installed_version "$latest")
         [[ $now == "$before" ]] || CHANGED+=("$latest ${before:--} -> ${now:--}")
@@ -1204,7 +1205,8 @@ tool_note() {
                 note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select"
             fi
             # The row reads the fleet line, so a pending upgrade of the newest line, also in the default set, is named here.
-            if [[ $latest != "$fleet" ]]; then
+            # Without a fleet line the row reads the newest line itself, so its own status already says so.
+            if [[ -n $fleet && $latest != "$fleet" ]]; then
                 local have want
                 have=$(apt_installed_version "$latest")
                 want=$(apt_candidate_version "$latest")
