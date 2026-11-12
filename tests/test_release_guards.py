@@ -2404,6 +2404,16 @@ class DotnetSdkLineCase(unittest.TestCase):
             if path != self.ACTION:
                 text = path.read_text(encoding="utf-8")
                 self.assertNotIn("actions/setup-dotnet@", text, path.relative_to(REPO))
+        # The action reads global.json from the workspace, so a step ahead of the checkout installs the fallback.
+        users = []
+        for path in (REPO / ".github/workflows").glob("*.yml"):
+            for job, body in job_texts(path.read_text(encoding="utf-8")).items():
+                use = body.find("uses: $/.github/actions/dotnet-sdk")
+                if use != -1:
+                    users.append(f"{path.name}:{job}")
+                    checkout = body.find("- name: Checkout code step")
+                    self.assertTrue(0 <= checkout < use, f"{path.name}:{job}")
+        self.assertGreaterEqual(len(users), 6, users)
         release = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
         for job, default in (
             ("dotnet-publish", "Run hub dotnet-publish default step"),

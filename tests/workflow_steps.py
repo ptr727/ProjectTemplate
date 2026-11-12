@@ -94,7 +94,7 @@ def yaml_value(text: str, *keys: str) -> str | None:
 
 
 def job_texts(workflow: str) -> dict[str, str]:
-    """Each job's text keyed by job id, read by indentation, since the suite runs on the standard library alone."""
+    """Each job's source text keyed by job id, cut by indentation so comments and step order stay as written."""
     lines = workflow.splitlines()
     start = next(i for i, line in enumerate(lines) if re.fullmatch(r"jobs:\s*(#.*)?", line))
     jobs: dict[str, list[str]] = {}
