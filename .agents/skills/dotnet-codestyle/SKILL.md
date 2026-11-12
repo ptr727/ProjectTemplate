@@ -105,14 +105,15 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
 
   The major tracks the repo's .NET TFM (`net10.0`), never a `netstandard` target an analyzer or
   source-generator project carries beside it. It moves only with that TFM (`11.0.100` alongside
-  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows and
-  composite actions install the line the calling repo's own `global.json` selects, through
-  `setup-dotnet`'s `global-json-file`, so CI follows each repo's file. The hub's devcontainer
-  snippet still installs its line through its image tag. The hub's host installers install the
-  line the `catalog/snippets/configs/global.json` baseline selects, and the Linux one adds the
-  newest line beside it. So a major move still starts in the hub, as a fleet-wide change to that
-  baseline and the image tag. The image provides both lines until every repo has moved. A host
-  building a repo not yet moved takes the old line from the installers' optional set.
+  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows
+  install the line the calling repo's own `global.json` selects, through `setup-dotnet`'s
+  `global-json-file`, so CI follows each repo's file. The hub's devcontainer snippet still
+  installs its line through its image tag. The hub's host installers install the line the
+  `catalog/snippets/configs/global.json` baseline selects, named in each installer and held
+  equal to the baseline by the hub's tests. The Linux one adds the newest line beside it. So a
+  major move still starts in the hub, as a fleet-wide change to that baseline, the installers,
+  and the image tag. The image provides both lines until every repo has moved. A host building a
+  repo not yet moved takes the old line from the installers' optional set.
 
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error

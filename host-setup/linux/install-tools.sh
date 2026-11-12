@@ -36,6 +36,11 @@ MANAGED_TOOLS=("${TOOLS[@]}")
 readonly PYTHON_PACKAGES=(build-essential ca-certificates curl python3 python3-dev python3-venv python3-pip)
 readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-setuptools python3-wheel)
 
+# The SDK line every fleet .NET repository's global.json selects, which the dotnet default set always carries.
+# It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
+# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
+readonly DOTNET_FLEET_LINE="10.0"
+
 MODE="report"
 DRY_RUN=false
 JSON_OUTPUT=false
@@ -854,25 +859,11 @@ dotnet_sdk_packages() {
 
 dotnet_sdk_latest() { dotnet_sdk_packages | tail -1; }
 
-# The SDK line the fleet's .NET repositories select, such as 10.0, read from the global.json baseline every one of them carries.
-# A TFM move edits that file, so the line moves here with it rather than being written into this script.
-# It is read with sed rather than jq, since a run selecting dotnet alone can reach a host jq is not yet on.
-# Joining the lines first keeps the read independent of how the file is laid out.
-# An empty result means the tree this script runs from carries no baseline selecting a line.
-dotnet_fleet_line() {
-    local baseline
-    baseline="$(dirname -- "${BASH_SOURCE[0]}")/../../catalog/snippets/configs/global.json"
-    [[ -f $baseline ]] || return 0
-    tr -d '\n' <"$baseline" | sed -nE 's/.*"sdk"[^}]*"version"[[:space:]]*:[[:space:]]*"([0-9]+\.[0-9]+)\.[^"]*".*/\1/p'
-}
-
 # The fleet line's SDK package, printed only where the feed carries it.
 dotnet_sdk_fleet() {
-    local line package
-    line=$(dotnet_fleet_line)
-    [[ -n $line ]] || return 0
+    local package
     while read -r package; do
-        if [[ $package == "dotnet-sdk-$line" ]]; then
+        if [[ $package == "dotnet-sdk-$DOTNET_FLEET_LINE" ]]; then
             printf '%s' "$package"
             return 0
         fi
@@ -953,15 +944,10 @@ dotnet_install() {
         return 1
     fi
 
-    local line fleet
-    line=$(dotnet_fleet_line)
-    if [[ -z $line ]]; then
-        warn "No global.json baseline beside this script selects an SDK line, so the dotnet set cannot be resolved"
-        return 1
-    fi
+    local fleet
     fleet=$(dotnet_sdk_fleet)
     if [[ -z $fleet ]]; then
-        warn "The feed carries no dotnet-sdk-$line, so fleet .NET repositories will not build on this host"
+        warn "The feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so fleet .NET repositories will not build on this host"
     else
         apt_install "$fleet"
     fi
@@ -1178,15 +1164,11 @@ tool_note() {
     dotnet)
         local -a sdks=()
         readarray -t sdks < <(dotnet_sdk_packages)
-        local line
-        line=$(dotnet_fleet_line)
         if [[ ${#sdks[@]} -eq 0 ]]; then
             note "dotnet" "no SDK package available, Microsoft's feed is not configured"
         else
-            if [[ -z $line ]]; then
-                note "dotnet" "no global.json baseline beside this script selects an SDK line"
-            elif [[ -z $(dotnet_sdk_fleet) ]]; then
-                note "dotnet" "the feed carries no dotnet-sdk-$line, the line fleet .NET repositories select"
+            if [[ -z $(dotnet_sdk_fleet) ]]; then
+                note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select"
             fi
             readarray -t missing < <(apt_missing "${sdks[@]}")
             if [[ ${#missing[@]} -gt 0 ]]; then
@@ -1493,7 +1475,7 @@ list_tools() {
     log "Package sets:"
     info "python default  : ${PYTHON_PACKAGES[*]}"
     info "python optional : ${PYTHON_OPTIONAL[*]}"
-    info "dotnet default  : the SDK line the fleet's global.json selects, and the newest line the feed carries"
+    info "dotnet default  : dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select, and the newest line the feed carries"
     info "dotnet optional : every other SDK line the feed carries"
 }
 

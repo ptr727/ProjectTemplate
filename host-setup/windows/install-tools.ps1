@@ -632,23 +632,10 @@ function Write-InstallFailure {
 
 # --- Tools ---
 
-# The SDK major the fleet's .NET repositories select, such as 10, read from the global.json baseline every one of them carries.
-# A TFM move edits that file, so the winget package moves with it rather than being written into this script.
-function Get-DotnetFleetMajor {
-    param([string]$Baseline = (Join-Path $PSScriptRoot '../../catalog/snippets/configs/global.json'))
-    try {
-        $json = Get-Content -LiteralPath $Baseline -Raw | ConvertFrom-Json
-    } catch {
-        die "No global.json baseline is readable at ${Baseline}: $($_.Exception.Message)"
-    }
-    $version = ''
-    if ($json.PSObject.Properties['sdk'] -and $json.sdk.PSObject.Properties['version']) { $version = [string]$json.sdk.version }
-    $match = [regex]::Match($version, '^(\d+)\.\d+\.')
-    if (-not $match.Success) { die "The global.json baseline at $Baseline selects no SDK line: '$version'" }
-    return [int]$match.Groups[1].Value
-}
-
-$DOTNET_MAJOR = Get-DotnetFleetMajor
+# The SDK major every fleet .NET repository's global.json selects, the winget package's major.
+# It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
+# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
+$DOTNET_MAJOR = 10
 
 # Managed tools, in the order a report lists them.
 # Every one is a single winget package, which is what makes this a table where the Linux script needs several functions per tool.
