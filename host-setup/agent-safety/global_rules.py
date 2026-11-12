@@ -13,7 +13,7 @@ agent is skipped, so running this never creates a directory for an agent nobody 
 Usage: python3 global_rules.py                 (write the file of each present agent).
        python3 global_rules.py --agent codex   (one agent only).
        python3 global_rules.py --dry-run       (say what would be written, change nothing).
-       python3 global_rules.py --report        (read-only: CURRENT, STALE, or ABSENT per agent).
+       python3 global_rules.py --report        (read-only: CURRENT, STALE, EDITED, or ABSENT per agent, plus SHADOWED where a Codex override hides the file).
        CODEX_HOME=/x python3 global_rules.py   (override the Codex directory, for testing).
        XDG_CONFIG_HOME=/x python3 global_rules.py   (override the opencode config root, for testing).
        AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 global_rules.py   (override the host-local file).
@@ -276,7 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--report",
         action="store_true",
-        help="read-only: CURRENT, STALE, or ABSENT per present agent, non-zero unless all are CURRENT",
+        help="read-only: CURRENT, STALE, EDITED, or ABSENT per present agent, plus SHADOWED where a Codex override hides the file, non-zero unless all are CURRENT and unshadowed",
     )
     mode.add_argument(
         "-n",
