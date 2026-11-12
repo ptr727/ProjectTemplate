@@ -31,8 +31,8 @@ d=$(mktemp -d) && curl -fsSLo "$d/bootstrap.sh" https://raw.githubusercontent.co
 On native Windows, in a PowerShell console:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $f = $env:TEMP + "\bootstrap.ps1"; Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile $f; powershell -ExecutionPolicy Bypass -File $f -AgentSetup -Yes'
-powershell -NoProfile -ExecutionPolicy Bypass -Command '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $f = $env:TEMP + "\bootstrap.ps1"; Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile $f; powershell -ExecutionPolicy Bypass -File $f -AgentStatus'
+powershell -NoProfile -ExecutionPolicy Bypass -Command '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $f = Join-Path $env:TEMP bootstrap.ps1; Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile $f; powershell -ExecutionPolicy Bypass -File $f -AgentSetup -Yes'
+powershell -NoProfile -ExecutionPolicy Bypass -Command '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $f = Join-Path $env:TEMP bootstrap.ps1; Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile $f; powershell -ExecutionPolicy Bypass -File $f -AgentStatus'
 ```
 
 Run the status after the setup, and run it alone to answer "is this machine current" without changing anything. Add `--dry-run` or `-DryRun` to the setup to see what it would run. A dry run never touches the status, which is read-only and always reads the real host.
