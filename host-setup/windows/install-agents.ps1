@@ -384,7 +384,8 @@ function Test-UnderScoop {
     param([string]$Path)
     foreach ($entry in (Get-ScoopRoot)) {
         foreach ($sub in 'shims', 'apps') {
-            if (Test-PathUnder -Path $Path -Root (Join-Path $entry.Root $sub) -Below) { return $true }
+            # Joined as text rather than with Join-Path, which fails for a root on a drive that is not present.
+            if (Test-PathUnder -Path $Path -Root "$($entry.Root)\$sub" -Below) { return $true }
         }
     }
     return $false
