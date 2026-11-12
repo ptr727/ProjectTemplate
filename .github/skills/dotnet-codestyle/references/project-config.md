@@ -5,8 +5,9 @@
    `"rollForward": "latestFeature"`, `"allowPrerelease": false`). See `SKILL.md`'s "Central build
    and package configuration". `LangVersion` stays unset, so the C# version follows the TFM. A
    `netstandard` analyzer or source-generator project is the exception, and that section says what
-   it sets. The TFM, the `sdk` major, and that project's fixed `LangVersion` move together. They move only once the hub's
-   `setup-dotnet` steps and devcontainer image provide the new line beside the old one.
+   it sets. The TFM, the `sdk` major, and that project's fixed `LangVersion` move together. They move with the hub's
+   `global.json` baseline, once the hub's devcontainer image provides the new line beside the old
+   one. The hub's `setup-dotnet` steps install whatever line the repo's own `global.json` selects.
 2. **AOT compatibility**: `<IsAotCompatible>true</IsAotCompatible>` unconditionally, and
    `<VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>` only in a
    `<PropertyGroup Condition="'$(PublishAot)' == 'true'">`. That group is placed in the `.csproj` after

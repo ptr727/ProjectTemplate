@@ -856,13 +856,14 @@ dotnet_sdk_latest() { dotnet_sdk_packages | tail -1; }
 
 # The SDK line the fleet's .NET repositories select, such as 10.0, read from the global.json baseline every one of them carries.
 # A TFM move edits that file, so the line moves here with it rather than being written into this script.
-# It is read with awk rather than jq, since a run selecting dotnet alone can reach a host jq is not yet on.
-# An empty result means the tree this script runs from carries no readable baseline.
+# It is read with sed rather than jq, since a run selecting dotnet alone can reach a host jq is not yet on.
+# Joining the lines first keeps the read independent of how the file is laid out.
+# An empty result means the tree this script runs from carries no baseline selecting a line.
 dotnet_fleet_line() {
     local baseline
     baseline="$(dirname -- "${BASH_SOURCE[0]}")/../../catalog/snippets/configs/global.json"
     [[ -f $baseline ]] || return 0
-    awk -F'"' '$2 == "version" && split($4, part, ".") >= 2 { print part[1] "." part[2]; exit }' "$baseline"
+    tr -d '\n' <"$baseline" | sed -nE 's/.*"sdk"[^}]*"version"[[:space:]]*:[[:space:]]*"([0-9]+\.[0-9]+)\.[^"]*".*/\1/p'
 }
 
 # The fleet line's SDK package, printed only where the feed carries it.
@@ -951,10 +952,9 @@ dotnet_install() {
 
     local line fleet
     line=$(dotnet_fleet_line)
+    [[ -n $line ]] || die "No global.json baseline beside this script selects an SDK line, so the dotnet set cannot be resolved"
     fleet=$(dotnet_sdk_fleet)
-    if [[ -z $line ]]; then
-        warn "No global.json baseline is readable beside this script, so only the newest SDK line is installed"
-    elif [[ -z $fleet ]]; then
+    if [[ -z $fleet ]]; then
         warn "The feed carries no dotnet-sdk-$line, so fleet .NET repositories will not build on this host"
     else
         apt_install "$fleet"
@@ -1177,7 +1177,9 @@ tool_note() {
         if [[ ${#sdks[@]} -eq 0 ]]; then
             note "dotnet" "no SDK package available, Microsoft's feed is not configured"
         else
-            if [[ -n $line && -z $(dotnet_sdk_fleet) ]]; then
+            if [[ -z $line ]]; then
+                note "dotnet" "no global.json baseline beside this script selects an SDK line"
+            elif [[ -z $(dotnet_sdk_fleet) ]]; then
                 note "dotnet" "the feed carries no dotnet-sdk-$line, the line fleet .NET repositories select"
             fi
             readarray -t missing < <(apt_missing "${sdks[@]}")

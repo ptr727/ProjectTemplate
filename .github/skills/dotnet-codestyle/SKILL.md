@@ -109,14 +109,14 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   composite actions install the line the calling repo's own `global.json` selects, through
   `setup-dotnet`'s `global-json-file`, so CI follows each repo's file. The hub's devcontainer
   snippet still installs its line through its image tag. The hub's host installers install the
-  line the `catalog/snippets/configs/global.json` baseline selects, beside the newest line. So a
-  major move still starts in the hub, as a fleet-wide change to that baseline and the image tag.
-  The image provides both lines until every repo has moved.
+  line the `catalog/snippets/configs/global.json` baseline selects, and the Linux one adds the
+  newest line beside it. So a major move still starts in the hub, as a fleet-wide change to that
+  baseline and the image tag. The image provides both lines until every repo has moved. A host
+  building a repo not yet moved takes the old line from the installers' optional set.
 
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
-  rather than silently drifting. The hub's host installers install the line's SDK beside the newer
-  one by default.
+  rather than silently drifting. The hub's host installers install the line's SDK by default.
 
 **`LangVersion` is left unset** in every `.props` or `.targets` file the repo holds and every
 project targeting a .NET TFM. The SDK's own targets derive it, which is the point. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it

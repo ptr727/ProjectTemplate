@@ -427,11 +427,73 @@ dotnet_install
         self.assertEqual(result.stdout.splitlines(), ["INSTALL dotnet-sdk-11.0"])
         self.assertIn("carries no dotnet-sdk-10.0", result.stderr)
 
-    def test_a_missing_baseline_installs_the_newest_line_and_says_so(self) -> None:
+    def test_a_missing_baseline_stops_before_installing_anything(self) -> None:
+        result = self.install(["dotnet-sdk-10.0", "dotnet-sdk-11.0"])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("selects an SDK line", result.stderr)
+
+    def test_a_one_line_baseline_selects_its_line(self) -> None:
+        self.baseline.write_text(
+            json.dumps({"test": {"runner": "x"}, "sdk": {"version": "10.0.100"}}), encoding="utf-8"
+        )
         result = self.install(["dotnet-sdk-10.0", "dotnet-sdk-11.0"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["INSTALL dotnet-sdk-11.0"])
-        self.assertIn("No global.json baseline is readable", result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(), ["INSTALL dotnet-sdk-10.0", "INSTALL dotnet-sdk-11.0"]
+        )
+
+    def report(self, feed: list[str]) -> list[str]:
+        """The dotnet row's installed and target packages, then each note `tool_note` files for it."""
+        body = f"""
+source "{self.functions}"
+dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
+apt_installed_version() {{ printf 'installed %s' "$1"; }}
+apt_candidate_version() {{ printf 'candidate %s' "$1"; }}
+apt_missing() {{ :; }}
+NOTES=()
+NOTE_TEXTS=()
+dotnet_version
+echo
+dotnet_target
+echo
+tool_note dotnet
+[[ ${{#NOTES[@]}} -eq 0 ]] || printf '%s\\n' "${{NOTES[@]}}"
+"""
+        result = subprocess.run(
+            ["bash", "-c", body],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.splitlines()
+
+    def test_the_row_reports_the_fleet_line_over_a_newer_one(self) -> None:
+        self.select("10.0.100")
+        self.assertEqual(
+            self.report(["dotnet-sdk-10.0", "dotnet-sdk-11.0"]),
+            ["installed dotnet-sdk-10.0", "candidate dotnet-sdk-10.0"],
+        )
+
+    def test_a_feed_without_the_fleet_line_is_noted_and_the_newest_reported(self) -> None:
+        self.select("10.0.100")
+        self.assertEqual(
+            self.report(["dotnet-sdk-11.0"]),
+            [
+                "installed dotnet-sdk-11.0",
+                "candidate dotnet-sdk-11.0",
+                "dotnet: the feed carries no dotnet-sdk-10.0, the line fleet .NET repositories select",
+            ],
+        )
+
+    def test_a_missing_baseline_is_noted(self) -> None:
+        self.assertEqual(
+            self.report(["dotnet-sdk-11.0"])[2:],
+            ["dotnet: no global.json baseline beside this script selects an SDK line"],
+        )
 
     def test_the_line_moves_with_the_baseline(self) -> None:
         self.select("11.0.100")
@@ -453,7 +515,7 @@ dotnet_install
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         version = json.loads(BASELINE.read_text(encoding="utf-8"))["sdk"]["version"]
-        self.assertEqual(result.stdout, ".".join(version.split(".")[:2]) + "\n")
+        self.assertEqual(result.stdout, ".".join(version.split(".")[:2]))
 
 
 WINDOWS_FLEET_MAJOR_HARNESS = r"""
