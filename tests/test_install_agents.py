@@ -689,9 +689,16 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("npm failed to upgrade it", result.stderr)
         self.assertIn("claude update", self.recorded())
 
+    def bun_package(self, name: str) -> None:
+        package = self.home / ".bun" / "install" / "global" / "node_modules" / name
+        package.mkdir(parents=True)
+        (package / "package.json").write_text('{"name": "' + name + '"}', encoding="utf-8")
+
     def test_bun_is_upgraded_through_bun(self) -> None:
-        bun_bin = self.home / ".bun" / "install" / "global" / "node_modules" / "opencode-ai" / "bin"
+        # The real Windows layout of bun: a copied shim in .bun\bin and the package under install\global.
+        bun_bin = self.home / ".bun" / "bin"
         self.stub("opencode", "1.0.0", bun_bin)
+        self.bun_package("opencode-ai")
         self.stub("bun", "1.1.0")
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=bun_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -737,8 +744,9 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("are not the npm package @openai/codex", result.stdout)
 
     def test_a_fork_under_bun_is_reported_not_run(self) -> None:
-        fork = self.home / ".bun" / "install" / "global" / "node_modules" / "opencode-fork" / "bin"
+        fork = self.home / ".bun" / "bin"
         self.stub("opencode", "1.0.0", fork)
+        self.bun_package("opencode-fork")
         self.stub("bun", "1.1.0")
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=fork)
         self.assertNotIn("bun install", " ".join(self.recorded()))

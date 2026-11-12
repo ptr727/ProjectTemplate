@@ -400,14 +400,21 @@ function Test-NpmPackageOwnership {
     return (($text -replace '/', '\').IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
 }
 
-# Whether the tool sits inside bun's global package for the recorded package.
+# Whether the tool is bun's global install of the recorded package.
+# On Windows bun copies a shim into its bin directory rather than linking into the package, so the shim alone names no package.
+# There the shim must sit in bun's bin directory and the recorded package must be installed globally, as the npm branch checks package.json.
+# The .bunx file beside the shim records the target, but its format is undocumented, so it is not read.
 function Test-BunPackageOwnership {
     param([string]$Path, [string]$Package)
     $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
     $directory = Join-Path (Join-Path (Join-Path (Join-Path $bun 'install') 'global') 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     $inside = (Resolve-FinalPath -Path $directory) -replace '/', '\'
-    return $resolved.StartsWith($inside.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
+    if ($resolved.StartsWith($inside.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    $bin = ((Resolve-FinalPath -Path (Join-Path $bun 'bin')) -replace '/', '\').TrimEnd('\')
+    $cut = $resolved.LastIndexOf('\')
+    $shimDirectory = if ($cut -gt 0) { $resolved.Substring(0, $cut) } else { '' }
+    return ($shimDirectory -ieq $bin -and (Test-Path -LiteralPath (Join-Path $directory 'package.json')))
 }
 
 # What an upgrade does for a tool a package manager owns.
