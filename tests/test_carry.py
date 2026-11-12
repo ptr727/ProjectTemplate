@@ -508,7 +508,11 @@ class CarryHubTests(unittest.TestCase):
         self.hub = root / "hub"
         subprocess.run(["git", "init", "--bare", remote], check=True, capture_output=True)
         subprocess.run(["git", "clone", remote, self.hub], check=True, capture_output=True)
-        for key, value in (("user.name", "Test"), ("user.email", "test@example.invalid")):
+        for key, value in (
+            ("user.name", "Test"),
+            ("user.email", "test@example.invalid"),
+            ("commit.gpgsign", "false"),
+        ):
             subprocess.run(["git", "-C", self.hub, "config", key, value], check=True)
         self.hub_entry = {"name": carry.HUB_NAME, "url": str(remote)}
         self.commit({"repos": [self.hub_entry, {"name": "Promoted"}]}, "main")

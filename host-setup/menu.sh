@@ -547,14 +547,12 @@ carry_action() {
             fail "No downstream repo checkout found. Run this menu from inside the target repo's own worktree."
             return 1
         }
-    # The menu carries from origin/main only, which carry.py requires for every promoted registry entry.
-    # An entry on develop alone is carried by running carry.py from a develop checkout, outside the menu.
-    # A non-default --ref checks out something else entirely.
-    # So this would always fail deep inside carry.py with no clue why.
-    # Refused here instead, with the actual reason.
+    # The menu carries from origin/main only, its own policy rather than a carry.py limit.
+    # A develop checkout is also accepted by carry.py for an entry not yet promoted, and that case runs outside the menu.
+    # So a non-default --ref is refused here, and the message names that case.
     [[ $REF == "$DEFAULT_REF" ]] ||
         {
-            fail "Pulling hub files needs the hub's $DEFAULT_REF branch, and this session was started with --ref $REF. Run without --ref, or start a separate session on $DEFAULT_REF for this task."
+            fail "Pulling hub files needs the hub's $DEFAULT_REF branch, and this session was started with --ref $REF. Run without --ref, or start a separate session on $DEFAULT_REF for this task. A repository whose registry entry is on develop only is carried outside the menu, by running scripts/carry.py from a hub checkout at develop."
             return 1
         }
     local default="$DOWNSTREAM_NAME"
@@ -594,9 +592,7 @@ print_menu() {
     log "Hub, $HUB_REPO:"
     log "  11  Audit a cataloged repo"
     log "  12  Check the generated Skills distributions are current"
-    # Also gated on REF.
-    # The menu carries from the default ref only, and carry.py rejects any other ref for a promoted entry.
-    # So these tasks cannot work in a non-default --ref session regardless of a downstream repo being detected.
+    # Also gated on REF, since the menu carries from the default ref only, whatever downstream repo is detected.
     if [[ -n $DOWNSTREAM_ROOT && $REF == "$DEFAULT_REF" ]]; then
         log ""
         log "Downstream, the repo this menu is run from:"

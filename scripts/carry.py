@@ -320,9 +320,8 @@ def verify_hub(hub: pathlib.Path, registry: dict[str, Any], name: str) -> str:
     head = git(hub, "rev-parse", "HEAD")
     main = git(hub, "rev-parse", "origin/main")
     if head == main:
-        if (
-            not registry_matches(name, registry)
-            and len(registry_matches(name, registry_at(hub, "origin/develop"))) == 1
+        if not registry_matches(name, registry) and registry_matches(
+            name, registry_at(hub, "origin/develop")
         ):
             raise CarryError(
                 f"{name} is registered on origin/develop only, so run from a hub checkout at origin/develop"
