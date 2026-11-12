@@ -26,6 +26,7 @@ import datetime
 import importlib.util
 import os
 import pathlib
+import re
 import shutil
 import signal
 import sys
@@ -50,6 +51,8 @@ class Agent:
     command: str
     config_dir: pathlib.Path
     target: pathlib.Path
+    # A file the agent reads in place of the target whenever it exists, which this script never writes or deletes.
+    override: pathlib.Path | None = None
 
 
 def load_kit() -> types.ModuleType:
@@ -78,7 +81,13 @@ def opencode_dir() -> pathlib.Path:
 
 def agents(which: str) -> list[Agent]:
     every = [
-        Agent("codex", "codex", codex_dir(), codex_dir() / "AGENTS.md"),
+        Agent(
+            "codex",
+            "codex",
+            codex_dir(),
+            codex_dir() / "AGENTS.md",
+            codex_dir() / "AGENTS.override.md",
+        ),
         Agent("opencode", "opencode", opencode_dir(), opencode_dir() / "AGENTS.md"),
     ]
     return [a for a in every if which in ("all", a.name)]
@@ -96,16 +105,37 @@ NOTE = (
 )
 
 
-def header(local_path: pathlib.Path) -> str:
+# The header records a digest of the body under it, so a later run can tell this script's own output from a hand edit.
+DIGEST_FIELD = re.compile(r" body=([0-9a-f]{16}) -->")
+
+
+def header(local_path: pathlib.Path, digest: str) -> str:
     comment = (
         f"{WRITER_MARKER}, which rewrites this whole file on every run. "
-        f"Put host-specific content in {local_path}, appended below. -->"
+        f"Put host-specific content in {local_path}, appended below. "
+        f"Edits are backed up first. body={digest} -->"
     )
     return f"{comment}\n\n{NOTE}"
 
 
+def body_of(text: str) -> str | None:
+    """Everything after the header comment and the note, or None where the file has no such shape."""
+    parts = text.split("\n\n", 2)
+    return parts[2] if len(parts) == 3 else None
+
+
+def render(kit: types.ModuleType, local_path: pathlib.Path, local_text: str) -> str:
+    """The file this script writes, its header carrying the digest of the body the kit renders."""
+    draft = kit.render_instructions(local_path, local_text, header=header(local_path, "0" * 16))
+    body = body_of(draft)
+    assert body is not None
+    return kit.render_instructions(
+        local_path, local_text, header=header(local_path, kit.text_digest(body))
+    )
+
+
 def read_state(kit: types.ModuleType, agent: Agent, rendered: str) -> tuple[str, bytes | None, str]:
-    """The agent's file as (state, raw bytes, reason), the state being CURRENT, STALE, or ABSENT."""
+    """The agent's file as (state, raw bytes, reason), the state being CURRENT, STALE, EDITED, or ABSENT."""
     try:
         raw = kit.read_regular_file(agent.target)
     except FileNotFoundError:
@@ -116,21 +146,44 @@ def read_state(kit: types.ModuleType, agent: Agent, rendered: str) -> tuple[str,
         return "STALE", None, f"{agent.target} is not a regular file"
     if kit.normalized(raw.decode("utf-8", errors="replace")) == rendered:
         return "CURRENT", raw, ""
-    if raw.startswith(WRITER_MARKER.encode("utf-8")):
+    if not raw.startswith(WRITER_MARKER.encode("utf-8")):
+        return "STALE", raw, "not written by this script, so a write backs it up first"
+    text = kit.normalized(raw.decode("utf-8", errors="replace"))
+    body = body_of(text)
+    held = DIGEST_FIELD.search(text.split("\n", 1)[0])
+    if held is not None:
+        # A digest that matches its own body means nothing changed since this script wrote it.
+        edited = body is None or kit.text_digest(body) != held.group(1)
+    else:
+        # Written by a release that recorded no digest.
+        # The reading chosen is that only a body differing from today's render is an edit.
+        edited = body is None or body != body_of(rendered)
+    if edited:
         return (
-            "STALE",
+            "EDITED",
             raw,
-            "this script's own output, and the rules or the host-local file have changed",
+            "changed since this script wrote it, the next run backs it up and rewrites it",
         )
-    return "STALE", raw, "not written by this script, so a write backs it up first"
+    return (
+        "STALE",
+        raw,
+        "this script's own output, and the rules or the host-local file have changed",
+    )
+
+
+def shadow(agent: Agent) -> str | None:
+    """The warning where the agent reads an override file instead of the target, else None."""
+    if agent.override is not None and (agent.override.exists() or agent.override.is_symlink()):
+        return f"{agent.override.name} takes precedence, so Codex does not read these rules"
+    return None
 
 
 def write_agent(
-    kit: types.ModuleType, agent: Agent, rendered: str, raw: bytes | None, dry_run: bool
+    kit: types.ModuleType, agent: Agent, rendered: str, raw: bytes | None, state: str, dry_run: bool
 ) -> int:
-    """Write one agent's file, backing up a prior file this script did not write. Returns 0 or 1."""
+    """Write one agent's file, backing up a prior file that is not this script's unedited output. Returns 0 or 1."""
     ours = raw is not None and raw.startswith(WRITER_MARKER.encode("utf-8"))
-    backup = raw is not None and not ours
+    backup = raw is not None and (not ours or state == "EDITED")
     if dry_run:
         verb = "updated" if raw is not None else "written"
         note = ", the prior file backed up first" if backup else ""
@@ -182,14 +235,18 @@ def run(args: argparse.Namespace) -> int:
     if problem:
         sys.stderr.write(f"Nothing was written: {problem}.\n")
         return 1
-    rendered = kit.render_instructions(local_path, local_text, header=header(local_path))
+    rendered = render(kit, local_path, local_text)
 
     status = 0
     for agent in wanted:
         state, raw, reason = read_state(kit, agent, rendered)
+        warning = shadow(agent)
         if args.report:
             print(f"  {agent.name}: {state} {agent.target}" + (f" ({reason})" if reason else ""))
             if state != "CURRENT":
+                status = 1
+            if warning is not None:
+                print(f"  {agent.name}: SHADOWED: {warning}")
                 status = 1
         elif state == "CURRENT":
             print(f"  {agent.name}: {agent.target} already current")
@@ -198,8 +255,10 @@ def run(args: argparse.Namespace) -> int:
             # A write would fail or swallow, so it is refused.
             sys.stderr.write(f"{agent.name}: {reason}. Move it aside and re-run.\n")
             status = 1
-        elif write_agent(kit, agent, rendered, raw, args.dry_run):
+        elif write_agent(kit, agent, rendered, raw, state, args.dry_run):
             status = 1
+        if warning is not None and not args.report:
+            print(f"  {agent.name}: SHADOWED: {warning}")
     return status
 
 

@@ -318,16 +318,52 @@ class TestWriting(Case):
         self.assertIn("global_rules.py", target.read_text(encoding="utf-8"))
         self.assertIn("backed up", result.stdout)
 
-    def test_an_older_render_of_this_script_is_replaced_without_a_backup(self) -> None:
+    def test_an_unedited_file_whose_rules_changed_is_rewritten_without_a_backup(self) -> None:
         self.assertEqual(self.run_script().returncode, 0)
-        target = self.codex / "AGENTS.md"
-        target.write_text(
-            target.read_text(encoding="utf-8").replace("\n", "\nstale line\n", 1), encoding="utf-8"
-        )
+        self.local.write_text("A constructed new note.\n", encoding="utf-8")
         result = self.run_script("--agent", "codex")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(list(self.codex.glob("*.bak")), [])
-        self.assertNotIn("stale line", target.read_text(encoding="utf-8"))
+        self.assertIn(
+            "A constructed new note.", (self.codex / "AGENTS.md").read_text(encoding="utf-8")
+        )
+
+    def test_a_hand_edit_below_the_header_is_backed_up_and_rewritten(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        target = self.codex / "AGENTS.md"
+        edited = target.read_text(encoding="utf-8") + "\nA constructed hand edit.\n"
+        target.write_text(edited, encoding="utf-8")
+        result = self.run_script("--agent", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        backups = list(self.codex.glob("AGENTS.md.*.bak"))
+        self.assertEqual(len(backups), 1, result.stdout)
+        self.assertEqual(backups[0].read_text(encoding="utf-8"), edited)
+        self.assertNotIn("hand edit", target.read_text(encoding="utf-8"))
+
+    def test_a_file_from_a_release_with_no_digest_is_an_edit_only_if_its_body_differs(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        target = self.codex / "AGENTS.md"
+        text = target.read_text(encoding="utf-8")
+        first, rest = text.split("\n", 1)
+        stripped = first.replace(" Edits are backed up first.", "")
+        stripped = stripped[: stripped.index(" body=")] + " -->"
+        target.write_text(stripped + "\n" + rest, encoding="utf-8")
+        same_body = self.run_script("--agent", "codex")
+        self.assertEqual(same_body.returncode, 0, same_body.stderr)
+        self.assertEqual(list(self.codex.glob("*.bak")), [])
+        target.write_text(stripped + "\n" + rest + "\nA constructed edit.\n", encoding="utf-8")
+        self.assertEqual(self.run_script("--agent", "codex").returncode, 0)
+        self.assertEqual(len(list(self.codex.glob("AGENTS.md.*.bak"))), 1)
+
+    def test_a_dry_run_says_an_edited_file_would_be_backed_up_and_changes_nothing(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        target = self.codex / "AGENTS.md"
+        target.write_text(target.read_text(encoding="utf-8") + "edit\n", encoding="utf-8")
+        before = target.read_bytes()
+        result = self.run_script("--dry-run", "--agent", "codex")
+        self.assertIn("the prior file backed up first", result.stdout)
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(list(self.codex.glob("*.bak")), [])
 
     def test_a_crlf_file_keeps_its_line_endings(self) -> None:
         target = self.codex / "AGENTS.md"
@@ -362,6 +398,62 @@ class TestWriting(Case):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.codex / "AGENTS.md").is_symlink())
         self.assertIn("global_rules.py", destination.read_text(encoding="utf-8"))
+
+
+class TestDigest(Case):
+    def test_the_digest_in_the_header_round_trips_to_the_body(self) -> None:
+        self.install_both()
+        self.assertEqual(self.run_script().returncode, 0)
+        kit = global_rules.load_kit()
+        text = (self.codex / "AGENTS.md").read_text(encoding="utf-8")
+        held = global_rules.DIGEST_FIELD.search(text.split("\n", 1)[0])
+        self.assertIsNotNone(held)
+        body = global_rules.body_of(text)
+        assert held is not None and body is not None
+        self.assertEqual(held.group(1), kit.text_digest(body))
+
+    def test_the_claude_render_is_unchanged_by_the_digest(self) -> None:
+        kit = global_rules.load_kit()
+        with mock.patch.dict(os.environ, {"AGENT_FLEET_LOCAL_INSTRUCTIONS": str(self.local)}):
+            claude = kit.render_instructions(self.local, "")
+        self.assertNotIn("body=", claude)
+
+
+class TestShadowedByOverride(Case):
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_both()
+        self.override = self.codex / "AGENTS.override.md"
+
+    def test_the_report_calls_a_current_file_shadowed_and_not_current(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        self.override.write_text("A constructed override.\n", encoding="utf-8")
+        result = self.run_script("--report", "--agent", "codex")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("CURRENT", result.stdout)
+        self.assertIn(
+            "SHADOWED: AGENTS.override.md takes precedence, so Codex does not read these rules",
+            result.stdout,
+        )
+
+    def test_the_setup_writes_agents_md_warns_and_leaves_the_override_alone(self) -> None:
+        self.override.write_text("A constructed override.\n", encoding="utf-8")
+        result = self.run_script("--agent", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.codex / "AGENTS.md").is_file())
+        self.assertIn("SHADOWED: AGENTS.override.md takes precedence", result.stdout)
+        self.assertEqual(self.override.read_text(encoding="utf-8"), "A constructed override.\n")
+
+    def test_opencode_is_never_shadowed(self) -> None:
+        (self.opencode / "AGENTS.override.md").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.run_script("--agent", "opencode").returncode, 0)
+        result = self.run_script("--report", "--agent", "opencode")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("SHADOWED", result.stdout)
+
+    def test_no_override_means_no_warning(self) -> None:
+        result = self.run_script("--agent", "codex")
+        self.assertNotIn("SHADOWED", result.stdout)
 
 
 class TestDryRun(Case):
@@ -416,6 +508,16 @@ class TestReport(Case):
         self.assertEqual(result.returncode, 1)
         self.assertIn("STALE", result.stdout)
         self.assertIn("backs it up first", result.stdout)
+
+    def test_a_hand_edit_reports_edited_not_the_false_rules_changed_reason(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        target = self.codex / "AGENTS.md"
+        target.write_text(target.read_text(encoding="utf-8") + "edit\n", encoding="utf-8")
+        result = self.run_script("--report", "--agent", "codex")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("EDITED", result.stdout)
+        self.assertIn("changed since this script wrote it, the next run backs it up", result.stdout)
+        self.assertNotIn("the rules or the host-local file have changed", result.stdout)
 
     def test_one_stale_agent_fails_the_report_even_when_the_other_is_current(self) -> None:
         self.assertEqual(self.run_script().returncode, 0)
