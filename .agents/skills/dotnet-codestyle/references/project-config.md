@@ -1,6 +1,10 @@
 # .NET Project Configuration
 
-1. **Target framework**: .NET 10.0 (`<TargetFramework>net10.0</TargetFramework>`).
+1. **Target framework and SDK line**: .NET 10.0 (`<TargetFramework>net10.0</TargetFramework>`),
+   with the root `global.json` `sdk` block on the same line (`"version": "10.0.100"`,
+   `"rollForward": "latestFeature"`), per `SKILL.md`'s "Central build and package configuration".
+   `LangVersion` stays unset, so the C# version follows the TFM. The TFM and the `sdk` major move
+   together, in one change.
 2. **AOT compatibility**: `<IsAotCompatible>true</IsAotCompatible>` unconditionally, and
    `<VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>` only in a
    `<PropertyGroup Condition="'$(PublishAot)' == 'true'">`. That group is placed in the `.csproj` after

@@ -6,7 +6,7 @@ description: >-
   language and naming conventions, XML documentation, analyzer suppression scope, the
   library-versus-application logging split, async and error-handling patterns, xUnit v3 and
   AwesomeAssertions testing, and AOT-compatible project configuration. Use this whenever writing,
-  reviewing, or editing a .cs file, a .csproj, Directory.Build.props, or Directory.Packages.props,
+  reviewing, or editing a .cs file, a .csproj, Directory.Build.props, Directory.Packages.props, or global.json,
   whenever choosing where to suppress an analyzer diagnostic, whenever a NuGet library needs to log
   without depending on Serilog directly, or whenever writing or reviewing an xUnit test. Triggers
   even when the task looks like a small local fix ("just silence this warning", "add a quick log
@@ -69,18 +69,52 @@ GOVERNANCE.md and README.md. That migration has nothing to do with code analysis
 Shared MSBuild configuration is centralized at the repository root, never duplicated per project:
 
 - **`Directory.Build.props`** carries the properties every project shares. Those are the analyzer set and
-  `TreatWarningsAsErrors` from the zero-warnings policy above, plus `LangVersion`,
-  `TargetFramework` where uniform, and any repo-wide build metadata. A `.csproj` carries only what
+  `TreatWarningsAsErrors` from the zero-warnings policy above, plus `TargetFramework` where
+  uniform, and any repo-wide build metadata. A `.csproj` carries only what
   is genuinely project-specific (`OutputType`, `IsPackable`, project references).
 - **`Directory.Packages.props`** owns central package management. It sets
   `ManagePackageVersionsCentrally` to `true` (in this file, not `Directory.Build.props`) and
   declares every dependency version once as a `PackageVersion` item. As a result, a `.csproj`'s
   `PackageReference` items are versionless. One file to review on a bump, one Dependabot surface,
   no version skew between projects.
+- **`global.json`** is required in every .NET repo. It selects the SDK line with an `sdk` block,
+  beside the `test` runner key an MTP-based test project needs (see Testing conventions below):
+
+  ```json
+  {
+      "sdk": {
+          "version": "10.0.100",
+          "rollForward": "latestFeature",
+          "allowPrerelease": false
+      },
+      "test": {
+          "runner": "Microsoft.Testing.Platform"
+      }
+  }
+  ```
+
+  With `latestFeature`, `10.0.100` means the newest installed 10.0.x SDK. It is a floor on the
+  line rather than a pin to one release, so it never goes stale and is not Dependabot-managed. Its
+  major moves only with the TFM (`11.0.100` alongside `net11.0`), the same deliberate bump as
+  `setup-dotnet`'s `dotnet-version`. Without the block, the `dotnet` host picks the newest
+  installed SDK. A host carrying a newer major than CI then runs `dotnet format`, `dotnet build`,
+  and `dotnet test` on a different SDK than CI does. A host with no SDK on the line fails with a clear
+  "compatible SDK not found" error rather than silently drifting.
+
+**`LangVersion` is left unset**, in every project and props file, so the C# version follows the
+TFM (`net10.0` gives C# 14 under any SDK). Never set it to `latest`, `latestMajor`, or `preview`.
+Those float with the installed SDK's compiler. A newer SDK then has IDE0028 suggest a syntax the
+older SDK cannot compile (CS8652), so no single source text passes
+`dotnet format style --verify-no-changes --severity=info` on both. `AnalysisLevel` stays
+`latest-all` with `AnalysisMode` `All`, since it is not what floats the syntax. The `sdk` block
+and an unset `LangVersion` together guarantee the same SDK major and C# version locally and in CI.
+Analyzer output can still differ between feature bands on one line, such as a distro-packaged
+1xx SDK against CI's latest band.
 
 A repo whose projects still carry per-project analyzer settings or versioned `PackageReference`
 items is drifted. Move the shared property or version up to the root file rather than editing it
-in place.
+in place. A repo with no `global.json` or with a `LangVersion` set anywhere is drifted too. So is
+an `sdk` block whose major differs from the TFM or whose `rollForward` is not `latestFeature`.
 
 ### Build tasks
 
