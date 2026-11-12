@@ -1067,7 +1067,9 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
         body = (
             f"$link = '{protected / 'nodejs'}'\n"
             "$real = Resolve-FinalPath -Path $link\n"
-            f"'resolved=' + ($real -eq '{appdata}')\n"
+            # Windows may spell the resolved target differently from the temp path Python made, such as in 8.3 form.
+            # So the test asks only that it lands in the user-writable directory the link points at.
+            "'resolved=' + (($real -replace '/', '\\').TrimEnd('\\') -like '*\\appdata\\nvm')\n"
             f"'link-protected=' + (Test-ProtectedPath -Directory $link -Roots @('{protected}'))\n"
             f"'target-protected=' + (Test-ProtectedPath -Directory $real -Roots @('{protected}'))\n"
         )
