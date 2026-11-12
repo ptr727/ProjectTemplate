@@ -345,6 +345,39 @@ def tagged_auto_mode(data):
     return out
 
 
+def defaults_first(held):
+    """Whether `held` starts with the built-in splice and carries it exactly once."""
+    return held[:1] == [AUTO_MODE_DEFAULTS] and held.count(AUTO_MODE_DEFAULTS) == 1
+
+
+def defaults_reason(held):
+    """Why a list failing `defaults_first` fails, worded for what it is.
+
+    Claude Code splices its built-ins in wherever `$defaults` sits, so only a list with none replaces them.
+    A misplaced or repeated one keeps them and breaks only this kit's own rule.
+    """
+    if AUTO_MODE_DEFAULTS not in held:
+        return f"has no {AUTO_MODE_DEFAULTS}, so it replaces Claude Code's built-in rules"
+    return f"has {AUTO_MODE_DEFAULTS} but not first, exactly once, as this kit requires"
+
+
+def put_defaults_first(held):
+    """Make `$defaults` the first entry of `held` in place, once, and say what changed (or "" where nothing did).
+
+    A list without the splice replaces Claude Code's built-in rules, which for a deny list drops its built-in denials.
+    Every other entry keeps its exact text and its relative order.
+    """
+    if defaults_first(held):
+        return ""
+    count = held.count(AUTO_MODE_DEFAULTS)
+    held[:] = [AUTO_MODE_DEFAULTS, *(e for e in held if e != AUTO_MODE_DEFAULTS)]
+    if count == 0:
+        return "added first"
+    if count == 1:
+        return "moved first"
+    return f"kept once, first, with {count - 1} duplicate{'s' if count > 2 else ''} removed"
+
+
 def auto_mode_bytes(lists):
     """The digest input for a set of autoMode lists, identical on the payload and installed sides."""
     return json.dumps([lists.get(name, []) for name in AUTO_MODE_LISTS]).encode("utf-8")
@@ -1390,6 +1423,12 @@ def registration_problems(claude_home):
                     f"the autoMode.{name} entries tagged {AUTO_MODE_TAG.strip()} differ from what "
                     "this checkout writes"
                 )
+        # Read live from settings.json rather than folded into the payload digest, which covers only what this kit writes.
+        auto = data.get("autoMode")
+        for name in AUTO_MODE_LISTS:
+            held = auto.get(name) if isinstance(auto, dict) else None
+            if isinstance(held, list) and not defaults_first(held):
+                out.append(f"autoMode.{name} {defaults_reason(held)}")
     return out
 
 
@@ -1465,7 +1504,16 @@ def report(claude_home):
     # The payload digest decides currency, so neither source shape below is a problem in itself.
     held_source = stamp.get("source", {})
     if held_source.get("vcs") == "archive":
-        print("Note: installed from a fetched archive, which has no checkout to compare against.")
+        recorded = held_source.get("commit")
+        # With a commit the stamp is comparable, so the note names it.
+        # Only a commit-less archive has nothing to compare.
+        if isinstance(recorded, str) and recorded:
+            print(f"Note: installed from a fetched archive at {recorded[:7]}.")
+        else:
+            print(
+                "Note: installed from a fetched archive that recorded no commit, "
+                "so the stamp cannot say which hub revision it holds."
+            )
     elif held_source.get("vcs") == "none":
         print(
             "Note: installed from a tree that named no commit, so the stamp cannot say which hub revision it holds."
@@ -1493,11 +1541,7 @@ def report(claude_home):
         held = auto.get(name) if isinstance(auto, dict) else None
         if isinstance(held, list):
             untagged = sum(1 for e in held if not tagged(e) and e != AUTO_MODE_DEFAULTS)
-            splice = (
-                f"with {AUTO_MODE_DEFAULTS}"
-                if AUTO_MODE_DEFAULTS in held
-                else f"without {AUTO_MODE_DEFAULTS}, so it replaces Claude Code's built-in rules"
-            )
+            splice = f"with {AUTO_MODE_DEFAULTS}" if defaults_first(held) else defaults_reason(held)
             print(f"autoMode.{name}: {untagged} untagged entries, {splice}")
     foreign = foreign_prefix(settings_data)
     env_block = settings_data.get("env") if isinstance(settings_data, dict) else None
@@ -1934,7 +1978,7 @@ def main():
         done.append(f"permission {rule}: {action}")
 
     # 4. The autoMode rules, stripped by their tag and appended again.
-    # A list the kit creates splices in the built-ins, since a list without the splice replaces them.
+    # A list the kit creates splices in the built-ins, and a list that exists is made to lead with the splice.
     for name, rules in owned_auto_mode().items():
         auto = data.get("autoMode", {})
         held = auto.get(name)
@@ -1954,11 +1998,17 @@ def main():
             action = "updated" if dropped else "added"
         if rules or dropped:
             done.append(f"autoMode.{name} rules tagged {AUTO_MODE_TAG.strip()}: {action}")
-        if rules and AUTO_MODE_DEFAULTS not in held:
-            done.append(
-                f"autoMode.{name} holds no {AUTO_MODE_DEFAULTS}, so it replaces Claude Code's "
-                "built-in rules. This kit leaves that choice as it stands"
-            )
+        # Every list that exists leads with the splice, since one without it silently replaces the built-in rules.
+        change = put_defaults_first(held)
+        if change:
+            others = len(held) - 1
+            if change == "added first":
+                done.append(
+                    f"autoMode.{name}: {AUTO_MODE_DEFAULTS} {change}, so Claude Code's built-in rules "
+                    f"apply alongside this host's {others} entr{'y' if others == 1 else 'ies'}"
+                )
+            else:
+                done.append(f"autoMode.{name}: {AUTO_MODE_DEFAULTS} {change}, as this kit requires")
 
     # Reported after the write rather than as each edit is made, since both edits share one write.
     # A line printed before it claims a change that a later failure would leave unmade.

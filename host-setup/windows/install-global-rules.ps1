@@ -31,7 +31,8 @@ Usage: install-global-rules.ps1 [options]
 
 Writes the fleet's host-wide agent rules to the global instruction file of each of Codex and
 opencode that is installed for this user, by running host-setup\agent-safety\global_rules.py from
-this tree. It writes rules and registers no hook.
+this tree. An agent counts as installed when its CLI is on PATH or its configuration
+directory exists. It writes rules and registers no hook.
 
 Actions, name one, default install:
   -r, -Report       Read-only: is each file current?
