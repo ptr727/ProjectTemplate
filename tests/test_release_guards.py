@@ -2398,7 +2398,11 @@ class DotnetSdkLineCase(unittest.TestCase):
         """A comment is valid to the dotnet host and not to jq, so the fallback names the cause rather than failing."""
         commented = '// the fleet line\n{"sdk": {"version": "11.0.100"}}'
         self.assertEqual(self.select(commented), [f"dotnet-version={baseline_line()[0]}.x"])
-        self.assertIn("::warning::jq could not read global.json", self.last_stdout)
+        self.assertIn(
+            f"::warning::jq could not read global.json (exit 5), so this installs the"
+            f" {baseline_line()[0]}.x fallback",
+            self.last_stdout,
+        )
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.

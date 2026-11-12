@@ -13,6 +13,7 @@ runs:
       shell: bash
       run: |
         set -Eeuo pipefail
+        fallback=10.x
         status=1
         if [[ -f global.json ]]; then
           status=0
@@ -24,9 +25,9 @@ runs:
           # The dotnet host accepts a global.json jq cannot read, such as one holding a comment, so this warns rather than fails.
           # A wrong line then fails the first dotnet command loudly, and this warning names the cause.
           if [[ $status -gt 1 ]]; then
-            echo "::warning::jq could not read global.json (exit $status), so this installs the 10.x fallback rather than the line it selects."
+            echo "::warning::jq could not read global.json (exit $status), so this installs the $fallback fallback rather than the line it selects."
           fi
-          echo "dotnet-version=10.x" >> "$GITHUB_OUTPUT"
+          echo "dotnet-version=$fallback" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Setup .NET SDK step

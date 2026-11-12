@@ -949,7 +949,11 @@ dotnet_install() {
     local -a packages=()
     if [[ -z $fleet ]]; then
         # The run carries on, so a stand-up on a distro that lags the fleet line still completes, and the warning and report name the gap.
-        warn "The feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so a fleet .NET repository selecting it will not build here. Adding Microsoft's feed beside the distro's .NET packages is the mixing that breaks a host, so install that line by hand from a source that does not mix with them"
+        if [[ $(dotnet_source) == "packages.microsoft.com" ]]; then
+            warn "Microsoft's feed carries no dotnet-sdk-$DOTNET_FLEET_LINE for $DISTRO_ID $DISTRO_VERSION, so a fleet .NET repository selecting it will not build here"
+        else
+            warn "The distro feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so a fleet .NET repository selecting it will not build here. Adding Microsoft's feed beside the distro's .NET packages is the mixing that breaks a host, so install that line by hand from a source that does not mix with them"
+        fi
     else
         packages+=("$fleet")
     fi
@@ -1210,7 +1214,7 @@ tool_note() {
                 local have want
                 have=$(apt_installed_version "$latest")
                 want=$(apt_candidate_version "$latest")
-                if [[ -n $have && -n $want && $have != "$want" ]]; then
+                if [[ -n $have && $(tool_status "$have" "$want") == "outdated" ]]; then
                     note "dotnet" "$latest is at $have and the feed carries $want, --upgrade moves it"
                 fi
             fi
