@@ -113,9 +113,9 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
   rather than silently drifting. Install the line's SDK beside the newer one.
 
-**`LangVersion` is left unset** in every props file and every project targeting a .NET TFM. The
-C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it anywhere to
-`latest`, `latestMajor`, or `preview`. Those float with the installed SDK's compiler. A newer
+**`LangVersion` is left unset** in every `.props` or `.targets` file and every project targeting a
+.NET TFM. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it
+anywhere to `latest`, `latestMajor`, or `preview`. Those float with the installed SDK's compiler. A newer
 SDK then has IDE0028 suggest a syntax the older SDK cannot compile (CS8652), so no single source
 text passes `dotnet format style --verify-no-changes --severity=info` on both. A `netstandard`
 analyzer or source-generator project is the one exception to leaving it unset. Unset, it compiles
