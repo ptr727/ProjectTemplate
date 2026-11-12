@@ -10,6 +10,8 @@
 # The same holds for an npm prefix under Program Files or ProgramData that a normal user cannot write, once a link there is followed.
 # The npm on PATH owns a tool only where the prefix it reports holds it, rather than where a path merely looks like npm's.
 # The package name is a per-tool record in this file (Get-NpmPackage), because a manager's shim does not always carry it.
+# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
@@ -341,26 +343,71 @@ function Test-NpmOwnership {
     return ($directory -ieq $prefix -or $where.StartsWith("$prefix\node_modules\", [StringComparison]::OrdinalIgnoreCase))
 }
 
+# The scoop roots this script knows, the user's and the global one.
+# SCOOP else the profile's scoop, and SCOOP_GLOBAL else the scoop under ProgramData.
+function Get-ScoopRoot {
+    $roots = @([pscustomobject]@{ Root = $(if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }); Global = $false })
+    $global = if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { $null }
+    if ($global) { $roots += [pscustomobject]@{ Root = $global; Global = $true } }
+    return $roots
+}
+
+# Whether a path sits under the shims or apps directory of a scoop root this script knows.
+function Test-UnderScoop {
+    param([string]$Path)
+    $where = $Path -replace '/', '\'
+    foreach ($entry in (Get-ScoopRoot)) {
+        $root = ($entry.Root -replace '/', '\').TrimEnd('\')
+        foreach ($sub in 'shims', 'apps') {
+            if ($where.StartsWith("$root\$sub\", [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
+    }
+    return $false
+}
+
 # The scoop app a path belongs to, read from directly under a scoop root's own apps directory, or nothing for any other path.
-# The roots are SCOOP (else the profile's scoop) and SCOOP_GLOBAL (else the scoop under ProgramData).
 # A first apps segment anywhere in the path would take a directory a user happened to name Apps.
+# Global says whether the app sits under the global root, which needs an elevated shell to update.
 function Get-ScoopApp {
     param([string]$Path)
-    $roots = @(
-        $(if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }),
-        $(if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' })
-    )
     # Scoop prints a per-user path with a leading tilde, so it is expanded to the profile before the roots are compared.
     if ($Path -match '^~[\\/]') { $Path = Join-Path $HOME $Path.Substring(2) }
     $where = $Path -replace '/', '\'
-    foreach ($root in ($roots | Where-Object { $_ })) {
-        $apps = (($root -replace '/', '\').TrimEnd('\')) + '\apps\'
+    foreach ($entry in (Get-ScoopRoot)) {
+        $apps = (($entry.Root -replace '/', '\').TrimEnd('\')) + '\apps\'
         if ($where.StartsWith($apps, [StringComparison]::OrdinalIgnoreCase)) {
             $name = ($where.Substring($apps.Length) -split '\\')[0]
-            if ($name) { return $name }
+            if ($name) { return [pscustomobject]@{ App = $name; Global = $entry.Global } }
         }
     }
     return $null
+}
+
+# Whether the npm package a tool is recorded under is the one that owns its files.
+# The package must be installed under the prefix, and the file must sit in it or a shim must name its directory.
+# This keeps a fork that provides the same command from being replaced by the recorded package.
+function Test-NpmPackageOwnership {
+    param([string]$Path, [string]$Package)
+    $prefix = (Resolve-FinalPath -Path (Get-NpmPrefix)).TrimEnd('\', '/')
+    $directory = Join-Path (Join-Path $prefix 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath (Join-Path $directory 'package.json') -PathType Leaf)) { return $false }
+    $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
+    if ($resolved.StartsWith((($directory -replace '/', '\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    # A shim is a script beside the package rather than a link into it, so its text must name the package's directory.
+    $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    if (-not $text) { return $false }
+    $needle = 'node_modules\' + ($Package -replace '/', '\') + '\'
+    return (($text -replace '/', '\').IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+
+# Whether the tool sits inside bun's global package for the recorded package.
+function Test-BunPackageOwnership {
+    param([string]$Path, [string]$Package)
+    $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
+    $directory = Join-Path (Join-Path (Join-Path (Join-Path $bun 'install') 'global') 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
+    $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
+    $inside = (Resolve-FinalPath -Path $directory) -replace '/', '\'
+    return $resolved.StartsWith($inside.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
 }
 
 # What an upgrade does for a tool a package manager owns.
@@ -379,6 +426,10 @@ function Get-ManagerPlan {
                 $plan.Why = "$Manager is not on PATH, so run: $Manager install -g $pkg@latest"
             } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
                 $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
+            } elseif ($Manager -eq 'npm' -and -not (Test-NpmPackageOwnership -Path $Path -Package $pkg)) {
+                $plan.Why = "its files at $(Hide-Home -Path $Path) are not the npm package $pkg, so that package does not own it, upgrade it where it was installed"
+            } elseif ($Manager -eq 'bun' -and -not (Test-BunPackageOwnership -Path $Path -Package $pkg)) {
+                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
             } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmPrefix))) {
                 $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: npm install -g $pkg@latest"
             } else {
@@ -393,9 +444,13 @@ function Get-ManagerPlan {
                 $which = Invoke-Captured -Command 'scoop' -Arguments @('which', $Tool) -TimeoutSec $script:READ_TIMEOUT
                 if ($which.ExitCode -eq 0) { $app = Get-ScoopApp -Path $which.Output.Trim() }
             }
-            if ($app) {
+            if ($app -and $app.App -in 'nodejs', 'nodejs-lts') {
+                $plan.Why = "it sits inside scoop's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
+            } elseif ($app -and $app.Global) {
+                $plan.Why = "scoop's global apps need an elevated shell and this script never elevates, so run in one: scoop update $($app.App) --global"
+            } elseif ($app) {
                 $plan.Command = 'scoop'
-                $plan.Arguments = @('update', $app)
+                $plan.Arguments = @('update', $app.App)
             } else {
                 $plan.Why = "scoop's name for $Tool could not be read, so run scoop update with it by hand"
             }
@@ -430,10 +485,11 @@ function Get-ToolManager {
         # The path shape stays as a fallback so a copy npm cannot confirm is still never given the tool's own updater.
         if (Test-NpmOwnership -Path $candidate) { return 'npm' }
         if ($candidate -like '*\WinGet\Packages\*' -or $candidate -like '*\Microsoft\WinGet\Links\*') { return 'winget' }
-        if ($candidate -like '*\scoop\*') { return 'scoop' }
+        if ((Test-UnderScoop -Path $candidate) -or $candidate -like '*\scoop\*') { return 'scoop' }
         if ($candidate -like '*\chocolatey\*') { return 'choco' }
-        if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
+        # A bun global package also sits under a node_modules, so bun is read first, as on Linux.
         if ($candidate -like '*\.bun\*') { return 'bun' }
+        if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
     }
     return 'self'
 }

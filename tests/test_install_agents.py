@@ -223,7 +223,17 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(self.called(), ["claude update", "npm install -g @openai/codex@latest"])
 
     def test_bun_is_upgraded_through_bun(self) -> None:
-        self.stub("opencode", "1.18.18", where=self.home / ".bun" / "bin")
+        self.stub(
+            "opencode",
+            "1.18.18",
+            where=self.home
+            / ".bun"
+            / "install"
+            / "global"
+            / "node_modules"
+            / "opencode-ai"
+            / "bin",
+        )
         self.stub("bun", "1.1.0")
         result = self.run_script("--upgrade", "--yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -269,6 +279,69 @@ class TestInstallAgents(unittest.TestCase):
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), ["npm install -g @openai/codex@latest"])
+
+    def test_a_fork_with_the_same_command_under_the_npm_root_is_reported_not_run(self) -> None:
+        root = self.dir / "lib" / "node_modules"
+        self.stub("codex", "codex-cli 9.9.9", where=root / "codex-fork" / "bin")
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("--upgrade", "--yes", "codex")
+        self.assertEqual(self.called(), [])
+        self.assertIn("are not under the npm package @openai/codex", result.stdout)
+
+    def test_a_fork_under_bun_is_reported_not_run(self) -> None:
+        self.stub(
+            "opencode",
+            "1.0.0",
+            where=self.home
+            / ".bun"
+            / "install"
+            / "global"
+            / "node_modules"
+            / "opencode-fork"
+            / "bin",
+        )
+        self.stub("bun", "1.1.0")
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(self.called(), [])
+        self.assertIn("not under bun's global package opencode-ai", result.stdout)
+
+    def test_an_agent_inside_a_homebrew_node_the_npm_does_not_own_is_reported_not_run(self) -> None:
+        self.stub(
+            "codex",
+            "1.0.0",
+            where=self.dir
+            / "linuxbrew"
+            / "Cellar"
+            / "node@20"
+            / "20.1.0"
+            / "lib"
+            / "node_modules"
+            / "@openai"
+            / "codex"
+            / "bin",
+        )
+        self.stub("brew", "Homebrew 4.0.0")
+        result = self.run_script("--upgrade", "--yes", "codex")
+        self.assertEqual(self.called(), [])
+        self.assertIn(
+            "it sits inside Homebrew's Node, and the npm on PATH does not own it", result.stdout
+        )
+
+    def test_an_agent_inside_a_mise_node_the_npm_does_not_own_is_reported_not_run(self) -> None:
+        install = self.dir / "mise" / "installs" / "node" / "20.1.0"
+        self.stub(
+            "codex", "1.0.0", where=install / "lib" / "node_modules" / "@openai" / "codex" / "bin"
+        )
+        (self.dir / "mise_ls.json").write_text(
+            json.dumps({"core:node": [{"install_path": str(install)}]}), encoding="utf-8"
+        )
+        self.stub("mise", "mise 2024.1.1")
+        result = self.run_script("--upgrade", "--yes", "codex")
+        self.assertEqual(self.called(), [])
+        self.assertIn(
+            "it sits inside mise's Node, and the npm on PATH does not own it", result.stdout
+        )
 
     def mise_layout(self, listed: bool = True) -> Path:
         """An npm-backend tool laid out as mise does, a node_modules inside its install directory, and mise's listing of it."""
@@ -490,6 +563,15 @@ class TestInstallAgentsWindows(unittest.TestCase):
         path.chmod(0o755)
         return path
 
+    def own_npm(self, shim: Path, prefix: Path, package: str) -> Path:
+        """Installs `package` under the prefix and has the shim name its directory, as npm's own shim does."""
+        directory = prefix / "node_modules" / package
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "package.json").write_text("{}", encoding="utf-8")
+        with shim.open("a", encoding="utf-8") as handle:
+            handle.write(f"\n# node_modules/{package}/bin/cli.js\n")
+        return shim
+
     def run_script(
         self,
         *arguments: str,
@@ -547,7 +629,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_node_modules_path_reads_as_npm_and_is_upgraded_through_npm(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
-        self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -557,7 +639,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
-        self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "-DryRun", "codex", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -567,7 +649,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_the_report_names_the_command_and_not_the_false_claim(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
-        self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Report", "codex", extra_path=npm_bin)
         self.assertIn("-Upgrade runs: npm install -g @openai/codex@latest", result.stdout)
@@ -576,7 +658,11 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
         prefix = self.dir / "npmprefix"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
-        self.stub("codex", "codex-cli 0.1.0", prefix / "node_modules" / ".bin")
+        self.own_npm(
+            self.stub("codex", "codex-cli 0.1.0", prefix / "node_modules" / ".bin"),
+            prefix,
+            "@openai/codex",
+        )
         self.stub("npm", "npm 10.0.0")
         prefix.chmod(0o555)
         self.addCleanup(prefix.chmod, 0o755)
@@ -590,7 +676,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_a_failing_manager_is_reported_and_the_other_tools_still_run(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
-        self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         failing = self.bin / "npm"
         failing.write_text(
             '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\n[[ $1 == install ]] && exit 3\ncat "$STUB_DIR/npm_root" "$STUB_DIR/npm_prefix" 2>/dev/null\nexit 0\n',
@@ -604,7 +690,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("claude update", self.recorded())
 
     def test_bun_is_upgraded_through_bun(self) -> None:
-        bun_bin = self.dir / ".bun" / "bin"
+        bun_bin = self.home / ".bun" / "install" / "global" / "node_modules" / "opencode-ai" / "bin"
         self.stub("opencode", "1.0.0", bun_bin)
         self.stub("bun", "1.1.0")
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=bun_bin)
@@ -640,6 +726,64 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("scoop update opencode", self.recorded())
 
+    def test_a_fork_under_the_npm_prefix_is_reported_not_run(self) -> None:
+        prefix = self.dir / "npmprefix"
+        (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
+        self.stub("codex", "codex-cli 9.9.9", prefix)
+        self.own_npm(prefix / "codex", prefix, "codex-fork")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=prefix)
+        self.assertNotIn("npm install", " ".join(self.recorded()))
+        self.assertIn("are not the npm package @openai/codex", result.stdout)
+
+    def test_a_fork_under_bun_is_reported_not_run(self) -> None:
+        fork = self.home / ".bun" / "install" / "global" / "node_modules" / "opencode-fork" / "bin"
+        self.stub("opencode", "1.0.0", fork)
+        self.stub("bun", "1.1.0")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=fork)
+        self.assertNotIn("bun install", " ".join(self.recorded()))
+        self.assertIn("not under bun's global package opencode-ai", result.stdout)
+
+    def test_a_global_scoop_app_is_reported_with_its_elevated_command(self) -> None:
+        glob = self.dir / "GlobalScoop"
+        shims = glob / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        self.scoop_which(f"{glob}/apps/opencode/current/opencode.exe")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "opencode", extra_path=shims, extra_env={"SCOOP_GLOBAL": str(glob)}
+        )
+        self.assertNotIn("scoop update", " ".join(self.recorded()))
+        self.assertIn(
+            "scoop's global apps need an elevated shell and this script never elevates, so run in one: scoop update opencode --global",
+            result.stdout,
+        )
+
+    def test_scoops_nodejs_app_is_never_updated_for_an_agent(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        self.scoop_which(f"{root}/apps/nodejs/current/bin/opencode.exe")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "opencode", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        self.assertNotIn("scoop update", " ".join(self.recorded()))
+        self.assertIn("it sits inside scoop's Node", result.stdout)
+
+    def test_a_configured_scoop_root_without_a_scoop_segment_is_still_scoop(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        result = self.run_script(
+            "-Report", "-Json", "opencode", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        self.assertEqual(json.loads(result.stdout)["tools"][0]["manager"], "scoop")
+        self.scoop_which(f"{root}/apps/opencode/current/opencode.exe")
+        upgraded = self.run_script(
+            "-Upgrade", "-Yes", "opencode", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        self.assertEqual(upgraded.returncode, 0, upgraded.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
+
     def test_a_scoop_path_outside_the_roots_apps_directory_is_reported_not_run(self) -> None:
         root = self.dir / "Apps" / "scoop"
         shims = root / "shims"
@@ -665,7 +809,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         # Scoop's real layout: npm's prefix is the persist directory, while PATH lists the linked current\bin.
         prefix = self.dir / "scoop" / "persist" / "nodejs" / "bin"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
-        self.stub("codex", "codex-cli 0.1.0", prefix)
+        self.own_npm(self.stub("codex", "codex-cli 0.1.0", prefix), prefix, "@openai/codex")
         version = self.dir / "scoop" / "apps" / "nodejs" / "22.0.0"
         version.mkdir(parents=True)
         (version / "bin").symlink_to(prefix, target_is_directory=True)

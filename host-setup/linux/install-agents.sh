@@ -10,6 +10,8 @@
 # Nix is declarative and apt is upgraded by upgrade-host.sh, so each is reported and nothing is run.
 # Nothing here elevates, so an npm prefix this user cannot write to is reported with its command and left.
 # The package name is a per-tool record in this file (npm_package), because a manager's files do not always carry it.
+# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
@@ -353,11 +355,23 @@ manager_plan() {
             PLAN_WHY="$manager is not on PATH, so run: $manager install -g $pkg@latest"
             return 0
         fi
+        # The recorded package must be the one that owns the file, so a fork providing the same command is never replaced by it.
+        if [[ $manager == "bun" ]]; then
+            dir=$(readlink -f -- "${BUN_INSTALL:-$HOME/.bun}/install/global/node_modules" 2>/dev/null) || dir=""
+            if [[ -z $dir || $real != "$dir/$pkg"/* ]]; then
+                PLAN_WHY="its files at $(hide_home "$real") are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
+                return 0
+            fi
+        fi
         if [[ $manager == "npm" ]]; then
             # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
             dir=$(npm_root)
             if [[ -z $dir || $real != "$dir"/* ]]; then
                 PLAN_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
+                return 0
+            fi
+            if [[ $real != "$dir/$pkg"/* ]]; then
+                PLAN_WHY="its files at $(hide_home "$real") are not under the npm package $pkg, so that package does not own it, upgrade it where it was installed"
                 return 0
             fi
             if [[ ! -w $dir ]]; then
@@ -376,6 +390,10 @@ manager_plan() {
         elif [[ $real == */Cellar/* ]]; then
             name="${real#*/Cellar/}"
             name="${name%%/*}"
+            if [[ $name == "node" || $name == node@* ]]; then
+                PLAN_WHY="it sits inside Homebrew's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
+                return 0
+            fi
             PLAN_CMD=(brew upgrade "$name")
         else
             PLAN_WHY="Homebrew's name for $tool could not be read from $(hide_home "$real"), so run brew upgrade with it by hand"
@@ -393,6 +411,13 @@ manager_plan() {
             PLAN_WHY="mise and jq must both be on PATH and mise's listing must hold an entry whose install path holds $(hide_home "$real"), and none does, so upgrade it with mise by hand"
             return 0
         fi
+        # A Node runtime is never upgraded for an agent in it, which would leave the agent behind in the old Node.
+        case "$name" in
+        node | core:node | nodejs)
+            PLAN_WHY="it sits inside mise's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
+            return 0
+            ;;
+        esac
         PLAN_CMD=(mise upgrade "$name")
         ;;
     esac
