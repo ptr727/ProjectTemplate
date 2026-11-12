@@ -168,7 +168,8 @@ class TestPresenceReason(Case):
         self.assertIn("(config directory present, no codex CLI on PATH)", result.stdout)
 
     def test_a_cli_on_path_prints_no_suffix(self) -> None:
-        cli = self.empty_bin / "codex"
+        # Windows finds a command on PATH only through a PATHEXT extension.
+        cli = self.empty_bin / ("codex.cmd" if os.name == "nt" else "codex")
         cli.write_text("#!/bin/sh\n", encoding="utf-8")
         cli.chmod(0o755)
         self.codex.mkdir()
