@@ -51,7 +51,8 @@ class Agent:
     command: str
     config_dir: pathlib.Path
     target: pathlib.Path
-    # A file the agent reads in place of the target whenever it exists, which this script never writes or deletes.
+    # A file the agent reads in place of the target whenever it exists and is not blank.
+    # This script never writes or deletes it.
     override: pathlib.Path | None = None
 
 
