@@ -408,6 +408,34 @@ class TestInstallAgents(unittest.TestCase):
         nix = self.plan("codex", "/nix/store/x/bin/codex", "nix")
         self.assertTrue(nix.startswith("|Nix is declarative, so update it where it is declared"))
 
+    def classify(self, path: str, npm_root: str) -> str:
+        """Runs the script's own tool_manager, with npm's global root fixed and main cut off so it can be sourced."""
+        body = SCRIPT.read_text(encoding="utf-8").rsplit('\nmain "$@"', 1)[0]
+        harness = self.dir / "classify.sh"
+        harness.write_text(
+            body + f"\nnpm_root() {{ printf '%s' '{npm_root}'; }}\ntool_manager '{path}'\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            ["bash", str(harness)],
+            capture_output=True, text=True, encoding="utf-8", check=False, timeout=30,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)},
+        )  # fmt: skip
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_an_npm_root_under_a_bun_directory_is_npms_and_not_buns(self) -> None:
+        root = "/opt/tools/.bun/npm/lib/node_modules"
+        self.assertEqual(self.classify(f"{root}/@openai/codex/bin/codex.js", root), "npm")
+
+    def test_a_bun_global_is_buns_when_npm_does_not_own_it(self) -> None:
+        path = "/opt/tools/.bun/install/global/node_modules/opencode-ai/bin/opencode"
+        self.assertEqual(self.classify(path, "/usr/lib/node_modules"), "bun")
+
+    def test_a_nix_store_node_modules_is_nixs_and_not_npms(self) -> None:
+        path = "/nix/store/abc-codex/lib/node_modules/@openai/codex/bin/codex.js"
+        self.assertEqual(self.classify(path, "/usr/lib/node_modules"), "nix")
+
     def test_install_names_what_it_installs(self) -> None:
         result = self.run_script("--install", "--yes")
         self.assertNotEqual(result.returncode, 0)

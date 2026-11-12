@@ -274,32 +274,28 @@ npm_root() {
 tool_manager() {
     local path="$1" real
     real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
-    case "$real" in
-    */.bun/*) printf 'bun' ;;
-    *)
-        # The npm on PATH is asked first, since an ordinary npm global can sit under a node that mise or Homebrew manages.
-        # Upgrading that node would leave the tool behind, so what npm holds is npm's whatever else the path looks like.
-        local root
-        root=$(npm_root)
-        if [[ -n $root && $real == "$root"/* ]]; then
-            printf 'npm'
-            return 0
-        fi
-        tool_manager_by_path "$real"
-        ;;
-    esac
+    # The npm on PATH is asked first, since an ordinary npm global can sit under another manager's node or bun directory.
+    # Upgrading that node would leave the tool behind, so what npm holds is npm's whatever else the path looks like.
+    local root
+    root=$(npm_root)
+    if [[ -n $root && $real == "$root"/* ]]; then
+        printf 'npm'
+        return 0
+    fi
+    tool_manager_by_path "$real"
 }
 
 # The manager a path suggests once npm has declined it.
 tool_manager_by_path() {
     local real="$1"
     case "$real" in
-    # A mise or Homebrew directory can hold a node_modules of its own, so each is read before the generic npm shape.
+    # A mise, Homebrew, bun, or Nix directory can hold a node_modules of its own, so each is read before the generic npm shape.
     */mise/installs/*) printf 'mise' ;;
     */Cellar/* | */Caskroom/*) printf 'brew' ;;
+    */.bun/*) printf 'bun' ;;
+    /nix/store/*) printf 'nix' ;;
     */node_modules/*) printf 'npm' ;;
     */linuxbrew/* | /opt/homebrew/*) printf 'brew' ;;
-    /nix/store/*) printf 'nix' ;;
     *)
         if [[ $real == /usr/* && $real != /usr/local/* ]] && command -v dpkg >/dev/null && dpkg -S "$real" >/dev/null 2>&1; then
             printf 'apt'
