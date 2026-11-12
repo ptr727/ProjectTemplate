@@ -113,7 +113,7 @@ def header(local_path: pathlib.Path, digest: str) -> str:
     comment = (
         f"{WRITER_MARKER}, which rewrites this whole file on every run. "
         f"Put host-specific content in {local_path}, appended below. "
-        f"Edits are backed up first. body={digest} -->"
+        f"Edits below the note are backed up first. body={digest} -->"
     )
     return f"{comment}\n\n{NOTE}"
 

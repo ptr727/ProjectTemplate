@@ -345,7 +345,7 @@ class TestWriting(Case):
         target = self.codex / "AGENTS.md"
         text = target.read_text(encoding="utf-8")
         first, rest = text.split("\n", 1)
-        stripped = first.replace(" Edits are backed up first.", "")
+        stripped = first.replace(" Edits below the note are backed up first.", "")
         stripped = stripped[: stripped.index(" body=")] + " -->"
         target.write_text(stripped + "\n" + rest, encoding="utf-8")
         same_body = self.run_script("--agent", "codex")
