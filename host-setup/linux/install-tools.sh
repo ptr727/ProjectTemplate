@@ -948,7 +948,8 @@ dotnet_install() {
     fleet=$(dotnet_sdk_fleet)
     local -a packages=()
     if [[ -z $fleet ]]; then
-        warn "The feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so fleet .NET repositories will not build on this host"
+        # The run carries on, so a stand-up on a distro that lags the fleet line still completes, and the warning and report name the gap.
+        warn "The feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so a fleet .NET repository selecting it will not build here until a feed carrying it is added"
     else
         packages+=("$fleet")
     fi
@@ -962,6 +963,8 @@ dotnet_install() {
     if [[ $latest != "$fleet" ]]; then
         before=$(apt_installed_version "$latest")
     fi
+    local row_before
+    row_before=$(dotnet_version)
 
     # Each set is one apt_install, so apt's exit status is the function's.
     # That matters because apply_tool runs this function with set -e off, where a failed call in a sequence would be passed over.
@@ -981,13 +984,14 @@ dotnet_install() {
                 optional+=("$package")
             fi
         done < <(dotnet_sdk_packages)
-        if [[ ${#optional[@]} -gt 0 ]]; then
-            apt_install "${optional[@]}" || return 1
+        if [[ ${#optional[@]} -gt 0 ]] && ! apt_install "${optional[@]}"; then
+            # A failed tool gets no change recorded by apply_tool, so the default set's move is recorded before failing.
+            local row_now
+            row_now=$(dotnet_version)
+            [[ $row_now == "$row_before" ]] || CHANGED+=("dotnet ${row_before:--} -> ${row_now:--}")
+            return 1
         fi
     fi
-
-    # A host left without the fleet line fails the tool, with the newest line it could install already in place.
-    [[ -n $fleet ]]
 }
 
 # --- powershell ---
@@ -1193,8 +1197,20 @@ tool_note() {
         if [[ ${#sdks[@]} -eq 0 ]]; then
             note "dotnet" "no SDK package available, Microsoft's feed is not configured"
         else
-            if [[ -z $(dotnet_sdk_fleet) ]]; then
+            local fleet latest
+            fleet=$(dotnet_sdk_fleet)
+            latest=$(dotnet_sdk_latest)
+            if [[ -z $fleet ]]; then
                 note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select"
+            fi
+            # The row reads the fleet line, so a pending upgrade of the newest line, also in the default set, is named here.
+            if [[ $latest != "$fleet" ]]; then
+                local have want
+                have=$(apt_installed_version "$latest")
+                want=$(apt_candidate_version "$latest")
+                if [[ -n $have && -n $want && $have != "$want" ]]; then
+                    note "dotnet" "$latest is at $have and the feed carries $want, --upgrade moves it"
+                fi
             fi
             readarray -t missing < <(apt_missing "${sdks[@]}")
             if [[ ${#missing[@]} -gt 0 ]]; then

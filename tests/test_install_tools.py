@@ -422,6 +422,27 @@ if dotnet_install; then printf '%s\\n' "${{CHANGED[@]}}"; else exit "$?"; fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"{self.newer} - -> 1.0"])
 
+    def test_a_failed_optional_install_still_records_the_default_move(self) -> None:
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+INSTALLED=""
+apt_install() {{ [[ " $* " != *" {self.older} "* ]] || return 1; INSTALLED="$INSTALLED $*"; }}
+apt_installed_version() {{ [[ " $INSTALLED " == *" $1 "* ]] && printf '1.0'; return 0; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.older} {self.fleet} {self.newer}; }}
+WITH_OPTIONAL=true
+DISTRO_ID=debian
+DISTRO_VERSION=13
+CHANGED=()
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+printf '%s\\n' "${{CHANGED[@]}}"
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["STATUS 1", f"{self.newer} - -> 1.0", "dotnet - -> 1.0"],
+        )
+
     def test_an_empty_feed_fails_the_tool_and_lets_the_run_carry_on(self) -> None:
         result = self.install([])
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -468,18 +489,22 @@ if dotnet_install; then printf '%s\\n' "${{CHANGED[@]}}"; else exit "$?"; fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet}"])
 
-    def test_a_feed_without_the_fleet_line_installs_the_newest_and_fails_the_tool(self) -> None:
+    def test_a_feed_without_the_fleet_line_installs_the_newest_and_carries_on(self) -> None:
         result = self.install([self.newer])
-        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.newer}"])
         self.assertIn(f"carries no {self.fleet}", result.stderr)
 
-    def report(self, feed: list[str]) -> list[str]:
-        """The dotnet row's installed and target packages, then each note `tool_note` files for it."""
+    def report(self, feed: list[str], pending: str = "") -> list[str]:
+        """The dotnet row's installed and target versions, then each note `tool_note` files for it.
+
+        Each package's version is its own name, so a row shows which package it read. The `pending`
+        package alone has a newer candidate than the version installed.
+        """
         result = self.run_bash(f"""
 dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
-apt_installed_version() {{ printf 'installed %s' "$1"; }}
-apt_candidate_version() {{ printf 'candidate %s' "$1"; }}
+apt_installed_version() {{ printf '%s' "$1"; }}
+apt_candidate_version() {{ if [[ $1 == "{pending}" ]]; then printf '%s-next' "$1"; else printf '%s' "$1"; fi; }}
 apt_missing() {{ :; }}
 NOTES=()
 NOTE_TEXTS=()
@@ -494,17 +519,27 @@ tool_note dotnet
         return result.stdout.splitlines()
 
     def test_the_row_reports_the_fleet_line_over_a_newer_one(self) -> None:
+        self.assertEqual(self.report([self.fleet, self.newer]), [self.fleet, self.fleet])
+
+    def test_a_pending_newest_line_upgrade_is_noted(self) -> None:
         self.assertEqual(
-            self.report([self.fleet, self.newer]),
-            [f"installed {self.fleet}", f"candidate {self.fleet}"],
+            self.report([self.fleet, self.newer], pending=self.newer),
+            [
+                self.fleet,
+                self.fleet,
+                (
+                    f"dotnet: {self.newer} is at {self.newer} and the feed carries"
+                    f" {self.newer}-next, --upgrade moves it"
+                ),
+            ],
         )
 
     def test_a_feed_without_the_fleet_line_is_noted_and_the_newest_reported(self) -> None:
         self.assertEqual(
             self.report([self.newer]),
             [
-                f"installed {self.newer}",
-                f"candidate {self.newer}",
+                self.newer,
+                self.newer,
                 f"dotnet: the feed carries no {self.fleet}, the line fleet .NET repositories select",
             ],
         )
