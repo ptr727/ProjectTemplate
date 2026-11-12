@@ -441,7 +441,7 @@ CI runs `--check` rather than trusting a contributor to have run the generator. 
 
 ## `carry.py`
 
-Copies manifest-owned trees, and the verbatim `## heading` regions inside a mixed file, from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
+Copies manifest-owned trees, and the verbatim `## heading` regions inside a mixed file, from a freshly fetched ProjectTemplate `main` checkout into an isolated downstream feature worktree. A repository whose registry entry has merged to `develop` but not yet reached `main` carries from a `develop` checkout instead. Run from `main`, the tool names that case rather than reporting the repository unregistered. Every other repository is refused from `develop`. `check` reports the canonical commit, repository identity, applicable declarations, path differences, and tree digests without changing the target. `apply` reports each write or removal and repeats the comparison before it succeeds.
 
 ```shell
 uv run --no-project --script scripts/carry.py check PhotoCleaner --target /path/to/worktree

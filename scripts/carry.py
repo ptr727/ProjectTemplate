@@ -295,15 +295,44 @@ def normalized_origin(value: str) -> str:
     return value
 
 
-def verify_hub(hub: pathlib.Path, registry: dict[str, Any]) -> str:
+def registry_at(hub: pathlib.Path, ref: str) -> dict[str, Any]:
+    try:
+        return cast("dict[str, Any]", json.loads(git(hub, "show", f"{ref}:registry/repos.json")))
+    except json.JSONDecodeError as exc:
+        raise CarryError(f"cannot read the registry at {ref}: {exc}") from exc
+
+
+def verify_hub(hub: pathlib.Path, registry: dict[str, Any], name: str) -> str:
+    """Return the hub commit, which is `origin/main`, or `origin/develop` for an entry not yet promoted.
+
+    A standup's registry entry merges to `develop` and reaches `main` only at the next hub promotion.
+    So between those two, `develop` is the one checkout holding the entry, as for `configure.sh` and the audit.
+    Every other repository's carry stays on `main`, the promoted and gated state.
+    """
     entry = resolve_repo(HUB_NAME, registry)
     origin = normalized_origin(git(hub, "config", "--get", "remote.origin.url"))
     if origin != normalized_origin(entry["url"]):
         raise CarryError(f"hub origin does not match the {HUB_NAME} registry entry")
-    git(hub, "fetch", "origin", "main")
+    git(hub, "fetch", "origin", "main", "develop")
     head = git(hub, "rev-parse", "HEAD")
-    if head != git(hub, "rev-parse", "origin/main"):
-        raise CarryError("hub checkout is not at freshly fetched origin/main")
+    main = git(hub, "rev-parse", "origin/main")
+    if head == main:
+        if (
+            not entry_count(name, registry)
+            and entry_count(name, registry_at(hub, "origin/develop")) == 1
+        ):
+            raise CarryError(
+                f"{name} is registered on origin/develop only, so run from a hub checkout at origin/develop"
+            )
+    elif head == git(hub, "rev-parse", "origin/develop"):
+        if entry_count(name, registry_at(hub, "origin/main")):
+            raise CarryError(
+                f"{name} is registered on origin/main, so the hub checkout must be at origin/main"
+            )
+    else:
+        raise CarryError(
+            "hub checkout is not at freshly fetched origin/main, or origin/develop for an unpromoted entry"
+        )
     if git(hub, "status", "--porcelain"):
         raise CarryError("hub checkout has local changes")
     return head
@@ -371,6 +400,10 @@ def validate_declarations(declarations: list[Any], hub: pathlib.Path) -> None:
                 raise CarryError(
                     f"overlapping tree declarations have conflicting ownership: {left_target} and {right_target}"
                 )
+
+
+def entry_count(name: str, registry: dict[str, Any]) -> int:
+    return sum(1 for entry in registry.get("repos", []) if entry.get("name") == name)
 
 
 def resolve_repo(name: str, registry: dict[str, Any]) -> dict[str, Any]:
@@ -998,7 +1031,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
         raise CarryError("the hub's own copy is the canonical, so it is never a re-vendor target")
     registry = load_json(hub / "registry/repos.json")
     manifest = load_json(hub / "spec/files.json")
-    hub_commit = verify_hub(hub, registry)
+    hub_commit = verify_hub(hub, registry, name)
     entry = resolve_repo(name, registry)
     selectors = selector_set(entry, registry.get("defaults", {}))
     units = section_units(manifest, selectors)
@@ -1038,7 +1071,7 @@ def refuse_hub_tree_target(name: str, declarations: list[dict[str, Any]]) -> Non
 def run(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path = ROOT) -> int:
     registry = load_json(hub / "registry/repos.json")
     manifest = load_json(hub / "spec/files.json")
-    hub_commit = verify_hub(hub, registry)
+    hub_commit = verify_hub(hub, registry, name)
     entry = resolve_repo(name, registry)
     selectors = selector_set(entry, registry.get("defaults", {}))
     all_declarations = manifest.get("trees")
