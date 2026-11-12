@@ -107,7 +107,8 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   `net11.0`). The hub's workflows and composite actions install the SDK line through
   `setup-dotnet`'s `dotnet-version`. A repo calling them therefore cannot move to a new major
   alone, since CI would then find no compatible SDK. Such a move starts in the hub, as a fleet-wide
-  change.
+  change. The hub's steps install both lines until every repo has moved. A repo still on
+  `10.0.100` would otherwise find no compatible SDK once the hub installs only the new line.
 
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
