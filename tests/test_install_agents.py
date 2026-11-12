@@ -865,6 +865,26 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("bun install -g opencode-ai@latest", self.recorded())
 
+    def test_a_relocated_bun_is_recognized_by_its_copied_shim_in_its_bin_directory(self) -> None:
+        # The real Windows layout with both bun variables moved: a copied shim in BUN_INSTALL\bin, no .bun segment.
+        bun_install = self.dir / "tools" / "bunhome"
+        global_dir = self.dir / "tools" / "bunglobal"
+        self.stub("opencode", "1.0.0", bun_install / "bin")
+        package = global_dir / "node_modules" / "opencode-ai"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text('{"name": "opencode-ai"}', encoding="utf-8")
+        self.stub("bun", "1.1.0")
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "opencode",
+            extra_path=bun_install / "bin",
+            extra_env={"BUN_INSTALL": str(bun_install), "BUN_INSTALL_GLOBAL_DIR": str(global_dir)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bun install -g opencode-ai@latest", self.recorded())
+        self.assertNotIn("opencode upgrade", " ".join(self.recorded()))
+
     def test_herdr_upgraded_by_scoop_gets_the_same_post_step(self) -> None:
         root = self.dir / "AgentTools"
         shims = root / "shims"

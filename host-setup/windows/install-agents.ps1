@@ -424,16 +424,25 @@ function Test-NpmPackageOwnership {
 # On Windows bun copies a shim into its bin directory rather than linking into the package, so the shim alone names no package.
 # There the shim must sit in bun's bin directory and the recorded package must be installed globally, as the npm branch checks package.json.
 # The .bunx file beside the shim records the target, but its format is undocumented, so it is not read.
+# Bun's bin directory, where its copied shims sit, and its global package directory, each resolved and without a trailing separator.
+# BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR are honored, and the install.globalDir in bunfig.toml is not read.
+function Get-BunDirectory {
+    $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
+    $globalDir = if ($env:BUN_INSTALL_GLOBAL_DIR) { $env:BUN_INSTALL_GLOBAL_DIR } else { Join-Path (Join-Path $bun 'install') 'global' }
+    return [pscustomobject]@{
+        Bin    = ((Resolve-FinalPath -Path (Join-Path $bun 'bin')) -replace '/', '\').TrimEnd('\')
+        Global = ((Resolve-FinalPath -Path $globalDir) -replace '/', '\').TrimEnd('\')
+    }
+}
+
 function Test-BunPackageOwnership {
     param([string]$Path, [string]$Package)
-    $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
-    # Bun's own BUN_INSTALL_GLOBAL_DIR is honored, and the install.globalDir in bunfig.toml is not read.
-    $globalDir = if ($env:BUN_INSTALL_GLOBAL_DIR) { $env:BUN_INSTALL_GLOBAL_DIR } else { Join-Path (Join-Path $bun 'install') 'global' }
-    $directory = Join-Path (Join-Path $globalDir 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
+    $bun = Get-BunDirectory
+    $directory = Join-Path (Join-Path $bun.Global 'node_modules') ($Package -replace '/', '\')
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     $inside = (Resolve-FinalPath -Path $directory) -replace '/', '\'
     if ($resolved.StartsWith($inside.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
-    $bin = ((Resolve-FinalPath -Path (Join-Path $bun 'bin')) -replace '/', '\').TrimEnd('\')
+    $bin = $bun.Bin
     $cut = $resolved.LastIndexOf('\')
     $shimDirectory = if ($cut -gt 0) { $resolved.Substring(0, $cut) } else { '' }
     return ($shimDirectory -ieq $bin -and (Test-Path -LiteralPath (Join-Path $directory 'package.json')))
@@ -516,10 +525,12 @@ function Get-ToolManager {
         if ($candidate -like '*\WinGet\Packages\*' -or $candidate -like '*\Microsoft\WinGet\Links\*') { return 'winget' }
         if ((Test-UnderScoop -Path $candidate) -or $candidate -like '*\scoop\*') { return 'scoop' }
         if ($candidate -like '*\chocolatey\*') { return 'choco' }
-        # A relocated bun global directory carries no .bun segment, so bun's own variable names it.
-        if ($env:BUN_INSTALL_GLOBAL_DIR) {
-            $bunGlobal = ((Resolve-FinalPath -Path $env:BUN_INSTALL_GLOBAL_DIR) -replace '/', '\').TrimEnd('\')
-            if (($candidate -replace '/', '\').StartsWith("$bunGlobal\", [StringComparison]::OrdinalIgnoreCase)) { return 'bun' }
+        # On Windows bun's shim is a copy in its bin directory, so bun is recognized by that directory and its global one.
+        # A relocated bun carries no .bun segment, so BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR name them.
+        $bunDirectory = Get-BunDirectory
+        $where = $candidate -replace '/', '\'
+        foreach ($bunRoot in @($bunDirectory.Bin, $bunDirectory.Global)) {
+            if ($where.StartsWith("$bunRoot\", [StringComparison]::OrdinalIgnoreCase)) { return 'bun' }
         }
         # A bun global package also sits under a node_modules, so bun is read first, as on Linux.
         if ($candidate -like '*\.bun\*') { return 'bun' }
