@@ -6,7 +6,7 @@
             "detect": ["*.csproj", "*.slnx", "*.sln"],
             "profiles": ["build"],
             "intentRefs": ["CODESTYLE.md", "GOVERNANCE.md#line-endings"],
-            "requiredFiles": [".editorconfig", ".gitattributes"],
+            "requiredFiles": [".editorconfig", ".gitattributes", "global.json"],
             "checks": [
                 { "id": "csharp.editorconfig.ruleblock", "verdict": "letter", "assert": ".editorconfig carries the shared [*.cs] plus ReSharper rule block.", "intentRef": "CODESTYLE.md" },
                 { "id": "csharp.analyzers.zerowarnings", "verdict": "intent", "assert": "Analyzer severities are enforced; warnings are not relaxed or suppressed wholesale.", "intentRef": "CODESTYLE.md" },
