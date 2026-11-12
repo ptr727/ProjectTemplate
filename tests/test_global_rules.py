@@ -1,0 +1,362 @@
+#!/usr/bin/env python3
+"""Tests for host-setup/agent-safety/global_rules.py, the writer of Codex's and opencode's global rules.
+
+Every case points CODEX_HOME, XDG_CONFIG_HOME, and the host-local file at a throwaway directory.
+It also withholds the real CLIs from PATH.
+No case therefore reads or writes the invoking user's own files.
+"""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+AGENT_SAFETY = ROOT / "host-setup" / "agent-safety"
+SCRIPT = AGENT_SAFETY / "global_rules.py"
+CLAUDE_INSTALL = AGENT_SAFETY / "claude" / "install.py"
+
+sys.path.insert(0, str(AGENT_SAFETY))
+import global_rules
+
+
+class Case(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.codex = self.root / "codex"
+        self.xdg = self.root / "xdg"
+        self.opencode = self.xdg / "opencode"
+        self.local = self.root / "local.md"
+        self.empty_bin = self.root / "bin"
+        self.empty_bin.mkdir()
+        self.env = {
+            **os.environ,
+            "CODEX_HOME": str(self.codex),
+            "XDG_CONFIG_HOME": str(self.xdg),
+            "AGENT_FLEET_LOCAL_INSTRUCTIONS": str(self.local),
+            # No codex or opencode CLI is on this PATH, so presence is decided by the directories alone.
+            "PATH": str(self.empty_bin),
+            "HOME": str(self.root / "home"),
+        }
+
+    def run_script(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=self.env,
+            timeout=60,
+        )
+
+    def install_both(self) -> None:
+        self.codex.mkdir()
+        self.opencode.mkdir(parents=True)
+
+
+class TestPresence(Case):
+    def test_a_missing_agent_is_skipped_and_nothing_is_created(self) -> None:
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("not installed, skipped"), 2)
+        self.assertFalse(self.codex.exists())
+        self.assertFalse(self.xdg.exists())
+
+    def test_a_report_with_no_agent_present_exits_zero(self) -> None:
+        result = self.run_script("--report")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_a_config_directory_makes_an_agent_present(self) -> None:
+        self.codex.mkdir()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.codex / "AGENTS.md").is_file())
+        self.assertFalse(self.opencode.exists())
+
+    def test_a_cli_on_path_makes_an_agent_present_and_creates_its_directory(self) -> None:
+        cli = self.empty_bin / "opencode"
+        cli.write_text("#!/bin/sh\n", encoding="utf-8")
+        cli.chmod(0o755)
+        result = self.run_script("--agent", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.opencode / "AGENTS.md").is_file())
+
+    def test_a_relative_xdg_config_home_is_treated_as_unset(self) -> None:
+        self.env["XDG_CONFIG_HOME"] = "relative/config"
+        home_config = Path(self.env["HOME"]) / ".config" / "opencode"
+        home_config.mkdir(parents=True)
+        result = self.run_script("--agent", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((home_config / "AGENTS.md").is_file())
+        self.assertFalse((Path.cwd() / "relative").exists())
+
+    def test_codex_home_defaults_to_the_users_codex_directory(self) -> None:
+        del self.env["CODEX_HOME"]
+        (Path(self.env["HOME"]) / ".codex").mkdir(parents=True)
+        result = self.run_script("--agent", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((Path(self.env["HOME"]) / ".codex" / "AGENTS.md").is_file())
+
+
+class TestContent(Case):
+    def test_the_file_is_the_kits_rendering_with_only_the_header_changed(self) -> None:
+        self.install_both()
+        self.local.write_text("A constructed host note.\n", encoding="utf-8")
+        self.assertEqual(self.run_script().returncode, 0)
+        kit = global_rules.load_kit()
+        with mock.patch.dict(os.environ, {"AGENT_FLEET_LOCAL_INSTRUCTIONS": str(self.local)}):
+            kit_render = kit.render_instructions(self.local, "A constructed host note.")
+        written = (self.codex / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(
+            written.split("\n", 1)[1], kit_render.split("\n", 1)[1], "the body must match the kit"
+        )
+        self.assertIn("global_rules.py", written.split("\n", 1)[0])
+        self.assertNotIn("global_rules.py", kit_render)
+        self.assertEqual(written, (self.opencode / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertIn("A constructed host note.", written)
+
+    def test_a_local_file_carrying_a_kit_marker_stops_the_run(self) -> None:
+        self.install_both()
+        self.local.write_text("<!-- agent-safety v1 start -->\n", encoding="utf-8")
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Nothing was written", result.stderr)
+        self.assertFalse((self.codex / "AGENTS.md").exists())
+
+
+class TestWriting(Case):
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_both()
+
+    def test_a_second_run_changes_nothing(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        before = (self.codex / "AGENTS.md").read_bytes()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.count("already current"), 2)
+        self.assertEqual((self.codex / "AGENTS.md").read_bytes(), before)
+        self.assertEqual(list(self.codex.glob("*.bak")), [])
+
+    def test_a_prior_file_this_script_did_not_write_is_backed_up(self) -> None:
+        target = self.codex / "AGENTS.md"
+        target.write_text("A constructed hand-written note.\n", encoding="utf-8")
+        result = self.run_script("--agent", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        backups = list(self.codex.glob("AGENTS.md.*.bak"))
+        self.assertEqual(len(backups), 1, result.stdout)
+        self.assertEqual(
+            backups[0].read_text(encoding="utf-8"), "A constructed hand-written note.\n"
+        )
+        self.assertIn("global_rules.py", target.read_text(encoding="utf-8"))
+        self.assertIn("backed up", result.stdout)
+
+    def test_an_older_render_of_this_script_is_replaced_without_a_backup(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        target = self.codex / "AGENTS.md"
+        target.write_text(
+            target.read_text(encoding="utf-8").replace("\n", "\nstale line\n", 1), encoding="utf-8"
+        )
+        result = self.run_script("--agent", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(list(self.codex.glob("*.bak")), [])
+        self.assertNotIn("stale line", target.read_text(encoding="utf-8"))
+
+    def test_a_crlf_file_keeps_its_line_endings(self) -> None:
+        target = self.codex / "AGENTS.md"
+        target.write_bytes(
+            b"<!-- Written by ProjectTemplate host-setup/agent-safety/global_rules.py\r\nold\r\n"
+        )
+        self.assertEqual(self.run_script("--agent", "codex").returncode, 0)
+        raw = target.read_bytes()
+        self.assertIn(b"\r\n", raw)
+        self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
+
+    def test_a_directory_at_the_target_is_refused_and_named(self) -> None:
+        (self.codex / "AGENTS.md").mkdir()
+        result = self.run_script("--agent", "codex")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not a regular file", result.stderr)
+
+    def test_one_agent_failing_does_not_stop_the_other(self) -> None:
+        (self.codex / "AGENTS.md").mkdir()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue((self.opencode / "AGENTS.md").is_file())
+
+    def test_a_symlinked_target_stays_a_link_and_its_destination_takes_the_content(self) -> None:
+        destination = self.root / "dotfiles-agents.md"
+        destination.write_text("", encoding="utf-8")
+        (self.codex / "AGENTS.md").symlink_to(destination)
+        result = self.run_script("--agent", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((self.codex / "AGENTS.md").is_symlink())
+        self.assertIn("global_rules.py", destination.read_text(encoding="utf-8"))
+
+
+class TestDryRun(Case):
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_both()
+
+    def test_a_dry_run_writes_and_backs_up_nothing(self) -> None:
+        (self.codex / "AGENTS.md").write_text("A constructed note.\n", encoding="utf-8")
+        result = self.run_script("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("would be updated, the prior file backed up first", result.stdout)
+        self.assertIn("would be written", result.stdout)
+        self.assertEqual(
+            (self.codex / "AGENTS.md").read_text(encoding="utf-8"), "A constructed note.\n"
+        )
+        self.assertFalse((self.opencode / "AGENTS.md").exists())
+        self.assertEqual(list(self.codex.glob("*.bak")), [])
+
+    def test_a_dry_run_with_report_is_refused(self) -> None:
+        result = self.run_script("--dry-run", "--report")
+        self.assertNotEqual(result.returncode, 0)
+
+
+class TestReport(Case):
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_both()
+
+    def test_an_absent_file_reports_absent_and_exits_non_zero(self) -> None:
+        result = self.run_script("--report")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout.count("ABSENT"), 2)
+        self.assertFalse((self.codex / "AGENTS.md").exists())
+
+    def test_a_current_file_reports_current_and_exits_zero(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        result = self.run_script("--report")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout.count("CURRENT"), 2)
+
+    def test_a_changed_host_local_file_reports_stale(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        self.local.write_text("A constructed new note.\n", encoding="utf-8")
+        result = self.run_script("--report")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout.count("STALE"), 2)
+
+    def test_a_hand_written_file_reports_stale_and_says_a_write_backs_it_up(self) -> None:
+        (self.codex / "AGENTS.md").write_text("A constructed note.\n", encoding="utf-8")
+        result = self.run_script("--report", "--agent", "codex")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("STALE", result.stdout)
+        self.assertIn("backs it up first", result.stdout)
+
+    def test_one_stale_agent_fails_the_report_even_when_the_other_is_current(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        (self.opencode / "AGENTS.md").write_text("edited\n", encoding="utf-8")
+        result = self.run_script("--report")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("CURRENT", result.stdout)
+
+    def test_a_report_changes_nothing(self) -> None:
+        self.run_script("--report")
+        self.assertFalse((self.codex / "AGENTS.md").exists())
+
+
+class TestArguments(Case):
+    def test_help_prints_usage_and_exits_zero(self) -> None:
+        result = self.run_script("--help")
+        self.assertEqual(result.returncode, 0)
+        self.assertTrue(result.stdout.startswith("usage:"))
+
+    def test_an_unknown_flag_is_refused_by_name(self) -> None:
+        result = self.run_script("--bogus-flag")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments: --bogus-flag", result.stderr)
+
+    def test_an_unknown_agent_is_refused(self) -> None:
+        result = self.run_script("--agent", "claude")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid choice", result.stderr)
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows cannot deliver SIGINT or SIGTERM to a script")
+class TestInterrupt(Case):
+    """The script holds no lock, temporary path, or child, so the check is the exit status and the one line."""
+
+    def interrupted(self, signum: int) -> subprocess.CompletedProcess[str]:
+        """Starts the real entry point with the run replaced by a sleep, then signals it mid-run."""
+        self.install_both()
+        driver = (
+            "import importlib.util, sys, time\n"
+            f"sys.argv = [{str(SCRIPT)!r}]\n"
+            f"spec = importlib.util.spec_from_file_location('gr', {str(SCRIPT)!r})\n"
+            "module = importlib.util.module_from_spec(spec)\n"
+            "sys.modules['gr'] = module\n"
+            "spec.loader.exec_module(module)\n"
+            "module.run = lambda args: time.sleep(30)\n"
+            "print('ready', flush=True)\n"
+            "sys.exit(module.main())\n"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-c", driver],
+            env=self.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert process.stdout is not None
+        self.assertEqual(process.stdout.readline().strip(), "ready")
+        time.sleep(0.2)
+        process.send_signal(signum)
+        try:
+            out, err = process.communicate(timeout=20)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        return subprocess.CompletedProcess(process.args, process.returncode, out, err)
+
+    def test_sigint_exits_130_with_one_line_and_no_traceback(self) -> None:
+        result = self.interrupted(signal.SIGINT)
+        self.assertEqual(result.returncode, 130, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+        self.assertIn("SIGINT", result.stderr)
+
+    def test_sigterm_exits_143_with_one_line_and_no_traceback(self) -> None:
+        result = self.interrupted(signal.SIGTERM)
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+        self.assertIn("SIGTERM", result.stderr)
+
+    def test_no_stray_file_is_left_behind(self) -> None:
+        self.interrupted(signal.SIGTERM)
+        self.assertFalse((self.codex / "AGENTS.md").exists())
+
+
+class TestKitIsReusedNotCopied(unittest.TestCase):
+    def test_the_script_defines_none_of_the_kits_render_or_write_helpers(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        for name in (
+            "render_instructions",
+            "local_instructions_path",
+            "read_local_instructions",
+            "write_regular_file",
+            "write_backup",
+        ):
+            with self.subTest(name=name):
+                self.assertNotIn(f"def {name}", source)
+                self.assertIn(f"kit.{name}", source)
+
+    def test_the_kit_exists_where_the_script_loads_it(self) -> None:
+        self.assertTrue(CLAUDE_INSTALL.is_file())
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

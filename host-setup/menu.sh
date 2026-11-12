@@ -56,10 +56,10 @@ usage() {
 Usage: menu.sh [options]
 
 An interactive menu over this fleet's host and repo tooling: update the host tools, upgrade the
-OS, install the fleet skills, audit a cataloged repo, and pull the hub's verbatim-owned files, or
-just the verbatim rule sections inside a mixed file, into a downstream repo's own worktree. Run
-from a hub checkout or from any other repo. Only the tasks that apply to that checkout are
-shown.
+OS, bring the coding agents current (tools, skills, safety kit, global rules), audit a cataloged
+repo, and pull the hub's verbatim-owned files, or just the verbatim rule sections inside a mixed
+file, into a downstream repo's own worktree. Run from a hub checkout or from any other repo. Only
+the tasks that apply to that checkout are shown.
 
 Options:
   -y, --yes         Pass --yes to each tool this menu runs, so a tool does not prompt. The menu's
@@ -433,20 +433,26 @@ run_in_hub() {
     "$path" "$@" "${flags[@]}"
 }
 
-install_skills() {
+# The agent setup and its report, which are one bootstrap action each.
+# The first argument is that action, --agent-setup or --agent-status.
+agent_setup() {
     hub_read_lock_acquire || return 1
     local rc=0
-    install_skills_locked || rc=$?
+    agent_setup_locked "$@" || rc=$?
     hub_read_lock_release
     return "$rc"
 }
 
-install_skills_locked() {
+# The setup installs the skills, and the skills installer registers the directory it runs from.
+# A fetched clone is removed on exit, so the setup is handed to the bootstrap, which keeps a tree of its own.
+# A hub checkout the menu runs from is registered in place, as installing the skills there always did.
+agent_setup_locked() {
+    local action="$1"
     ensure_hub_root || return 1
     if [[ $HUB_FETCHED == true ]]; then
-        run_in_hub "host-setup" bootstrap.sh --skills --ref "$REF"
+        run_in_hub "host-setup" bootstrap.sh "$action" --ref "$REF"
     else
-        run_in_hub "host-setup/linux" install-skills.sh
+        run_in_hub "host-setup" bootstrap.sh "$action" --from-tree "$HUB_ROOT"
     fi
 }
 
@@ -579,25 +585,23 @@ print_menu() {
     log "   5  Upgrade the host OS packages"
     log "   6  Report git and GitHub setup"
     log "   7  Configure git and GitHub"
-    log "   8  Report fleet Skills install status"
-    log "   9  Install or update the fleet Skills"
-    log "  10  Report the coding-agent tools installed for this user"
-    log "  11  Upgrade the coding-agent tools already installed"
-    log "  12  Install coding-agent tools by name"
+    log "   8  Report agent setup (agent tools, skills, safety kit, global rules)"
+    log "   9  Update agent setup (agent tools, skills, safety kit, global rules)"
+    log "  10  Install coding-agent tools by name"
     log ""
     log "Hub, $HUB_REPO:"
-    log "  13  Audit a cataloged repo"
-    log "  14  Check the generated Skills distributions are current"
+    log "  11  Audit a cataloged repo"
+    log "  12  Check the generated Skills distributions are current"
     # Also gated on REF.
     # The carry.py script always rejects a hub checkout that is not exactly on the default ref.
     # So these tasks cannot work in a non-default --ref session regardless of a downstream repo being detected.
     if [[ -n $DOWNSTREAM_ROOT && $REF == "$DEFAULT_REF" ]]; then
         log ""
         log "Downstream, the repo this menu is run from:"
-        log "  15  Check what the hub would change here, change nothing"
-        log "  16  Pull the hub's verbatim-owned files into this repo"
-        log "  17  Check the hub's verbatim rule sections inside this repo's mixed files"
-        log "  18  Pull those rule sections in, leaving every other section alone"
+        log "  13  Check what the hub would change here, change nothing"
+        log "  14  Pull the hub's verbatim-owned files into this repo"
+        log "  15  Check the hub's verbatim rule sections inside this repo's mixed files"
+        log "  16  Pull those rule sections in, leaving every other section alone"
     fi
     log ""
     log "   q  Quit"
@@ -619,25 +623,23 @@ dispatch() {
     5) host_tool upgrade-host.sh --packages ;;
     6) host_tool setup-github.sh --status ;;
     7) host_tool setup-github.sh --configure ;;
-    8) host_tool install-skills.sh --report ;;
-    9) install_skills ;;
-    10) host_tool install-agents.sh --report ;;
-    11) host_tool install-agents.sh --upgrade ;;
-    12) install_agents ;;
-    13) audit_repo ;;
-    14) check_skills_dist ;;
-    15) carry_action check ;;
+    8) agent_setup --agent-status ;;
+    9) agent_setup --agent-setup ;;
+    10) install_agents ;;
+    11) audit_repo ;;
+    12) check_skills_dist ;;
+    13) carry_action check ;;
     # --dry-run changes nothing, and carry.py itself has no dry-run mode.
     # So a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
-    16)
+    14)
         if [[ $DRY_RUN == true ]]; then
             carry_action check
         else
             carry_action apply
         fi
         ;;
-    17) carry_action check-sections ;;
-    18)
+    15) carry_action check-sections ;;
+    16)
         if [[ $DRY_RUN == true ]]; then
             carry_action check-sections
         else

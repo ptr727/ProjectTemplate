@@ -21,6 +21,7 @@ Usage: python3 install.py            (installs to ~/.claude).
        AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing).
        AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing).
        AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 install.py   (override the host-local file, for testing).
+       AGENT_SAFETY_SOURCE_COMMIT=<40 hex> python3 install.py   (name the commit of a tree git cannot answer for, which the bootstrap sets).
 """
 
 import argparse
@@ -96,6 +97,12 @@ LOCAL_MARKER = "host-local"
 # Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
+# The marker the bootstrap writes into a tree it extracted, and the variable it hands that tree's commit in.
+# A tarball has no .git to answer for it, so the loader resolves its ref to a commit before downloading and passes it here.
+BOOTSTRAP_OWNED_MARKER = ".bootstrap-owned"
+SOURCE_COMMIT_ENV = "AGENT_SAFETY_SOURCE_COMMIT"
+FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
+
 PAYLOAD_FILES = (
     DEPLOYED_HOOKS + tuple(DEPLOYED_DATA) + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
 )
@@ -573,6 +580,11 @@ def source_ref():
     The SHA still names a commit, but the bytes installed are not that commit's.
     A stamp that claims otherwise is the thing this exists to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
 
+    A tree the bootstrap extracted is asked nothing of git, which would answer for whatever repository encloses it.
+    The commit it resolved arrives in AGENT_SAFETY_SOURCE_COMMIT and is recorded as an archive, clean by construction.
+    Only a full 40-character lowercase hex commit is honored, so a stray or truncated value is never recorded as a commit.
+    A git tree ignores the variable.
+
     AGENT_SAFETY_DIRTY_OVERRIDE, read as exactly "0" or "1", replaces the git-derived dirty
     signal with a fixed one, and honoring it prints a warning below. Any other value, unset
     included, falls through to the git status read below, so a stray or misspelled setting
@@ -596,8 +608,12 @@ def source_ref():
             return None
         return r.stdout.strip() if r.returncode == 0 else None
 
-    sha = git("rev-parse", "HEAD")
+    extracted = (HERE.parent.parent.parent / BOOTSTRAP_OWNED_MARKER).is_file()
+    sha = None if extracted else git("rev-parse", "HEAD")
     if not sha:
+        handed = os.environ.get(SOURCE_COMMIT_ENV, "")
+        if FULL_COMMIT.fullmatch(handed):
+            return {"vcs": "archive", "commit": handed, "dirty": False}
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
@@ -858,17 +874,20 @@ def read_local_instructions(local_path):
     return text, None
 
 
-def render_instructions(local_path, local_text):
+def render_instructions(local_path, local_text, header=None):
     """The whole global instruction file in newline form: a header, each block, then the local file.
+
+    A caller writing the same content for another agent passes its own header, which is the only part that differs.
 
     Rendered whole rather than merged into whatever the file held. Hand-written sections outside the
     blocks were never written or checked, so they restated rules in wording the fleet had since changed.
     Every session on the host read them anyway.
     """
-    header = (
-        "<!-- Written by ProjectTemplate host-setup/agent-safety, which rewrites this whole file on "
-        f"every install. Put host-specific content in {local_path}, appended below. -->"
-    )
+    if header is None:
+        header = (
+            "<!-- Written by ProjectTemplate host-setup/agent-safety, which rewrites this whole file on "
+            f"every install. Put host-specific content in {local_path}, appended below. -->"
+        )
     parts = [header]
     parts += [
         (HERE / filename).read_text(encoding="utf-8").strip() for _, filename in CLAUDE_MD_BLOCKS
@@ -1429,6 +1448,14 @@ def report(claude_home):
         )
         return 2
     print(f"This machine:  {stamp_line(stamp)}")
+    # The payload digest decides currency, so neither source shape below is a problem in itself.
+    held_source = stamp.get("source", {})
+    if held_source.get("vcs") == "archive":
+        print("Note: installed from a fetched archive, which has no checkout to compare against.")
+    elif held_source.get("vcs") == "none":
+        print(
+            "Note: installed from a tree that named no commit, so the stamp cannot say which hub revision it holds."
+        )
     # The stamp says what was installed; the machine says what is there now.
     # A block edited or deleted by hand since the install makes both true and only the second current.
     live = blocks_present(claude_home / "CLAUDE.md")

@@ -547,7 +547,14 @@ class TestScriptPresence(unittest.TestCase):
     def test_every_managed_tool_is_executable(self) -> None:
         """Each script the loader hands control to is present and executable."""
         modes = self.indexed_modes()
-        for name in ("install-skills.sh", "install-tools.sh", "upgrade-host.sh", "setup-github.sh"):
+        for name in (
+            "install-skills.sh",
+            "install-safety-kit.sh",
+            "install-global-rules.sh",
+            "install-tools.sh",
+            "upgrade-host.sh",
+            "setup-github.sh",
+        ):
             path = LINUX / name
             with self.subTest(script=name):
                 self.assertTrue(path.is_file(), f"{name} is missing from host-setup/linux")
@@ -571,6 +578,8 @@ class TestScriptPresence(unittest.TestCase):
         """
         scripts = (
             "install-skills.ps1",
+            "install-safety-kit.ps1",
+            "install-global-rules.ps1",
             "install-tools.ps1",
             "upgrade-host.ps1",
             "setup-github.ps1",
@@ -941,7 +950,8 @@ $wanted = @(
     'Test-KeepsTree', 'Get-TreeName', 'Get-TreePath', 'Get-StagingPath', 'Get-RetiredPath', 'Get-ArchivePath',
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
     'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
-    'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall', 'Unlock-Directory', 'main'
+    'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall', 'Unlock-Directory', 'main',
+    'Invoke-AgentSetup', 'Invoke-AgentStatus'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -951,6 +961,7 @@ $script:MODE = 'skills'
 $script:DRY_RUN = $false
 $script:ASSUME_YES = $false
 $script:KEEP = $false
+$script:FROM_TREE = ''
 $script:PWSH_PATH = (Get-Process -Id $PID).Path
 $script:REPO = 'ptr727/ProjectTemplate'
 $script:REF = 'main'
@@ -1469,6 +1480,11 @@ printf '%s|%s|%s\\n' "$step" "$(basename "$(cd "$(dirname "$0")/../.." && pwd)")
 exit 0
 """
 
+# The safety kit stub also records the commit it was handed, since a fetched tree has no .git to answer for it.
+STUB_KIT_TOOL = STUB_ARGS_TOOL.replace(
+    "exit 0\n", 'printf \'%s\\n\' "${AGENT_SAFETY_SOURCE_COMMIT:-}" >>"$STEP_LOG.commit"\nexit 0\n'
+)
+
 STUB_CURL = """\
 #!/usr/bin/env bash
 out="" url=""
@@ -1498,13 +1514,39 @@ fi
 exec /bin/mv "$@"
 """
 
+# The agent setup closes a stand-up, so the tools, the skills, the safety kit, and the global rules follow the GitHub step.
 STAND_UP_STEPS = (
     "install-tools.sh --sudo-timestamp",
     "upgrade-host.sh --packages",
     "install-tools.sh --install",
     "setup-github.sh --configure",
+    "install-agents.sh --upgrade",
     "install-skills.sh",
+    "install-safety-kit.sh",
+    "install-global-rules.sh",
 )
+
+AGENT_SETUP_STEPS = (
+    "install-agents.sh --upgrade",
+    "install-skills.sh",
+    "install-safety-kit.sh",
+    "install-global-rules.sh",
+)
+
+AGENT_STATUS_STEPS = (
+    "install-agents.sh --report",
+    "install-skills.sh --report",
+    "install-safety-kit.sh --report",
+    "install-global-rules.sh --report",
+)
+
+
+def stand_up_steps() -> tuple[str, ...]:
+    """The stand-up steps this process's loader runs, which skips the agent tools when the runner is root."""
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        return tuple(step for step in STAND_UP_STEPS if step != "install-agents.sh --upgrade")
+    return STAND_UP_STEPS
+
 
 UPGRADE_STEPS = ("upgrade-host.sh --packages", "install-agents.sh --upgrade")
 
@@ -1549,12 +1591,25 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.tarball = self.root / "source.tar.gz"
         with tarfile.open(self.tarball, "w:gz") as archive:
             for tool in sorted(
-                {step.split()[0] for step in (*STAND_UP_STEPS, *UPGRADE_STEPS, *REPORT_STEPS)}
+                {
+                    step.split()[0]
+                    for step in (
+                        *STAND_UP_STEPS,
+                        *UPGRADE_STEPS,
+                        *REPORT_STEPS,
+                        *AGENT_SETUP_STEPS,
+                        *AGENT_STATUS_STEPS,
+                    )
+                }
             ):
                 self.add_member(
                     archive,
                     f"ProjectTemplate-abc/host-setup/linux/{tool}",
-                    STUB_ARGS_TOOL if tool == "install-agents.sh" else STUB_TOOL,
+                    STUB_KIT_TOOL
+                    if tool == "install-safety-kit.sh"
+                    else STUB_ARGS_TOOL
+                    if tool in ("install-agents.sh", "install-global-rules.sh")
+                    else STUB_TOOL,
                     0o755,
                 )
             self.add_member(archive, "ProjectTemplate-abc/VERSION", "new", 0o644)
@@ -1656,19 +1711,23 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         result = self.run_main()
         self.assertEqual(result.returncode, 0, result.stderr)
         steps = self.steps()
-        self.assertEqual([step for step, _, _ in steps], list(STAND_UP_STEPS), result.stderr)
-        *before, last = steps
-        for step, tree, kept in before:
+        expected = stand_up_steps()
+        self.assertEqual([step for step, _, _ in steps], list(expected), result.stderr)
+        at = expected.index("install-skills.sh")
+        for step, tree, kept in steps[:at]:
             self.assertEqual(kept, "old", f"{step} found the previous tree gone or replaced")
             self.assertEqual(tree, "skills-tree.new", f"{step} ran from {tree}")
-        self.assertEqual(
-            last[1:], ["skills-tree", "new"], "the skills step must run from the swapped-in tree"
-        )
+        # The skills step and every agent step after it run from the swapped-in tree.
+        for step, tree, kept in steps[at:]:
+            self.assertEqual(
+                [tree, kept], ["skills-tree", "new"], f"{step} must run from the swapped-in tree"
+            )
 
     def test_a_stand_up_failing_before_the_skills_step_leaves_the_previous_tree_loading(
         self,
     ) -> None:
-        for fail_step in STAND_UP_STEPS[:-1]:
+        expected = stand_up_steps()
+        for fail_step in expected[: expected.index("install-skills.sh")]:
             with self.subTest(fail_step=fail_step):
                 shutil.rmtree(self.data)
                 self.data.mkdir()
@@ -1743,6 +1802,125 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual([step for step, _, _ in self.steps()], list(REPORT_STEPS[:-1]))
         self.assertIn("Running as root, so no user's coding-agent tools are read", result.stdout)
         self.assertNotIn("did not report", result.stdout)
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_setup_runs_the_tools_skills_kit_and_rules_in_order(self) -> None:
+        self.previous_tree()
+        result = self.run_main(action="--agent-setup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = self.steps()
+        self.assertEqual([step for step, _, _ in steps], list(AGENT_SETUP_STEPS), result.stderr)
+        # The tree is swapped in before the skills step, and the kit and the rules run from it.
+        self.assertEqual(steps[0][1:], ["skills-tree.new", "old"])
+        for step, tree, kept in steps[1:]:
+            self.assertEqual([tree, kept], ["skills-tree", "new"], step)
+        self.assertEqual(self.version(), "new")
+        self.assertEqual(self.leftovers(), [], result.stderr)
+
+    @requires_unprivileged_root
+    def test_an_agent_setup_as_root_skips_the_agent_tools_and_says_so(self) -> None:
+        result = self.run_main(action="--agent-setup", root=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), list(AGENT_SETUP_STEPS[1:]), result.stderr)
+        self.assertIn("Running as root, so no user's coding-agent tools are read", result.stdout)
+
+    def test_an_agent_setup_hands_the_resolved_commit_to_the_safety_kit(self) -> None:
+        result = self.run_main(action="--agent-setup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        handed = Path(f"{self.log}.commit").read_text(encoding="utf-8").split()
+        self.assertEqual(handed, ["0123456789abcdef0123456789abcdef01234567"])
+
+    def test_an_agent_setup_failing_at_the_kit_stops_before_the_rules(self) -> None:
+        result = self.run_main("install-safety-kit.sh", action="--agent-setup")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertNotIn("install-global-rules.sh", self.agents_steps())
+
+    def test_an_agent_setup_dry_run_passes_the_dry_run_to_each_step_and_keeps_no_tree(self) -> None:
+        result = self.run_main(action="--agent-setup", args=("--dry-run",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = self.agents_steps()
+        self.assertEqual(len(steps), len(AGENT_SETUP_STEPS), result.stderr)
+        # The skills stub logs only its first argument, so the dry run is read off the stubs that log all of them.
+        for step in steps:
+            if not step.startswith("install-skills.sh"):
+                self.assertTrue(step.endswith("--dry-run"), step)
+        self.assertFalse(self.kept.exists())
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_status_runs_each_report_in_order_and_keeps_no_tree(self) -> None:
+        result = self.run_main(action="--agent-status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), list(AGENT_STATUS_STEPS), result.stderr)
+        self.assertIn("Every agent setup step reports current", result.stdout)
+        self.assertNotIn("Not current", result.stdout)
+        self.assertFalse(self.kept.exists())
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_status_names_every_step_that_is_not_current_and_still_finishes(self) -> None:
+        for failing, name in (
+            ("install-agents.sh --report", "agent tools"),
+            ("install-skills.sh --report", "fleet skills"),
+            ("install-safety-kit.sh --report", "Claude Code safety kit"),
+            ("install-global-rules.sh --report", "host-wide rules"),
+        ):
+            with self.subTest(failing=failing):
+                self.log.unlink(missing_ok=True)
+                result = self.run_main(failing, action="--agent-status")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.agents_steps(), list(AGENT_STATUS_STEPS), result.stderr)
+                self.assertIn(f"Not current: {name}", result.stdout)
+
+    def given_tree(self) -> Path:
+        """The stub tarball extracted where a caller keeps a tree of its own, as a hub checkout is."""
+        given = self.root / "given"
+        given.mkdir()
+        with tarfile.open(self.tarball) as archive:
+            for member in archive.getmembers():
+                member.name = member.name.split("/", 1)[1] if "/" in member.name else ""
+                if member.name:
+                    archive.extract(member, given, filter="data")
+        return given
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_a_given_tree_is_run_from_in_place_with_nothing_fetched_or_kept(self) -> None:
+        given = self.given_tree()
+        result = self.run_main(action="--agent-setup", args=("--from-tree", str(given)))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = self.steps()
+        self.assertEqual([step for step, _, _ in steps], list(AGENT_SETUP_STEPS), result.stderr)
+        self.assertEqual({tree for _, tree, _ in steps}, {"given"})
+        self.assertEqual(
+            list(self.data.iterdir()), [], "a given tree takes no lock and keeps no tree"
+        )
+        self.assertTrue((given / "VERSION").is_file(), "the given tree must be left as it was")
+
+    def test_a_given_tree_is_refused_for_an_action_that_installs_a_tree(self) -> None:
+        result = self.run_main(action="--host", args=("--from-tree", str(self.given_tree())))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "--from-tree is accepted with --agent-setup or --agent-status only", result.stderr
+        )
+        self.assertEqual(self.steps(), [])
+
+    def test_a_given_tree_that_is_not_a_host_setup_tree_is_refused(self) -> None:
+        empty = self.root / "empty"
+        empty.mkdir()
+        result = self.run_main(action="--agent-status", args=("--from-tree", str(empty)))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("holds no host-setup/linux", result.stderr)
+
+    def test_a_relative_given_tree_is_refused(self) -> None:
+        result = self.run_main(action="--agent-status", args=("--from-tree", "relative/tree"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("takes an absolute path", result.stderr)
 
     def agents_steps(self) -> list[str]:
         return [step for step, _, _ in self.steps()]
@@ -1839,6 +2017,20 @@ POWERSHELL_REPORT_STEPS = (
 
 POWERSHELL_UPGRADE_STEPS = ("upgrade-host.ps1 -Packages", "install-agents.ps1 -Upgrade")
 
+POWERSHELL_AGENT_SETUP_STEPS = (
+    "install-agents.ps1 -Upgrade",
+    "install-skills.ps1",
+    "install-safety-kit.ps1",
+    "install-global-rules.ps1",
+)
+
+POWERSHELL_AGENT_STATUS_STEPS = (
+    "install-agents.ps1 -Report",
+    "install-skills.ps1 -Report",
+    "install-safety-kit.ps1 -Report",
+    "install-global-rules.ps1 -Report",
+)
+
 
 def host_is_elevated() -> bool:
     """Whether `bootstrap.ps1` should read this process as elevated, asked of the shell API rather than the check under test.
@@ -1865,7 +2057,12 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.tree = self.work / "tree"
         tools = self.tree / "host-setup" / "windows"
         tools.mkdir(parents=True)
-        for step in (*POWERSHELL_REPORT_STEPS, *POWERSHELL_UPGRADE_STEPS):
+        for step in (
+            *POWERSHELL_REPORT_STEPS,
+            *POWERSHELL_UPGRADE_STEPS,
+            *POWERSHELL_AGENT_SETUP_STEPS,
+            *POWERSHELL_AGENT_STATUS_STEPS,
+        ):
             (tools / step.split()[0]).write_text(STUB_POWERSHELL_TOOL, encoding="utf-8")
         self.log = self.work / "steps.log"
 
@@ -1935,6 +2132,47 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS[:-1]), result.stdout)
         self.assertIn("Running elevated, so no user's coding-agent tools are read", result.stdout)
+
+    def test_an_agent_setup_runs_the_tools_skills_kit_and_rules_in_order(self) -> None:
+        result = self.run_handoff("$script:FROM_TREE = $env:FIXTURE_TREE\nInvoke-AgentSetup")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_AGENT_SETUP_STEPS), result.stdout)
+
+    def test_an_elevated_agent_setup_skips_the_agent_tools_and_says_so(self) -> None:
+        result = self.run_handoff(
+            "$script:FROM_TREE = $env:FIXTURE_TREE\nInvoke-AgentSetup", elevated=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_AGENT_SETUP_STEPS[1:]), result.stdout)
+        self.assertIn("Running elevated, so no user's coding-agent tools are read", result.stdout)
+
+    def test_an_agent_setup_failing_at_the_kit_stops_before_the_rules(self) -> None:
+        result = self.run_handoff(
+            "$script:FROM_TREE = $env:FIXTURE_TREE\nInvoke-AgentSetup",
+            fail_step="install-safety-kit.ps1",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("install-global-rules.ps1", self.steps())
+
+    def test_an_agent_status_runs_each_report_in_order(self) -> None:
+        result = self.run_handoff("Invoke-AgentStatus")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_AGENT_STATUS_STEPS), result.stdout)
+        self.assertIn("Every agent setup step reports current", result.stdout)
+
+    def test_an_agent_status_names_a_step_that_is_not_current_and_still_finishes(self) -> None:
+        for failing, name in (
+            ("install-agents.ps1 -Report", "agent tools"),
+            ("install-skills.ps1 -Report", "fleet skills"),
+            ("install-safety-kit.ps1 -Report", "Claude Code safety kit"),
+            ("install-global-rules.ps1 -Report", "host-wide rules"),
+        ):
+            with self.subTest(failing=failing):
+                self.log.unlink(missing_ok=True)
+                result = self.run_handoff("Invoke-AgentStatus", fail_step=failing)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.steps(), list(POWERSHELL_AGENT_STATUS_STEPS), result.stdout)
+                self.assertIn(f"Not current: {name}", result.stdout)
 
     def test_a_report_whose_agent_tools_step_reports_names_no_failure(self) -> None:
         result = self.run_handoff("Show-Report")
@@ -2014,21 +2252,22 @@ def menu_functions() -> str:
 
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux menu's own functions")
-class TestMenuSkillsInstall(unittest.TestCase):
-    """Which installer the menu's skills task runs, since the installer registers its own directory."""
+class TestMenuAgentSetup(unittest.TestCase):
+    """Which tree the menu's agent setup runs from, since the skills installer registers its own directory."""
 
     def setUp(self) -> None:
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.functions = self.dir / "functions.sh"
         self.functions.write_text(menu_functions(), encoding="utf-8")
         self.hub = self.dir / "hub"
-        for relative in ("host-setup/bootstrap.sh", "host-setup/linux/install-skills.sh"):
-            script = self.hub / relative
-            script.parent.mkdir(parents=True, exist_ok=True)
-            script.write_text(f'#!/bin/sh\necho "{relative} $*"\n', encoding="utf-8")
-            script.chmod(0o755)
+        script = self.hub / "host-setup" / "bootstrap.sh"
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text('#!/bin/sh\necho "host-setup/bootstrap.sh $*"\n', encoding="utf-8")
+        script.chmod(0o755)
 
-    def run_task(self, fetched: bool, extra: str = "") -> subprocess.CompletedProcess[str]:
+    def run_task(
+        self, action: str, fetched: bool, extra: str = ""
+    ) -> subprocess.CompletedProcess[str]:
         script = "\n".join(
             [
                 f'source "{self.functions}"',
@@ -2037,7 +2276,7 @@ class TestMenuSkillsInstall(unittest.TestCase):
                 f"HUB_FETCHED={'true' if fetched else 'false'}",
                 extra,
                 "ensure_hub_root() { return 0; }",
-                "install_skills_locked",
+                f"agent_setup_locked {action}",
             ]
         )
         return subprocess.run(
@@ -2049,24 +2288,92 @@ class TestMenuSkillsInstall(unittest.TestCase):
             timeout=30,
         )
 
-    def test_a_fetched_clone_hands_the_install_to_the_bootstraps_kept_tree(self) -> None:
+    def test_a_fetched_clone_hands_the_setup_to_the_bootstraps_kept_tree(self) -> None:
         """The menu removes its clone on exit, so installing from it registers a directory about to go."""
-        result = self.run_task(fetched=True, extra="REF=develop\nASSUME_YES=true")
+        result = self.run_task("--agent-setup", fetched=True, extra="REF=develop\nASSUME_YES=true")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            result.stdout.strip(), "host-setup/bootstrap.sh --skills --ref develop --yes"
+            result.stdout.strip(), "host-setup/bootstrap.sh --agent-setup --ref develop --yes"
         )
 
     def test_a_fetched_clone_never_passes_the_menus_cache_directory_on(self) -> None:
         """The bootstrap keeps its tree under a data directory, and the menu's own directory is a cache."""
-        result = self.run_task(fetched=True)
+        result = self.run_task("--agent-setup", fetched=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("--dir", result.stdout)
 
-    def test_a_hub_checkout_the_menu_runs_from_installs_from_that_checkout(self) -> None:
-        result = self.run_task(fetched=False)
+    def test_a_hub_checkout_the_menu_runs_from_is_set_up_in_place(self) -> None:
+        result = self.run_task("--agent-setup", fetched=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "host-setup/linux/install-skills.sh")
+        self.assertEqual(
+            result.stdout.strip(), f"host-setup/bootstrap.sh --agent-setup --from-tree {self.hub}"
+        )
+
+    def test_the_report_takes_the_same_two_branches(self) -> None:
+        fetched = self.run_task("--agent-status", fetched=True, extra="REF=develop")
+        self.assertEqual(
+            fetched.stdout.strip(), "host-setup/bootstrap.sh --agent-status --ref develop"
+        )
+        in_place = self.run_task("--agent-status", fetched=False)
+        self.assertEqual(
+            in_place.stdout.strip(),
+            f"host-setup/bootstrap.sh --agent-status --from-tree {self.hub}",
+        )
+
+    def test_a_dry_run_is_passed_to_the_bootstrap(self) -> None:
+        result = self.run_task("--agent-setup", fetched=False, extra="DRY_RUN=true")
+        self.assertIn("--dry-run", result.stdout)
+
+
+class TestMenuNumbering(unittest.TestCase):
+    """The two menus list the same tasks under the same numbers, and the dispatch agrees with each listing."""
+
+    MENU_SH = ROOT / "host-setup" / "menu.sh"
+    MENU_PS = ROOT / "host-setup" / "menu.ps1"
+
+    def listed(self, path: Path) -> dict[int, str]:
+        """The `N  text` lines the menu prints, which both menus write as a quoted log call."""
+        found: dict[int, str] = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = re.match(r"""\s*log ["'] {0,3}(\d+)  (.+?)["']\s*$""", line)
+            if match:
+                found[int(match.group(1))] = match.group(2)
+        return found
+
+    def test_the_agent_setup_is_two_lines_in_each_menu(self) -> None:
+        for path, report, update in (
+            (self.MENU_SH, 8, 9),
+            (self.MENU_PS, 10, 11),
+        ):
+            with self.subTest(menu=path.name):
+                listed = self.listed(path)
+                self.assertEqual(
+                    listed[report],
+                    "Report agent setup (agent tools, skills, safety kit, global rules)",
+                )
+                self.assertEqual(
+                    listed[update],
+                    "Update agent setup (agent tools, skills, safety kit, global rules)",
+                )
+                self.assertEqual(listed[update + 1], "Install coding-agent tools by name")
+                for gone in ("Skills install status", "Install or update the fleet Skills"):
+                    self.assertFalse([t for t in listed.values() if gone in t], gone)
+
+    def test_each_menu_numbers_its_tasks_without_a_gap_or_a_repeat(self) -> None:
+        for path in (self.MENU_SH, self.MENU_PS):
+            with self.subTest(menu=path.name):
+                numbers = sorted(self.listed(path))
+                self.assertEqual(numbers, list(range(1, len(numbers) + 1)))
+
+    def test_every_listed_number_is_dispatched(self) -> None:
+        sh = self.MENU_SH.read_text(encoding="utf-8")
+        ps = self.MENU_PS.read_text(encoding="utf-8")
+        for number in self.listed(self.MENU_SH):
+            with self.subTest(menu="menu.sh", number=number):
+                self.assertRegex(sh, rf"(?m)^    {number}\)")
+        for number in self.listed(self.MENU_PS):
+            with self.subTest(menu="menu.ps1", number=number):
+                self.assertRegex(ps, rf"(?m)^        '{number}' \{{")
 
 
 class HubCleanupCases:
