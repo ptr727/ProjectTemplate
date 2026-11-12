@@ -247,6 +247,29 @@ class TestInstallAgents(unittest.TestCase):
             sorted(self.called()), ["brew upgrade --cask claude-code", "brew upgrade opencode"]
         )
 
+    def test_an_npm_global_under_a_mise_node_is_npms_and_not_mises(self) -> None:
+        root = self.dir / "mise" / "installs" / "node" / "20.1.0" / "lib" / "node_modules"
+        self.stub(
+            "claude", "2.1.0 (Claude Code)", where=root / "@anthropic-ai" / "claude-code" / "bin"
+        )
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        self.stub("mise", "mise 2024.1.1")
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["npm install -g @anthropic-ai/claude-code@latest"])
+        self.assertEqual(self.report()["claude"]["manager"], "npm")
+
+    def test_an_npm_global_under_a_keg_only_node_in_the_cellar_is_npms_and_not_brews(self) -> None:
+        root = self.dir / "linuxbrew" / "Cellar" / "node@20" / "20.1.0" / "lib" / "node_modules"
+        self.stub("codex", "codex-cli 0.149.1", where=root / "@openai" / "codex" / "bin")
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        self.stub("brew", "Homebrew 4.0.0")
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["npm install -g @openai/codex@latest"])
+
     def mise_layout(self, listed: bool = True) -> Path:
         """An npm-backend tool laid out as mise does, a node_modules inside its install directory, and mise's listing of it."""
         install = self.dir / "mise" / "installs" / "npm-opencode-ai" / "1.0.0"
@@ -608,6 +631,14 @@ class TestInstallAgentsWindows(unittest.TestCase):
             encoding="utf-8",
         )
         scoop.chmod(0o755)
+
+    def test_scoops_tilde_path_for_a_per_user_install_is_expanded_before_matching(self) -> None:
+        shims = self.home / "scoop" / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        self.scoop_which("~\\scoop\\apps\\opencode\\current\\opencode.exe")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
 
     def test_a_scoop_path_outside_the_roots_apps_directory_is_reported_not_run(self) -> None:
         root = self.dir / "Apps" / "scoop"

@@ -257,12 +257,44 @@ npm_package() {
     esac
 }
 
+# The global root of the npm on PATH, real-pathed, asked once and empty where npm cannot say.
+NPM_ROOT=""
+NPM_ROOT_READ=false
+npm_root() {
+    if [[ $NPM_ROOT_READ == false ]]; then
+        NPM_ROOT_READ=true
+        if command -v npm >/dev/null; then
+            NPM_ROOT=$(timeout 30 npm root -g 2>/dev/null </dev/null) || NPM_ROOT=""
+            [[ -z $NPM_ROOT ]] || NPM_ROOT=$(readlink -f -- "$NPM_ROOT" 2>/dev/null) || NPM_ROOT=""
+        fi
+    fi
+    printf '%s' "$NPM_ROOT"
+}
+
 # What owns the installed copy, read from where the command resolves to rather than from how it was meant to be installed.
 tool_manager() {
     local path="$1" real
     real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
     case "$real" in
     */.bun/*) printf 'bun' ;;
+    *)
+        # The npm on PATH is asked first, since an ordinary npm global can sit under a node that mise or Homebrew manages.
+        # Upgrading that node would leave the tool behind, so what npm holds is npm's whatever else the path looks like.
+        local root
+        root=$(npm_root)
+        if [[ -n $root && $real == "$root"/* ]]; then
+            printf 'npm'
+            return 0
+        fi
+        tool_manager_by_path "$real"
+        ;;
+    esac
+}
+
+# The manager a path suggests once npm has declined it.
+tool_manager_by_path() {
+    local real="$1"
+    case "$real" in
     # A mise or Homebrew directory can hold a node_modules of its own, so each is read before the generic npm shape.
     */mise/installs/*) printf 'mise' ;;
     */Cellar/* | */Caskroom/*) printf 'brew' ;;

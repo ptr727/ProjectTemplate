@@ -337,6 +337,8 @@ function Get-ScoopApp {
         $(if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }),
         $(if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' })
     )
+    # Scoop prints a per-user path with a leading tilde, so it is expanded to the profile before the roots are compared.
+    if ($Path -match '^~[\\/]') { $Path = Join-Path $HOME $Path.Substring(2) }
     $where = $Path -replace '/', '\'
     foreach ($root in ($roots | Where-Object { $_ })) {
         $apps = (($root -replace '/', '\').TrimEnd('\')) + '\apps\'
