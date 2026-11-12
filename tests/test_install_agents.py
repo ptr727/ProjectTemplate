@@ -29,6 +29,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "host-setup" / "linux" / "install-agents.sh"
 
+# The manager calls that only read, which the tests do not count as a change.
+READS = {"npm root -g", "npm prefix -g", "mise ls --json"}
+
 AWKWARD = 'a "quoted" back\\slash\ttab\nnewline\rreturn \x01\x1f é end'
 
 # A stub answers --version with a banner shaped like its tool's own, records every call, and answers herdr's status reads from files the test writes.
@@ -38,6 +41,9 @@ case "$*" in
 --version) printf '%s\\n' "$BANNER" ;;
 "integration status --outdated-only") cat "$STUB_DIR/outdated" 2>/dev/null || true ;;
 "status --json") cat "$STUB_DIR/status.json" ;;
+"root -g") cat "$STUB_DIR/npm_root" 2>/dev/null || true ;;
+"prefix -g") cat "$STUB_DIR/npm_prefix" 2>/dev/null || true ;;
+"ls --json") cat "$STUB_DIR/mise_ls.json" 2>/dev/null || true ;;
 esac
 exit 0
 """
@@ -112,7 +118,7 @@ class TestInstallAgents(unittest.TestCase):
         return [
             line
             for line in self.calls.read_text(encoding="utf-8").splitlines()
-            if not line.endswith("--version")
+            if not line.endswith("--version") and line not in READS
         ]
 
     def report(self) -> dict[str, dict[str, Any]]:
@@ -139,7 +145,27 @@ class TestInstallAgents(unittest.TestCase):
     def codex_in_npm(self) -> Path:
         node_modules = self.dir / "lib" / "node_modules"
         self.stub("codex", "codex-cli 0.149.1", where=node_modules / "@openai" / "codex" / "bin")
+        (self.dir / "npm_root").write_text(str(node_modules), encoding="utf-8")
         return node_modules
+
+    def test_files_outside_the_npm_global_root_are_not_claimed_by_that_npm(self) -> None:
+        self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        (self.dir / "npm_root").write_text(
+            str(self.dir / "elsewhere" / "node_modules"), encoding="utf-8"
+        )
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn("not under the global root of the npm on PATH", result.stdout)
+
+    def test_an_npm_that_cannot_say_its_root_claims_nothing(self) -> None:
+        self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        (self.dir / "npm_root").unlink()
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(self.called(), [])
+        self.assertIn("does not own it", result.stdout)
 
     def test_an_npm_install_is_upgraded_through_npm_for_that_one_package(self) -> None:
         self.codex_in_npm()
@@ -185,7 +211,8 @@ class TestInstallAgents(unittest.TestCase):
         self.codex_in_npm()
         failing = self.bin / "npm"
         failing.write_text(
-            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\nexit 3\n', encoding="utf-8"
+            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\n[[ $1 == install ]] && exit 3\ncat "$STUB_DIR/npm_root" "$STUB_DIR/npm_prefix" 2>/dev/null\nexit 0\n',
+            encoding="utf-8",
         )
         failing.chmod(0o755)
         self.stub("claude", "2.1.0 (Claude Code)")
@@ -220,16 +247,33 @@ class TestInstallAgents(unittest.TestCase):
             sorted(self.called()), ["brew upgrade --cask claude-code", "brew upgrade opencode"]
         )
 
-    def test_mise_upgrades_the_backend_tool_its_directory_names(self) -> None:
-        self.stub(
-            "opencode",
-            "1.0.0",
-            where=self.dir / "mise" / "installs" / "npm-opencode-ai" / "1.0.0" / "bin",
-        )
+    def mise_layout(self, listed: bool = True) -> Path:
+        """An npm-backend tool laid out as mise does, a node_modules inside its install directory, and mise's listing of it."""
+        install = self.dir / "mise" / "installs" / "npm-opencode-ai" / "1.0.0"
+        package = install / "lib" / "node_modules" / "opencode-ai" / "bin"
+        self.stub("opencode", "1.0.0", where=package)
+        other = self.dir / "mise" / "installs" / "aqua-sst-opencode" / "0.9.0"
+        entries = {"aqua:sst/opencode": [{"install_path": str(other)}]}
+        if listed:
+            entries["npm:opencode-ai"] = [{"install_path": str(install)}]
+        (self.dir / "mise_ls.json").write_text(json.dumps(entries), encoding="utf-8")
         self.stub("mise", "mise 2024.1.1")
+        return install
+
+    def test_mise_upgrades_the_key_its_listing_gives_for_the_install_path(self) -> None:
+        self.mise_layout()
+        self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), ["mise upgrade npm:opencode-ai"])
+        self.assertEqual(self.report()["opencode"]["manager"], "mise")
+
+    def test_a_mise_tool_the_listing_does_not_hold_is_reported_and_not_run(self) -> None:
+        self.mise_layout(listed=False)
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("mise upgrade", " ".join(self.called()))
+        self.assertIn("upgrade it with mise by hand", result.stdout)
 
     def test_a_tool_with_no_recorded_package_name_is_reported_not_guessed(self) -> None:
         self.stub("herdr", "herdr 0.9.0", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
@@ -424,7 +468,11 @@ class TestInstallAgentsWindows(unittest.TestCase):
         return path
 
     def run_script(
-        self, *arguments: str, pane: bool = False, extra_path: Path | None = None
+        self,
+        *arguments: str,
+        pane: bool = False,
+        extra_path: Path | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         directories = [str(self.bin), "/usr/bin", "/bin"]
         if extra_path is not None:
@@ -439,6 +487,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         }
         if pane:
             env["HERDR_PANE_ID"] = "test-pane"
+        env.update(extra_env or {})
         assert PWSH is not None
         return subprocess.run(
             [PWSH, "-NoProfile", "-File", str(SCRIPT_PS), *arguments],
@@ -474,6 +523,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
 
     def test_node_modules_path_reads_as_npm_and_is_upgraded_through_npm(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
+        (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.stub("codex", "codex-cli 0.1.0", npm_bin)
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=npm_bin)
@@ -483,6 +533,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
 
     def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
+        (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.stub("codex", "codex-cli 0.1.0", npm_bin)
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "-DryRun", "codex", extra_path=npm_bin)
@@ -492,6 +543,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
 
     def test_the_report_names_the_command_and_not_the_false_claim(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
+        (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.stub("codex", "codex-cli 0.1.0", npm_bin)
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Report", "codex", extra_path=npm_bin)
@@ -499,22 +551,27 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertNotIn("which upgrades it", result.stdout)
 
     def test_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
-        node_modules = self.dir / "node_modules"
-        self.stub("codex", "codex-cli 0.1.0", node_modules / ".bin")
+        prefix = self.dir / "npmprefix"
+        (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
+        self.stub("codex", "codex-cli 0.1.0", prefix / "node_modules" / ".bin")
         self.stub("npm", "npm 10.0.0")
-        node_modules.chmod(0o555)
-        self.addCleanup(node_modules.chmod, 0o755)
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=node_modules / ".bin")
+        prefix.chmod(0o555)
+        self.addCleanup(prefix.chmod, 0o755)
+        result = self.run_script(
+            "-Upgrade", "-Yes", "codex", extra_path=prefix / "node_modules" / ".bin"
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("is not writable by this user", result.stdout)
         self.assertNotIn("npm install -g @openai/codex@latest", self.recorded())
 
     def test_a_failing_manager_is_reported_and_the_other_tools_still_run(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
+        (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.stub("codex", "codex-cli 0.1.0", npm_bin)
         failing = self.bin / "npm"
         failing.write_text(
-            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\nexit 3\n', encoding="utf-8"
+            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\n[[ $1 == install ]] && exit 3\ncat "$STUB_DIR/npm_root" "$STUB_DIR/npm_prefix" 2>/dev/null\nexit 0\n',
+            encoding="utf-8",
         )
         failing.chmod(0o755)
         self.stub("claude", "2.1.0 (Claude Code)")
@@ -532,17 +589,97 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("bun install -g opencode-ai@latest", self.recorded())
 
     def test_scoop_updates_the_app_its_which_names(self) -> None:
-        shims = self.dir / "scoop" / "shims"
+        root = self.dir / "Apps" / "scoop"
+        shims = root / "shims"
         self.stub("opencode", "1.0.0", shims)
+        self.scoop_which(f"{root}/apps/opencode/current/opencode.exe")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "opencode", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
+        self.assertNotIn("scoop update scoop", self.recorded())
+
+    def scoop_which(self, answer: str) -> None:
         scoop = self.bin / "scoop"
         scoop.write_text(
-            '#!/bin/bash\nprintf "scoop %s\\n" "$*" >>"$CALLS"\n[[ $1 == which ]] && echo "C:\\\\scoop\\\\apps\\\\opencode\\\\current\\\\opencode.exe"\nexit 0\n',
+            '#!/bin/bash\nprintf "scoop %s\\n" "$*" >>"$CALLS"\n'
+            f'[[ $1 == which ]] && echo "{answer}"\nexit 0\n',
             encoding="utf-8",
         )
         scoop.chmod(0o755)
-        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=shims)
+
+    def test_a_scoop_path_outside_the_roots_apps_directory_is_reported_not_run(self) -> None:
+        root = self.dir / "Apps" / "scoop"
+        shims = root / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        self.scoop_which(f"{self.dir}/Apps/other/apps/opencode/current/opencode.exe")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "opencode", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("scoop update opencode", self.recorded())
+        self.assertNotIn("scoop update", " ".join(self.recorded()))
+        self.assertIn("scoop's name for opencode could not be read", result.stdout)
+
+    def test_shims_directly_in_the_npm_prefix_are_classified_as_npm(self) -> None:
+        prefix = self.dir / "Program Files" / "nodejs"
+        (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
+        self.stub("codex", "codex-cli 0.1.0", prefix)
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Report", "-Json", "codex", extra_path=prefix)
+        row = json.loads(result.stdout)["tools"][0]
+        self.assertEqual(row["manager"], "npm")
+
+    def test_files_outside_the_npm_prefix_are_not_claimed_by_that_npm(self) -> None:
+        (self.dir / "npm_prefix").write_text(str(self.dir / "somewhere"), encoding="utf-8")
+        elsewhere = self.dir / "node_modules" / ".bin"
+        self.stub("codex", "codex-cli 0.1.0", elsewhere)
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=elsewhere)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("npm install", " ".join(self.recorded()))
+        self.assertIn("not under the prefix of the npm on PATH", result.stdout)
+
+    def run_functions(self, body: str) -> subprocess.CompletedProcess[str]:
+        """Runs the script's own helper functions, lifted by AST so main is not run."""
+        assert PWSH is not None
+        driver = (
+            "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
+            f"'{SCRIPT_PS}', [ref]$null, [ref]$null)\n"
+            "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
+            " if ($f.Name -in 'Resolve-DirectoryTarget', 'Test-ProtectedPath') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
+            + body
+        )
+        return subprocess.run(
+            [PWSH, "-NoProfile", "-Command", driver],
+            capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
+        )  # fmt: skip
+
+    def test_a_link_into_a_user_writable_directory_is_resolved_before_the_protected_rule(
+        self,
+    ) -> None:
+        """A symlink stands in for the junction nvm-windows makes, since pwsh on Linux cannot create a junction.
+
+        The Program Files rule itself is Windows-only, so this covers the resolution and the rule apart.
+        """
+        protected = self.dir / "Program Files"
+        protected.mkdir()
+        appdata = self.dir / "appdata" / "nvm"
+        appdata.mkdir(parents=True)
+        (protected / "nodejs").symlink_to(appdata, target_is_directory=True)
+        body = (
+            f"$link = '{protected / 'nodejs'}'\n"
+            "$real = Resolve-DirectoryTarget -Directory $link\n"
+            f"'resolved=' + ($real -eq '{appdata}')\n"
+            f"'link-protected=' + (Test-ProtectedPath -Directory $link -Roots @('{protected}'))\n"
+            f"'target-protected=' + (Test-ProtectedPath -Directory $real -Roots @('{protected}'))\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split(),
+            ["resolved=True", "link-protected=True", "target-protected=False"],
+        )
 
     def test_winget_is_left_to_upgrade_host(self) -> None:
         links = self.dir / "Microsoft" / "WinGet" / "Links"

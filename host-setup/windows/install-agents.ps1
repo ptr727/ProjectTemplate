@@ -7,9 +7,10 @@
 # An upgrade runs that manager's own upgrade for that one package instead: npm, bun, and scoop.
 # The winget packages are already upgraded by upgrade-host.ps1, so winget is not repeated here.
 # A choco package needs an elevated shell and this script never elevates, so it is reported with its command and nothing is run.
-# The same holds for an npm directory under Program Files that a normal user cannot write.
+# The same holds for an npm prefix under Program Files or ProgramData that a normal user cannot write, once a link there is followed.
+# The npm on PATH owns a tool only where the prefix it reports holds it, rather than where a path merely looks like npm's.
 # The package name is a per-tool record in this file (Get-NpmPackage), because a manager's shim does not always carry it.
-# The scoop and choco names are read from where the manager put the files.
+# The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
@@ -61,6 +62,7 @@ $NOTE_TEXTS = [System.Collections.Generic.List[string]]::new()
 $FAILED = [System.Collections.Generic.List[string]]::new()
 $CHANGED = [System.Collections.Generic.List[string]]::new()
 $TMP_DIR = ''
+$NPM_PREFIX = $null
 
 # --- Output ---
 
@@ -112,7 +114,7 @@ A tool reads as "self" when no package manager owns it, so this script runs its 
 the name of a package manager when one owns it. -Upgrade then runs that manager's upgrade for
 that one package: npm or bun install the latest tag, and scoop updates the app. winget is
 upgraded by upgrade-host.ps1. choco needs an elevated shell and an npm directory under Program
-Files needs one too, so each is reported with its command and nothing is run. herdr's
+Files or ProgramData needs one too, so each is reported with its command and nothing is run. herdr's
 agent integrations are reinstalled after an upgrade wherever herdr reports one outdated, and a
 herdr server still running the previous binary is left running and reported as needing a
 restart, since stopping it would end every pane inside it.
@@ -269,28 +271,81 @@ function Get-NpmPackage {
     return $null
 }
 
-# The directory npm installs a global package into, read from where the command resolves to.
-function Get-NpmGlobalDirectory {
-    param([string]$Path)
-    $p = $Path -replace '\\', '/'
-    $at = $p.IndexOf('/node_modules/')
-    if ($at -ge 0) { return $p.Substring(0, $at) + '/node_modules' }
-    return (Split-Path -Parent $p)
+# A directory followed through any link or junction to the directory it really is.
+# The nvm-windows install points C:\Program Files\nodejs into a user-writable directory, so the link target decides, not the link.
+function Resolve-DirectoryTarget {
+    param([string]$Directory)
+    $item = Get-Item -LiteralPath $Directory -ErrorAction SilentlyContinue
+    if ($item -and $item.LinkTarget) {
+        $target = $item.ResolveLinkTarget($true)
+        if ($target) { return $target.FullName }
+    }
+    return $Directory
+}
+
+# Whether a directory sits under one of the roots a normal user cannot write.
+function Test-ProtectedPath {
+    param([string]$Directory, [string[]]$Roots)
+    foreach ($root in ($Roots | Where-Object { $_ })) {
+        if (($Directory -replace '/', '\').StartsWith(($root -replace '/', '\'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
 }
 
 # Whether this user can write a directory, without elevating to find out.
-# Windows keeps a per-user npm directory writable, and an install under Program Files needs an elevated shell.
+# Windows keeps a per-user directory writable, and one under Program Files or ProgramData needs an elevated shell.
 function Test-DirectoryWritable {
     param([string]$Directory)
+    $real = Resolve-DirectoryTarget -Directory $Directory
     if ($IsWindows) {
-        $protected = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData) | Where-Object { $_ }
-        foreach ($root in $protected) {
-            if (($Directory -replace '/', '\').StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $false }
-        }
-        return $true
+        return -not (Test-ProtectedPath -Directory $real -Roots @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData))
     }
-    & test -w $Directory
+    & test -w $real
     return ($LASTEXITCODE -eq 0)
+}
+
+# The prefix the npm on PATH installs global packages and their shims into, or nothing where npm cannot say.
+function Get-NpmPrefix {
+    if ($null -eq $script:NPM_PREFIX) {
+        $script:NPM_PREFIX = ''
+        if (Get-Command npm -CommandType Application -ErrorAction SilentlyContinue) {
+            $result = Invoke-Captured -Command 'npm' -Arguments @('prefix', '-g') -TimeoutSec $script:READ_TIMEOUT
+            if ($result.ExitCode -eq 0 -and $result.Output) { $script:NPM_PREFIX = $result.Output.Trim() }
+        }
+    }
+    return $script:NPM_PREFIX
+}
+
+# Whether a tool's files sit where the npm on PATH installs: its shims directly in the prefix, or the package under the prefix's node_modules.
+function Test-NpmOwnership {
+    param([string]$Path)
+    $prefix = (Get-NpmPrefix) -replace '/', '\'
+    if (-not $prefix) { return $false }
+    $prefix = $prefix.TrimEnd('\')
+    $where = ($Path -replace '/', '\')
+    $cut = $where.LastIndexOf('\')
+    $directory = if ($cut -gt 0) { $where.Substring(0, $cut).TrimEnd('\') } else { '' }
+    return ($directory -ieq $prefix -or $where.StartsWith("$prefix\node_modules\", [StringComparison]::OrdinalIgnoreCase))
+}
+
+# The scoop app a path belongs to, read from directly under a scoop root's own apps directory, or nothing for any other path.
+# The roots are SCOOP (else the profile's scoop) and SCOOP_GLOBAL (else the scoop under ProgramData).
+# A first apps segment anywhere in the path would take a directory a user happened to name Apps.
+function Get-ScoopApp {
+    param([string]$Path)
+    $roots = @(
+        $(if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }),
+        $(if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' })
+    )
+    $where = $Path -replace '/', '\'
+    foreach ($root in ($roots | Where-Object { $_ })) {
+        $apps = (($root -replace '/', '\').TrimEnd('\')) + '\apps\'
+        if ($where.StartsWith($apps, [StringComparison]::OrdinalIgnoreCase)) {
+            $name = ($where.Substring($apps.Length) -split '\\')[0]
+            if ($name) { return $name }
+        }
+    }
+    return $null
 }
 
 # What an upgrade does for a tool a package manager owns.
@@ -307,8 +362,10 @@ function Get-ManagerPlan {
                 $plan.Why = "no $Manager package name is recorded for $Tool, so upgrade it with $Manager by hand"
             } elseif (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
                 $plan.Why = "$Manager is not on PATH, so run: $Manager install -g $pkg@latest"
-            } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmGlobalDirectory -Path $Path))) {
-                $plan.Why = "the npm global directory $(Hide-Home -Path (Get-NpmGlobalDirectory -Path $Path)) is not writable by this user, so run in an elevated shell: npm install -g $pkg@latest"
+            } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
+                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
+            } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmPrefix))) {
+                $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: npm install -g $pkg@latest"
             } else {
                 # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
                 $plan.Command = $Manager
@@ -319,7 +376,7 @@ function Get-ManagerPlan {
             $app = $null
             if (Get-Command scoop -CommandType Application -ErrorAction SilentlyContinue) {
                 $which = Invoke-Captured -Command 'scoop' -Arguments @('which', $Tool) -TimeoutSec $script:READ_TIMEOUT
-                if ($which.ExitCode -eq 0 -and ($which.Output -replace '/', '\') -match '\\apps\\([^\\]+)\\') { $app = $Matches[1] }
+                if ($which.ExitCode -eq 0) { $app = Get-ScoopApp -Path $which.Output.Trim() }
             }
             if ($app) {
                 $plan.Command = 'scoop'
@@ -352,6 +409,9 @@ function Get-ToolManager {
         if ($candidate -like '*\WinGet\Packages\*' -or $candidate -like '*\Microsoft\WinGet\Links\*') { return 'winget' }
         if ($candidate -like '*\scoop\*') { return 'scoop' }
         if ($candidate -like '*\chocolatey\*') { return 'choco' }
+        # The npm on PATH is asked first where it installs, since its shims sit directly in the prefix, as in Program Files\nodejs.
+        # The path shape stays as a fallback so a copy npm cannot confirm is still never given the tool's own updater.
+        if (Test-NpmOwnership -Path $candidate) { return 'npm' }
         if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
         if ($candidate -like '*\.bun\*') { return 'bun' }
     }

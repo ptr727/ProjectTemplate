@@ -10,7 +10,8 @@
 # Nix is declarative and apt is upgraded by upgrade-host.sh, so each is reported and nothing is run.
 # Nothing here elevates, so an npm prefix this user cannot write to is reported with its command and left.
 # The package name is a per-tool record in this file (npm_package), because a manager's files do not always carry it.
-# Homebrew and mise names are read from where the manager put the files.
+# The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
+# The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 set -Eeuo pipefail
@@ -262,9 +263,11 @@ tool_manager() {
     real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
     case "$real" in
     */.bun/*) printf 'bun' ;;
-    */node_modules/*) printf 'npm' ;;
-    */linuxbrew/* | /opt/homebrew/* | */Cellar/* | */Caskroom/*) printf 'brew' ;;
+    # A mise or Homebrew directory can hold a node_modules of its own, so each is read before the generic npm shape.
     */mise/installs/*) printf 'mise' ;;
+    */Cellar/* | */Caskroom/*) printf 'brew' ;;
+    */node_modules/*) printf 'npm' ;;
+    */linuxbrew/* | /opt/homebrew/*) printf 'brew' ;;
     /nix/store/*) printf 'nix' ;;
     *)
         if [[ $real == /usr/* && $real != /usr/local/* ]] && command -v dpkg >/dev/null && dpkg -S "$real" >/dev/null 2>&1; then
@@ -274,6 +277,23 @@ tool_manager() {
         fi
         ;;
     esac
+}
+
+# The key mise lists the tool under, such as npm:opencode-ai, for the entry whose install path holds the given real path.
+# Prints nothing where mise, jq, or a matching entry is missing, so nothing is upgraded on a guess.
+mise_key() {
+    local real="$1" out key install
+    command -v mise >/dev/null && command -v jq >/dev/null || return 0
+    out=$(timeout 30 mise ls --json 2>/dev/null </dev/null) || return 0
+    while IFS=$'\t' read -r key install; do
+        [[ -n $install ]] || continue
+        install=$(readlink -f -- "$install" 2>/dev/null) || continue
+        if [[ $real == "$install"/* ]]; then
+            printf '%s' "$key"
+            return 0
+        fi
+    done < <(jq -r 'to_entries[] | .key as $k | .value[]? | select(.install_path != null) | [$k, .install_path] | @tsv' <<<"$out" 2>/dev/null)
+    return 0
 }
 
 # What an upgrade does for a tool a package manager owns, as PLAN_CMD (the command to run) or PLAN_WHY (why none runs).
@@ -304,8 +324,14 @@ manager_plan() {
             PLAN_WHY="$manager is not on PATH, so run: $manager install -g $pkg@latest"
             return 0
         fi
-        if [[ $manager == "npm" && $real == */node_modules/* ]]; then
-            dir="${real%%/node_modules/*}/node_modules"
+        if [[ $manager == "npm" ]]; then
+            # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
+            dir=$(timeout 30 npm root -g 2>/dev/null </dev/null) || dir=""
+            dir=$(readlink -f -- "$dir" 2>/dev/null) || dir=""
+            if [[ -z $dir || $real != "$dir"/* ]]; then
+                PLAN_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
+                return 0
+            fi
             if [[ ! -w $dir ]]; then
                 PLAN_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: npm install -g $pkg@latest"
                 return 0
@@ -333,18 +359,13 @@ manager_plan() {
         }
         ;;
     mise)
-        name="${real#*/mise/installs/}"
-        name="${name%%/*}"
-        pkg=$(npm_package "$tool")
-        # A backend tool such as npm:opencode-ai sits in a mise directory with the separators replaced by dashes.
-        if [[ -n $pkg && $name == "npm-${pkg//[\/:]/-}" ]]; then
-            name="npm:$pkg"
+        # The tool is named by mise's own listing, matched on install path, rather than read from the directory name.
+        name=$(mise_key "$real")
+        if [[ -z $name ]]; then
+            PLAN_WHY="mise and jq must both be on PATH and mise's listing must hold an entry whose install path holds $(hide_home "$real"), and none does, so upgrade it with mise by hand"
+            return 0
         fi
         PLAN_CMD=(mise upgrade "$name")
-        command -v mise >/dev/null || {
-            PLAN_WHY="mise is not on PATH, so run: ${PLAN_CMD[*]}"
-            PLAN_CMD=()
-        }
         ;;
     esac
 }
