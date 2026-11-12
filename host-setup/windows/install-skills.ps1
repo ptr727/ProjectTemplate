@@ -2,7 +2,8 @@
 # This is the one script here that reaches outside host-setup/, deliberately.
 # The skills content lives at the tree root, so a copy fetched without the tree has nothing to install.
 # The independent-fetchability rule the sibling scripts follow therefore cannot apply to it.
-# Python is its one dependency, which is why the bootstrap runs it last: install-tools.ps1 provides the interpreter before this needs one.
+# Python is its one dependency.
+# The bootstrap runs it inside the agent setup, after install-tools.ps1 has provided the interpreter.
 #
 # Every step is idempotent, because the installer it drives is.
 # SKILLS_SOURCE_COMMIT, where the caller sets it, names the commit of a tree git cannot answer for.
