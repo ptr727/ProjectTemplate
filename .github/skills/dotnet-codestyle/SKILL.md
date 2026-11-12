@@ -115,12 +115,12 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
 
 **`LangVersion` is left unset** in every props file and every project targeting a .NET TFM. The
 C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it anywhere to
-`latest`, `latestMajor`, or `preview`. Those float with the installed SDK's compiler. A
-`netstandard` analyzer or source-generator project is the one exception. Unset, it compiles at
-C# 7.3, which `Nullable` `enable` refuses (CS8630). So it sets a fixed number in its own `.csproj`,
-the TFM's C# version (`14` beside `net10.0`), which does not float. A newer SDK then has IDE0028 suggest a syntax the
-older SDK cannot compile (CS8652), so no single source text passes
-`dotnet format style --verify-no-changes --severity=info` on both. `AnalysisLevel` stays
+`latest`, `latestMajor`, or `preview`. Those float with the installed SDK's compiler. A newer
+SDK then has IDE0028 suggest a syntax the older SDK cannot compile (CS8652), so no single source
+text passes `dotnet format style --verify-no-changes --severity=info` on both. A `netstandard`
+analyzer or source-generator project is the one exception to leaving it unset. Unset, it compiles
+at C# 7.3, which `Nullable` `enable` refuses (CS8630). So it sets a fixed number in its own
+`.csproj`, the TFM's C# version (`14` beside `net10.0`), which does not float. `AnalysisLevel` stays
 `latest-all` with `AnalysisMode` `All`, since it is not what floats the syntax. The `sdk` block
 and an unset `LangVersion` together guarantee the same SDK major and C# version locally and in CI.
 Analyzer output can still differ between feature bands on one line, such as a distro-packaged
