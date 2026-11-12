@@ -1,5 +1,5 @@
 # Installs the fleet skills for the current user, by driving the hub-hosted installer in the tree this script sits in.
-# Like install-safety-kit and install-global-rules, it reaches outside host-setup/, deliberately.
+# This is the one script here that reaches outside host-setup/, deliberately.
 # The skills content lives at the tree root, so a copy fetched without the tree has nothing to install.
 # The independent-fetchability rule the sibling scripts follow therefore cannot apply to it.
 # Python is its one dependency.

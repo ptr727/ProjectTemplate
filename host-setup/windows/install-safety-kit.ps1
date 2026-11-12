@@ -1,5 +1,5 @@
 # Installs the Claude Code safety kit for the current user, by driving the installer in the tree this script sits in.
-# Like install-skills.ps1 it reaches outside host-setup\, deliberately, since the kit lives beside the other agent-safety content.
+# Like install-skills.ps1 it reaches outside host-setup\windows\, deliberately, since the kit lives beside the other agent-safety content.
 # A host without Claude Code is skipped with a line saying so, because installing would create the .claude directory for an agent nobody installed.
 # The kit installer takes no dry-run flag, so a dry run here prints the command and runs nothing.
 #

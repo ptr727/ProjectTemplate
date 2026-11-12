@@ -91,7 +91,7 @@ flowchart TD
   agent --> session["first agent session"]
 ```
 
-Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. The agent setup's steps act only on agents already installed. No agent exists yet on this path, so the safety kit and the host-wide rules land nothing. They land when the setup runs again after an agent is installed. The tools step also polices its own PATH. A stray copy shadowing a managed `uv`, `jq`, or `git-restore-mtime` install is named in the report. An install or upgrade run removes the copy when removal is safe. No open gaps sit on this path. G1, the skills install with no home in the provisioning flow, is closed and its row records the resolution.
+Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. The agent setup's steps act only on agents already installed. No agent exists yet on this path, so the Claude Code plugin registration, the safety kit, and the host-wide rules land nothing. They land when the setup runs again after an agent is installed. The tools step also polices its own PATH. A stray copy shadowing a managed `uv`, `jq`, or `git-restore-mtime` install is named in the report. An install or upgrade run removes the copy when removal is safe. No open gaps sit on this path. G1, the skills install with no home in the provisioning flow, is closed and its row records the resolution.
 
 ### A New Repository
 
