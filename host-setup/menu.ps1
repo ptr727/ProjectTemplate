@@ -77,10 +77,10 @@ function usage {
 Usage: menu.ps1 [options]
 
 An interactive menu over this fleet's host and repo tooling: update the host tools, upgrade the
-OS packages, install the fleet skills, audit a cataloged repo, and pull the hub's verbatim-owned
-files, or just the verbatim rule sections inside a mixed file, into a downstream repo's own
-worktree. Run from a hub checkout or from any other repo. Only the tasks that apply to that
-checkout are shown.
+OS packages, bring the coding agents current (tools, skills, safety kit, global rules), audit a
+cataloged repo, and pull the hub's verbatim-owned files, or just the verbatim rule sections inside a
+mixed file, into a downstream repo's own worktree. Run from a hub checkout or from any other repo.
+Only the tasks that apply to that checkout are shown.
 
 Options:
   -y, -Yes          Pass -Yes to each tool this menu runs, so a tool does not prompt. The menu's
@@ -481,13 +481,20 @@ function Invoke-InHub {
     return $LASTEXITCODE
 }
 
-function Invoke-SkillsInstall {
-    return (Invoke-WithHubLock {
+# The agent setup and its report, which are one bootstrap action each.
+# The report registers nothing, so it always reads the tree the menu already holds, a checkout or a fetched clone.
+# The setup installs the skills, and the skills installer registers the directory it runs from.
+# A fetched clone is removed on exit, so the setup is handed to the bootstrap, which keeps a tree of its own.
+# A hub checkout the menu runs from is registered in place, as installing the skills there always did.
+function Invoke-AgentSetup {
+    param([Parameter(Mandatory)][string]$Action)
+    return (Invoke-WithHubLock -ArgumentList @($Action) -ScriptBlock {
+            param($Action)
             if (-not (Confirm-HubRoot)) { return 1 }
-            if ($script:HUB_FETCHED) {
-                return (Invoke-InHub -Directory 'host-setup' -Tool 'bootstrap.ps1' -Arguments '-Skills', '-Ref', $script:REF)
+            if ($script:HUB_FETCHED -and $Action -ne '-AgentStatus') {
+                return (Invoke-InHub -Directory 'host-setup' -Tool 'bootstrap.ps1' -Arguments $Action, '-Ref', $script:REF)
             }
-            return (Invoke-InHub -Directory 'host-setup\windows' -Tool 'install-skills.ps1')
+            return (Invoke-InHub -Directory 'host-setup' -Tool 'bootstrap.ps1' -Arguments $Action, '-FromTree', $script:HUB_ROOT)
         })
 }
 
@@ -599,23 +606,21 @@ function Show-Menu {
     # The -Install action of setup-wsl.ps1 needs a distribution name, which no menu entry collects.
     # Installing one nobody asked for is exactly what this stays out of.
     log '   9  Report the WSL platform and the distributions installed'
-    log '  10  Report fleet Skills install status'
-    log '  11  Install or update the fleet Skills'
-    log '  12  Report the coding-agent tools installed for this user'
-    log '  13  Upgrade the coding-agent tools already installed'
-    log '  14  Install coding-agent tools by name'
+    log '  10  Report agent setup (agent tools, skills, safety kit, global rules)'
+    log '  11  Update agent setup (agent tools, skills, safety kit, global rules)'
+    log '  12  Install coding-agent tools by name'
     log ''
     log "Hub, $($script:HUB_REPO):"
-    log '  15  Audit a cataloged repo'
-    log '  16  Check the generated Skills distributions are current'
+    log '  13  Audit a cataloged repo'
+    log '  14  Check the generated Skills distributions are current'
     # Also gated on REF: scripts/carry.py always rejects a hub checkout that is not exactly on the default ref.
     if ($script:DOWNSTREAM_ROOT -and $script:REF -eq $script:DEFAULT_REF) {
         log ''
         log 'Downstream, the repo this menu is run from:'
-        log '  17  Check what the hub would change here, change nothing'
-        log "  18  Pull the hub's verbatim-owned files into this repo"
-        log "  19  Check the hub's verbatim rule sections inside this repo's mixed files"
-        log '  20  Pull those rule sections in, leaving every other section alone'
+        log '  15  Check what the hub would change here, change nothing'
+        log "  16  Pull the hub's verbatim-owned files into this repo"
+        log "  17  Check the hub's verbatim rule sections inside this repo's mixed files"
+        log '  18  Pull those rule sections in, leaving every other section alone'
     }
     log ''
     log '   q  Quit'
@@ -637,22 +642,20 @@ function Invoke-Dispatch {
         '7' { return (Invoke-HostTool -Tool 'setup-github.ps1' -Arguments '-Status') }
         '8' { return (Invoke-HostTool -Tool 'setup-github.ps1' -Arguments '-Configure') }
         '9' { return (Invoke-HostTool -Tool 'setup-wsl.ps1' -Arguments '-Status') }
-        '10' { return (Invoke-HostTool -Tool 'install-skills.ps1' -Arguments '-Report') }
-        '11' { return (Invoke-SkillsInstall) }
-        '12' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Report') }
-        '13' { return (Invoke-HostTool -Tool 'install-agents.ps1' -Arguments '-Upgrade') }
-        '14' { return (Invoke-AgentsInstall) }
-        '15' { return (Invoke-AuditRepo) }
-        '16' { return (Invoke-CheckSkillsDist) }
-        '17' { return (Invoke-CarryAction 'check') }
-        '18' {
+        '10' { return (Invoke-AgentSetup -Action '-AgentStatus') }
+        '11' { return (Invoke-AgentSetup -Action '-AgentSetup') }
+        '12' { return (Invoke-AgentsInstall) }
+        '13' { return (Invoke-AuditRepo) }
+        '14' { return (Invoke-CheckSkillsDist) }
+        '15' { return (Invoke-CarryAction 'check') }
+        '16' {
             # -DryRun changes nothing, and scripts/carry.py itself has no dry-run mode.
             # So a dry-run apply reads as its own check instead of silently mutating the downstream worktree.
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check') }
             return (Invoke-CarryAction 'apply')
         }
-        '19' { return (Invoke-CarryAction 'check-sections') }
-        '20' {
+        '17' { return (Invoke-CarryAction 'check-sections') }
+        '18' {
             if ($script:DRY_RUN) { return (Invoke-CarryAction 'check-sections') }
             return (Invoke-CarryAction 'apply-sections')
         }

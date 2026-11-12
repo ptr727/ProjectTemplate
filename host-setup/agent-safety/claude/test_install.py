@@ -219,6 +219,102 @@ class TestSourceRef(unittest.TestCase):
         self.assertTrue(install.source_ref()["dirty"])
 
 
+class TestSourceRefFromAnArchive(unittest.TestCase):
+    """A tree git cannot answer for records the commit its loader handed in, and only a full one."""
+
+    COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        # A kit directory three levels below a tree root, outside any repository.
+        self.kit = self.tmp / "tree" / "host-setup" / "agent-safety" / "claude"
+        self.kit.mkdir(parents=True)
+        patcher = mock.patch.object(install, "HERE", self.kit)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("AGENT_SAFETY_SOURCE_COMMIT", None)
+        os.environ.pop("AGENT_SAFETY_DIRTY_OVERRIDE", None)
+
+    def test_a_full_commit_is_recorded_as_a_clean_archive(self):
+        os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
+        self.assertEqual(
+            install.source_ref(), {"vcs": "archive", "commit": self.COMMIT, "dirty": False}
+        )
+
+    def test_no_commit_handed_in_reads_as_no_vcs(self):
+        self.assertEqual(install.source_ref(), {"vcs": "none"})
+
+    def test_a_value_that_is_not_a_full_lowercase_hex_commit_is_ignored(self):
+        for value in (
+            "",
+            "abc123",
+            self.COMMIT[:-1],
+            self.COMMIT + "0",
+            self.COMMIT.upper(),
+            "g" * 40,
+        ):
+            with self.subTest(value=value):
+                os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = value
+                self.assertEqual(install.source_ref(), {"vcs": "none"})
+
+    def test_a_tree_the_bootstrap_extracted_reads_its_commit_marker_without_the_variable(self):
+        tree = self.tmp / "tree"
+        (tree / ".bootstrap-owned").touch()
+        (tree / ".bootstrap-commit").write_text(self.COMMIT + "\n", encoding="utf-8")
+        self.assertEqual(
+            install.source_ref(), {"vcs": "archive", "commit": self.COMMIT, "dirty": False}
+        )
+
+    def test_a_malformed_marker_falls_through_to_the_commit_less_archive_record(self):
+        tree = self.tmp / "tree"
+        (tree / ".bootstrap-owned").touch()
+        for text in ("not-a-commit\n", "abc123\n", ("a" * 40) + "0\n", "A" * 40 + "\n"):
+            with self.subTest(text=text):
+                (tree / ".bootstrap-commit").write_text(text, encoding="utf-8")
+                self.assertEqual(
+                    install.source_ref(), {"vcs": "archive", "commit": None, "dirty": False}
+                )
+
+    def test_the_variable_wins_over_the_marker(self):
+        tree = self.tmp / "tree"
+        (tree / ".bootstrap-owned").touch()
+        (tree / ".bootstrap-commit").write_text("f" * 40 + "\n", encoding="utf-8")
+        os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
+        self.assertEqual(install.source_ref()["commit"], self.COMMIT)
+
+    def test_a_bootstrap_tree_with_no_commit_anywhere_is_an_archive_naming_none(self):
+        (self.tmp / "tree" / ".bootstrap-owned").touch()
+        self.assertEqual(install.source_ref(), {"vcs": "archive", "commit": None, "dirty": False})
+        self.assertIn("unknown", install.stamp_line({"source": install.source_ref()}))
+
+    def test_a_git_tree_ignores_the_variable(self):
+        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.tmp), "-c", "user.name=T", "-c", "user.email=t@example.com",
+             "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"],
+            check=True,
+        )  # fmt: skip
+        os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
+        ref = install.source_ref()
+        self.assertEqual(ref["vcs"], "git")
+        self.assertNotEqual(ref["commit"], self.COMMIT)
+
+    def test_a_tree_the_bootstrap_extracted_is_not_asked_of_an_enclosing_repository(self):
+        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.tmp), "-c", "user.name=T", "-c", "user.email=t@example.com",
+             "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"],
+            check=True,
+        )  # fmt: skip
+        (self.tmp / "tree" / ".bootstrap-owned").touch()
+        os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
+        self.assertEqual(install.source_ref()["vcs"], "archive")
+
+
 class TestInstalledContent(StampCase):
     """Presence is not currency. These are the cases markers and versions cannot see."""
 
@@ -2579,6 +2675,34 @@ class TestContainmentHookSelftests(unittest.TestCase):
 
 
 @unittest.skipIf(os.name == "nt", "the stub launchers are POSIX shell scripts")
+class TestArchiveStampReport(StampCase):
+    """A stamp recording an archive commit is judged on the payload, as a git stamp is."""
+
+    COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+    def test_an_install_handed_a_commit_by_an_archive_tree_reads_as_current_and_names_it(self):
+        # A copy of the whole kit outside any repository is too heavy for this case.
+        # The stamp shape the installer writes and the report reads is exercised instead.
+        self.assertEqual(run(self.home).returncode, 0)
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["source"] = {"vcs": "archive", "commit": self.COMMIT, "dirty": False}
+        self.stamp.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("hub 0123456", r.stdout)
+        self.assertIn("installed from a fetched archive", r.stdout)
+        self.assertIn("CURRENT", r.stdout)
+
+    def test_a_stamp_naming_no_commit_is_current_with_a_note_rather_than_stale(self):
+        self.assertEqual(run(self.home).returncode, 0)
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["source"] = {"vcs": "none"}
+        self.stamp.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("named no commit", r.stdout)
+
+
 class TestLauncher(StampCase):
     """A hook command naming an interpreter that never runs the hook fails open, so each is run first."""
 

@@ -199,7 +199,7 @@ python3 scripts/skills_install.py            # or the scripts/skills_install.sh 
 python3 scripts/skills_install.py --report   # read-only: what does each channel hold?
 ```
 
-A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode. A fresh machine therefore finishes with the tools, the identity, and the skills together. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.
+A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode. It runs as part of the agent setup, which also installs the Claude Code safety kit and writes the host-wide rules for Codex and opencode. A fresh machine therefore finishes with the tools, the identity, and the skills copy Codex and opencode read. The Claude Code plugin registration, the kit, and the host-wide rules act only on agents already installed. So run the agent setup again after installing a coding agent, before its first session. `bootstrap.sh --agent-setup` or `bootstrap.ps1 -AgentSetup` runs that setup on its own. `--agent-status` or `-AgentStatus` reports it. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.
 
 ### Carry the Rules Into a Repository
 

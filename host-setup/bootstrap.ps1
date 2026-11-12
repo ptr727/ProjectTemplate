@@ -8,6 +8,7 @@
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
 #
 # A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
+# That covers the agent setup, which installs the skills as one of its steps.
 # The bootstrap still needs no git and modifies no checkout of anyone's, because of the following.
 #   - That tree is replaced whole by the next such run.
 #   - That tree is never a git checkout.
@@ -36,6 +37,8 @@ param(
     [switch]$Tools,
     [switch]$Github,
     [switch]$Skills,
+    [switch]$AgentSetup,
+    [switch]$AgentStatus,
     [Alias('w')][switch]$Wsl,
     [Alias('n')][switch]$DryRun,
     [Alias('y')][switch]$Yes,
@@ -44,6 +47,8 @@ param(
     # Declared after -Ref and -Dir, so the positions those two had before it existed stay theirs.
     [string[]]$Agents,
     [switch]$Keep,
+    # Named FromTree rather than Tree, since PowerShell variable names are case-insensitive and $TREE is the fetched tree below.
+    [string]$FromTree,
     [Alias('h')][switch]$Help
 )
 
@@ -83,6 +88,8 @@ $ACTIONS = [ordered]@{
     tools   = [bool]$Tools
     github  = [bool]$Github
     skills  = [bool]$Skills
+    'agent-setup'  = [bool]$AgentSetup
+    'agent-status' = [bool]$AgentStatus
     wsl     = [bool]$Wsl
     host    = [bool]$StandUpHost
     dev     = [bool]$Dev
@@ -93,6 +100,7 @@ $WANT_HELP = [bool]$Help
 $DRY_RUN = [bool]$DryRun
 $ASSUME_YES = [bool]$Yes
 $KEEP = [bool]$Keep
+$FROM_TREE = $FromTree
 $REF = if ($Ref) { $Ref } else { $DEFAULT_REF }
 
 $MODE = ''
@@ -115,7 +123,8 @@ describe them come from one revision rather than from whatever a host happens to
 
 Actions, name one, default -Report:
   -r, -Report       Report what each tool would do, change nothing
-      -Host         Upgrade packages, install the tools, configure git and GitHub, install the skills
+      -Host         Upgrade packages, install the tools, configure git and GitHub, set up the coding
+                    agents as -AgentSetup does
       -Dev          As -Host, and add the tools a development machine needs
       -Upgrade      Upgrade the packages winget manages, and this user's coding-agent tools
                     that are already installed
@@ -124,6 +133,11 @@ Actions, name one, default -Report:
       -Tools        Install the host tools, only
       -Github       Configure git, the SSH key, and commit signing, only
       -Skills       Install the fleet skills for the current user, only
+      -AgentSetup   Bring this user's coding agents fully current: upgrade the agent tools already
+                    installed, install the fleet skills, install the Claude Code safety kit where
+                    Claude Code is present, and write the host-wide rules for Codex and opencode
+      -AgentStatus  Report each step of -AgentSetup, in the same order. It changes nothing in the
+                    agent setup, though any action first installs PowerShell 7 where it is missing
   -w, -Wsl          Report the WSL platform and the distributions installed, only
   -h, -Help         Show this help
 
@@ -133,10 +147,13 @@ Options:
       -Ref REF      Branch, tag, pull request ref, or commit to run from, default main
       -Dir PATH     Where the tree is extracted, default %LOCALAPPDATA%\host-setup
       -Keep         Leave the extracted tree in place, which is removed by default
+      -FromTree PATH
+                    With -AgentSetup or -AgentStatus only: run from this tree, a hub checkout for
+                    one, instead of fetching one. Nothing is fetched, swapped, or removed.
 
--Host, -Dev, and -Skills keep their tree, at skills-tree under that directory, because the
-Claude Code plugin they register loads it in place. The next such run replaces it, and a -DryRun
-leaves it.
+-Host, -Dev, -Skills, and -AgentSetup keep their tree, at skills-tree under that directory,
+because the Claude Code plugin they register loads it in place. The next such run replaces it, and a
+-DryRun leaves it.
 
 With no action on a console, the menu asks. With no action and no console, the report runs, since a
 redirected run is not a place to answer a question.
@@ -152,6 +169,8 @@ Examples:
   bootstrap.ps1 -Ref develop -Report   Report using the tooling on develop
   bootstrap.ps1 -Tools -DryRun         Show what installing the tools would run
   bootstrap.ps1 -Agents herdr,cswap    Install two coding-agent tools
+  bootstrap.ps1 -AgentSetup            Bring this user's coding agents fully current
+  bootstrap.ps1 -AgentStatus           Report whether they are
 '@
 }
 
@@ -239,6 +258,27 @@ function Invoke-PwshHandoff {
 
 # --- Fetch ---
 
+# The variables that hand a resolved commit to the installers, which a persistent console would otherwise keep after the run.
+function Save-SourceCommitEnv {
+    $saved = @{}
+    foreach ($name in 'SKILLS_SOURCE_COMMIT', 'AGENT_SAFETY_SOURCE_COMMIT') {
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+    }
+    return $saved
+}
+
+# A variable unset before the run is removed again rather than left empty.
+function Restore-SourceCommitEnv {
+    param([hashtable]$Saved)
+    foreach ($name in $Saved.Keys) {
+        if ($null -eq $Saved[$name]) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $Saved[$name])
+        }
+    }
+}
+
 # Resolve the ref to the commit it names, so the run reports a revision rather than a moving name.
 # The plain-text accept header returns the commit alone, which keeps this free of a JSON parser on a host that has none.
 function Resolve-Ref {
@@ -260,7 +300,7 @@ function Resolve-Ref {
 # A dry run changes nothing, so it takes a transient tree like any other action rather than replacing the one the plugin loads.
 function Test-KeepsTree {
     if ($script:DRY_RUN) { return $false }
-    return $script:MODE -in @('host', 'dev', 'skills')
+    return $script:MODE -in @('host', 'dev', 'skills', 'agent-setup')
 }
 
 # The paths this loader creates under DIR, named in one place so the cleanup and the download agree.
@@ -501,13 +541,9 @@ function Show-Report {
     Invoke-Tool -Tool 'upgrade-host.ps1' -Arguments '-Status'
     Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Report'
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Status'
-    # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
-    Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
-    if ($LASTEXITCODE -ne 0) { info 'The fleet skills step did not report a current copy, and the output above says why' }
-    if (Test-AgentsUser) {
-        Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
-        if ($LASTEXITCODE -ne 0) { info 'The agent tools step did not report, and the output above says why' }
-    }
+    # The agent half is tolerated step by step inside Invoke-AgentStatus.
+    # A missing install is a finding to name and not a reason to stop naming the rest.
+    Invoke-AgentStatus
 }
 
 function Test-Elevated {
@@ -550,7 +586,7 @@ function Invoke-AgentsInstall {
 # The order is fixed rather than chosen.
 # Packages come first so install-tools.ps1 and setup-github.ps1 act on a host winget has just brought current.
 # GitHub comes last because it is the only step that waits on a person in a browser.
-# The skills step runs after the tools, because install-tools.ps1 provides the interpreter it needs.
+# The agent setup runs after the tools, because install-tools.ps1 provides the interpreter it needs.
 function Invoke-StandUp {
     # Named Kind rather than Profile, which is PowerShell's own automatic variable for the current user's profile script.
     param([string]$Kind)
@@ -562,13 +598,87 @@ function Invoke-StandUp {
         Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install'
     }
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure'
-    Invoke-SkillsInstall
+    Invoke-AgentSetup
 }
 
 # The installer registers the directory it runs from, so the kept tree has to hold its name before it runs.
 function Invoke-SkillsInstall {
-    if (Test-KeepsTree) { Invoke-SwapIn }
+    # A given tree is already where it runs from, so there is nothing to swap into place.
+    if ((Test-KeepsTree) -and -not $script:FROM_TREE) { Invoke-SwapIn }
     Invoke-Tool -Tool 'install-skills.ps1'
+}
+
+# Everything this host installs for coding agents, in one action.
+# The tools come first, so the steps after them find the CLIs they act on current.
+# The skills come before the kit and the rules, because the kept tree has to hold its name before the skills installer registers it.
+# Only the agent tools already installed are touched, so this never adds one.
+# The kit and the rules each skip an agent that is not installed.
+# The whole action is therefore safe on a host with any of them.
+function Invoke-AgentSetup {
+    if (Test-AgentsUser) {
+        Invoke-Tool -Tool 'install-agents.ps1' -Arguments '-Upgrade'
+    }
+    Invoke-SkillsInstall
+    Invoke-Tool -Tool 'install-safety-kit.ps1'
+    Invoke-Tool -Tool 'install-global-rules.ps1'
+}
+
+# The counterpart of Invoke-AgentSetup that changes nothing in the agent setup, one report per step in the same order.
+# A step that is not current is a finding to name and not a reason to stop naming the rest, as Show-Report does.
+# The names are collected and said again at the end, so a long report does not bury them.
+function Invoke-AgentStatus {
+    $behind = @()
+    $skipped = @()
+    # The agent tools report is an inventory, so its outcome is tracked apart from the steps that can be not current.
+    $toolsOutcome = 'skipped'
+    # A report is read-only, so it runs for real under -DryRun rather than printing that it would.
+    $wasDryRun = $script:DRY_RUN
+    $script:DRY_RUN = $false
+    try {
+        if (Test-AgentsUser) {
+            Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
+            if ($LASTEXITCODE -ne 0) {
+                info 'The agent tools step did not report, and the output above says why'
+                $toolsOutcome = 'failed'
+            } else {
+                $toolsOutcome = 'listed'
+            }
+        } else {
+            $skipped += 'agent tools (running elevated)'
+        }
+        Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) {
+            info 'The fleet skills step did not report a current copy, and the output above says why'
+            $behind += 'fleet skills'
+        }
+        Invoke-Tool -Tool 'install-safety-kit.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) {
+            info 'The Claude Code safety kit step did not report current, and the output above says why'
+            $behind += 'Claude Code safety kit'
+        }
+        Invoke-Tool -Tool 'install-global-rules.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) {
+            info 'The host-wide rules step did not report current, and the output above says why'
+            $behind += 'host-wide rules'
+        }
+        if ($behind.Count -gt 0) {
+            info "Not current: $($behind -join ', ')"
+        }
+        if ($skipped.Count -gt 0) {
+            info "Not checked: $($skipped -join ', ')"
+        }
+        # The listing shows versions without comparing them to upstream, so it is never called current.
+        if ($toolsOutcome -eq 'listed') {
+            info 'Agent tools: listed above, versions not compared with upstream'
+        } elseif ($toolsOutcome -eq 'failed') {
+            info 'Agent tools: the report failed'
+        }
+        if ($behind.Count -eq 0) {
+            info 'Every other agent setup step reports current'
+        }
+    } finally {
+        $script:DRY_RUN = $wasDryRun
+    }
 }
 
 # Names the host in the menu heading.
@@ -595,7 +705,7 @@ function Show-Menu {
     log '  2  Upgrade the packages winget manages, and the agent tools already installed'
     log '  3  Install the host tools'
     log '  4  Configure git and GitHub'
-    log '  5  Install the fleet skills'
+    log '  5  Set up the coding agents (agent tools, skills, safety kit, global rules)'
     log '  6  Report the WSL platform and the distributions installed'
     log '  7  All of the above but WSL, which is a host stood up'
     log '  8  All of the above but WSL, plus the development tools'
@@ -608,7 +718,7 @@ function Show-Menu {
         '2' { $script:MODE = 'upgrade' }
         '3' { $script:MODE = 'tools' }
         '4' { $script:MODE = 'github' }
-        '5' { $script:MODE = 'skills' }
+        '5' { $script:MODE = 'agent-setup' }
         '6' { $script:MODE = 'wsl' }
         '7' { $script:MODE = 'host' }
         '8' { $script:MODE = 'dev' }
@@ -643,6 +753,9 @@ function Resolve-Directory {
 function Resolve-Mode {
     $given = @($script:ACTIONS.Keys | Where-Object { $script:ACTIONS[$_] })
     if ($given.Count -gt 1) { die "More than one action given ($($given -join ', ')), name one" }
+    # A given tree is never fetched, swapped, or removed, so only the actions that read or install from a tree in place accept one.
+    # No action given is refused too, since the menu or the report it falls back to would then run from that tree.
+    if ($script:FROM_TREE -and ($given.Count -eq 0 -or $given[0] -notin @('agent-setup', 'agent-status'))) { die '-FromTree is accepted with -AgentSetup or -AgentStatus only' }
     if ($given.Count -eq 0) { return '' }
     return $given[0]
 }
@@ -659,6 +772,27 @@ function Show-DownloadAndRunRemedy {
     $forwarded = Format-ForwardedArgumentForDisplay
     $suffix = if ($forwarded) { " $forwarded" } else { '' }
     info "  powershell -ExecutionPolicy Bypass -File bootstrap.ps1$suffix"
+}
+
+# The action the run was given, dispatched once the tree it acts on is in place.
+function Invoke-Mode {
+    switch ($script:MODE) {
+        'report' { Show-Report }
+        'upgrade' { Invoke-Upgrade }
+        'agents' { Invoke-AgentsInstall }
+        'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
+        'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
+        'skills' { Invoke-SkillsInstall }
+        'agent-setup' { Invoke-AgentSetup }
+        'agent-status' { Invoke-AgentStatus }
+        # Only setup-wsl.ps1's -Status runs here.
+        # Its -Install needs a distribution name, which no flag here collects.
+        # Choosing a default distro nobody asked for is therefore exactly what -Wsl staying out of -Host and -Dev already exists to avoid.
+        # Installing one by name is a checkout away, once this run has fetched it.
+        'wsl' { Invoke-Tool -Tool 'setup-wsl.ps1' -Arguments '-Status' }
+        'host' { Invoke-StandUp -Kind 'host' }
+        'dev' { Invoke-StandUp -Kind 'dev' }
+    }
 }
 
 function main {
@@ -679,7 +813,6 @@ function main {
 
     # Reached only under a confirmed pwsh 7, either started that way or handed off to above.
     $script:PWSH_PATH = (Get-Process -Id $PID).Path
-    Test-Prerequisite
     $script:DIR = Resolve-Directory
     $script:MODE = Resolve-Mode
 
@@ -696,31 +829,36 @@ function main {
         }
     }
 
+    # A given tree is run from in place, so there is nothing to lock, fetch, or clean up.
+    if ($script:FROM_TREE) {
+        $resolved = Resolve-Path -LiteralPath $script:FROM_TREE -ErrorAction SilentlyContinue
+        if (-not $resolved) { die "-FromTree $($script:FROM_TREE) is not a directory" }
+        $script:TREE = $resolved.Path.TrimEnd('\', '/')
+        if (-not (Test-Path -LiteralPath (Join-Path $script:TREE 'host-setup\windows'))) { die "-FromTree $script:TREE holds no host-setup\windows, so it is not a tree to run from" }
+        step "Running from $script:TREE"
+        Invoke-Mode
+        step 'Done'
+        info "Ran from $script:TREE, which this run left as it was"
+        return
+    }
+
+    # A given tree fetches nothing, so tar.exe is needed only from here on.
+    Test-Prerequisite
+
     # Taken before the try, so a run refused here never reaches the cleanup that would remove the trees of the run holding the lock.
     Lock-Directory
+    $savedCommitEnv = Save-SourceCommitEnv
     try {
         Resolve-Ref
         # The commit the resolve produced is handed to the skills installer, since the tarball tree it runs from has no .git to answer for it.
         $env:SKILLS_SOURCE_COMMIT = $script:RESOLVED
+        # And to the safety kit installer, for the same reason.
+        $env:AGENT_SAFETY_SOURCE_COMMIT = $script:RESOLVED
         Get-Tree
-        switch ($script:MODE) {
-            'report' { Show-Report }
-            'upgrade' { Invoke-Upgrade }
-            'agents' { Invoke-AgentsInstall }
-            'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
-            'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
-            'skills' { Invoke-SkillsInstall }
-            # Only setup-wsl.ps1's -Status runs here.
-            # Its -Install needs a distribution name, which no flag here collects.
-            # Choosing a default distro nobody asked for is therefore exactly what -Wsl staying out of -Host and -Dev already exists to avoid.
-            # Installing one by name is a checkout away, once this run has fetched it.
-            'wsl' { Invoke-Tool -Tool 'setup-wsl.ps1' -Arguments '-Status' }
-            'host' { Invoke-StandUp -Kind 'host' }
-            'dev' { Invoke-StandUp -Kind 'dev' }
-        }
+        Invoke-Mode
     } finally {
         # Released after the cleanup, so the cleanup still runs under the lock, and on die's exit too, which runs this finally on its way out.
-        try { Invoke-Cleanup } finally { Unlock-Directory }
+        try { Invoke-Cleanup } finally { try { Unlock-Directory } finally { Restore-SourceCommitEnv -Saved $savedCommitEnv } }
     }
 
     step 'Done'

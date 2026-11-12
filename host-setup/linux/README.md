@@ -9,6 +9,8 @@ The tooling that makes a Debian or Ubuntu based host satisfy the contract in [`d
 - [`setup-github.sh`][setup-github] configures the SSH key, git, and commit signing. It checks both key registrations against what GitHub publishes.
 - [`install-agents.sh`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed. The script installs a tool only when that tool is named.
 - [`install-skills.sh`][install-skills] drives the hub's skills installer at [`scripts/skills_install.py`][skills-install] from this tree.
+- [`install-safety-kit.sh`][install-safety-kit] drives the Claude Code safety kit installer at [`host-setup/agent-safety/claude/install.sh`][kit-install] from this tree. It skips a host where Claude Code is not installed for this user.
+- [`install-global-rules.sh`][install-global-rules] writes the host-wide agent rules to the global instruction file of each installed Codex or opencode, by running [`global_rules.py`][global-rules] from this tree.
 
 Each runs on its own, and each takes `--help`.
 
@@ -18,6 +20,8 @@ host-setup/linux/install-tools.sh --install
 host-setup/linux/upgrade-host.sh --status
 host-setup/linux/setup-github.sh --status
 host-setup/linux/install-skills.sh --report
+host-setup/linux/install-safety-kit.sh --report
+host-setup/linux/install-global-rules.sh --report
 host-setup/linux/install-agents.sh --upgrade
 ```
 
@@ -131,7 +135,7 @@ The agent tools install into the user's home, so this script refuses root rather
 
 ## install-skills.sh Is the Exception
 
-The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it last. Run on a host without one, it stops and names the tools step as its prerequisite.
+The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it inside the agent setup, the last step of a stand-up. Run on a host without one, it stops and names the tools step as its prerequisite. `install-safety-kit.sh` and `install-global-rules.sh` are exceptions for the same reason. The kit installer needs Python 3.11 or later and runs only where Claude Code is present. The rules writer runs on any Python 3 and asks for 3.11 only where Codex or opencode is present.
 
 ## Why There Is No Linter Category
 
@@ -180,11 +184,15 @@ CI checks the scripts with `shellcheck` and `shfmt`. It runs both over every `.s
 
 [bootstrap]: ../bootstrap.sh
 [bootstrap-ps1]: ../bootstrap.ps1
+[global-rules]: ../agent-safety/global_rules.py
 [host-setup]: ../../docs/host-setup.md
 [host-setup-readme]: ../README.md
 [install-agents]: ./install-agents.sh
+[install-global-rules]: ./install-global-rules.sh
+[install-safety-kit]: ./install-safety-kit.sh
 [install-skills]: ./install-skills.sh
 [install-tools]: ./install-tools.sh
+[kit-install]: ../agent-safety/claude/install.sh
 [setup-github]: ./setup-github.sh
 [skills-install]: ../../scripts/skills_install.py
 [test-bootstrap]: ../../tests/test_bootstrap.py

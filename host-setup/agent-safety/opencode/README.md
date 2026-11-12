@@ -5,8 +5,10 @@ No hook implements [`../README.md`][spec]'s requirements for opencode yet. Track
 
 ## What To Keep Enabled Meanwhile
 
-Keep opencode's own permission model enabled. The carried repository rules remain the only
-behavioral layer in a fleet checkout until a hook exists. They include `GOVERNANCE.md` "Repository
+Keep opencode's own permission model enabled. The host-wide rules reach opencode through
+`${XDG_CONFIG_HOME:-~/.config}/opencode/AGENTS.md`, which [`../global_rules.py`][global-rules]
+writes from the same blocks the Claude kit renders. The carried repository rules and those host-wide
+rules remain the only behavioral layer in a fleet checkout until a hook exists. They include `GOVERNANCE.md` "Repository
 Boundaries and Write Safety" and the rest of the fleet's prose. There is no mechanical backstop for
 opencode today. That means a mistake that the Claude Code hook would deny goes through unblocked in
 an opencode session.
@@ -36,6 +38,7 @@ requirements, not against `gh-write-guard.py`'s source.
 
 <!-- Repo -->
 [spec]: ../README.md
+[global-rules]: ../global_rules.py
 [claude-hook]: ../claude/gh-write-guard.py
 [claude-sweep]: ../claude/stray-process-sweep.py
 [claude-contain]: ../claude/tool-containment.py

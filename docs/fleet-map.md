@@ -82,13 +82,16 @@ flowchart TD
   fetch --> upgrade["upgrade host packages"]
   upgrade --> tools["install-tools: the host toolchain, floors in spec/host-tools.json"]
   tools --> github["setup-github: identity, SSH signing, gh auth"]
-  github --> skillsinstall["install-skills: fleet skills for the user"]
-  skillsinstall --> safety["agent-safety install: write guard + rendered CLAUDE.md"]
-  safety --> verify["verify: host_gate + skills_install --report"]
-  verify --> session["first agent session"]
+  github --> agenttools["agent setup: upgrade the installed coding-agent CLIs"]
+  agenttools --> skillsinstall["install-skills: fleet skills for the user"]
+  skillsinstall --> safety["install-safety-kit: write guard + rendered CLAUDE.md"]
+  safety --> rules["install-global-rules: host-wide rules for Codex and opencode"]
+  rules --> verify["verify: host_gate + bootstrap --agent-status"]
+  verify --> agent["install a coding agent, then re-run the agent setup"]
+  agent --> session["first agent session"]
 ```
 
-Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. The tools step also polices its own PATH. A stray copy shadowing a managed `uv`, `jq`, or `git-restore-mtime` install is named in the report. An install or upgrade run removes the copy when removal is safe. No open gaps sit on this path. G1, the skills install with no home in the provisioning flow, is closed and its row records the resolution.
+Owned by [`host-setup/`][host-setup-readme] and [`docs/host-setup.md`][host-setup-doc]. The agent setup's steps act only on agents already installed. No agent exists yet on this path, so the Claude Code plugin registration, the safety kit, and the host-wide rules land nothing. They land when the setup runs again after an agent is installed. The tools step also polices its own PATH. A stray copy shadowing a managed `uv`, `jq`, or `git-restore-mtime` install is named in the report. An install or upgrade run removes the copy when removal is safe. No open gaps sit on this path. G1, the skills install with no home in the provisioning flow, is closed and its row records the resolution.
 
 ### A New Repository
 
@@ -151,7 +154,7 @@ The lifecycle chain as built: a skill is hand-authored under [`.agents/skills/`]
 
 Four wiring points close the model, and each is in place:
 
-1. **Bootstrap** (G1, closed): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] end their host mode with a skills step, driven by the `install-skills` pair in the platform directories. The step degrades gracefully when the `claude` CLI is absent. In that case the overlay half still lands, and the stamp records the partial install. Each loader hands the commit it resolved to the installer, so a stamp written from the tarball tree stays checkable.
+1. **Bootstrap** (G1, closed): [`host-setup/bootstrap.sh`][bootstrap] and [`bootstrap.ps1`][bootstrap-ps1] end their host mode with the agent setup. Its skills step is driven by the `install-skills` pair in the platform directories. The step degrades gracefully when the `claude` CLI is absent. In that case the overlay half still lands, and the stamp records the partial install. Each loader hands the commit it resolved to the installer, so a stamp written from the tarball tree stays checkable. The host mode ends with the agent setup, of which the skills step is the first installer. The setup also installs the Claude Code safety kit and writes the host-wide rules for Codex and opencode ([`docs/host-setup.md`][host-setup-doc] "Agent Setup").
 2. **Host contract** (G1, closed): [`docs/host-setup.md`][host-setup-doc] states the install and the verify command in its "Fleet Skills Install" section. The [`README.md`][readme] "Using This Repo" section names the skills install among its four deployed things.
 3. **Session entry** (G6, closed): the tail of [`AGENTS.md`][agents] says a rule that keeps needing restating signals a stale install. The `check-this-repo` skill runs the report and points to [`docs/host-setup.md`][host-setup-doc] for the cadence, so the symptom routes to the check without new tooling.
 4. **Refresh cadence** (G6, closed): [`docs/host-setup.md`][host-setup-doc] "Fleet Skills Install" states it. It says to re-run the installer from a freshly fetched `main` when `--report` exits non-zero. It also says to re-run it from a freshly fetched `main` after any promotion to `main` that touches `.agents/skills/`. The maintainer runs it by hand, and an automated refresh is deliberately out of scope until the fleet has evidence the manual cadence fails.
@@ -179,8 +182,8 @@ Each gap's handoff below states who detects it, what closes it, and the test tha
 ### G1: Skills Install Is Absent From the Cold Start (Closed)
 
 - **Gap** - A host bootstrapped end to end via `host-setup/` had every tool and no fleet skills, because no provisioning step ran [`scripts/skills_install.py`][skills-install].
-- **Resolution** - The bootstrap host mode ends with a skills step. `install-skills.sh` and `install-skills.ps1` drive the installer from the fetched tree. A `--skills` action runs the step on its own. The bootstrap report reads `--report` beside the other status lines. Each loader hands the commit it resolved to the installer via `SKILLS_SOURCE_COMMIT`. That makes the stamp written from a tarball tree stay checkable, and `--report` exit zero on a fresh host. That second result is this row's closing test. [`docs/host-setup.md`][host-setup-doc] carries the "Fleet Skills Install" section with the verify line, and [`README.md`][readme] "Using This Repo" names four deployed things.
-- **Decisions** - The `claude` CLI stays out of [`spec/host-tools.json`][host-tools]. A Codex-only machine is a complete machine, so the installer degrades where the CLI is absent. In that case the installer lands the overlay half and records the partial install in the stamp. The skills step is the recorded exception to `host-setup/`'s no-Python and independent-fetchability rules. It runs last in a stand-up so `install-tools` provides its interpreter first.
+- **Resolution** - The bootstrap host mode ends with the agent setup. Its skills step is `install-skills.sh` or `install-skills.ps1`, driving the installer from the fetched tree. A `--skills` action runs that step on its own, and `--agent-setup` runs the whole setup. The bootstrap report reads the agent status, which carries the skills `--report`, beside the other status lines. Each loader hands the commit it resolved to the skills installer via `SKILLS_SOURCE_COMMIT`, and to the safety kit via `AGENT_SAFETY_SOURCE_COMMIT`. That makes the stamp written from a tarball tree stay checkable, and `--report` exit zero on a fresh host. That second result is this row's closing test. [`docs/host-setup.md`][host-setup-doc] carries the "Fleet Skills Install" section with the verify line, and [`README.md`][readme] "Using This Repo" names four deployed things.
+- **Decisions** - The `claude` CLI stays out of [`spec/host-tools.json`][host-tools]. A Codex-only machine is a complete machine, so the installer degrades where the CLI is absent. In that case the installer lands the overlay half and records the partial install in the stamp. The agent setup's Python-driven steps, the skills step among them, are the recorded exceptions to `host-setup/`'s no-Python and independent-fetchability rules. It runs inside the agent setup, the last step of a stand-up, so `install-tools` provides its interpreter first.
 - **Cross-links** - [#671][issue-671] and [#673][issue-673] touch the same `host-setup/` scripts.
 
 ### G2: Host-Tools Repo Overlay Is Silently Skippable (Closed)
