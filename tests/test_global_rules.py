@@ -451,6 +451,13 @@ class TestShadowedByOverride(Case):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("SHADOWED", result.stdout)
 
+    def test_a_blank_override_shadows_nothing(self) -> None:
+        self.assertEqual(self.run_script().returncode, 0)
+        self.override.write_text("  \n\n", encoding="utf-8")
+        result = self.run_script("--report", "--agent", "codex")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("SHADOWED", result.stdout)
+
     def test_no_override_means_no_warning(self) -> None:
         result = self.run_script("--agent", "codex")
         self.assertNotIn("SHADOWED", result.stdout)
