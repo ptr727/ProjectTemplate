@@ -323,6 +323,12 @@ tool_manager_by_path() {
         printf 'bun'
         return 0
     fi
+    # MISE_DATA_DIR can move mise's installs off any /mise/installs/ path, so mise's own listing is asked before any shape.
+    # Read by shape there, a relocated mise tool would fall to its own updater over mise's files.
+    if [[ -n $(mise_key "$real") ]]; then
+        printf 'mise'
+        return 0
+    fi
     case "$real" in
     # A mise, Homebrew, bun, or Nix directory can hold a node_modules of its own, so each is read before the generic npm shape.
     */mise/installs/*) printf 'mise' ;;

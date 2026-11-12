@@ -435,6 +435,19 @@ class TestInstallAgents(unittest.TestCase):
         self.assertNotIn("mise upgrade", " ".join(self.called()))
         self.assertIn("upgrade it with mise by hand", result.stdout)
 
+    def test_a_relocated_mise_tool_is_read_from_mises_listing_not_its_path(self) -> None:
+        # MISE_DATA_DIR moved: no /mise/installs/ segment, and a plain binary that would otherwise read as self.
+        install = self.dir / "agent-tools" / "installs" / "opencode" / "1.0.0"
+        self.stub("opencode", "1.0.0", where=install / "bin")
+        listing = {"opencode": [{"install_path": str(install)}]}
+        (self.dir / "mise_ls.json").write_text(json.dumps(listing), encoding="utf-8")
+        self.stub("mise", "mise 2024.1.1")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["mise upgrade opencode"])
+        self.assertEqual(self.report()["opencode"]["manager"], "mise")
+
     def test_a_tool_with_no_recorded_package_name_is_reported_not_guessed(self) -> None:
         self.stub("herdr", "herdr 0.9.0", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
         self.stub("npm", "npm 10.0.0")
