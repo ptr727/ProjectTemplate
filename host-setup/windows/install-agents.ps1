@@ -132,6 +132,8 @@ refuses them here and names the documented route rather than inventing one.
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
 
+It exits 0 on success, 3 where a tool failed while the others still ran, and 1 where it refused or stopped.
+
 Examples:
   install-agents.ps1                        Report on every tool
   install-agents.ps1 -Upgrade -Yes          Upgrade every tool already installed, no prompt
@@ -788,7 +790,7 @@ function Invoke-ToolUpgrade {
         return
     }
 
-    if ($ToolName -eq 'cswap' -and -not $script:DRY_RUN) {
+    if ($ToolName -eq 'cswap') {
         $holders = @(Get-CswapLauncherHolder $path)
         if ($holders.Count -gt 0) {
             log "cswap: at $shownVersion, and a running cswap (process $($holders -join ', ')) holds its launcher, which uv cannot replace while it runs, close it and run this again to update it"
@@ -893,7 +895,7 @@ function Invoke-Apply {
     if ($script:FAILED.Count -gt 0) {
         log ''
         warn "Failed: $($script:FAILED -join ' ')"
-        return 1
+        return 3
     }
     return 0
 }

@@ -385,10 +385,13 @@ install_skills() {
 # The whole action is therefore safe on a host with any of them.
 # The commit is handed to the kit because a fetched tree has no .git to answer for it.
 agent_setup() {
-    local tools_failed=false
+    local tools_failed=false rc=0
     if agents_user; then
-        if ! run_tool install-agents.sh --upgrade; then
+        run_tool install-agents.sh --upgrade || rc=$?
+        if ((rc == 3)); then
             tools_failed=true
+        elif ((rc != 0)); then
+            exit "$rc"
         fi
     fi
     install_skills

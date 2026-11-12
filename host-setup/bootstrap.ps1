@@ -618,7 +618,11 @@ function Invoke-AgentSetup {
     $toolsFailed = $false
     if (Test-AgentsUser) {
         Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Upgrade'
-        if ($LASTEXITCODE -ne 0) { $toolsFailed = $true }
+        if ($LASTEXITCODE -eq 3) {
+            $toolsFailed = $true
+        } elseif ($LASTEXITCODE -ne 0) {
+            die "install-agents.ps1 exited $LASTEXITCODE"
+        }
     }
     Invoke-SkillsInstall
     Invoke-Tool -Tool 'install-safety-kit.ps1'

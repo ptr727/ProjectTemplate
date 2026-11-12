@@ -156,7 +156,7 @@ class TestInstallAgents(unittest.TestCase):
         stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
         stub.chmod(0o755)
         result = self.run_script("--upgrade", "--yes", "claude")
-        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn("claude: its updater failed", result.stderr)
         self.assertIn("Changed:\n  claude 2.1.0 -> 2.2.0", result.stdout)
 
@@ -235,7 +235,7 @@ class TestInstallAgents(unittest.TestCase):
         failing.chmod(0o755)
         self.stub("claude", "2.1.0 (Claude Code)")
         result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 3)
         self.assertIn("codex: npm failed to upgrade it", result.stderr)
         self.assertIn("Failed: codex", result.stderr)
         self.assertEqual(self.called(), ["claude update", "npm install -g @openai/codex@latest"])
@@ -834,7 +834,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         failing.chmod(0o755)
         self.stub("claude", "2.1.0 (Claude Code)")
         result = self.run_script("-Upgrade", "-Yes", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 3)
         self.assertIn("npm failed to upgrade it", result.stderr)
         self.assertIn("claude update", self.recorded())
 
@@ -1131,7 +1131,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
 
     def test_install_refuses_codex_and_opencode_without_a_windows_installer(self) -> None:
         result = self.run_script("-Install", "-Yes", "codex", "opencode")
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 3)
         self.assertIn("codex documents no Windows installer", result.stderr)
         self.assertIn("opencode documents no Windows installer", result.stderr)
         self.assertIn("Failed: codex opencode", result.stderr)
@@ -1199,7 +1199,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
         stub.chmod(0o755)
         result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=self.dir / "front")
-        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn("claude: its updater failed", result.stderr)
         self.assertIn("Changed:\n  claude 2.1.0 -> 2.2.0", result.stdout)
 

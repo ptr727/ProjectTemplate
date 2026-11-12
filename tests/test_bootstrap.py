@@ -1461,7 +1461,7 @@ step="${step% }"
 kept=absent
 [[ -e "$KEPT_TREE/VERSION" ]] && kept=$(cat "$KEPT_TREE/VERSION")
 printf '%s|%s|%s\\n' "$step" "$(basename "$(cd "$(dirname "$0")/../.." && pwd)")" "$kept" >>"$STEP_LOG"
-[[ $step == "$FAIL_STEP" ]] && exit 7
+[[ $step == "$FAIL_STEP" ]] && exit "${FAIL_CODE:-7}"
 exit 0
 """
 
@@ -1476,7 +1476,7 @@ done
 kept=absent
 [[ -e "$KEPT_TREE/VERSION" ]] && kept=$(cat "$KEPT_TREE/VERSION")
 printf '%s|%s|%s\\n' "$step" "$(basename "$(cd "$(dirname "$0")/../.." && pwd)")" "$kept" >>"$STEP_LOG"
-[[ $step == "$FAIL_STEP" ]] && exit 7
+[[ $step == "$FAIL_STEP" ]] && exit "${FAIL_CODE:-7}"
 exit 0
 """
 
@@ -1639,6 +1639,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         action: str = "--host",
         root: bool = False,
         args: tuple[str, ...] = (),
+        fail_code: str = "",
     ) -> subprocess.CompletedProcess[str]:
         """Runs the loader with `action` and its arguments, under a user namespace's EUID 0 where `root` is set."""
         env = {
@@ -1648,6 +1649,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
             "STEP_LOG": str(self.log),
             "MV_LOG": str(self.mv_log),
             "FAIL_STEP": fail_step,
+            "FAIL_CODE": fail_code,
             "STUB_TARBALL": str(self.tarball),
             "STUB_COMMIT": "0123456789abcdef0123456789abcdef01234567",
         }
@@ -1729,12 +1731,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self,
     ) -> None:
         expected = stand_up_steps()
-        stopping = [
-            step
-            for step in expected[: expected.index("install-skills.sh")]
-            if step != "install-agents.sh --upgrade"
-        ]
-        for fail_step in stopping:
+        for fail_step in expected[: expected.index("install-skills.sh")]:
             with self.subTest(fail_step=fail_step):
                 shutil.rmtree(self.data)
                 self.data.mkdir()
@@ -1850,11 +1847,20 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     def test_an_agent_setup_whose_tools_step_fails_runs_every_later_step_and_still_fails(
         self,
     ) -> None:
-        result = self.run_main("install-agents.sh --upgrade", action="--agent-setup")
+        result = self.run_main("install-agents.sh --upgrade", action="--agent-setup", fail_code="3")
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(self.agents_steps(), list(AGENT_SETUP_STEPS), result.stderr)
         self.assertIn("Not current: agent tools (an upgrade failed, see above)", result.stdout)
         self.assertIn("The agent tools step failed", result.stderr)
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_setup_whose_tools_step_refuses_stops_there(self) -> None:
+        result = self.run_main("install-agents.sh --upgrade", action="--agent-setup")
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.agents_steps(), ["install-agents.sh --upgrade"], result.stderr)
+        self.assertNotIn("Not current", result.stdout)
 
     @unittest.skipIf(
         hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
@@ -2119,7 +2125,7 @@ STUB_POWERSHELL_TOOL = """\
 $shown = $args | ForEach-Object { if ($_ -match '\\s') { "<$_>" } else { $_ } }
 $step = (@(Split-Path -Leaf $PSCommandPath) + $shown) -join ' '
 Add-Content -LiteralPath $env:STEP_LOG -Value $step
-if ($step -eq $env:FAIL_STEP) { exit 7 }
+if ($step -eq $env:FAIL_STEP) { exit $(if ($env:FAIL_CODE) { [int]$env:FAIL_CODE } else { 7 }) }
 exit 0
 """
 
@@ -2186,7 +2192,11 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.log = self.work / "steps.log"
 
     def run_handoff(
-        self, call: str, elevated: bool | None = False, fail_step: str = ""
+        self,
+        call: str,
+        elevated: bool | None = False,
+        fail_step: str = "",
+        fail_code: str = "",
     ) -> subprocess.CompletedProcess[str]:
         """Runs `call` with elevation stood in for as `elevated`, or the loader's own check where it is None."""
         stand_in = (
@@ -2208,6 +2218,7 @@ class TestPowerShellToolHandoff(unittest.TestCase):
                 "FIXTURE_ELEVATED": "1" if elevated else "0",
                 "STEP_LOG": str(self.log),
                 "FAIL_STEP": fail_step,
+                "FAIL_CODE": fail_code,
             },
         )
 
@@ -2279,11 +2290,22 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         result = self.run_handoff(
             "$script:FROM_TREE = $env:FIXTURE_TREE\nInvoke-AgentSetup",
             fail_step="install-agents.ps1 -Upgrade",
+            fail_code="3",
         )
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(self.steps(), list(POWERSHELL_AGENT_SETUP_STEPS), result.stdout)
         self.assertIn("Not current: agent tools (an upgrade failed, see above)", result.stdout)
         self.assertIn("The agent tools step failed", result.stderr)
+
+    def test_an_agent_setup_whose_tools_step_refuses_stops_there(self) -> None:
+        result = self.run_handoff(
+            "$script:FROM_TREE = $env:FIXTURE_TREE\nInvoke-AgentSetup",
+            fail_step="install-agents.ps1 -Upgrade",
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(self.steps(), ["install-agents.ps1 -Upgrade"], result.stdout)
+        self.assertIn("install-agents.ps1 exited 7", result.stderr)
+        self.assertNotIn("Not current", result.stdout)
 
     def resolve_mode(self, given: str, from_tree: str) -> subprocess.CompletedProcess[str]:
         """Runs the loader's own Resolve-Mode with `given` the only action set and `from_tree` the -FromTree value."""

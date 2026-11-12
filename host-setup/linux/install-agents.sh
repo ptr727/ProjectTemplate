@@ -176,6 +176,8 @@ as needing a restart, since stopping it would end every pane inside it.
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
 
+It exits 0 on success, 3 where a tool failed while the others still ran, and 1 where it refused or stopped.
+
 Examples:
   install-agents.sh                        Report on every tool
   install-agents.sh --upgrade --yes        Upgrade every tool already installed, no prompt
@@ -771,7 +773,7 @@ apply() {
     if [[ ${#FAILED[@]} -gt 0 ]]; then
         log ""
         warn "Failed: ${FAILED[*]}"
-        return 1
+        return 3
     fi
 }
 
