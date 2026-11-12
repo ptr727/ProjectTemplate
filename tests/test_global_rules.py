@@ -138,6 +138,45 @@ class TestContent(Case):
         self.assertFalse((self.codex / "AGENTS.md").exists())
 
 
+class TestPresenceReason(Case):
+    def test_a_config_directory_alone_says_so_in_the_report_and_the_setup(self) -> None:
+        self.codex.mkdir()
+        setup = self.run_script("--agent", "codex")
+        self.assertIn("(config directory present, no codex CLI on PATH)", setup.stdout)
+        report = self.run_script("--report", "--agent", "codex")
+        self.assertIn("CURRENT", report.stdout)
+        self.assertIn("(config directory present, no codex CLI on PATH)", report.stdout)
+
+    def test_a_dry_run_says_it_too(self) -> None:
+        self.codex.mkdir()
+        result = self.run_script("--dry-run", "--agent", "codex")
+        self.assertIn("(config directory present, no codex CLI on PATH)", result.stdout)
+
+    @unittest.skipUnless(
+        shutil.which("pwsh") and os.name != "nt", "drives the PowerShell wrapper on Linux"
+    )
+    def test_the_powershell_wrapper_reports_the_same_reason(self) -> None:
+        pwsh = shutil.which("pwsh")
+        assert pwsh is not None
+        (self.empty_bin / "python3").symlink_to(sys.executable)
+        self.codex.mkdir()
+        script = ROOT / "host-setup" / "windows" / "install-global-rules.ps1"
+        result = subprocess.run(
+            [pwsh, "-NoProfile", "-File", str(script), "-Report"],
+            capture_output=True, text=True, encoding="utf-8", check=False, env=self.env, timeout=120,
+        )  # fmt: skip
+        self.assertIn("(config directory present, no codex CLI on PATH)", result.stdout)
+
+    def test_a_cli_on_path_prints_no_suffix(self) -> None:
+        cli = self.empty_bin / "codex"
+        cli.write_text("#!/bin/sh\n", encoding="utf-8")
+        cli.chmod(0o755)
+        self.codex.mkdir()
+        for args in ((), ("--report",)):
+            result = self.run_script("--agent", "codex", *args)
+            self.assertNotIn("config directory present", result.stdout)
+
+
 class TestNote(Case):
     def test_both_files_carry_the_no_hook_note_directly_under_the_header(self) -> None:
         self.install_both()

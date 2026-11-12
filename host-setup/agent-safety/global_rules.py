@@ -98,6 +98,13 @@ def present(agent: Agent) -> bool:
     return shutil.which(agent.command) is not None or agent.config_dir.is_dir()
 
 
+def presence_note(agent: Agent) -> str:
+    """Why a present agent counts when its CLI is not on PATH, or "" where the CLI is."""
+    if shutil.which(agent.command) is not None:
+        return ""
+    return f" (config directory present, no {agent.command} CLI on PATH)"
+
+
 # Said under the header because the blocks below describe Claude Code's hooks as the mechanical layer.
 # Neither agent has such a hook, so a session of either would otherwise read a backstop that is not there.
 NOTE = (
@@ -194,7 +201,7 @@ def write_agent(
     if dry_run:
         verb = "updated" if raw is not None else "written"
         note = ", the prior file backed up first" if backup else ""
-        print(f"  {agent.name}: {agent.target} would be {verb}{note}")
+        print(f"  {agent.name}: {agent.target} would be {verb}{note}{presence_note(agent)}")
         return 0
     # A CRLF file keeps its line endings, as the kit keeps CLAUDE.md's.
     newline = "\r\n" if raw is not None and b"\r\n" in raw else "\n"
@@ -216,9 +223,15 @@ def write_agent(
         sys.stderr.write(f"{agent.name}: {agent.target} could not be written ({e}).{kept}\n")
         return 1
     if backups:
-        print(f"  {agent.name}: {agent.target} rewritten, the prior file backed up to {backups[0]}")
+        print(
+            f"  {agent.name}: {agent.target} rewritten, the prior file backed up to {backups[0]}"
+            f"{presence_note(agent)}"
+        )
     else:
-        print(f"  {agent.name}: {agent.target} {'updated' if raw is not None else 'written'}")
+        print(
+            f"  {agent.name}: {agent.target} {'updated' if raw is not None else 'written'}"
+            f"{presence_note(agent)}"
+        )
     return 0
 
 
@@ -249,14 +262,18 @@ def run(args: argparse.Namespace) -> int:
         state, raw, reason = read_state(kit, agent, rendered)
         warning = shadow(agent)
         if args.report:
-            print(f"  {agent.name}: {state} {agent.target}" + (f" ({reason})" if reason else ""))
+            print(
+                f"  {agent.name}: {state} {agent.target}"
+                + (f" ({reason})" if reason else "")
+                + presence_note(agent)
+            )
             if state != "CURRENT":
                 status = 1
             if warning is not None:
                 print(f"  {agent.name}: SHADOWED: {warning}")
                 status = 1
         elif state == "CURRENT":
-            print(f"  {agent.name}: {agent.target} already current")
+            print(f"  {agent.name}: {agent.target} already current{presence_note(agent)}")
         elif raw is None and state == "STALE":
             # Not a regular file, or unreadable.
             # A write would fail or swallow, so it is refused.
