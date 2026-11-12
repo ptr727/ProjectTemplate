@@ -3,8 +3,8 @@
 
 The rules are the ones the Claude kit renders into the user CLAUDE.md: the safety block, the fleet
 block, and the host-local file. This script writes the same rendered content to each other agent's
-global file, so every agent on the host reads one set of rules. Only the header comment differs, as
-it names this script. It writes rules and registers no hook. Codex and opencode have no hook
+global file, so every agent on the host reads one set of rules. Only the top differs: the header comment
+names this script, and a note says no hook guards this agent yet. It writes rules and registers no hook. Codex and opencode have no hook
 installer yet.
 
 An agent counts as present when its CLI is on PATH or its configuration directory exists. A missing
