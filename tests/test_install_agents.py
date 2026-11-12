@@ -472,7 +472,7 @@ class TestInstallAgents(unittest.TestCase):
         nix = self.plan("codex", "/nix/store/x/bin/codex", "nix")
         self.assertTrue(nix.startswith("|Nix is declarative, so update it where it is declared"))
 
-    def classify(self, path: str, npm_root: str) -> str:
+    def classify(self, path: str, npm_root: str, env: dict[str, str] | None = None) -> str:
         """Runs the script's own tool_manager, with npm's global root fixed and main cut off so it can be sourced."""
         body = SCRIPT.read_text(encoding="utf-8").rsplit('\nmain "$@"', 1)[0]
         harness = self.dir / "classify.sh"
@@ -483,10 +483,16 @@ class TestInstallAgents(unittest.TestCase):
         result = subprocess.run(
             ["bash", str(harness)],
             capture_output=True, text=True, encoding="utf-8", check=False, timeout=30,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)},
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home), **(env or {})},
         )  # fmt: skip
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
+
+    def test_a_bun_moved_by_bun_install_alone_is_buns_and_not_npms(self) -> None:
+        bun_install = f"{self.dir}/bunhome"
+        path = f"{bun_install}/install/global/node_modules/opencode-ai/bin/opencode"
+        manager = self.classify(path, "/usr/lib/node_modules", {"BUN_INSTALL": bun_install})
+        self.assertEqual(manager, "bun")
 
     def test_an_npm_root_under_a_bun_directory_is_npms_and_not_buns(self) -> None:
         root = "/opt/tools/.bun/npm/lib/node_modules"

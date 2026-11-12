@@ -306,11 +306,19 @@ tool_manager() {
     tool_manager_by_path "$real"
 }
 
+# Bun's global package directory, real-pathed where it exists, so one expression serves classification and the plan.
+# BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR are honored, and the install.globalDir in bunfig.toml is not read.
+bun_global_dir() {
+    local dir="${BUN_INSTALL_GLOBAL_DIR:-${BUN_INSTALL:-$HOME/.bun}/install/global}" real
+    real=$(readlink -f -- "$dir" 2>/dev/null) || real="$dir"
+    printf '%s' "$real"
+}
+
 # The manager a path suggests once npm has declined it.
 tool_manager_by_path() {
-    local real="$1" bun_global=""
-    # A relocated bun global directory carries no .bun segment, so bun's own variable names it.
-    [[ -z ${BUN_INSTALL_GLOBAL_DIR:-} ]] || bun_global=$(readlink -f -- "$BUN_INSTALL_GLOBAL_DIR" 2>/dev/null) || bun_global=""
+    local real="$1" bun_global
+    # A relocated bun carries no .bun segment, so bun's own variables name its global directory.
+    bun_global=$(bun_global_dir)
     if [[ -n $bun_global && $real == "$bun_global"/* ]]; then
         printf 'bun'
         return 0
@@ -383,8 +391,7 @@ manager_plan() {
         fi
         # The recorded package must be the one that owns the file, so a fork providing the same command is never replaced by it.
         if [[ $manager == "bun" ]]; then
-            # Bun's own BUN_INSTALL_GLOBAL_DIR is honored, and the install.globalDir in bunfig.toml is not read.
-            dir=$(readlink -f -- "${BUN_INSTALL_GLOBAL_DIR:-${BUN_INSTALL:-$HOME/.bun}/install/global}/node_modules" 2>/dev/null) || dir=""
+            dir="$(bun_global_dir)/node_modules"
             if [[ -z $dir || $real != "$dir/$pkg"/* ]]; then
                 PLAN_WHY="its files at $(hide_home "$real") are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
                 return 0
