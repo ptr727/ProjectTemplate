@@ -1,12 +1,12 @@
 #!/bin/bash
 
 # Installs the fleet skills for the current user, by driving the hub-hosted installer in the tree this script sits in.
-# This is the one script here that reaches outside host-setup/, deliberately.
+# Like install-safety-kit and install-global-rules, it reaches outside host-setup/, deliberately.
 # The skills content lives at the tree root, so a copy fetched without the tree has nothing to install.
 # The independent-fetchability rule the sibling scripts follow therefore cannot apply to it.
 # Python is its one dependency.
 # The bootstrap runs it inside the agent setup, after install-tools.sh has provided the interpreter.
-# It is also the one script here that takes no sudo at all.
+# Like those two, it takes no sudo at all.
 # The scripts install-tools.sh and upgrade-host.sh elevate per command themselves instead.
 # Holding the operator to the no-sudo rule is what refuse_sudo below exists to do.
 #
