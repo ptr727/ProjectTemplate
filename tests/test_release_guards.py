@@ -2388,26 +2388,35 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(None), ["dotnet-version=10.x"])
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
-        """Each workflow step reaches the shared action, and each composite action's copy equals it."""
+        """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.
+
+        The two release defaults carry no SDK step of their own. The release task runs the shared
+        action ahead of each, under the condition that selects the default.
+        """
         for workflow in (
             "validate-task.yml",
             "get-version-task.yml",
             "run-codegen-pull-request-task.yml",
+            "build-release-task.yml",
         ):
             text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
             self.assertNotIn("actions/setup-dotnet@", text, workflow)
-            self.assertIn("uses: $/.github/actions/dotnet-sdk\n", text, workflow)
-        action = self.ACTION.read_text(encoding="utf-8")
         for name in ("nuget-build-default", "dotnet-publish-default"):
             text = (REPO / ".github/actions" / name / "action.yml").read_text(encoding="utf-8")
-            with self.subTest(action=name):
+            self.assertNotIn("actions/setup-dotnet@", text, name)
+        release = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        for job, default in (
+            ("dotnet-publish", "Run hub dotnet-publish default step"),
+            ("build-nuget", "Run hub build-nuget default step"),
+        ):
+            with self.subTest(job=job):
+                steps = release.split(f"\n  {job}:\n", 1)[1].split("\n  # ", 1)[0]
+                setup = yaml_step(steps, "Setup .NET SDK step")
+                self.assertEqual(yaml_value(setup, "uses"), "$/.github/actions/dotnet-sdk")
                 self.assertEqual(
-                    step_script_text(text, self.SELECT), step_script_text(action, self.SELECT)
+                    yaml_value(setup, "if"), yaml_value(yaml_step(steps, default), "if")
                 )
-                self.assertEqual(
-                    yaml_step(text, "Setup .NET SDK step").strip(),
-                    yaml_step(action, "Setup .NET SDK step").strip(),
-                )
+                self.assertLess(steps.index("Setup .NET SDK step"), steps.index(default))
 
 
 if __name__ == "__main__":
