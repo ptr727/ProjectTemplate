@@ -393,6 +393,27 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(self.called(), [])
         self.assertIn("is a mise shim and mise which could not resolve it", result.stdout)
 
+    def test_the_report_names_outdated_integrations_for_a_manager_owned_herdr(self) -> None:
+        self.stub(
+            "herdr",
+            "herdr 0.9.4",
+            where=self.dir / "linuxbrew" / "Cellar" / "herdr" / "0.9.4" / "bin",
+        )
+        self.stub("brew", "Homebrew 4.0.0")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        notes = self.report()["herdr"]["notes"]
+        self.assertIn("integrations outdated: claude, --upgrade reinstalls them", notes)
+        self.assertTrue(any("--upgrade runs: brew upgrade herdr" in n for n in notes))
+
+    def test_the_report_makes_no_post_step_promise_for_a_herdr_the_manager_will_not_run(
+        self,
+    ) -> None:
+        self.stub("herdr", "herdr 0.9.4", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
+        self.stub("npm", "npm 10.0.0")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        notes = " ".join(self.report()["herdr"]["notes"])
+        self.assertNotIn("integrations outdated", notes)
+
     def test_herdr_upgraded_by_a_manager_gets_the_same_post_step(self) -> None:
         self.stub(
             "herdr",
@@ -904,6 +925,18 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("bun install -g opencode-ai@latest", self.recorded())
         self.assertNotIn("opencode upgrade", " ".join(self.recorded()))
 
+    def test_the_report_names_outdated_integrations_for_a_scoop_owned_herdr(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("herdr", "herdr 0.9.4", shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        result = self.run_script(
+            "-Report", "-Json", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        notes = json.loads(result.stdout)["tools"][0]["notes"]
+        self.assertIn("integrations outdated: claude, -Upgrade reinstalls them", notes)
+
     def test_herdr_upgraded_by_scoop_gets_the_same_post_step(self) -> None:
         root = self.dir / "AgentTools"
         shims = root / "shims"
@@ -1173,14 +1206,16 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
     def setUp(self) -> None:
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
-    def run_functions(self, body: str) -> subprocess.CompletedProcess[str]:
-        """Runs the script's own helper functions, lifted by AST so main is not run."""
+    def run_functions(
+        self, body: str, script: Path = SCRIPT_PS
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs a script's own helper functions, lifted by AST so main is not run."""
         assert PWSH is not None
         driver = (
             "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
-            f"'{SCRIPT_PS}', [ref]$null, [ref]$null)\n"
+            f"'{script}', [ref]$null, [ref]$null)\n"
             "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
-            " if ($f.Name -in 'Resolve-FinalPath', 'Test-ProtectedPath', 'Hide-Home') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
+            " if ($f.Name -in 'Resolve-FinalPath', 'Test-PathUnder', 'Test-ProtectedPath', 'Hide-Home') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
             + body
         )
         return subprocess.run(
@@ -1200,6 +1235,54 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
         inside, sibling = result.stdout.split("\n")[:2]
         self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
         self.assertEqual(sibling, "sibling-kept=True")
+
+    def test_install_tools_hides_home_the_same_way_and_the_two_copies_are_identical(self) -> None:
+        tools = ROOT / "host-setup" / "windows" / "install-tools.ps1"
+
+        def function_text(path: Path) -> str:
+            text = path.read_text(encoding="utf-8")
+            start = text.index("function Hide-Home {")
+            return text[start : text.index("\n}\n", start) + 3]
+
+        self.assertEqual(function_text(tools), function_text(SCRIPT_PS))
+        body = (
+            "'inside=' + (Hide-Home -Path (Join-Path $HOME '.bun'))\n"
+            "$sibling = $HOME.TrimEnd('/', '\\') + '2/bin'\n"
+            "'sibling-kept=' + ((Hide-Home -Path $sibling) -eq $sibling)\n"
+        )
+        result = self.run_functions(body, script=tools)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inside, sibling = result.stdout.split("\n")[:2]
+        self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
+        self.assertEqual(sibling, "sibling-kept=True")
+
+    def test_path_under_reads_the_root_and_its_children_but_not_a_sibling(self) -> None:
+        root = self.dir / "Program Files"
+        body = (
+            f"'equal=' + (Test-PathUnder -Path '{root}' -Root '{root}')\n"
+            f"'trailing=' + (Test-PathUnder -Path '{root}/' -Root '{root}\\')\n"
+            f"'child=' + (Test-PathUnder -Path '{root / 'nodejs'}' -Root '{root}')\n"
+            f"'case=' + (Test-PathUnder -Path '{str(root).upper()}/NODEJS' -Root '{root}')\n"
+            f"'sibling=' + (Test-PathUnder -Path '{self.dir / 'Program FilesPortable'}' -Root '{root}')\n"
+            f"'below-root=' + (Test-PathUnder -Path '{root}' -Root '{root}' -Below)\n"
+            f"'below-child=' + (Test-PathUnder -Path '{root / 'nodejs'}' -Root '{root}' -Below)\n"
+            "'empty-root=' + (Test-PathUnder -Path 'x' -Root '')\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split(),
+            [
+                "equal=True",
+                "trailing=True",
+                "child=True",
+                "case=True",
+                "sibling=False",
+                "below-root=False",
+                "below-child=True",
+                "empty-root=False",
+            ],
+        )
 
     def test_a_protected_root_matches_only_at_a_path_component(self) -> None:
         root = self.dir / "Program Files"

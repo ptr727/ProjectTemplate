@@ -281,28 +281,35 @@ function Get-NpmPackage {
 # Each component is resolved, since a link can sit above the last one, as scoop's current junction does.
 # It is the one link resolver here, so ownership, writability, and the manager read all see the same real path.
 function Resolve-FinalPath {
-    param([string]$Path, [int]$Depth = 0)
-    # A bound on the walk, so a link cycle ends in the path as given rather than in a stack overflow.
-    if ($Depth -gt 64) { return $Path }
+    param([string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if (-not $item) { return $Path }
     if ($item.LinkTarget) {
         $target = $item.ResolveLinkTarget($true)
-        if ($target) { return Resolve-FinalPath -Path $target.FullName -Depth ($Depth + 1) }
+        if ($target) { return Resolve-FinalPath -Path $target.FullName }
     }
     $parent = Split-Path -Parent $item.FullName
     if (-not $parent -or $parent -eq $item.FullName) { return $item.FullName }
-    return Join-Path (Resolve-FinalPath -Path $parent -Depth ($Depth + 1)) $item.Name
+    return Join-Path (Resolve-FinalPath -Path $parent) $item.Name
+}
+
+# Whether a path is the root or sits under it, with both sides read with either separator and without a trailing one.
+# The match ends at a path component, so a sibling such as Program FilesPortable is not read as under Program Files.
+# Below leaves out the root itself, for a caller that needs something inside it.
+function Test-PathUnder {
+    param([string]$Path, [string]$Root, [switch]$Below)
+    $where = ($Path -replace '/', '\').TrimEnd('\')
+    $base = ($Root -replace '/', '\').TrimEnd('\')
+    if (-not $base) { return $false }
+    if (-not $Below -and $where -ieq $base) { return $true }
+    return $where.StartsWith("$base\", [StringComparison]::OrdinalIgnoreCase)
 }
 
 # Whether a directory sits under one of the roots a normal user cannot write.
 function Test-ProtectedPath {
     param([string]$Directory, [string[]]$Roots)
-    $where = ($Directory -replace '/', '\').TrimEnd('\')
     foreach ($root in ($Roots | Where-Object { $_ })) {
-        # The match ends at a path component, so a sibling such as Program FilesPortable is not read as under Program Files.
-        $base = ($root -replace '/', '\').TrimEnd('\')
-        if ($where -ieq $base -or $where.StartsWith("$base\", [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if (Test-PathUnder -Path $Directory -Root $root) { return $true }
     }
     return $false
 }
@@ -347,7 +354,7 @@ function Test-NpmOwnership {
     $where = ($resolved -replace '/', '\')
     $cut = $where.LastIndexOf('\')
     $directory = if ($cut -gt 0) { $where.Substring(0, $cut).TrimEnd('\') } else { '' }
-    return ($directory -ieq $prefix -or $where.StartsWith("$prefix\node_modules\", [StringComparison]::OrdinalIgnoreCase))
+    return ($directory -ieq $prefix -or (Test-PathUnder -Path $where -Root "$prefix\node_modules" -Below))
 }
 
 # The scoop roots this script knows, the user's and the global one.
@@ -375,11 +382,9 @@ function Get-ScoopRoot {
 # Whether a path sits under the shims or apps directory of a scoop root this script knows.
 function Test-UnderScoop {
     param([string]$Path)
-    $where = $Path -replace '/', '\'
     foreach ($entry in (Get-ScoopRoot)) {
-        $root = ($entry.Root -replace '/', '\').TrimEnd('\')
         foreach ($sub in 'shims', 'apps') {
-            if ($where.StartsWith("$root\$sub\", [StringComparison]::OrdinalIgnoreCase)) { return $true }
+            if (Test-PathUnder -Path $Path -Root (Join-Path $entry.Root $sub) -Below) { return $true }
         }
     }
     return $false
@@ -395,7 +400,7 @@ function Get-ScoopApp {
     $where = $Path -replace '/', '\'
     foreach ($entry in (Get-ScoopRoot)) {
         $apps = (($entry.Root -replace '/', '\').TrimEnd('\')) + '\apps\'
-        if ($where.StartsWith($apps, [StringComparison]::OrdinalIgnoreCase)) {
+        if (Test-PathUnder -Path $where -Root $apps -Below) {
             $name = ($where.Substring($apps.Length) -split '\\')[0]
             if ($name) { return [pscustomobject]@{ App = $name; Global = $entry.Global } }
         }
@@ -412,7 +417,7 @@ function Test-NpmPackageOwnership {
     $directory = Join-Path (Join-Path $prefix 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
     if (-not (Test-Path -LiteralPath (Join-Path $directory 'package.json') -PathType Leaf)) { return $false }
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
-    if ($resolved.StartsWith((($directory -replace '/', '\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if (Test-PathUnder -Path $resolved -Root $directory -Below) { return $true }
     # A shim is a script beside the package rather than a link into it, so its text must name the package's directory.
     $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
     if (-not $text) { return $false }
@@ -441,7 +446,7 @@ function Test-BunPackageOwnership {
     $directory = Join-Path (Join-Path $bun.Global 'node_modules') ($Package -replace '/', '\')
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     $inside = (Resolve-FinalPath -Path $directory) -replace '/', '\'
-    if ($resolved.StartsWith($inside.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if (Test-PathUnder -Path $resolved -Root $inside -Below) { return $true }
     $bin = $bun.Bin
     $cut = $resolved.LastIndexOf('\')
     $shimDirectory = if ($cut -gt 0) { $resolved.Substring(0, $cut) } else { '' }
@@ -530,7 +535,7 @@ function Get-ToolManager {
         $bunDirectory = Get-BunDirectory
         $where = $candidate -replace '/', '\'
         foreach ($bunRoot in @($bunDirectory.Bin, $bunDirectory.Global)) {
-            if ($where.StartsWith("$bunRoot\", [StringComparison]::OrdinalIgnoreCase)) { return 'bun' }
+            if (Test-PathUnder -Path $where -Root $bunRoot -Below) { return 'bun' }
         }
         # A bun global package also sits under a node_modules, so bun is read first, as on Linux.
         if ($candidate -like '*\.bun\*') { return 'bun' }
@@ -680,16 +685,19 @@ function Show-Report {
             if ($version) { $installed = $version }
             $manager = Get-ToolManager $path
             $status = 'present'
+            $upgrades = $true
             if ($manager -ne 'self') {
                 $plan = Get-ManagerPlan -Tool $tool -Path $path -Manager $manager
                 if ($plan.Command) {
                     note $tool "installed through $manager, -Upgrade runs: $($plan.Command) $($plan.Arguments -join ' ')"
                 } else {
                     note $tool "installed through $manager, -Upgrade does not run it: $($plan.Why)"
+                    $upgrades = $false
                 }
-            } elseif ($tool -eq 'herdr') {
-                Add-HerdrNote
             }
+            # The post step runs after the self-updater and after a manager upgrade alike, so the notes about it do too.
+            # A manager that does not run leaves the post step unrun, so the notes would promise what -Upgrade does not do.
+            if ($tool -eq 'herdr' -and $upgrades) { Add-HerdrNote }
             $restart = Get-RestartPending $tool
         }
         $shown = if ($path) { Hide-Home $path } else { $null }

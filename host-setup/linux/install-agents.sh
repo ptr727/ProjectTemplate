@@ -588,14 +588,19 @@ report() {
             installed=$(tool_version "$path")
             manager=$(tool_manager "$path")
             status="present"
+            local upgrades=true
             if [[ $manager != "self" ]]; then
                 manager_plan "$tool" "$path" "$manager"
                 if ((${#PLAN_CMD[@]} > 0)); then
                     note "$tool" "installed through $manager, --upgrade runs: ${PLAN_CMD[*]}"
                 else
                     note "$tool" "installed through $manager, --upgrade does not run it: $PLAN_WHY"
+                    upgrades=false
                 fi
-            elif [[ $tool == "herdr" ]]; then
+            fi
+            # The post step runs after the self-updater and after a manager upgrade alike, so the notes about it do too.
+            # A manager that does not run leaves the post step unrun, so the notes would promise what --upgrade does not do.
+            if [[ $tool == "herdr" && $upgrades == true ]]; then
                 herdr_note
             fi
             restart=$(restart_pending_json "$tool")
