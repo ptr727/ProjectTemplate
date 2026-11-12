@@ -173,7 +173,7 @@ def read_state(kit: types.ModuleType, agent: Agent, rendered: str) -> tuple[str,
 
 def shadow(agent: Agent) -> str | None:
     """The warning where the agent reads an override file instead of the target, else None."""
-    if agent.override is not None and (agent.override.exists() or agent.override.is_symlink()):
+    if agent.override is not None and agent.override.is_file():
         return f"{agent.override.name} takes precedence, so Codex does not read these rules"
     return None
 
