@@ -2348,5 +2348,67 @@ gh() {
                     )
 
 
+class DotnetSdkLineCase(unittest.TestCase):
+    """The hub's .NET SDK steps install the line the caller's global.json selects, else 10.x."""
+
+    ACTION = REPO / ".github/actions/dotnet-sdk/action.yml"
+    SELECT = "Select .NET SDK line step"
+
+    def select(self, global_json: str | None) -> list[str]:
+        """The outputs the selection step writes in a workspace holding `global_json`, or none."""
+        if shutil.which("jq") is None:
+            self.skipTest("the selection step reads global.json with jq, which this host lacks")
+        script = step_script_text(self.ACTION.read_text(encoding="utf-8"), self.SELECT)
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            if global_json is not None:
+                (workspace / "global.json").write_text(global_json, encoding="utf-8")
+            output = workspace / "github-output"
+            output.write_text("", encoding="utf-8")
+            result = run(
+                [bash_or_skip(), "-c", script],
+                cwd=workspace,
+                env={**os.environ, "GITHUB_OUTPUT": str(output)},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return output.read_text(encoding="utf-8").splitlines()
+
+    def test_a_global_json_selecting_a_line_is_read(self) -> None:
+        selects = json.dumps({"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}})
+        self.assertEqual(self.select(selects), ["global-json-file=global.json"])
+
+    def test_a_caller_without_an_sdk_version_gets_10x(self) -> None:
+        runner_only = json.dumps({"test": {"runner": "Microsoft.Testing.Platform"}})
+        self.assertEqual(self.select(runner_only), ["dotnet-version=10.x"])
+        self.assertEqual(self.select(None), ["dotnet-version=10.x"])
+
+    def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
+        """Each workflow step reaches the shared action, and each composite action's copy equals it."""
+        for workflow in (
+            "validate-task.yml",
+            "get-version-task.yml",
+            "run-codegen-pull-request-task.yml",
+        ):
+            text = (REPO / ".github/workflows" / workflow).read_text(encoding="utf-8")
+            self.assertNotIn("actions/setup-dotnet@", text, workflow)
+            self.assertIn("uses: $/.github/actions/dotnet-sdk\n", text, workflow)
+        action = self.ACTION.read_text(encoding="utf-8")
+        for name in ("nuget-build-default", "dotnet-publish-default"):
+            text = (REPO / ".github/actions" / name / "action.yml").read_text(encoding="utf-8")
+            with self.subTest(action=name):
+                self.assertEqual(
+                    step_script_text(text, self.SELECT), step_script_text(action, self.SELECT)
+                )
+                self.assertEqual(
+                    yaml_step(text, "Setup .NET SDK step").strip(),
+                    yaml_step(action, "Setup .NET SDK step").strip(),
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

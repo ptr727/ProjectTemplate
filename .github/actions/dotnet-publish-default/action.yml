@@ -44,6 +44,7 @@ runs:
 
     # The caller's global.json selects the SDK line where it carries an sdk.version, so a TFM move edits that file alone.
     # 10.x is the line for a caller carrying no such global.json yet.
+    # It is the step .github/actions/dotnet-sdk runs, held equal to it by the hub's tests.
     - name: Select .NET SDK line step
       id: sdk-line
       shell: bash

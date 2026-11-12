@@ -948,11 +948,17 @@ dotnet_install() {
 
     local latest
     latest=$(dotnet_sdk_latest)
-    [[ -n $latest ]] || die "No .NET SDK package is available for $DISTRO_ID $DISTRO_VERSION"
+    if [[ -z $latest ]]; then
+        warn "No .NET SDK package is available for $DISTRO_ID $DISTRO_VERSION"
+        return 1
+    fi
 
     local line fleet
     line=$(dotnet_fleet_line)
-    [[ -n $line ]] || die "No global.json baseline beside this script selects an SDK line, so the dotnet set cannot be resolved"
+    if [[ -z $line ]]; then
+        warn "No global.json baseline beside this script selects an SDK line, so the dotnet set cannot be resolved"
+        return 1
+    fi
     fleet=$(dotnet_sdk_fleet)
     if [[ -z $fleet ]]; then
         warn "The feed carries no dotnet-sdk-$line, so fleet .NET repositories will not build on this host"
