@@ -662,12 +662,18 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(row["manager"], "npm")
 
     def test_an_npm_global_under_a_scoop_node_is_npms_and_not_scoops(self) -> None:
+        # Scoop's real layout: npm's prefix is the persist directory, while PATH lists the linked current\bin.
         prefix = self.dir / "scoop" / "persist" / "nodejs" / "bin"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
         self.stub("codex", "codex-cli 0.1.0", prefix)
+        version = self.dir / "scoop" / "apps" / "nodejs" / "22.0.0"
+        version.mkdir(parents=True)
+        (version / "bin").symlink_to(prefix, target_is_directory=True)
+        (version.parent / "current").symlink_to(version, target_is_directory=True)
+        on_path = version.parent / "current" / "bin"
         self.stub("npm", "npm 10.0.0")
         self.scoop_which(f"{self.dir}/scoop/apps/nodejs/current/node.exe")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=prefix)
+        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=on_path)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("npm install -g @openai/codex@latest", " ".join(self.recorded()))
         self.assertNotIn("scoop update", " ".join(self.recorded()))

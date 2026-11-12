@@ -283,6 +283,23 @@ function Resolve-DirectoryTarget {
     return $Directory
 }
 
+# A path with every link along it followed to its final target, or the path as given where it cannot be read.
+# Each component is resolved, since a link can sit above the last one, as scoop's current junction does.
+function Resolve-FinalPath {
+    param([string]$Path, [int]$Depth = 0)
+    # A bound on the walk, so a link cycle ends in the path as given rather than in a stack overflow.
+    if ($Depth -gt 64) { return $Path }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return $Path }
+    if ($item.LinkTarget) {
+        $target = $item.ResolveLinkTarget($true)
+        if ($target) { return Resolve-FinalPath -Path $target.FullName -Depth ($Depth + 1) }
+    }
+    $parent = Split-Path -Parent $item.FullName
+    if (-not $parent -or $parent -eq $item.FullName) { return $item.FullName }
+    return Join-Path (Resolve-FinalPath -Path $parent -Depth ($Depth + 1)) $item.Name
+}
+
 # Whether a directory sits under one of the roots a normal user cannot write.
 function Test-ProtectedPath {
     param([string]$Directory, [string[]]$Roots)
@@ -319,10 +336,16 @@ function Get-NpmPrefix {
 # Whether a tool's files sit where the npm on PATH installs: its shims directly in the prefix, or the package under the prefix's node_modules.
 function Test-NpmOwnership {
     param([string]$Path)
-    $prefix = (Get-NpmPrefix) -replace '/', '\'
+    $prefix = Get-NpmPrefix
     if (-not $prefix) { return $false }
+    # Both sides are resolved through every link first, since a manager can put a linked path on PATH.
+    # Scoop's Node, for one, lists apps\nodejs\current\bin, which leads to the persist directory npm names as its prefix.
+    $prefix = (Resolve-FinalPath -Path $prefix) -replace '/', '\'
     $prefix = $prefix.TrimEnd('\')
-    $where = ($Path -replace '/', '\')
+    $parent = Split-Path -Parent $Path
+    $leaf = Split-Path -Leaf $Path
+    $resolved = if ($parent) { Join-Path (Resolve-FinalPath -Path $parent) $leaf } else { $Path }
+    $where = ($resolved -replace '/', '\')
     $cut = $where.LastIndexOf('\')
     $directory = if ($cut -gt 0) { $where.Substring(0, $cut).TrimEnd('\') } else { '' }
     return ($directory -ieq $prefix -or $where.StartsWith("$prefix\node_modules\", [StringComparison]::OrdinalIgnoreCase))
