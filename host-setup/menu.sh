@@ -443,13 +443,14 @@ agent_setup() {
     return "$rc"
 }
 
+# The report registers nothing, so it always reads the tree the menu already holds, a checkout or a fetched clone.
 # The setup installs the skills, and the skills installer registers the directory it runs from.
 # A fetched clone is removed on exit, so the setup is handed to the bootstrap, which keeps a tree of its own.
 # A hub checkout the menu runs from is registered in place, as installing the skills there always did.
 agent_setup_locked() {
     local action="$1"
     ensure_hub_root || return 1
-    if [[ $HUB_FETCHED == true ]]; then
+    if [[ $HUB_FETCHED == true && $action != "--agent-status" ]]; then
         run_in_hub "host-setup" bootstrap.sh "$action" --ref "$REF"
     else
         run_in_hub "host-setup" bootstrap.sh "$action" --from-tree "$HUB_ROOT"

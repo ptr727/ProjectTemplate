@@ -19,27 +19,23 @@ A host holds four things the fleet installs for coding agents. They are the agen
 
 ## Run It
 
-Fetch the loader fresh and run it as the user whose agents are being updated, never under sudo. Download it rather than piping it, as the hub's `host-setup/README.md` states.
+Fetch the loader fresh and run it as the user whose agents are being updated, never under sudo. Download it rather than piping it, as the hub's `host-setup/README.md` states. Each command below is one self-contained line that fetches and runs, and carries no shell variable from one command to the next.
 
-On Linux or WSL:
+On Linux or WSL, the setup and then the status:
 
 ```sh
-d=$(mktemp -d) && curl -fsSLo "$d/bootstrap.sh" https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.sh
-bash "$d/bootstrap.sh" --agent-setup --yes
-bash "$d/bootstrap.sh" --agent-status
+d=$(mktemp -d) && curl -fsSLo "$d/bootstrap.sh" https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.sh && bash "$d/bootstrap.sh" --agent-setup --yes
+d=$(mktemp -d) && curl -fsSLo "$d/bootstrap.sh" https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.sh && bash "$d/bootstrap.sh" --agent-status
 ```
 
 On native Windows, in a PowerShell console:
 
 ```powershell
-$d = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "bootstrap-$([guid]::NewGuid())")
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile "$d\bootstrap.ps1"
-powershell -ExecutionPolicy Bypass -File "$d\bootstrap.ps1" -AgentSetup -Yes
-powershell -ExecutionPolicy Bypass -File "$d\bootstrap.ps1" -AgentStatus
+powershell -NoProfile -ExecutionPolicy Bypass -Command '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $f = $env:TEMP + "\bootstrap.ps1"; Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile $f; powershell -ExecutionPolicy Bypass -File $f -AgentSetup -Yes'
+powershell -NoProfile -ExecutionPolicy Bypass -Command '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12; $f = $env:TEMP + "\bootstrap.ps1"; Invoke-WebRequest -UseBasicParsing -Uri https://raw.githubusercontent.com/ptr727/ProjectTemplate/main/host-setup/bootstrap.ps1 -OutFile $f; powershell -ExecutionPolicy Bypass -File $f -AgentStatus'
 ```
 
-Run the status after the setup, and run it alone to answer "is this machine current" without changing anything. Add `--dry-run` or `-DryRun` to the setup to see what it would run.
+Run the status after the setup, and run it alone to answer "is this machine current" without changing anything. Add `--dry-run` or `-DryRun` to the setup to see what it would run. A dry run never touches the status, which is read-only and always reads the real host.
 
 ## What the Setup Does
 
@@ -57,7 +53,7 @@ Report each step's status as the output states it, in the order above, and name 
 
 ## When the Run Is Refused
 
-An executor may refuse the run as a self-modification of the agent's own configuration, because the safety kit rewrites files under the user's agent directories. Do not retry it, and do not edit those directories by hand. Hand the maintainer the exact command to run themselves with the `!` prefix in the session, for example `! bash "$d/bootstrap.sh" --agent-setup --yes` after the download line. Then run the status once they confirm it ran.
+An executor may refuse the run as a self-modification of the agent's own configuration, because the safety kit rewrites files under the user's agent directories. Do not retry it, and do not edit those directories by hand. Hand the maintainer the setup line above for their platform, unchanged, with the `!` prefix. It fetches and runs in one line, so it needs nothing from an earlier command. Then run the status once they confirm it ran.
 
 ## What It Does Not Do
 

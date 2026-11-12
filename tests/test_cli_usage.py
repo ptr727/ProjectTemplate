@@ -110,7 +110,6 @@ NO_REQUIRED_ARGUMENT = frozenset(
         "host-setup/agent-safety/claude/install.ps1",
         "host-setup/agent-safety/claude/install.py",
         "host-setup/agent-safety/claude/install.sh",
-        "host-setup/agent-safety/global_rules.ps1",
         "host-setup/agent-safety/global_rules.py",
         "host-setup/bootstrap.ps1",
         "host-setup/bootstrap.sh",

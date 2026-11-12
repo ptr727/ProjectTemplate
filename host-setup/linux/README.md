@@ -135,7 +135,7 @@ The agent tools install into the user's home, so this script refuses root rather
 
 ## install-skills.sh Is the Exception
 
-The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it last. Run on a host without one, it stops and names the tools step as its prerequisite. `install-safety-kit.sh` and `install-global-rules.sh` are exceptions for the same reason. The rules writer needs Python 3.11 or later, the floor the safety kit installer already holds.
+The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it last. Run on a host without one, it stops and names the tools step as its prerequisite. `install-safety-kit.sh` and `install-global-rules.sh` are exceptions for the same reason. The kit installer needs Python 3.11 or later and runs only where Claude Code is present. The rules writer runs on any Python 3 and asks for 3.11 only where Codex or opencode is present.
 
 ## Why There Is No Linter Category
 

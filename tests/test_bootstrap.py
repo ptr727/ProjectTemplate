@@ -951,7 +951,7 @@ $wanted = @(
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
     'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
     'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall', 'Unlock-Directory', 'main',
-    'Invoke-AgentSetup', 'Invoke-AgentStatus'
+    'Invoke-AgentSetup', 'Invoke-AgentStatus', 'Resolve-Mode'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -1550,13 +1550,15 @@ def stand_up_steps() -> tuple[str, ...]:
 
 UPGRADE_STEPS = ("upgrade-host.sh --packages", "install-agents.sh --upgrade")
 
+# The default report ends with the agent status, so it covers what a stand-up installs.
 REPORT_STEPS = (
     "upgrade-host.sh --status",
     "install-tools.sh --report",
     "setup-github.sh --status",
-    "install-skills.sh --report",
-    "install-agents.sh --report",
+    *AGENT_STATUS_STEPS,
 )
+
+REPORT_STEPS_AS_ROOT = tuple(step for step in REPORT_STEPS if step != "install-agents.sh --report")
 
 
 @unittest.skipUnless(
@@ -1799,7 +1801,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     def test_a_report_as_root_skips_the_agent_tools_and_says_so(self) -> None:
         result = self.run_main(action="--report", root=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([step for step, _, _ in self.steps()], list(REPORT_STEPS[:-1]))
+        self.assertEqual([step for step, _, _ in self.steps()], list(REPORT_STEPS_AS_ROOT))
         self.assertIn("Running as root, so no user's coding-agent tools are read", result.stdout)
         self.assertNotIn("did not report", result.stdout)
 
@@ -1917,10 +1919,36 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("holds no host-setup/linux", result.stderr)
 
-    def test_a_relative_given_tree_is_refused(self) -> None:
-        result = self.run_main(action="--agent-status", args=("--from-tree", "relative/tree"))
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_status_under_a_dry_run_still_reads_every_step_for_real(self) -> None:
+        """A report is read-only, so no step is told to print what it would do instead."""
+        result = self.run_main(action="--agent-status", args=("--dry-run",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), list(AGENT_STATUS_STEPS), result.stderr)
+
+    def test_a_given_tree_with_no_action_is_refused_before_anything_runs(self) -> None:
+        env = {**os.environ, "HOME": str(self.home)}
+        result = subprocess.run(
+            [bash_or_skip(), str(BOOTSTRAP), "--from-tree", str(self.given_tree())],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env,
+            timeout=60,
+            stdin=subprocess.DEVNULL,
+        )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("takes an absolute path", result.stderr)
+        self.assertIn(
+            "--from-tree is accepted with --agent-setup or --agent-status only", result.stderr
+        )
+
+    def test_a_given_name_that_is_no_directory_is_refused(self) -> None:
+        result = self.run_main(action="--agent-status", args=("--from-tree", "no/such/tree"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("is not a directory", result.stderr)
 
     def agents_steps(self) -> list[str]:
         return [step for step, _, _ in self.steps()]
@@ -2007,14 +2035,6 @@ if ($step -eq $env:FAIL_STEP) { exit 7 }
 exit 0
 """
 
-POWERSHELL_REPORT_STEPS = (
-    "upgrade-host.ps1 -Status",
-    "install-tools.ps1 -Report",
-    "setup-github.ps1 -Status",
-    "install-skills.ps1 -Report",
-    "install-agents.ps1 -Report",
-)
-
 POWERSHELL_UPGRADE_STEPS = ("upgrade-host.ps1 -Packages", "install-agents.ps1 -Upgrade")
 
 POWERSHELL_AGENT_SETUP_STEPS = (
@@ -2029,6 +2049,17 @@ POWERSHELL_AGENT_STATUS_STEPS = (
     "install-skills.ps1 -Report",
     "install-safety-kit.ps1 -Report",
     "install-global-rules.ps1 -Report",
+)
+
+POWERSHELL_REPORT_STEPS = (
+    "upgrade-host.ps1 -Status",
+    "install-tools.ps1 -Report",
+    "setup-github.ps1 -Status",
+    *POWERSHELL_AGENT_STATUS_STEPS,
+)
+
+POWERSHELL_REPORT_STEPS_ELEVATED = tuple(
+    step for step in POWERSHELL_REPORT_STEPS if step != "install-agents.ps1 -Report"
 )
 
 
@@ -2130,7 +2161,7 @@ class TestPowerShellToolHandoff(unittest.TestCase):
     def test_an_elevated_report_skips_the_agent_tools_and_says_so(self) -> None:
         result = self.run_handoff("Show-Report", elevated=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS[:-1]), result.stdout)
+        self.assertEqual(self.steps(), list(POWERSHELL_REPORT_STEPS_ELEVATED), result.stdout)
         self.assertIn("Running elevated, so no user's coding-agent tools are read", result.stdout)
 
     def test_an_agent_setup_runs_the_tools_skills_kit_and_rules_in_order(self) -> None:
@@ -2153,6 +2184,41 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("install-global-rules.ps1", self.steps())
+
+    def resolve_mode(self, given: str, from_tree: str) -> subprocess.CompletedProcess[str]:
+        """Runs the loader's own Resolve-Mode with `given` the only action set and `from_tree` the -FromTree value."""
+        mark = f"$script:ACTIONS['{given}'] = $true\n" if given else ""
+        return self.run_handoff(
+            "$script:ACTIONS = [ordered]@{ report = $false; 'agent-status' = $false; "
+            "'agent-setup' = $false; host = $false }\n"
+            f"{mark}$script:FROM_TREE = '{from_tree}'\nlog (Resolve-Mode)"
+        )
+
+    def test_a_given_tree_with_no_action_is_refused(self) -> None:
+        result = self.resolve_mode("", "somewhere")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("-FromTree is accepted with -AgentSetup or -AgentStatus only", result.stderr)
+
+    def test_a_given_tree_with_another_action_is_refused(self) -> None:
+        result = self.resolve_mode("host", "somewhere")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("-FromTree is accepted with -AgentSetup or -AgentStatus only", result.stderr)
+
+    def test_a_given_tree_with_an_agent_action_is_accepted(self) -> None:
+        for action in ("agent-setup", "agent-status"):
+            with self.subTest(action=action):
+                result = self.resolve_mode(action, "somewhere")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines()[-1], action)
+
+    def test_no_given_tree_and_no_action_still_resolves_to_no_mode(self) -> None:
+        result = self.resolve_mode("", "")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_an_agent_status_under_a_dry_run_still_runs_every_step_for_real(self) -> None:
+        result = self.run_handoff("$script:DRY_RUN = $true\nInvoke-AgentStatus")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_AGENT_STATUS_STEPS), result.stdout)
 
     def test_an_agent_status_runs_each_report_in_order(self) -> None:
         result = self.run_handoff("Invoke-AgentStatus")
@@ -2309,10 +2375,11 @@ class TestMenuAgentSetup(unittest.TestCase):
             result.stdout.strip(), f"host-setup/bootstrap.sh --agent-setup --from-tree {self.hub}"
         )
 
-    def test_the_report_takes_the_same_two_branches(self) -> None:
+    def test_the_report_reads_the_tree_the_menu_holds_whether_fetched_or_not(self) -> None:
+        """The status registers nothing, so a fetched clone is read in place rather than downloaded again."""
         fetched = self.run_task("--agent-status", fetched=True, extra="REF=develop")
         self.assertEqual(
-            fetched.stdout.strip(), "host-setup/bootstrap.sh --agent-status --ref develop"
+            fetched.stdout.strip(), f"host-setup/bootstrap.sh --agent-status --from-tree {self.hub}"
         )
         in_place = self.run_task("--agent-status", fetched=False)
         self.assertEqual(

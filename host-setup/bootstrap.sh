@@ -327,13 +327,9 @@ report() {
     run_tool upgrade-host.sh --status
     run_tool install-tools.sh --report
     run_tool setup-github.sh --status
-    # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
-    if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
-        info "The fleet skills step did not report a current copy, and the output above says why"
-    fi
-    if agents_user && ! run_tool install-agents.sh --report; then
-        info "The agent tools step did not report, and the output above says why"
-    fi
+    # The agent half is tolerated step by step inside agent_status.
+    # A missing install is a finding to name and not a reason to stop naming the rest.
+    agent_status
 }
 
 # The agent tools live in a user's home, and root's holds none on a host where a person uses them.
@@ -401,6 +397,8 @@ agent_setup() {
 # A step that is not current is a finding to name and not a reason to stop naming the rest, as report does.
 # The names are collected and said again at the end, so a long report does not bury them.
 agent_status() {
+    # A report is read-only, so it runs for real under --dry-run rather than printing that it would.
+    local DRY_RUN=false
     local -a behind=()
     if agents_user && ! run_tool install-agents.sh --report; then
         info "The agent tools step did not report, and the output above says why"
@@ -520,8 +518,7 @@ parse_args() {
             ;;
         --from-tree)
             [[ $# -ge 2 ]] || die "--from-tree takes the path of a tree on this host"
-            [[ $2 == /* ]] || die "--from-tree takes an absolute path, and \"$2\" is relative"
-            FROM_TREE="${2%/}"
+            FROM_TREE=$(cd -- "$2" 2>/dev/null && pwd) || die "--from-tree $2 is not a directory"
             shift
             ;;
         --dir)
@@ -595,13 +592,11 @@ main() {
     fi
 
     # Run from a given tree in place, so there is no tree to fetch, lock, swap, or clean up.
-    # The commit is read from the tree when it is a checkout, and left empty otherwise, which the installers then read from git themselves.
+    # The installers resolve the commit of this tree themselves, so none is handed to them.
     if [[ -n $FROM_TREE ]]; then
         [[ -d $FROM_TREE/host-setup/linux ]] || die "--from-tree $FROM_TREE holds no host-setup/linux, so it is not a tree to run from"
         TREE="$FROM_TREE"
-        RESOLVED=$(git -C "$TREE" rev-parse HEAD 2>/dev/null) || RESOLVED=""
         step "Running from $TREE"
-        [[ -n $RESOLVED ]] && info "Commit: $RESOLVED"
         run_mode
         step "Done"
         info "Ran from $TREE, which this run left as it was"

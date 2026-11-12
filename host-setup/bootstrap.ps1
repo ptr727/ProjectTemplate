@@ -519,13 +519,9 @@ function Show-Report {
     Invoke-Tool -Tool 'upgrade-host.ps1' -Arguments '-Status'
     Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Report'
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Status'
-    # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
-    Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
-    if ($LASTEXITCODE -ne 0) { info 'The fleet skills step did not report a current copy, and the output above says why' }
-    if (Test-AgentsUser) {
-        Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
-        if ($LASTEXITCODE -ne 0) { info 'The agent tools step did not report, and the output above says why' }
-    }
+    # The agent half is tolerated step by step inside Invoke-AgentStatus.
+    # A missing install is a finding to name and not a reason to stop naming the rest.
+    Invoke-AgentStatus
 }
 
 function Test-Elevated {
@@ -610,32 +606,39 @@ function Invoke-AgentSetup {
 # The names are collected and said again at the end, so a long report does not bury them.
 function Invoke-AgentStatus {
     $behind = @()
-    if (Test-AgentsUser) {
-        Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
-        if ($LASTEXITCODE -ne 0) {
-            info 'The agent tools step did not report, and the output above says why'
-            $behind += 'agent tools'
+    # A report is read-only, so it runs for real under -DryRun rather than printing that it would.
+    $wasDryRun = $script:DRY_RUN
+    $script:DRY_RUN = $false
+    try {
+        if (Test-AgentsUser) {
+            Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
+            if ($LASTEXITCODE -ne 0) {
+                info 'The agent tools step did not report, and the output above says why'
+                $behind += 'agent tools'
+            }
         }
-    }
-    Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
-    if ($LASTEXITCODE -ne 0) {
-        info 'The fleet skills step did not report a current copy, and the output above says why'
-        $behind += 'fleet skills'
-    }
-    Invoke-Tool -Tool 'install-safety-kit.ps1' -ToleratesFailure -Arguments '-Report'
-    if ($LASTEXITCODE -ne 0) {
-        info 'The Claude Code safety kit step did not report current, and the output above says why'
-        $behind += 'Claude Code safety kit'
-    }
-    Invoke-Tool -Tool 'install-global-rules.ps1' -ToleratesFailure -Arguments '-Report'
-    if ($LASTEXITCODE -ne 0) {
-        info 'The host-wide rules step did not report current, and the output above says why'
-        $behind += 'host-wide rules'
-    }
-    if ($behind.Count -gt 0) {
-        info "Not current: $($behind -join ', ')"
-    } else {
-        info 'Every agent setup step reports current'
+        Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) {
+            info 'The fleet skills step did not report a current copy, and the output above says why'
+            $behind += 'fleet skills'
+        }
+        Invoke-Tool -Tool 'install-safety-kit.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) {
+            info 'The Claude Code safety kit step did not report current, and the output above says why'
+            $behind += 'Claude Code safety kit'
+        }
+        Invoke-Tool -Tool 'install-global-rules.ps1' -ToleratesFailure -Arguments '-Report'
+        if ($LASTEXITCODE -ne 0) {
+            info 'The host-wide rules step did not report current, and the output above says why'
+            $behind += 'host-wide rules'
+        }
+        if ($behind.Count -gt 0) {
+            info "Not current: $($behind -join ', ')"
+        } else {
+            info 'Every agent setup step reports current'
+        }
+    } finally {
+        $script:DRY_RUN = $wasDryRun
     }
 }
 
@@ -711,9 +714,10 @@ function Resolve-Directory {
 function Resolve-Mode {
     $given = @($script:ACTIONS.Keys | Where-Object { $script:ACTIONS[$_] })
     if ($given.Count -gt 1) { die "More than one action given ($($given -join ', ')), name one" }
-    if ($given.Count -eq 0) { return '' }
     # A given tree is never fetched, swapped, or removed, so only the actions that read or install from a tree in place accept one.
-    if ($script:FROM_TREE -and $given[0] -notin @('agent-setup', 'agent-status')) { die '-FromTree is accepted with -AgentSetup or -AgentStatus only' }
+    # No action given is refused too, since the menu or the report it falls back to would then run from that tree.
+    if ($script:FROM_TREE -and ($given.Count -eq 0 -or $given[0] -notin @('agent-setup', 'agent-status'))) { die '-FromTree is accepted with -AgentSetup or -AgentStatus only' }
+    if ($given.Count -eq 0) { return '' }
     return $given[0]
 }
 
@@ -789,18 +793,11 @@ function main {
 
     # A given tree is run from in place, so there is nothing to lock, fetch, or clean up.
     if ($script:FROM_TREE) {
-        if (-not [IO.Path]::IsPathFullyQualified($script:FROM_TREE)) { die "-FromTree takes an absolute path, and `"$($script:FROM_TREE)`" is relative" }
-        $script:TREE = $script:FROM_TREE.TrimEnd('\', '/')
-        if (-not (Test-Path -LiteralPath (Join-Path $script:TREE 'host-setup')) ) { die "-FromTree $script:TREE holds no host-setup, so it is not a tree to run from" }
+        $resolved = Resolve-Path -LiteralPath $script:FROM_TREE -ErrorAction SilentlyContinue
+        if (-not $resolved) { die "-FromTree $($script:FROM_TREE) is not a directory" }
+        $script:TREE = $resolved.Path.TrimEnd('\', '/')
+        if (-not (Test-Path -LiteralPath (Join-Path $script:TREE 'host-setup\windows'))) { die "-FromTree $script:TREE holds no host-setup\windows, so it is not a tree to run from" }
         step "Running from $script:TREE"
-        $script:RESOLVED = ''
-        if (Get-Command git -ErrorAction SilentlyContinue) {
-            $head = & git -C $script:TREE rev-parse HEAD 2>$null
-            if ($LASTEXITCODE -eq 0 -and $head) { $script:RESOLVED = "$head".Trim() }
-        }
-        if ($script:RESOLVED) { info "Commit: $script:RESOLVED" }
-        $env:SKILLS_SOURCE_COMMIT = $script:RESOLVED
-        $env:AGENT_SAFETY_SOURCE_COMMIT = $script:RESOLVED
         Invoke-Mode
         step 'Done'
         info "Ran from $script:TREE, which this run left as it was"

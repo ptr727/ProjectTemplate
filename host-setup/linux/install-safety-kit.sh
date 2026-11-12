@@ -86,7 +86,8 @@ main() {
     local -a args=()
     [[ $MODE == "report" ]] && args+=(--report)
 
-    if [[ $DRY_RUN == true ]]; then
+    # A report is read-only already, so it runs for real under --dry-run.
+    if [[ $DRY_RUN == true && $MODE != "report" ]]; then
         info "[dry run] $installer ${args[*]}"
         return 0
     fi

@@ -261,6 +261,26 @@ class TestSourceRefFromAnArchive(unittest.TestCase):
                 os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = value
                 self.assertEqual(install.source_ref(), {"vcs": "none"})
 
+    def test_a_tree_the_bootstrap_extracted_reads_its_commit_marker_without_the_variable(self):
+        tree = self.tmp / "tree"
+        (tree / ".bootstrap-owned").touch()
+        (tree / ".bootstrap-commit").write_text(self.COMMIT + "\n", encoding="utf-8")
+        self.assertEqual(
+            install.source_ref(), {"vcs": "archive", "commit": self.COMMIT, "dirty": False}
+        )
+
+    def test_the_variable_wins_over_the_marker(self):
+        tree = self.tmp / "tree"
+        (tree / ".bootstrap-owned").touch()
+        (tree / ".bootstrap-commit").write_text("f" * 40 + "\n", encoding="utf-8")
+        os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
+        self.assertEqual(install.source_ref()["commit"], self.COMMIT)
+
+    def test_a_bootstrap_tree_with_no_commit_anywhere_is_an_archive_naming_none(self):
+        (self.tmp / "tree" / ".bootstrap-owned").touch()
+        self.assertEqual(install.source_ref(), {"vcs": "archive", "commit": None, "dirty": False})
+        self.assertIn("unknown", install.stamp_line({"source": install.source_ref()}))
+
     def test_a_git_tree_ignores_the_variable(self):
         subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
         subprocess.run(

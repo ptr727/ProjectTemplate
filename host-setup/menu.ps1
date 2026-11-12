@@ -482,6 +482,7 @@ function Invoke-InHub {
 }
 
 # The agent setup and its report, which are one bootstrap action each.
+# The report registers nothing, so it always reads the tree the menu already holds, a checkout or a fetched clone.
 # The setup installs the skills, and the skills installer registers the directory it runs from.
 # A fetched clone is removed on exit, so the setup is handed to the bootstrap, which keeps a tree of its own.
 # A hub checkout the menu runs from is registered in place, as installing the skills there always did.
@@ -490,7 +491,7 @@ function Invoke-AgentSetup {
     return (Invoke-WithHubLock -ArgumentList @($Action) -ScriptBlock {
             param($Action)
             if (-not (Confirm-HubRoot)) { return 1 }
-            if ($script:HUB_FETCHED) {
+            if ($script:HUB_FETCHED -and $Action -ne '-AgentStatus') {
                 return (Invoke-InHub -Directory 'host-setup' -Tool 'bootstrap.ps1' -Arguments $Action, '-Ref', $script:REF)
             }
             return (Invoke-InHub -Directory 'host-setup' -Tool 'bootstrap.ps1' -Arguments $Action, '-FromTree', $script:HUB_ROOT)

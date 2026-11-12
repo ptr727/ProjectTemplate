@@ -70,7 +70,8 @@ function main {
     $arguments = @()
     if ($WANT_REPORT) { $arguments += '--report' }
 
-    if ($DRY_RUN) {
+    # A report is read-only already, so it runs for real under -DryRun.
+    if ($DRY_RUN -and -not $WANT_REPORT) {
         info "[dry run] $installer $($arguments -join ' ')"
         exit 0
     }

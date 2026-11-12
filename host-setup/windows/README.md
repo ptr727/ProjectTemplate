@@ -10,7 +10,7 @@ The tooling that makes a native Windows host satisfy the contract in [`docs/host
 - [`setup-wsl.ps1`][setup-wsl] installs a WSL distribution and reports how Docker Desktop is integrated with the ones this host runs.
 - [`install-agents.ps1`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed. cswap is the exception to each tool's own updater, going through `uv tool upgrade` since its updater cannot replace its own running launcher on Windows. The script installs a tool only when that tool is named. A tool winget owns is left to `upgrade-host.ps1`. It refuses an elevated session, since the tools live in the user's profile. codex and opencode document no Windows installer outside a package manager, so it installs neither and names the route their documentation gives.
 - [`install-safety-kit.ps1`][install-safety-kit] drives the Claude Code safety kit installer at `host-setup\agent-safety\claude\install.ps1` from this tree. It skips a host where Claude Code is not installed for this user.
-- [`install-global-rules.ps1`][install-global-rules] writes the host-wide agent rules to the global instruction file of each of Codex and opencode that is installed, through `host-setup\agent-safety\global_rules.ps1` in this tree.
+- [`install-global-rules.ps1`][install-global-rules] writes the host-wide agent rules to the global file of each installed Codex or opencode, by running `host-setup\agent-safety\global_rules.py` from this tree.
 
 Each runs on its own, and each takes `-Help`.
 

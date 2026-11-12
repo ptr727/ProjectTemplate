@@ -2,8 +2,9 @@
 
 # Writes the host-wide agent rules to Codex's and opencode's global instruction files, by driving global_rules.py in the tree this script sits in.
 # The rules are the ones the Claude Code safety kit renders into ~/.claude/CLAUDE.md.
-# Python is its one dependency, which is why the bootstrap runs it after the tools step.
-# An agent that is not installed for this user is skipped by the writer itself.
+# Python 3 is its one dependency, which is why the bootstrap runs it after the tools step.
+# An agent that is not installed for this user is skipped by the writer itself, on any Python 3.
+# The writer asks for 3.11 only once an agent is present, and says so then.
 
 set -Eeuo pipefail
 
@@ -62,12 +63,12 @@ refuse_sudo() {
     die "Running under sudo writes the rules for root rather than for $SUDO_USER. This script needs no elevation. Re-run it as $SUDO_USER without sudo."
 }
 
-# The first candidate that is a Python 3.11+, since the writer shares the kit installer's floor.
+# The first candidate that is a Python 3, since the writer holds its own 3.11 floor for a host that has an agent.
 find_python() {
     local candidate
     for candidate in python3 python; do
         if command -v "$candidate" >/dev/null &&
-            "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
+            "$candidate" -c 'import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)' 2>/dev/null; then
             printf '%s' "$candidate"
             return 0
         fi
@@ -83,7 +84,7 @@ main() {
     [[ -f $writer ]] || die "This tree carries no host-setup/agent-safety/global_rules.py, so there is nothing to drive"
 
     local py
-    py=$(find_python) || die "Python 3.11+ not found. install-tools.sh provides it, so run the tools step first and this one after."
+    py=$(find_python) || die "Python 3 not found. install-tools.sh provides it, so run the tools step first and this one after."
 
     local -a args=()
     [[ $MODE == "report" ]] && args+=(--report)

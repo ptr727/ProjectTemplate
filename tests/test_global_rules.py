@@ -116,7 +116,9 @@ class TestContent(Case):
             kit_render = kit.render_instructions(self.local, "A constructed host note.")
         written = (self.codex / "AGENTS.md").read_text(encoding="utf-8")
         self.assertEqual(
-            written.split("\n", 1)[1], kit_render.split("\n", 1)[1], "the body must match the kit"
+            written.split("\n\n", 2)[2],
+            kit_render.split("\n\n", 1)[1],
+            "the body must match the kit",
         )
         self.assertIn("global_rules.py", written.split("\n", 1)[0])
         self.assertNotIn("global_rules.py", kit_render)
@@ -130,6 +132,97 @@ class TestContent(Case):
         self.assertEqual(result.returncode, 1)
         self.assertIn("Nothing was written", result.stderr)
         self.assertFalse((self.codex / "AGENTS.md").exists())
+
+
+class TestNote(Case):
+    def test_both_files_carry_the_no_hook_note_directly_under_the_header(self) -> None:
+        self.install_both()
+        self.assertEqual(self.run_script().returncode, 0)
+        for path in (self.codex / "AGENTS.md", self.opencode / "AGENTS.md"):
+            with self.subTest(path=path.parent.name):
+                lines = path.read_text(encoding="utf-8").split("\n")
+                self.assertTrue(lines[0].startswith("<!-- Written by ProjectTemplate"))
+                self.assertEqual(lines[1], "")
+                self.assertEqual(lines[2], global_rules.NOTE)
+                self.assertIn("no hook enforces these rules here yet", lines[2])
+                self.assertIn("describe Claude Code only", lines[2])
+                self.assertIn("ptr727/ProjectTemplate#781", lines[2])
+
+    def test_the_block_text_is_not_edited(self) -> None:
+        self.install_both()
+        self.run_script()
+        kit = global_rules.load_kit()
+        with mock.patch.dict(os.environ, {"AGENT_FLEET_LOCAL_INSTRUCTIONS": str(self.local)}):
+            claude = kit.render_instructions(self.local, "")
+        written = (self.codex / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertEqual(written.split("\n\n", 2)[2], claude.split("\n\n", 1)[1])
+
+    def test_the_claude_render_is_byte_unchanged(self) -> None:
+        kit = global_rules.load_kit()
+        with mock.patch.dict(os.environ, {"AGENT_FLEET_LOCAL_INSTRUCTIONS": str(self.local)}):
+            claude = kit.render_instructions(self.local, "")
+        self.assertTrue(
+            claude.startswith("<!-- Written by ProjectTemplate host-setup/agent-safety, which")
+        )
+        self.assertNotIn(global_rules.NOTE, claude)
+        self.assertNotIn("global_rules.py", claude)
+
+
+class TestOldPython(Case):
+    """An interpreter below 3.11 is simulated by removing datetime.UTC before the script runs."""
+
+    def run_old(self, *args: str) -> subprocess.CompletedProcess[str]:
+        driver = (
+            "import datetime, sys, runpy\n"
+            "del datetime.UTC\n"
+            f"sys.argv = [{str(SCRIPT)!r}, *{list(args)!r}]\n"
+            f"runpy.run_path({str(SCRIPT)!r}, run_name='__main__')\n"
+        )
+        return subprocess.run(
+            [sys.executable, "-c", driver],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=self.env,
+            timeout=60,
+        )
+
+    def test_with_no_agent_present_it_skips_and_exits_zero(self) -> None:
+        for flag in ((), ("--report",)):
+            with self.subTest(flag=flag):
+                result = self.run_old(*flag)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.count("not installed, skipped"), 2)
+
+    def test_with_an_agent_present_it_exits_non_zero_naming_the_floor(self) -> None:
+        self.codex.mkdir()
+        result = self.run_old()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Python 3.11+", result.stderr)
+        self.assertFalse((self.codex / "AGENTS.md").exists())
+
+
+class TestKitWrapperReport(Case):
+    @unittest.skipUnless(sys.platform != "win32", "runs the Linux wrapper")
+    def test_a_report_under_a_dry_run_runs_the_installer_for_real(self) -> None:
+        wrapper = ROOT / "host-setup" / "linux" / "install-safety-kit.sh"
+        claude_home = self.root / "claude"
+        claude_home.mkdir()
+        env = {**os.environ, "CLAUDE_HOME": str(claude_home), "HOME": self.env["HOME"]}
+        env.pop("SUDO_USER", None)
+        report = subprocess.run(
+            ["bash", str(wrapper), "--report", "--dry-run"],
+            capture_output=True, text=True, encoding="utf-8", check=False, env=env, timeout=60,
+        )  # fmt: skip
+        self.assertNotIn("[dry run]", report.stdout)
+        self.assertIn("NOT INSTALLED", report.stdout)
+        install = subprocess.run(
+            ["bash", str(wrapper), "--dry-run"],
+            capture_output=True, text=True, encoding="utf-8", check=False, env=env, timeout=60,
+        )  # fmt: skip
+        self.assertIn("[dry run]", install.stdout)
+        self.assertEqual(list(claude_home.iterdir()), [])
 
 
 class TestWriting(Case):

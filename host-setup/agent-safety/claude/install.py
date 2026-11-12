@@ -92,17 +92,18 @@ BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
 LOCAL_INSTRUCTIONS_ENV = "AGENT_FLEET_LOCAL_INSTRUCTIONS"
 LOCAL_MARKER = "host-local"
 
+# The marker the bootstrap writes into a tree it extracted, and the variable it hands that tree's commit in.
+# A tarball has no .git to answer for it, so the loader resolves its ref to a commit before downloading and passes it here.
+BOOTSTRAP_OWNED_MARKER = ".bootstrap-owned"
+BOOTSTRAP_COMMIT_MARKER = ".bootstrap-commit"
+SOURCE_COMMIT_ENV = "AGENT_SAFETY_SOURCE_COMMIT"
+FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
+
 # The files whose bytes this kit actually places on a machine, the hook first and then each block.
 # Derived rather than listed, so a block added above enters the digest without a second edit.
 # Written out, this list and the block list drifted apart silently and the digest stopped covering a file.
 # The digest is taken over these rather than over the commit, since it is the content that runs.
 # A clean commit and a dirty checkout install different bytes while reporting the same SHA.
-# The marker the bootstrap writes into a tree it extracted, and the variable it hands that tree's commit in.
-# A tarball has no .git to answer for it, so the loader resolves its ref to a commit before downloading and passes it here.
-BOOTSTRAP_OWNED_MARKER = ".bootstrap-owned"
-SOURCE_COMMIT_ENV = "AGENT_SAFETY_SOURCE_COMMIT"
-FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
-
 PAYLOAD_FILES = (
     DEPLOYED_HOOKS + tuple(DEPLOYED_DATA) + tuple(filename for _, filename in CLAUDE_MD_BLOCKS)
 )
@@ -608,12 +609,22 @@ def source_ref():
             return None
         return r.stdout.strip() if r.returncode == 0 else None
 
-    extracted = (HERE.parent.parent.parent / BOOTSTRAP_OWNED_MARKER).is_file()
+    # Resolves an archive commit as scripts/skills_install.py source_ref does: the handed variable first, then the .bootstrap-commit marker.
+    root = HERE.parent.parent.parent
+    extracted = (root / BOOTSTRAP_OWNED_MARKER).is_file()
     sha = None if extracted else git("rev-parse", "HEAD")
     if not sha:
         handed = os.environ.get(SOURCE_COMMIT_ENV, "")
-        if FULL_COMMIT.fullmatch(handed):
+        if not FULL_COMMIT.fullmatch(handed):
+            try:
+                handed = (root / BOOTSTRAP_COMMIT_MARKER).read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                handed = ""
+        if handed:
             return {"vcs": "archive", "commit": handed, "dirty": False}
+        # A bootstrap tree whose loader resolved no commit is still an archive.
+        if extracted:
+            return {"vcs": "archive", "commit": None, "dirty": False}
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
@@ -1392,7 +1403,7 @@ def stamp_line(stamp):
     )
     if host.get("wsl"):
         where += " (WSL)"
-    commit = str(src.get("commit", "unknown"))[:7] + ("-dirty" if src.get("dirty") else "")
+    commit = str(src.get("commit") or "unknown")[:7] + ("-dirty" if src.get("dirty") else "")
     held = stamp.get("blocks")
     blocks = (
         ", ".join(f"{k} {v}" for k, v in sorted(held.items()))
@@ -1417,7 +1428,7 @@ def report(claude_home):
     """
     path = claude_home / "agent-safety-stamp.json"
     current = payload_digest()
-    print(f"This checkout: payload {current}, hub {source_ref().get('commit', 'unknown')[:7]}")
+    print(f"This checkout: payload {current}, hub {(source_ref().get('commit') or 'unknown')[:7]}")
     try:
         raw = read_regular_file(path)
         if raw is None:

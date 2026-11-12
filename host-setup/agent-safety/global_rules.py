@@ -88,11 +88,21 @@ def present(agent: Agent) -> bool:
     return shutil.which(agent.command) is not None or agent.config_dir.is_dir()
 
 
+# Said under the header because the blocks below describe Claude Code's hooks as the mechanical layer.
+# Neither agent has such a hook, so a session of either would otherwise read a backstop that is not there.
+NOTE = (
+    "Note for this agent: no hook enforces these rules here yet. "
+    "Sentences below that name a hook describe Claude Code only. "
+    "The gap is tracked at ptr727/ProjectTemplate#781."
+)
+
+
 def header(local_path: pathlib.Path) -> str:
-    return (
+    comment = (
         f"{WRITER_MARKER}, which rewrites this whole file on every run. "
         f"Put host-specific content in {local_path}, appended below. -->"
     )
+    return f"{comment}\n\n{NOTE}"
 
 
 def read_state(kit: types.ModuleType, agent: Agent, rendered: str) -> tuple[str, bytes | None, str]:
@@ -154,9 +164,18 @@ def write_agent(
 
 
 def run(args: argparse.Namespace) -> int:
+    # The kit module is loaded only once an agent is present, so a host with none runs this on any python3.
+    wanted = [agent for agent in agents(args.agent) if present(agent)]
+    for agent in agents(args.agent):
+        if agent not in wanted:
+            print(f"  {agent.name}: not installed, skipped")
+    if not wanted:
+        return 0
     # A capability probe rather than a version tuple, which the linter reads as dead code under the py313 target.
     if not hasattr(datetime, "UTC"):
-        sys.stderr.write("This script requires Python 3.11+. Run it with a newer python3.\n")
+        sys.stderr.write(
+            "Python 3.11+ is needed to write the rules for an installed agent. Run this with a newer python3.\n"
+        )
         return 1
     kit = load_kit()
     local_path = kit.local_instructions_path()
@@ -167,10 +186,7 @@ def run(args: argparse.Namespace) -> int:
     rendered = kit.render_instructions(local_path, local_text, header=header(local_path))
 
     status = 0
-    for agent in agents(args.agent):
-        if not present(agent):
-            print(f"  {agent.name}: not installed, skipped")
-            continue
+    for agent in wanted:
         state, raw, reason = read_state(kit, agent, rendered)
         if args.report:
             print(f"  {agent.name}: {state} {agent.target}" + (f" ({reason})" if reason else ""))
