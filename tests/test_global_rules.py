@@ -207,6 +207,10 @@ class TestOldPython(Case):
         self.assertFalse((self.codex / "AGENTS.md").exists())
 
 
+@unittest.skipIf(
+    os.name == "nt",
+    "the stub interpreters are extension-less shell scripts, which Windows cannot start",
+)
 class TestWrapperInterpreterChoice(Case):
     """The wrappers prefer a Python 3.11 or newer and fall back to any Python 3 only when none is."""
 

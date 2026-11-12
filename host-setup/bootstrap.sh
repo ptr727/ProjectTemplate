@@ -400,10 +400,14 @@ agent_status() {
     # A report is read-only, so it runs for real under --dry-run rather than printing that it would.
     local DRY_RUN=false
     local -a behind=() skipped=()
+    # The agent tools report is an inventory, so its outcome is tracked apart from the steps that can be not current.
+    local tools_outcome=skipped
     if agents_user; then
-        if ! run_tool install-agents.sh --report; then
+        if run_tool install-agents.sh --report; then
+            tools_outcome=listed
+        else
             info "The agent tools step did not report, and the output above says why"
-            behind+=("agent tools")
+            tools_outcome=failed
         fi
     else
         skipped+=("agent tools (running as root)")
@@ -428,10 +432,11 @@ agent_status() {
     if ((${#skipped[@]} > 0)); then
         info "Not checked: ${skipped[*]}"
     fi
-    # The agent tools report lists versions without comparing them to upstream, so it is an inventory and never called current.
-    if ((${#skipped[@]} == 0)); then
-        info "Agent tools: listed above, versions not compared with upstream"
-    fi
+    # The listing shows versions without comparing them to upstream, so it is never called current.
+    case "$tools_outcome" in
+    listed) info "Agent tools: listed above, versions not compared with upstream" ;;
+    failed) info "Agent tools: the report failed" ;;
+    esac
     if ((${#behind[@]} == 0)); then
         info "Every other agent setup step reports current"
     fi

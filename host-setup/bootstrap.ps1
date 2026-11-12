@@ -629,6 +629,8 @@ function Invoke-AgentSetup {
 function Invoke-AgentStatus {
     $behind = @()
     $skipped = @()
+    # The agent tools report is an inventory, so its outcome is tracked apart from the steps that can be not current.
+    $toolsOutcome = 'skipped'
     # A report is read-only, so it runs for real under -DryRun rather than printing that it would.
     $wasDryRun = $script:DRY_RUN
     $script:DRY_RUN = $false
@@ -637,7 +639,9 @@ function Invoke-AgentStatus {
             Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
             if ($LASTEXITCODE -ne 0) {
                 info 'The agent tools step did not report, and the output above says why'
-                $behind += 'agent tools'
+                $toolsOutcome = 'failed'
+            } else {
+                $toolsOutcome = 'listed'
             }
         } else {
             $skipped += 'agent tools (running elevated)'
@@ -663,9 +667,11 @@ function Invoke-AgentStatus {
         if ($skipped.Count -gt 0) {
             info "Not checked: $($skipped -join ', ')"
         }
-        # The agent tools report lists versions without comparing them to upstream, so it is an inventory and never called current.
-        if ($skipped.Count -eq 0) {
+        # The listing shows versions without comparing them to upstream, so it is never called current.
+        if ($toolsOutcome -eq 'listed') {
             info 'Agent tools: listed above, versions not compared with upstream'
+        } elseif ($toolsOutcome -eq 'failed') {
+            info 'Agent tools: the report failed'
         }
         if ($behind.Count -eq 0) {
             info 'Every other agent setup step reports current'

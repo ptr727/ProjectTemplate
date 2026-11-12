@@ -1880,7 +1880,6 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     )
     def test_an_agent_status_names_every_step_that_is_not_current_and_still_finishes(self) -> None:
         for failing, name in (
-            ("install-agents.sh --report", "agent tools"),
             ("install-skills.sh --report", "fleet skills"),
             ("install-safety-kit.sh --report", "Claude Code safety kit"),
             ("install-global-rules.sh --report", "host-wide rules"),
@@ -1891,6 +1890,19 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.agents_steps(), list(AGENT_STATUS_STEPS), result.stderr)
                 self.assertIn(f"Not current: {name}", result.stdout)
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_tools_report_that_fails_is_named_apart_from_the_not_current_steps(
+        self,
+    ) -> None:
+        result = self.run_main("install-agents.sh --report", action="--agent-status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Agent tools: the report failed", result.stdout)
+        self.assertNotIn("versions not compared", result.stdout)
+        self.assertNotIn("Not current", result.stdout)
+        self.assertIn("Every other agent setup step reports current", result.stdout)
 
     def given_tree(self) -> Path:
         """The stub tarball extracted where a caller keeps a tree of its own, as a hub checkout is."""
@@ -2309,6 +2321,16 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         )
         self.assertLess(main.index("    Test-Prerequisite\n"), main.index("    Lock-Directory\n"))
 
+    def test_an_agent_tools_report_that_fails_is_named_apart_from_the_not_current_steps(
+        self,
+    ) -> None:
+        result = self.run_handoff("Invoke-AgentStatus", fail_step="install-agents.ps1 -Report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Agent tools: the report failed", result.stdout)
+        self.assertNotIn("versions not compared", result.stdout)
+        self.assertNotIn("Not current", result.stdout)
+        self.assertIn("Every other agent setup step reports current", result.stdout)
+
     def test_an_agent_status_runs_each_report_in_order(self) -> None:
         result = self.run_handoff("Invoke-AgentStatus")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -2320,7 +2342,6 @@ class TestPowerShellToolHandoff(unittest.TestCase):
 
     def test_an_agent_status_names_a_step_that_is_not_current_and_still_finishes(self) -> None:
         for failing, name in (
-            ("install-agents.ps1 -Report", "agent tools"),
             ("install-skills.ps1 -Report", "fleet skills"),
             ("install-safety-kit.ps1 -Report", "Claude Code safety kit"),
             ("install-global-rules.ps1 -Report", "host-wide rules"),
