@@ -946,22 +946,29 @@ dotnet_install() {
 
     local fleet
     fleet=$(dotnet_sdk_fleet)
+    local -a packages=()
     if [[ -z $fleet ]]; then
         warn "The feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so fleet .NET repositories will not build on this host"
     else
-        apt_install "$fleet"
+        packages+=("$fleet")
     fi
     if [[ $latest != "$fleet" ]]; then
-        apt_install "$latest"
+        packages+=("$latest")
     fi
 
+    # Each set is one apt_install, so apt's exit status is the function's.
+    # That matters because apply_tool runs this function with set -e off, where a failed call in a sequence would be passed over.
+    apt_install "${packages[@]}" || return 1
+
     [[ $WITH_OPTIONAL == true ]] || return 0
+    local -a optional=()
     local package
     while read -r package; do
         if [[ $package != "$latest" && $package != "$fleet" ]]; then
-            apt_install "$package"
+            optional+=("$package")
         fi
     done < <(dotnet_sdk_packages)
+    [[ ${#optional[@]} -eq 0 ]] || apt_install "${optional[@]}"
 }
 
 # --- powershell ---

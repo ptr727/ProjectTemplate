@@ -2348,6 +2348,12 @@ gh() {
                     )
 
 
+def baseline_major() -> int:
+    """The SDK major the fleet's global.json baseline selects."""
+    baseline = REPO / "catalog/snippets/configs/global.json"
+    return int(json.loads(baseline.read_text(encoding="utf-8"))["sdk"]["version"].split(".")[0])
+
+
 class DotnetSdkLineCase(unittest.TestCase):
     """The hub's .NET SDK steps install the line the caller's global.json selects, else 10.x."""
 
@@ -2384,8 +2390,20 @@ class DotnetSdkLineCase(unittest.TestCase):
 
     def test_a_caller_without_an_sdk_version_gets_10x(self) -> None:
         runner_only = json.dumps({"test": {"runner": "Microsoft.Testing.Platform"}})
-        self.assertEqual(self.select(runner_only), ["dotnet-version=10.x"])
-        self.assertEqual(self.select(None), ["dotnet-version=10.x"])
+        fallback = f"dotnet-version={baseline_major()}.x"
+        self.assertEqual(self.select(runner_only), [fallback])
+        self.assertEqual(self.select(None), [fallback])
+
+    def test_every_10x_fallback_is_the_baseline_major(self) -> None:
+        """A TFM move fails here until each hub-authored fallback names the new major."""
+        major = baseline_major()
+        for path in (
+            "catalog/snippets/workflows/publish-release.yml",
+            "docs/reusable-workflows.md",
+        ):
+            text = (REPO / path).read_text(encoding="utf-8")
+            self.assertRegex(text, r"dotnet-version: \d+\.x", path)
+            self.assertNotRegex(text, rf"dotnet-version: (?!{major}\.x)\d+\.x", path)
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.

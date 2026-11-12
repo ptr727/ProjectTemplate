@@ -417,16 +417,42 @@ dotnet_install
     def test_the_fleet_line_installs_beside_a_newer_one(self) -> None:
         result = self.install([self.older, self.fleet, self.newer])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout.splitlines(), [f"INSTALL {self.fleet}", f"INSTALL {self.newer}"]
-        )
+        self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet} {self.newer}"])
 
     def test_the_optional_set_skips_both_default_lines(self) -> None:
         result = self.install([self.older, self.fleet, self.newer], optional=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.splitlines(),
-            [f"INSTALL {self.fleet}", f"INSTALL {self.newer}", f"INSTALL {self.older}"],
+            [f"INSTALL {self.fleet} {self.newer}", f"INSTALL {self.older}"],
+        )
+
+    def test_a_failed_default_install_fails_the_tool(self) -> None:
+        """apply_tool runs the install with set -e off, so the status has to be the function's own."""
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+apt_install() {{ echo "INSTALL $*"; [[ " $* " != *" {self.fleet} "* ]]; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.older} {self.fleet} {self.newer}; }}
+WITH_OPTIONAL=true
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+""")
+        self.assertEqual(
+            result.stdout.splitlines(), [f"INSTALL {self.fleet} {self.newer}", "STATUS 1"]
+        )
+
+    def test_a_failed_optional_install_fails_the_tool(self) -> None:
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+apt_install() {{ echo "INSTALL $*"; [[ " $* " != *" {self.older} "* ]]; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.older} {self.fleet} {self.newer}; }}
+WITH_OPTIONAL=true
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+""")
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [f"INSTALL {self.fleet} {self.newer}", f"INSTALL {self.older}", "STATUS 1"],
         )
 
     def test_a_fleet_line_that_is_the_newest_installs_once(self) -> None:
