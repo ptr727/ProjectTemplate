@@ -296,10 +296,7 @@ def normalized_origin(value: str) -> str:
 
 
 def registry_at(hub: pathlib.Path, ref: str) -> dict[str, Any]:
-    try:
-        return cast("dict[str, Any]", json.loads(git(hub, "show", f"{ref}:registry/repos.json")))
-    except json.JSONDecodeError as exc:
-        raise CarryError(f"cannot read the registry at {ref}: {exc}") from exc
+    return cast("dict[str, Any]", json.loads(git(hub, "show", f"{ref}:registry/repos.json")))
 
 
 def verify_hub(hub: pathlib.Path, registry: dict[str, Any], name: str) -> str:
@@ -313,19 +310,25 @@ def verify_hub(hub: pathlib.Path, registry: dict[str, Any], name: str) -> str:
     origin = normalized_origin(git(hub, "config", "--get", "remote.origin.url"))
     if origin != normalized_origin(entry["url"]):
         raise CarryError(f"hub origin does not match the {HUB_NAME} registry entry")
-    git(hub, "fetch", "origin", "main", "develop")
+    git(
+        hub,
+        "fetch",
+        "origin",
+        "+refs/heads/main:refs/remotes/origin/main",
+        "+refs/heads/develop:refs/remotes/origin/develop",
+    )
     head = git(hub, "rev-parse", "HEAD")
     main = git(hub, "rev-parse", "origin/main")
     if head == main:
         if (
-            not entry_count(name, registry)
-            and entry_count(name, registry_at(hub, "origin/develop")) == 1
+            not registry_matches(name, registry)
+            and len(registry_matches(name, registry_at(hub, "origin/develop"))) == 1
         ):
             raise CarryError(
                 f"{name} is registered on origin/develop only, so run from a hub checkout at origin/develop"
             )
     elif head == git(hub, "rev-parse", "origin/develop"):
-        if entry_count(name, registry_at(hub, "origin/main")):
+        if registry_matches(name, registry_at(hub, "origin/main")):
             raise CarryError(
                 f"{name} is registered on origin/main, so the hub checkout must be at origin/main"
             )
@@ -402,12 +405,12 @@ def validate_declarations(declarations: list[Any], hub: pathlib.Path) -> None:
                 )
 
 
-def entry_count(name: str, registry: dict[str, Any]) -> int:
-    return sum(1 for entry in registry.get("repos", []) if entry.get("name") == name)
+def registry_matches(name: str, registry: dict[str, Any]) -> list[dict[str, Any]]:
+    return [entry for entry in registry.get("repos", []) if entry.get("name") == name]
 
 
 def resolve_repo(name: str, registry: dict[str, Any]) -> dict[str, Any]:
-    matches = [entry for entry in registry.get("repos", []) if entry.get("name") == name]
+    matches = registry_matches(name, registry)
     if len(matches) != 1:
         raise CarryError(f"repository is not uniquely registered: {name}")
     return matches[0]

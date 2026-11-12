@@ -561,7 +561,8 @@ function Invoke-CarryAction {
         fail "No downstream repo checkout found. Run this menu from inside the target repo's own worktree."
         return 1
     }
-    # A non-default -Ref checks out something other than the origin/main scripts/carry.py's hub argument requires.
+    # A non-default -Ref checks out something other than the origin/main scripts/carry.py requires for a promoted entry.
+    # An entry on develop alone is carried by running carry.py from a develop checkout, outside the menu.
     # So this is refused here with the actual reason rather than failing deep inside that tool.
     if ($script:REF -ne $script:DEFAULT_REF) {
         fail "Pulling hub files needs the hub's $script:DEFAULT_REF branch, and this session was started with -Ref $script:REF. Run without -Ref, or start a separate session on $script:DEFAULT_REF for this task."
@@ -613,7 +614,7 @@ function Show-Menu {
     log "Hub, $($script:HUB_REPO):"
     log '  13  Audit a cataloged repo'
     log '  14  Check the generated Skills distributions are current'
-    # Also gated on REF: scripts/carry.py always rejects a hub checkout that is not exactly on the default ref.
+    # Also gated on REF: the menu carries from the default ref only, which scripts/carry.py requires for a promoted entry.
     if ($script:DOWNSTREAM_ROOT -and $script:REF -eq $script:DEFAULT_REF) {
         log ''
         log 'Downstream, the repo this menu is run from:'

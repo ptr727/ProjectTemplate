@@ -310,7 +310,7 @@ hub_ref_commit() {
 # The check runs here rather than at startup, so opening the menu costs no network call until a hub-dependent task actually runs.
 # A local checkout that has moved on falls back to a real fetch rather than being trusted.
 # Examples of a checkout that has moved on include a feature branch, a commit behind, and an uncommitted edit.
-# This matches the same freshness and cleanliness carry.py's own verify_hub already requires of its own hub argument.
+# This matches the same freshness and cleanliness carry.py's own verify_hub requires of a main checkout.
 ensure_hub_root() {
     if [[ -n $HUB_ROOT ]]; then
         if [[ $DRY_RUN == true ]]; then
@@ -547,7 +547,8 @@ carry_action() {
             fail "No downstream repo checkout found. Run this menu from inside the target repo's own worktree."
             return 1
         }
-    # Its hub argument must be exactly on origin/main by carry.py's own requirement.
+    # The menu carries from origin/main only, which carry.py requires for every promoted registry entry.
+    # An entry on develop alone is carried by running carry.py from a develop checkout, outside the menu.
     # A non-default --ref checks out something else entirely.
     # So this would always fail deep inside carry.py with no clue why.
     # Refused here instead, with the actual reason.
@@ -594,7 +595,7 @@ print_menu() {
     log "  11  Audit a cataloged repo"
     log "  12  Check the generated Skills distributions are current"
     # Also gated on REF.
-    # The carry.py script always rejects a hub checkout that is not exactly on the default ref.
+    # The menu carries from the default ref only, and carry.py rejects any other ref for a promoted entry.
     # So these tasks cannot work in a non-default --ref session regardless of a downstream repo being detected.
     if [[ -n $DOWNSTREAM_ROOT && $REF == "$DEFAULT_REF" ]]; then
         log ""

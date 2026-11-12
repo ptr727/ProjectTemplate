@@ -504,6 +504,7 @@ class CarryHubTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         root = pathlib.Path(temp.name)
         remote = root / "remote.git"
+        self.remote = remote
         self.hub = root / "hub"
         subprocess.run(["git", "init", "--bare", remote], check=True, capture_output=True)
         subprocess.run(["git", "clone", remote, self.hub], check=True, capture_output=True)
@@ -556,6 +557,17 @@ class CarryHubTests(unittest.TestCase):
         self.assertEqual(self.verify("main", "Unknown"), self.head("origin/main"))
         with self.assertRaisesRegex(carry.CarryError, "not uniquely registered"):
             carry.resolve_repo("Unknown", carry.load_json(self.hub / "registry/repos.json"))
+
+    def test_a_single_branch_main_clone_still_names_develop(self) -> None:
+        """The menus clone main alone, so the fetch itself must create `origin/develop`."""
+        self.hub = self.hub.parent / "single"
+        subprocess.run(
+            ["git", "clone", "--single-branch", "--branch", "main", self.remote, self.hub],
+            check=True,
+            capture_output=True,
+        )
+        with self.assertRaisesRegex(carry.CarryError, "registered on origin/develop only"):
+            self.verify("main", "Unpromoted")
 
     def test_a_checkout_at_neither_branch_refuses(self) -> None:
         self.commit({"repos": [self.hub_entry, {"name": "Promoted"}]}, "feature/local")
