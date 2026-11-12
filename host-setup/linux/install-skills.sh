@@ -6,7 +6,7 @@
 # The independent-fetchability rule the sibling scripts follow therefore cannot apply to it.
 # Python is its one dependency.
 # The bootstrap runs it inside the agent setup, after install-tools.sh has provided the interpreter.
-# Like those two, it takes no sudo at all.
+# Like install-safety-kit.sh and install-global-rules.sh, it takes no sudo at all.
 # The scripts install-tools.sh and upgrade-host.sh elevate per command themselves instead.
 # Holding the operator to the no-sudo rule is what refuse_sudo below exists to do.
 #
