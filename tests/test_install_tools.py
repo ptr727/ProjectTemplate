@@ -392,7 +392,8 @@ class TestLinuxDotnetSets(LinuxFunctionsCase):
     ) -> subprocess.CompletedProcess[str]:
         """Run `dotnet_install` with `feed` as the packages apt sees and `apt_install` as its body.
 
-        The default body records each call, so the run's exit status is `dotnet_install`'s own.
+        It runs inside an `if`, as apply_tool runs it, where set -e is off.
+        So the run's exit status is the function's own return, not an errexit stop at a failed call.
         """
         return self.run_bash(f"""
 apt_refresh() {{ :; }}
@@ -400,8 +401,16 @@ dotnet_feed() {{ return 0; }}
 apt_install() {{ {apt_install}; }}
 dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
 WITH_OPTIONAL={"true" if optional else "false"}
-dotnet_install
+DISTRO_ID=debian
+DISTRO_VERSION=13
+if dotnet_install; then exit 0; else exit "$?"; fi
 """)
+
+    def test_an_empty_feed_fails_the_tool_and_lets_the_run_carry_on(self) -> None:
+        result = self.install([])
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("No .NET SDK package is available for debian 13", result.stderr)
 
     def test_the_fleet_line_installs_beside_a_newer_one(self) -> None:
         result = self.install([self.older, self.fleet, self.newer])
