@@ -176,7 +176,7 @@ as needing a restart, since stopping it would end every pane inside it.
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
 
-It exits 0 on success, 3 where a tool failed while the others still ran, and 1 where it refused or stopped.
+It exits 0 on success, 3 where a tool failed or was refused while the others still ran, and 1 where the run itself refused or stopped.
 
 Examples:
   install-agents.sh                        Report on every tool

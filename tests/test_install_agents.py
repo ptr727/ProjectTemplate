@@ -1203,7 +1203,8 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("claude: its updater failed", result.stderr)
         self.assertIn("Changed:\n  claude 2.1.0 -> 2.2.0", result.stdout)
 
-    def test_cswap_is_skipped_while_a_running_cswap_holds_its_launcher(self) -> None:
+    def hold_cswap_launcher(self) -> int:
+        """Runs a copy of bash as the cswap launcher and returns its pid, with uv stubbed beside it."""
         bash = shutil.which("bash")
         if bash is None:
             self.skipTest("needs bash to stand in for a running cswap")
@@ -1214,10 +1215,21 @@ class TestInstallAgentsWindows(unittest.TestCase):
         running = subprocess.Popen([str(launcher), "-c", "sleep 120; :"])
         self.addCleanup(running.wait, 10)
         self.addCleanup(running.kill)
+        return running.pid
+
+    def test_cswap_is_skipped_while_a_running_cswap_holds_its_launcher(self) -> None:
+        pid = self.hold_cswap_launcher()
         result = self.run_script("-Upgrade", "-Yes", "cswap")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"a running cswap (process {running.pid}) holds its launcher", result.stdout)
+        self.assertIn(f"a running cswap (process {pid}) holds its launcher", result.stdout)
         self.assertNotIn("uv tool upgrade claude-swap", self.recorded())
+
+    def test_a_dry_run_also_skips_cswap_while_a_running_cswap_holds_its_launcher(self) -> None:
+        pid = self.hold_cswap_launcher()
+        result = self.run_script("-Upgrade", "-Yes", "-DryRun", "cswap")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"a running cswap (process {pid}) holds its launcher", result.stdout)
+        self.assertNotIn("uv tool upgrade claude-swap", result.stdout)
 
     def test_restart_pending_is_null_when_unreadable(self) -> None:
         self.stub("herdr", "herdr 0.9.4")

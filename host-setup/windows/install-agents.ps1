@@ -132,7 +132,7 @@ refuses them here and names the documented route rather than inventing one.
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
 
-It exits 0 on success, 3 where a tool failed while the others still ran, and 1 where it refused or stopped.
+It exits 0 on success, 3 where a tool failed or was refused while the others still ran, and 1 where the run itself refused or stopped.
 
 Examples:
   install-agents.ps1                        Report on every tool
