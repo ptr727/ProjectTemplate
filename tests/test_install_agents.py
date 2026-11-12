@@ -868,71 +868,6 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertNotIn("npm install", " ".join(self.recorded()))
         self.assertIn("not under the prefix of the npm on PATH", result.stdout)
 
-    def run_functions(self, body: str) -> subprocess.CompletedProcess[str]:
-        """Runs the script's own helper functions, lifted by AST so main is not run."""
-        assert PWSH is not None
-        driver = (
-            "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
-            f"'{SCRIPT_PS}', [ref]$null, [ref]$null)\n"
-            "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
-            " if ($f.Name -in 'Resolve-FinalPath', 'Test-ProtectedPath', 'Hide-Home') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
-            + body
-        )
-        return subprocess.run(
-            [PWSH, "-NoProfile", "-Command", driver],
-            capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
-        )  # fmt: skip
-
-    def test_hide_home_shortens_only_paths_inside_the_profile(self) -> None:
-        # $HOME is read-only in PowerShell, so the paths are built from the real profile and a sibling of it.
-        body = (
-            "'inside=' + (Hide-Home -Path (Join-Path $HOME '.bun'))\n"
-            "$sibling = $HOME.TrimEnd('/', '\\') + '2/bin'\n"
-            "'sibling-kept=' + ((Hide-Home -Path $sibling) -eq $sibling)\n"
-        )
-        result = self.run_functions(body)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        inside, sibling = result.stdout.split("\n")[:2]
-        self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
-        self.assertEqual(sibling, "sibling-kept=True")
-
-    def test_a_protected_root_matches_only_at_a_path_component(self) -> None:
-        root = self.dir / "Program Files"
-        body = (
-            f"'root=' + (Test-ProtectedPath -Directory '{root}' -Roots @('{root}'))\n"
-            f"'child=' + (Test-ProtectedPath -Directory '{root / 'nodejs'}' -Roots @('{root}'))\n"
-            f"'sibling=' + (Test-ProtectedPath -Directory '{self.dir / 'Program FilesPortable' / 'npm'}' -Roots @('{root}'))\n"
-        )
-        result = self.run_functions(body)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.split(), ["root=True", "child=True", "sibling=False"])
-
-    def test_a_link_into_a_user_writable_directory_is_resolved_before_the_protected_rule(
-        self,
-    ) -> None:
-        """A symlink stands in for the junction nvm-windows makes, since pwsh on Linux cannot create a junction.
-
-        The Program Files rule itself is Windows-only, so this covers the resolution and the rule apart.
-        """
-        protected = self.dir / "Program Files"
-        protected.mkdir()
-        appdata = self.dir / "appdata" / "nvm"
-        appdata.mkdir(parents=True)
-        (protected / "nodejs").symlink_to(appdata, target_is_directory=True)
-        body = (
-            f"$link = '{protected / 'nodejs'}'\n"
-            "$real = Resolve-FinalPath -Path $link\n"
-            f"'resolved=' + ($real -eq '{appdata}')\n"
-            f"'link-protected=' + (Test-ProtectedPath -Directory $link -Roots @('{protected}'))\n"
-            f"'target-protected=' + (Test-ProtectedPath -Directory $real -Roots @('{protected}'))\n"
-        )
-        result = self.run_functions(body)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout.split(),
-            ["resolved=True", "link-protected=True", "target-protected=False"],
-        )
-
     def test_winget_is_left_to_upgrade_host(self) -> None:
         links = self.dir / "Microsoft" / "WinGet" / "Links"
         self.stub("opencode", "1.0.0", links)
@@ -1062,6 +997,86 @@ class TestInstallAgentsWindows(unittest.TestCase):
         helped = self.run_script("-Help")
         self.assertEqual(helped.returncode, 0, helped.stderr)
         self.assertTrue(helped.stdout.startswith("Usage: install-agents.ps1"))
+
+
+@unittest.skipUnless(PWSH, "needs pwsh")
+class TestInstallAgentsWindowsHelpers(unittest.TestCase):
+    """`install-agents.ps1`'s pure path helpers, lifted by AST, so they also run on a native Windows runner.
+
+    Unlike TestInstallAgentsWindows, they need no stub tool and no unelevated shell.
+    So a hosted Windows runner exercises their separator, case, and root-boundary handling on real paths.
+    """
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def run_functions(self, body: str) -> subprocess.CompletedProcess[str]:
+        """Runs the script's own helper functions, lifted by AST so main is not run."""
+        assert PWSH is not None
+        driver = (
+            "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
+            f"'{SCRIPT_PS}', [ref]$null, [ref]$null)\n"
+            "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
+            " if ($f.Name -in 'Resolve-FinalPath', 'Test-ProtectedPath', 'Hide-Home') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
+            + body
+        )
+        return subprocess.run(
+            [PWSH, "-NoProfile", "-Command", driver],
+            capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
+        )  # fmt: skip
+
+    def test_hide_home_shortens_only_paths_inside_the_profile(self) -> None:
+        # $HOME is read-only in PowerShell, so the paths are built from the real profile and a sibling of it.
+        body = (
+            "'inside=' + (Hide-Home -Path (Join-Path $HOME '.bun'))\n"
+            "$sibling = $HOME.TrimEnd('/', '\\') + '2/bin'\n"
+            "'sibling-kept=' + ((Hide-Home -Path $sibling) -eq $sibling)\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inside, sibling = result.stdout.split("\n")[:2]
+        self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
+        self.assertEqual(sibling, "sibling-kept=True")
+
+    def test_a_protected_root_matches_only_at_a_path_component(self) -> None:
+        root = self.dir / "Program Files"
+        body = (
+            f"'root=' + (Test-ProtectedPath -Directory '{root}' -Roots @('{root}'))\n"
+            f"'child=' + (Test-ProtectedPath -Directory '{root / 'nodejs'}' -Roots @('{root}'))\n"
+            f"'sibling=' + (Test-ProtectedPath -Directory '{self.dir / 'Program FilesPortable' / 'npm'}' -Roots @('{root}'))\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["root=True", "child=True", "sibling=False"])
+
+    def test_a_link_into_a_user_writable_directory_is_resolved_before_the_protected_rule(
+        self,
+    ) -> None:
+        """A symlink stands in for the junction nvm-windows makes, since pwsh on Linux cannot create a junction.
+
+        The Program Files rule itself is Windows-only, so this covers the resolution and the rule apart.
+        """
+        protected = self.dir / "Program Files"
+        protected.mkdir()
+        appdata = self.dir / "appdata" / "nvm"
+        appdata.mkdir(parents=True)
+        try:
+            (protected / "nodejs").symlink_to(appdata, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"this host cannot create a directory symlink: {error}")
+        body = (
+            f"$link = '{protected / 'nodejs'}'\n"
+            "$real = Resolve-FinalPath -Path $link\n"
+            f"'resolved=' + ($real -eq '{appdata}')\n"
+            f"'link-protected=' + (Test-ProtectedPath -Directory $link -Roots @('{protected}'))\n"
+            f"'target-protected=' + (Test-ProtectedPath -Directory $real -Roots @('{protected}'))\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split(),
+            ["resolved=True", "link-protected=True", "target-protected=False"],
+        )
 
 
 if __name__ == "__main__":
