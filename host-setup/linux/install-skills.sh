@@ -4,8 +4,9 @@
 # This is the one script here that reaches outside host-setup/, deliberately.
 # The skills content lives at the tree root, so a copy fetched without the tree has nothing to install.
 # The independent-fetchability rule the sibling scripts follow therefore cannot apply to it.
-# Python is its one dependency, which is why the bootstrap runs it last: install-tools.sh provides the interpreter before this needs one.
-# It is also the one script here that takes no sudo at all.
+# Python is its one dependency.
+# The bootstrap runs it inside the agent setup, after install-tools.sh has provided the interpreter.
+# Like install-safety-kit.sh and install-global-rules.sh, it takes no sudo at all.
 # The scripts install-tools.sh and upgrade-host.sh elevate per command themselves instead.
 # Holding the operator to the no-sudo rule is what refuse_sudo below exists to do.
 #
