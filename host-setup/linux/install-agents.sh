@@ -11,6 +11,8 @@
 # Nothing here elevates, so an npm prefix this user cannot write to is reported with its command and left.
 # The package name is a per-tool record in this file (npm_package), because a manager's files do not always carry it.
 # An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
+# A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
@@ -271,9 +273,28 @@ npm_root() {
 }
 
 # What owns the installed copy, read from where the command resolves to rather than from how it was meant to be installed.
+# The real path of a tool, with a mise shim followed to the file it stands for.
+# The shims of mise are symlinks to the mise executable, so a tool whose real path is named mise is asked of mise itself.
+# Returns 1 and prints nothing where mise cannot say, so a shim is never read as the manager that holds mise.
+tool_real_path() {
+    local path="$1" tool real out
+    tool="${path##*/}"
+    real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
+    if [[ ${real##*/} == "mise" && $tool != "mise" ]]; then
+        out=$(timeout 30 mise which "$tool" 2>/dev/null </dev/null) || return 1
+        [[ -n $out ]] || return 1
+        real=$(readlink -f -- "$out" 2>/dev/null) || real="$out"
+    fi
+    printf '%s' "$real"
+}
+
 tool_manager() {
     local path="$1" real
-    real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
+    # A mise shim that mise cannot resolve is still mise's, and its plan reports that nothing runs.
+    real=$(tool_real_path "$path") || {
+        printf 'mise'
+        return 0
+    }
     # The npm on PATH is asked first, since an ordinary npm global can sit under another manager's node or bun directory.
     # Upgrading that node would leave the tool behind, so what npm holds is npm's whatever else the path looks like.
     local root
@@ -285,9 +306,29 @@ tool_manager() {
     tool_manager_by_path "$real"
 }
 
+# Bun's global package directory, real-pathed where it exists, so one expression serves classification and the plan.
+# BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR are honored, and the install.globalDir in bunfig.toml is not read.
+bun_global_dir() {
+    local dir="${BUN_INSTALL_GLOBAL_DIR:-${BUN_INSTALL:-$HOME/.bun}/install/global}" real
+    real=$(readlink -f -- "$dir" 2>/dev/null) || real="$dir"
+    printf '%s' "$real"
+}
+
 # The manager a path suggests once npm has declined it.
 tool_manager_by_path() {
-    local real="$1"
+    local real="$1" bun_global
+    # A relocated bun carries no .bun segment, so bun's own variables name its global directory.
+    bun_global=$(bun_global_dir)
+    if [[ -n $bun_global && $real == "$bun_global"/* ]]; then
+        printf 'bun'
+        return 0
+    fi
+    # MISE_DATA_DIR can move mise's installs off any /mise/installs/ path, so mise's own listing is asked before any shape.
+    # Read by shape there, a relocated mise tool would fall to its own updater over mise's files.
+    if [[ -n $(mise_key "$real") ]]; then
+        printf 'mise'
+        return 0
+    fi
     case "$real" in
     # A mise, Homebrew, bun, or Nix directory can hold a node_modules of its own, so each is read before the generic npm shape.
     */mise/installs/*) printf 'mise' ;;
@@ -333,7 +374,10 @@ manager_plan() {
     local tool="$1" path="$2" manager="$3" real pkg dir name
     PLAN_CMD=()
     PLAN_WHY=""
-    real=$(readlink -f -- "$path" 2>/dev/null) || real="$path"
+    if ! real=$(tool_real_path "$path"); then
+        PLAN_WHY="$tool is a mise shim and mise which could not resolve it, so upgrade it with mise by hand"
+        return 0
+    fi
     case "$manager" in
     apt)
         PLAN_WHY="apt owns it and upgrade-host.sh upgrades it"
@@ -353,7 +397,7 @@ manager_plan() {
         fi
         # The recorded package must be the one that owns the file, so a fork providing the same command is never replaced by it.
         if [[ $manager == "bun" ]]; then
-            dir=$(readlink -f -- "${BUN_INSTALL:-$HOME/.bun}/install/global/node_modules" 2>/dev/null) || dir=""
+            dir="$(bun_global_dir)/node_modules"
             if [[ -z $dir || $real != "$dir/$pkg"/* ]]; then
                 PLAN_WHY="its files at $(hide_home "$real") are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
                 return 0
@@ -625,17 +669,20 @@ upgrade_tool() {
     [[ -z $path ]] || now=$(tool_version "$path")
     [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
 
-    # Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
-    if [[ $tool == "herdr" ]]; then
-        herdr_post || FAILED+=("herdr integrations")
-        if [[ $DRY_RUN == false ]]; then
-            local rc=0
-            herdr_restart_pending || rc=$?
-            case $rc in
-            0) log "herdr: a running server is on the previous binary and is left running, restart it when no pane needs it" ;;
-            2) log "herdr: could not read whether a running server needs a restart" ;;
-            esac
-        fi
+    [[ $tool != "herdr" ]] || herdr_after_upgrade
+}
+
+# Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
+# One path for the self-updater and for a manager, so both reinstall the integrations and give the same restart guidance.
+herdr_after_upgrade() {
+    herdr_post || FAILED+=("herdr integrations")
+    if [[ $DRY_RUN == false ]]; then
+        local rc=0
+        herdr_restart_pending || rc=$?
+        case $rc in
+        0) log "herdr: a running server is on the previous binary and is left running, restart it when no pane needs it" ;;
+        2) log "herdr: could not read whether a running server needs a restart" ;;
+        esac
     fi
 }
 
@@ -658,6 +705,7 @@ manager_upgrade() {
     now=""
     [[ -z $path ]] || now=$(tool_version "$path")
     [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
+    [[ $tool != "herdr" ]] || herdr_after_upgrade
 }
 
 install_tool() {
