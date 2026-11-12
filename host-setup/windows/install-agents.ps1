@@ -11,6 +11,8 @@
 # The npm on PATH owns a tool only where the prefix it reports holds it, rather than where a path merely looks like npm's.
 # The package name is a per-tool record in this file (Get-NpmPackage), because a manager's shim does not always carry it.
 # An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
+# The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
@@ -351,8 +353,21 @@ function Test-NpmOwnership {
 # The scoop roots this script knows, the user's and the global one.
 # SCOOP else the profile's scoop, and SCOOP_GLOBAL else the scoop under ProgramData.
 function Get-ScoopRoot {
-    $roots = @([pscustomobject]@{ Root = $(if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }); Global = $false })
-    $global = if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { $null }
+    # Scoop's own config names the roots when the environment does not, as the scoop command itself reads it.
+    $config = $null
+    $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
+    $configFile = Join-Path (Join-Path $configHome 'scoop') 'config.json'
+    if (Test-Path -LiteralPath $configFile -PathType Leaf) {
+        try { $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } catch { $config = $null }
+    }
+    $fromConfig = {
+        param([string]$Key)
+        if ($config -and $config.PSObject.Properties[$Key] -and $config.$Key -is [string] -and $config.$Key) { return $config.$Key }
+        return $null
+    }
+    $user = if ($env:SCOOP) { $env:SCOOP } elseif (& $fromConfig 'root_path') { & $fromConfig 'root_path' } else { Join-Path $HOME 'scoop' }
+    $roots = @([pscustomobject]@{ Root = $user; Global = $false })
+    $global = if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif (& $fromConfig 'global_path') { & $fromConfig 'global_path' } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { $null }
     if ($global) { $roots += [pscustomobject]@{ Root = $global; Global = $true } }
     return $roots
 }
@@ -412,7 +427,9 @@ function Test-NpmPackageOwnership {
 function Test-BunPackageOwnership {
     param([string]$Path, [string]$Package)
     $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
-    $directory = Join-Path (Join-Path (Join-Path (Join-Path $bun 'install') 'global') 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
+    # Bun's own BUN_INSTALL_GLOBAL_DIR is honored, and the install.globalDir in bunfig.toml is not read.
+    $globalDir = if ($env:BUN_INSTALL_GLOBAL_DIR) { $env:BUN_INSTALL_GLOBAL_DIR } else { Join-Path (Join-Path $bun 'install') 'global' }
+    $directory = Join-Path (Join-Path $globalDir 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     $inside = (Resolve-FinalPath -Path $directory) -replace '/', '\'
     if ($resolved.StartsWith($inside.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
@@ -499,6 +516,11 @@ function Get-ToolManager {
         if ($candidate -like '*\WinGet\Packages\*' -or $candidate -like '*\Microsoft\WinGet\Links\*') { return 'winget' }
         if ((Test-UnderScoop -Path $candidate) -or $candidate -like '*\scoop\*') { return 'scoop' }
         if ($candidate -like '*\chocolatey\*') { return 'choco' }
+        # A relocated bun global directory carries no .bun segment, so bun's own variable names it.
+        if ($env:BUN_INSTALL_GLOBAL_DIR) {
+            $bunGlobal = ((Resolve-FinalPath -Path $env:BUN_INSTALL_GLOBAL_DIR) -replace '/', '\').TrimEnd('\')
+            if (($candidate -replace '/', '\').StartsWith("$bunGlobal\", [StringComparison]::OrdinalIgnoreCase)) { return 'bun' }
+        }
         # A bun global package also sits under a node_modules, so bun is read first, as on Linux.
         if ($candidate -like '*\.bun\*') { return 'bun' }
         if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
@@ -738,16 +760,19 @@ function Invoke-ToolUpgrade {
         $script:CHANGED.Add("$ToolName $before -> $after")
     }
 
-    # Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
-    if ($ToolName -eq 'herdr') {
-        if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
-        if (-not $script:DRY_RUN) {
-            $pending = Get-HerdrRestartPending
-            if ($pending -eq $true) {
-                log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
-            } elseif ($null -eq $pending) {
-                log 'herdr: could not read whether a running server needs a restart'
-            }
+    if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
+}
+
+# Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
+# One path for the self-updater and for a manager, so both reinstall the integrations and give the same restart guidance.
+function Invoke-HerdrAfterUpgrade {
+    if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
+    if (-not $script:DRY_RUN) {
+        $pending = Get-HerdrRestartPending
+        if ($pending -eq $true) {
+            log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
+        } elseif ($null -eq $pending) {
+            log 'herdr: could not read whether a running server needs a restart'
         }
     }
 }
@@ -775,6 +800,7 @@ function Invoke-ManagerUpgrade {
         $after = if ($now) { $now } else { '-' }
         $script:CHANGED.Add("$ToolName $before -> $after")
     }
+    if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
 
 function Invoke-ToolInstall {

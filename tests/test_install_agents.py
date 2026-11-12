@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "host-setup" / "linux" / "install-agents.sh"
 
 # The manager calls that only read, which the tests do not count as a change.
-READS = {"npm root -g", "npm prefix -g", "mise ls --json"}
+READS = {"npm root -g", "npm prefix -g", "mise ls --json", "mise which opencode"}
 
 AWKWARD = 'a "quoted" back\\slash\ttab\nnewline\rreturn \x01\x1f é end'
 
@@ -44,6 +44,7 @@ case "$*" in
 "root -g") cat "$STUB_DIR/npm_root" 2>/dev/null || true ;;
 "prefix -g") cat "$STUB_DIR/npm_prefix" 2>/dev/null || true ;;
 "ls --json") cat "$STUB_DIR/mise_ls.json" 2>/dev/null || true ;;
+"which opencode") cat "$STUB_DIR/mise_which" 2>/dev/null || true ;;
 esac
 exit 0
 """
@@ -93,7 +94,9 @@ class TestInstallAgents(unittest.TestCase):
             (self.bin / name).symlink_to(path)
         return path
 
-    def run_script(self, *arguments: str, pane: bool = False) -> subprocess.CompletedProcess[str]:
+    def run_script(
+        self, *arguments: str, pane: bool = False, extra_env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             "PATH": f"{self.dir / 'front'}:{self.bin}:/usr/bin:/bin",
             "HOME": str(self.home),
@@ -103,6 +106,7 @@ class TestInstallAgents(unittest.TestCase):
         }
         if pane:
             env["HERDR_PANE_ID"] = "test-pane"
+        env.update(extra_env or {})
         return subprocess.run(
             [str(SCRIPT), *arguments],
             capture_output=True,
@@ -342,6 +346,66 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn(
             "it sits inside mise's Node, and the npm on PATH does not own it", result.stdout
         )
+
+    def test_bun_honors_its_global_dir_variable_and_not_bunfig(self) -> None:
+        custom = self.dir / "custom-global"
+        self.stub("opencode", "1.0.0", where=custom / "node_modules" / "opencode-ai" / "bin")
+        self.stub("bun", "1.1.0")
+        (self.home / "bunfig.toml").write_text(
+            '[install]\nglobalDir = "/elsewhere"\n', encoding="utf-8"
+        )
+        result = self.run_script(
+            "--upgrade", "--yes", "opencode", extra_env={"BUN_INSTALL_GLOBAL_DIR": str(custom)}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["bun install -g opencode-ai@latest"])
+
+    def mise_shim(self, resolves: bool) -> None:
+        """A mise shim, a symlink to the mise executable that Homebrew keeps in its Cellar."""
+        cellar = self.dir / "linuxbrew" / "Cellar" / "mise" / "2024.1.1" / "bin"
+        mise = self.stub("mise", "mise 2024.1.1", where=cellar)
+        install = self.dir / "mise" / "installs" / "npm-opencode-ai" / "1.0.0"
+        real = install / "lib" / "node_modules" / "opencode-ai" / "bin" / "opencode"
+        real.parent.mkdir(parents=True)
+        real.write_text("#!/bin/bash\necho 1.0.0\n", encoding="utf-8")
+        real.chmod(0o755)
+        (self.bin / "opencode").symlink_to(mise)
+        (self.dir / "mise_ls.json").write_text(
+            json.dumps({"npm:opencode-ai": [{"install_path": str(install)}]}), encoding="utf-8"
+        )
+        if resolves:
+            (self.dir / "mise_which").write_text(str(real), encoding="utf-8")
+        self.stub("brew", "Homebrew 4.0.0")
+
+    def test_a_mise_shim_is_resolved_through_mise_which_and_never_upgrades_mise_itself(
+        self,
+    ) -> None:
+        self.mise_shim(resolves=True)
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["mise upgrade npm:opencode-ai"])
+        self.assertNotIn("brew", " ".join(self.called()))
+
+    def test_a_mise_shim_mise_cannot_resolve_is_reported_and_nothing_runs(self) -> None:
+        self.mise_shim(resolves=False)
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn("is a mise shim and mise which could not resolve it", result.stdout)
+
+    def test_herdr_upgraded_by_a_manager_gets_the_same_post_step(self) -> None:
+        self.stub(
+            "herdr",
+            "herdr 0.9.4",
+            where=self.dir / "linuxbrew" / "Cellar" / "herdr" / "0.9.4" / "bin",
+        )
+        self.stub("brew", "Homebrew 4.0.0")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        result = self.run_script("--upgrade", "--yes", "herdr")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.called()
+        self.assertEqual(calls[0], "brew upgrade herdr")
+        self.assertIn("herdr integration install claude", calls)
 
     def mise_layout(self, listed: bool = True) -> Path:
         """An npm-backend tool laid out as mise does, a node_modules inside its install directory, and mise's listing of it."""
@@ -683,6 +747,9 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("-Upgrade runs: npm install -g @openai/codex@latest", result.stdout)
         self.assertNotIn("which upgrades it", result.stdout)
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "root can write the unwritable directory"
+    )
     def test_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
         prefix = self.dir / "npmprefix"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
@@ -779,6 +846,63 @@ class TestInstallAgentsWindows(unittest.TestCase):
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=fork)
         self.assertNotIn("bun install", " ".join(self.recorded()))
         self.assertIn("not under bun's global package opencode-ai", result.stdout)
+
+    def test_bun_honors_its_global_dir_variable_and_not_bunfig(self) -> None:
+        custom = self.dir / "custom-global"
+        bun_bin = custom / "node_modules" / "opencode-ai" / "bin"
+        self.stub("opencode", "1.0.0", bun_bin)
+        self.stub("bun", "1.1.0")
+        (self.home / "bunfig.toml").write_text(
+            '[install]\nglobalDir = "/elsewhere"\n', encoding="utf-8"
+        )
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "opencode",
+            extra_path=bun_bin,
+            extra_env={"BUN_INSTALL_GLOBAL_DIR": str(custom)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bun install -g opencode-ai@latest", self.recorded())
+
+    def test_herdr_upgraded_by_scoop_gets_the_same_post_step(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("herdr", "herdr 0.9.4", shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.recorded()
+        self.assertIn("scoop update herdr", calls)
+        self.assertIn("herdr integration install claude", calls)
+
+    def test_scoops_own_config_names_the_root_when_the_environment_does_not(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        config = self.home / ".config" / "scoop"
+        config.mkdir(parents=True)
+        (config / "config.json").write_text(json.dumps({"root_path": str(root)}), encoding="utf-8")
+        report = self.run_script("-Report", "-Json", "opencode", extra_path=shims)
+        self.assertEqual(json.loads(report.stdout)["tools"][0]["manager"], "scoop")
+        self.scoop_which(f"{root}/apps/opencode/current/opencode.exe")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
+
+    def test_an_unreadable_scoop_config_falls_back_to_the_defaults(self) -> None:
+        config = self.home / ".config" / "scoop"
+        config.mkdir(parents=True)
+        (config / "config.json").write_text("{ not json", encoding="utf-8")
+        shims = self.home / "scoop" / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        self.scoop_which("~\\scoop\\apps\\opencode\\current\\opencode.exe")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
 
     def test_a_global_scoop_app_is_reported_with_its_elevated_command(self) -> None:
         glob = self.dir / "GlobalScoop"
