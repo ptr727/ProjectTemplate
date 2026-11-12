@@ -3,9 +3,18 @@
 # For the same reason it drives each tool's updater rather than replacing it.
 # An upgrade touches only a tool already present, so a host where nobody installed codex never gets codex from a scheduled run.
 #
-# A tool installed through a package manager (winget, scoop, choco, npm, bun) is reported and left to that manager.
-# This is because running the tool's own updater over it would fight the manager for the same files.
+# A tool installed through a package manager is never given its own updater, which would fight the manager for the same files.
+# An upgrade runs that manager's own upgrade for that one package instead: npm, bun, and scoop.
 # The winget packages are already upgraded by upgrade-host.ps1, so winget is not repeated here.
+# A choco package needs an elevated shell and this script never elevates, so it is reported with its command and nothing is run.
+# The same holds for an npm prefix under Program Files or ProgramData that a normal user cannot write, once a link there is followed.
+# The npm on PATH owns a tool only where the prefix it reports holds it, rather than where a path merely looks like npm's.
+# The package name is a per-tool record in this file (Get-NpmPackage), because a manager's shim does not always carry it.
+# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
+# The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
+# A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
+# The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
@@ -57,6 +66,7 @@ $NOTE_TEXTS = [System.Collections.Generic.List[string]]::new()
 $FAILED = [System.Collections.Generic.List[string]]::new()
 $CHANGED = [System.Collections.Generic.List[string]]::new()
 $TMP_DIR = ''
+$NPM_PREFIX = $null
 
 # --- Output ---
 
@@ -74,8 +84,10 @@ function note {
 function Hide-Home {
     param([string]$Path)
     if (-not $Path -or -not $HOME) { return $Path }
-    if ($Path.StartsWith($HOME, [StringComparison]::OrdinalIgnoreCase)) {
-        return '%USERPROFILE%' + $Path.Substring($HOME.Length)
+    # The match ends at a path component, so a sibling profile such as the same name with a suffix is shown as it is.
+    $profileRoot = $HOME.TrimEnd('\', '/')
+    if ($Path -ieq $profileRoot -or $Path.StartsWith("$profileRoot\", [StringComparison]::OrdinalIgnoreCase) -or $Path.StartsWith("$profileRoot/", [StringComparison]::OrdinalIgnoreCase)) {
+        return '%USERPROFILE%' + $Path.Substring($profileRoot.Length)
     }
     return $Path
 }
@@ -105,7 +117,10 @@ With no tool named, -Report and -Upgrade select every managed tool, while -Insta
 none, so an install always names what it installs, or says -All.
 
 A tool reads as "self" when no package manager owns it, so this script runs its update, and as
-the name of a package manager when one owns it, which -Upgrade leaves to that manager. herdr's
+the name of a package manager when one owns it. -Upgrade then runs that manager's upgrade for
+that one package: npm or bun install the latest tag, and scoop updates the app. winget is
+upgraded by upgrade-host.ps1. choco needs an elevated shell and an npm directory under Program
+Files or ProgramData needs one too, so each is reported with its command and nothing is run. herdr's
 agent integrations are reinstalled after an upgrade wherever herdr reports one outdated, and a
 herdr server still running the previous binary is left running and reported as needing a
 restart, since stopping it would end every pane inside it.
@@ -250,19 +265,284 @@ function Get-ToolVersion {
     return ''
 }
 
+# The npm registry name of a tool, which npm and bun both install from, or nothing where none is recorded.
+# These are the names each tool's own documentation gives, and herdr and cswap are not published there.
+function Get-NpmPackage {
+    param([string]$Tool)
+    switch ($Tool) {
+        'claude' { return '@anthropic-ai/claude-code' }
+        'codex' { return '@openai/codex' }
+        'opencode' { return 'opencode-ai' }
+    }
+    return $null
+}
+
+# A path with every link along it followed to its final target, or the path as given where it cannot be read.
+# Each component is resolved, since a link can sit above the last one, as scoop's current junction does.
+# It is the one link resolver here, so ownership, writability, and the manager read all see the same real path.
+function Resolve-FinalPath {
+    param([string]$Path)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return $Path }
+    if ($item.LinkTarget) {
+        $target = $item.ResolveLinkTarget($true)
+        if ($target) { return Resolve-FinalPath -Path $target.FullName }
+    }
+    $parent = Split-Path -Parent $item.FullName
+    if (-not $parent -or $parent -eq $item.FullName) { return $item.FullName }
+    return Join-Path (Resolve-FinalPath -Path $parent) $item.Name
+}
+
+# Whether a path is the root or sits under it, with both sides read with either separator and without a trailing one.
+# The match ends at a path component, so a sibling such as Program FilesPortable is not read as under Program Files.
+# Below leaves out the root itself, for a caller that needs something inside it.
+function Test-PathUnder {
+    param([string]$Path, [string]$Root, [switch]$Below)
+    $where = ($Path -replace '/', '\').TrimEnd('\')
+    $base = ($Root -replace '/', '\').TrimEnd('\')
+    if (-not $base) { return $false }
+    if (-not $Below -and $where -ieq $base) { return $true }
+    return $where.StartsWith("$base\", [StringComparison]::OrdinalIgnoreCase)
+}
+
+# Whether a directory sits under one of the roots a normal user cannot write.
+function Test-ProtectedPath {
+    param([string]$Directory, [string[]]$Roots)
+    foreach ($root in ($Roots | Where-Object { $_ })) {
+        if (Test-PathUnder -Path $Directory -Root $root) { return $true }
+    }
+    return $false
+}
+
+# Whether this user can write a directory, without elevating to find out.
+# Windows keeps a per-user directory writable, and one under Program Files or ProgramData needs an elevated shell.
+# The nvm-windows install points C:\Program Files\nodejs into a user-writable directory, so the link target decides, not the link.
+function Test-DirectoryWritable {
+    param([string]$Directory)
+    $real = Resolve-FinalPath -Path $Directory
+    if ($IsWindows) {
+        return -not (Test-ProtectedPath -Directory $real -Roots @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData))
+    }
+    & test -w $real
+    return ($LASTEXITCODE -eq 0)
+}
+
+# The prefix the npm on PATH installs global packages and their shims into, or nothing where npm cannot say.
+function Get-NpmPrefix {
+    if ($null -eq $script:NPM_PREFIX) {
+        $script:NPM_PREFIX = ''
+        if (Get-Command npm -CommandType Application -ErrorAction SilentlyContinue) {
+            $result = Invoke-Captured -Command 'npm' -Arguments @('prefix', '-g') -TimeoutSec $script:READ_TIMEOUT
+            if ($result.ExitCode -eq 0 -and $result.Output) { $script:NPM_PREFIX = $result.Output.Trim() }
+        }
+    }
+    return $script:NPM_PREFIX
+}
+
+# Whether a tool's files sit where the npm on PATH installs: its shims directly in the prefix, or the package under the prefix's node_modules.
+function Test-NpmOwnership {
+    param([string]$Path)
+    $prefix = Get-NpmPrefix
+    if (-not $prefix) { return $false }
+    # Both sides are resolved through every link first, since a manager can put a linked path on PATH.
+    # Scoop's Node, for one, lists apps\nodejs\current\bin, which leads to the persist directory npm names as its prefix.
+    $prefix = (Resolve-FinalPath -Path $prefix) -replace '/', '\'
+    $prefix = $prefix.TrimEnd('\')
+    $parent = Split-Path -Parent $Path
+    $leaf = Split-Path -Leaf $Path
+    $resolved = if ($parent) { Join-Path (Resolve-FinalPath -Path $parent) $leaf } else { $Path }
+    $where = ($resolved -replace '/', '\')
+    $cut = $where.LastIndexOf('\')
+    $directory = if ($cut -gt 0) { $where.Substring(0, $cut).TrimEnd('\') } else { '' }
+    return ($directory -ieq $prefix -or (Test-PathUnder -Path $where -Root "$prefix\node_modules" -Below))
+}
+
+# The scoop roots this script knows, the user's and the global one.
+# SCOOP else the profile's scoop, and SCOOP_GLOBAL else the scoop under ProgramData.
+function Get-ScoopRoot {
+    # Scoop's own config names the roots when the environment does not, as the scoop command itself reads it.
+    $config = $null
+    $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
+    $configFile = Join-Path (Join-Path $configHome 'scoop') 'config.json'
+    if (Test-Path -LiteralPath $configFile -PathType Leaf) {
+        try { $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } catch { $config = $null }
+    }
+    $fromConfig = {
+        param([string]$Key)
+        if ($config -and $config.PSObject.Properties[$Key] -and $config.$Key -is [string] -and $config.$Key) { return $config.$Key }
+        return $null
+    }
+    $user = if ($env:SCOOP) { $env:SCOOP } elseif (& $fromConfig 'root_path') { & $fromConfig 'root_path' } else { Join-Path $HOME 'scoop' }
+    $roots = @([pscustomobject]@{ Root = $user; Global = $false })
+    $global = if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif (& $fromConfig 'global_path') { & $fromConfig 'global_path' } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { $null }
+    if ($global) { $roots += [pscustomobject]@{ Root = $global; Global = $true } }
+    return $roots
+}
+
+# Whether a path sits under the shims or apps directory of a scoop root this script knows.
+function Test-UnderScoop {
+    param([string]$Path)
+    foreach ($entry in (Get-ScoopRoot)) {
+        foreach ($sub in 'shims', 'apps') {
+            # Joined as text rather than with Join-Path, which fails for a root on a drive that is not present.
+            # The root's trailing separator is trimmed first, as Get-ScoopApp does, so a root written as D:\Tools\ still matches.
+            $base = ($entry.Root -replace '/', '\').TrimEnd('\')
+            if (Test-PathUnder -Path $Path -Root "$base\$sub" -Below) { return $true }
+        }
+    }
+    return $false
+}
+
+# The scoop app a path belongs to, read from directly under a scoop root's own apps directory, or nothing for any other path.
+# A first apps segment anywhere in the path would take a directory a user happened to name Apps.
+# Global says whether the app sits under the global root, which needs an elevated shell to update.
+function Get-ScoopApp {
+    param([string]$Path)
+    # Scoop prints a per-user path with a leading tilde, so it is expanded to the profile before the roots are compared.
+    if ($Path -match '^~[\\/]') { $Path = Join-Path $HOME $Path.Substring(2) }
+    $where = $Path -replace '/', '\'
+    foreach ($entry in (Get-ScoopRoot)) {
+        $apps = (($entry.Root -replace '/', '\').TrimEnd('\')) + '\apps\'
+        if (Test-PathUnder -Path $where -Root $apps -Below) {
+            $name = ($where.Substring($apps.Length) -split '\\')[0]
+            if ($name) { return [pscustomobject]@{ App = $name; Global = $entry.Global } }
+        }
+    }
+    return $null
+}
+
+# Whether the npm package a tool is recorded under is the one that owns its files.
+# The package must be installed under the prefix, and the file must sit in it or a shim must name its directory.
+# This keeps a fork that provides the same command from being replaced by the recorded package.
+function Test-NpmPackageOwnership {
+    param([string]$Path, [string]$Package)
+    $prefix = (Resolve-FinalPath -Path (Get-NpmPrefix)).TrimEnd('\', '/')
+    $directory = Join-Path (Join-Path $prefix 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
+    if (-not (Test-Path -LiteralPath (Join-Path $directory 'package.json') -PathType Leaf)) { return $false }
+    $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
+    if (Test-PathUnder -Path $resolved -Root $directory -Below) { return $true }
+    # A shim is a script beside the package rather than a link into it, so its text must name the package's directory.
+    $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    if (-not $text) { return $false }
+    $needle = 'node_modules\' + ($Package -replace '/', '\') + '\'
+    return (($text -replace '/', '\').IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+
+# Whether the tool is bun's global install of the recorded package.
+# On Windows bun copies a shim into its bin directory rather than linking into the package, so the shim alone names no package.
+# There the shim must sit in bun's bin directory and the recorded package must be installed globally, as the npm branch checks package.json.
+# The .bunx file beside the shim records the target, but its format is undocumented, so it is not read.
+# Bun's bin directory, where its copied shims sit, and its global package directory, each resolved and without a trailing separator.
+# BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR are honored, and the install.globalDir in bunfig.toml is not read.
+function Get-BunDirectory {
+    $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
+    $globalDir = if ($env:BUN_INSTALL_GLOBAL_DIR) { $env:BUN_INSTALL_GLOBAL_DIR } else { Join-Path (Join-Path $bun 'install') 'global' }
+    return [pscustomobject]@{
+        Bin    = ((Resolve-FinalPath -Path (Join-Path $bun 'bin')) -replace '/', '\').TrimEnd('\')
+        Global = ((Resolve-FinalPath -Path $globalDir) -replace '/', '\').TrimEnd('\')
+    }
+}
+
+function Test-BunPackageOwnership {
+    param([string]$Path, [string]$Package)
+    $bun = Get-BunDirectory
+    $directory = Join-Path (Join-Path $bun.Global 'node_modules') ($Package -replace '/', '\')
+    $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
+    $inside = (Resolve-FinalPath -Path $directory) -replace '/', '\'
+    if (Test-PathUnder -Path $resolved -Root $inside -Below) { return $true }
+    $bin = $bun.Bin
+    $cut = $resolved.LastIndexOf('\')
+    $shimDirectory = if ($cut -gt 0) { $resolved.Substring(0, $cut) } else { '' }
+    return ($shimDirectory -ieq $bin -and (Test-Path -LiteralPath (Join-Path $directory 'package.json')))
+}
+
+# What an upgrade does for a tool a package manager owns.
+# Command and Arguments hold the command to run, or Why holds the reason none runs, and never both.
+# The reason names the command where one exists, so the person can run it where this script may not.
+function Get-ManagerPlan {
+    param([string]$Tool, [string]$Path, [string]$Manager)
+    $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
+    switch ($Manager) {
+        'winget' { $plan.Why = 'winget owns it and upgrade-host upgrades it' }
+        { $_ -in 'npm', 'bun' } {
+            $pkg = Get-NpmPackage -Tool $Tool
+            if (-not $pkg) {
+                $plan.Why = "no $Manager package name is recorded for $Tool, so upgrade it with $Manager by hand"
+            } elseif (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
+                $plan.Why = "$Manager is not on PATH, so run: $Manager install -g $pkg@latest"
+            } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
+                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
+            } elseif ($Manager -eq 'npm' -and -not (Test-NpmPackageOwnership -Path $Path -Package $pkg)) {
+                $plan.Why = "its files at $(Hide-Home -Path $Path) are not the npm package $pkg, so that package does not own it, upgrade it where it was installed"
+            } elseif ($Manager -eq 'bun' -and -not (Test-BunPackageOwnership -Path $Path -Package $pkg)) {
+                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
+            } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmPrefix))) {
+                $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: npm install -g $pkg@latest"
+            } else {
+                # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
+                $plan.Command = $Manager
+                $plan.Arguments = @('install', '-g', "$pkg@latest")
+            }
+        }
+        'scoop' {
+            $app = $null
+            if (Get-Command scoop -CommandType Application -ErrorAction SilentlyContinue) {
+                $which = Invoke-Captured -Command 'scoop' -Arguments @('which', $Tool) -TimeoutSec $script:READ_TIMEOUT
+                if ($which.ExitCode -eq 0) { $app = Get-ScoopApp -Path $which.Output.Trim() }
+            }
+            if ($app -and $app.App -in 'nodejs', 'nodejs-lts') {
+                $plan.Why = "it sits inside scoop's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
+            } elseif ($app -and $app.Global) {
+                $plan.Why = "scoop's global apps need an elevated shell and this script never elevates, so run in one: scoop update $($app.App) --global"
+            } elseif ($app) {
+                $plan.Command = 'scoop'
+                $plan.Arguments = @('update', $app.App)
+            } else {
+                $plan.Why = "scoop's name for $Tool could not be read, so run scoop update with it by hand"
+            }
+        }
+        'choco' {
+            $pkg = '<package>'
+            $lib = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { $null }
+            if ($lib -and (Test-Path -LiteralPath $lib -PathType Container)) {
+                $hit = Get-ChildItem -LiteralPath $lib -Recurse -Filter "$Tool.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) { $pkg = ($hit.FullName.Substring($lib.Length).TrimStart('\', '/') -split '[\\/]')[0] }
+            }
+            $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade $pkg -y"
+        }
+    }
+    return $plan
+}
+
 # What owns the installed copy, read from where the command resolves to rather than from how it was meant to be installed.
 function Get-ToolManager {
     param([string]$Path)
     # Separators are unified so one set of patterns reads a Windows path and the stub path of a test on another host alike.
     $p = $Path -replace '/', '\'
     $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
-    if ($item -and $item.LinkTarget) { $p = "$p`n" + (($item.LinkTarget -replace '/', '\')) }
+    if ($item) {
+        $final = Resolve-FinalPath -Path $Path
+        if ($final -ne $Path) { $p = "$p`n" + ($final -replace '/', '\') }
+    }
     foreach ($candidate in ($p -split "`n")) {
+        # The npm on PATH is asked first where it installs, since its shims sit directly in the prefix, as in Program Files\nodejs.
+        # It comes before every path shape, because a Node that scoop, choco, or winget installed puts npm's prefix under that manager's tree.
+        # Read by shape there, an npm global would upgrade Node itself rather than the tool.
+        # The path shape stays as a fallback so a copy npm cannot confirm is still never given the tool's own updater.
+        if (Test-NpmOwnership -Path $candidate) { return 'npm' }
         if ($candidate -like '*\WinGet\Packages\*' -or $candidate -like '*\Microsoft\WinGet\Links\*') { return 'winget' }
-        if ($candidate -like '*\scoop\*') { return 'scoop' }
+        if ((Test-UnderScoop -Path $candidate) -or $candidate -like '*\scoop\*') { return 'scoop' }
         if ($candidate -like '*\chocolatey\*') { return 'choco' }
-        if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
+        # On Windows bun's shim is a copy in its bin directory, so bun is recognized by that directory and its global one.
+        # A relocated bun carries no .bun segment, so BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR name them.
+        $bunDirectory = Get-BunDirectory
+        $where = $candidate -replace '/', '\'
+        foreach ($bunRoot in @($bunDirectory.Bin, $bunDirectory.Global)) {
+            if (Test-PathUnder -Path $where -Root $bunRoot -Below) { return 'bun' }
+        }
+        # A bun global package also sits under a node_modules, so bun is read first, as on Linux.
         if ($candidate -like '*\.bun\*') { return 'bun' }
+        if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
     }
     return 'self'
 }
@@ -408,11 +688,19 @@ function Show-Report {
             if ($version) { $installed = $version }
             $manager = Get-ToolManager $path
             $status = 'present'
+            $upgrades = $true
             if ($manager -ne 'self') {
-                note $tool "installed through $manager, which upgrades it, so -Upgrade leaves it alone"
-            } elseif ($tool -eq 'herdr') {
-                Add-HerdrNote
+                $plan = Get-ManagerPlan -Tool $tool -Path $path -Manager $manager
+                if ($plan.Command) {
+                    note $tool "installed through $manager, -Upgrade runs: $($plan.Command) $($plan.Arguments -join ' ')"
+                } else {
+                    note $tool "installed through $manager, -Upgrade does not run it: $($plan.Why)"
+                    $upgrades = $false
+                }
             }
+            # The post step runs after the self-updater and after a manager upgrade alike, so the notes about it do too.
+            # A manager that does not run leaves the post step unrun, so the notes would promise what -Upgrade does not do.
+            if ($tool -eq 'herdr' -and $upgrades) { Add-HerdrNote }
             $restart = Get-RestartPending $tool
         }
         $shown = if ($path) { Hide-Home $path } else { $null }
@@ -467,7 +755,7 @@ function Invoke-ToolUpgrade {
     $installed = Get-ToolVersion $path
     $shownVersion = if ($installed) { $installed } else { 'an unreadable version' }
     if ($manager -ne 'self') {
-        log "${ToolName}: installed through $manager, leaving it to $manager"
+        Invoke-ManagerUpgrade -ToolName $ToolName -Path $path -Manager $manager -Installed $installed
         return
     }
 
@@ -494,18 +782,47 @@ function Invoke-ToolUpgrade {
         $script:CHANGED.Add("$ToolName $before -> $after")
     }
 
-    # Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
-    if ($ToolName -eq 'herdr') {
-        if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
-        if (-not $script:DRY_RUN) {
-            $pending = Get-HerdrRestartPending
-            if ($pending -eq $true) {
-                log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
-            } elseif ($null -eq $pending) {
-                log 'herdr: could not read whether a running server needs a restart'
-            }
+    if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
+}
+
+# Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
+# One path for the self-updater and for a manager, so both reinstall the integrations and give the same restart guidance.
+function Invoke-HerdrAfterUpgrade {
+    if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
+    if (-not $script:DRY_RUN) {
+        $pending = Get-HerdrRestartPending
+        if ($pending -eq $true) {
+            log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
+        } elseif ($null -eq $pending) {
+            log 'herdr: could not read whether a running server needs a restart'
         }
     }
+}
+
+# Upgrades a tool through the package manager that owns it, or says why nothing runs.
+# A failing manager is recorded and the other tools still run, as a failing updater is.
+function Invoke-ManagerUpgrade {
+    param([string]$ToolName, [string]$Path, [string]$Manager, [string]$Installed)
+    $plan = Get-ManagerPlan -Tool $ToolName -Path $Path -Manager $Manager
+    if (-not $plan.Command) {
+        log "${ToolName}: installed through $Manager, not run here: $($plan.Why)"
+        return
+    }
+    $shown = if ($Installed) { $Installed } else { 'an unreadable version' }
+    log "${ToolName}: at $shown, installed through $Manager, running: $($plan.Command) $($plan.Arguments -join ' ')"
+    if ((Invoke-Step -Command $plan.Command -Arguments $plan.Arguments) -ne 0) {
+        warn "${ToolName}: $Manager failed to upgrade it"
+        $script:FAILED.Add($ToolName)
+        return
+    }
+    $newPath = Get-ToolPath $ToolName
+    $now = if ($newPath) { Get-ToolVersion $newPath } else { '' }
+    if ($now -ne $Installed) {
+        $before = if ($Installed) { $Installed } else { '-' }
+        $after = if ($now) { $now } else { '-' }
+        $script:CHANGED.Add("$ToolName $before -> $after")
+    }
+    if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
 
 function Invoke-ToolInstall {
