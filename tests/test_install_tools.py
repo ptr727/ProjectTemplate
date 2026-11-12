@@ -294,7 +294,7 @@ esac
 
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
-class TestLinuxHeldPackages(unittest.TestCase):
+class TestLinuxHeldPackages(LinuxFunctionsCase):
     """A held package reads as installed, and a held Docker conflict is reported rather than removed.
 
     The stub dpkg-query answers each status field a format names from a table of `package want status` lines.
@@ -302,9 +302,7 @@ class TestLinuxHeldPackages(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.functions = self.dir / "functions.sh"
-        self.functions.write_text(linux_functions(), encoding="utf-8")
+        super().setUp()
         self.bin = self.dir / "bin"
         self.bin.mkdir()
         stub = self.bin / "dpkg-query"
@@ -312,7 +310,7 @@ class TestLinuxHeldPackages(unittest.TestCase):
         stub.chmod(0o755)
         self.table = self.dir / "dpkg-table"
 
-    def run_bash(self, rows: str, body: str) -> subprocess.CompletedProcess[str]:
+    def run_with_table(self, rows: str, body: str) -> subprocess.CompletedProcess[str]:
         self.table.write_text(rows, encoding="ascii")
         script = f'source "{self.functions}"\nPATH="{self.bin}:$PATH"\n{body}\n'
         return subprocess.run(
@@ -332,11 +330,11 @@ CODENAME=trixie
 run_root() { printf 'ROOT %s\\n' "$*"; }
 ensure_prerequisites() { printf 'PAST REMOVAL\\n'; exit 0; }
 if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
-        return self.run_bash(rows, body)
+        return self.run_with_table(rows, body)
 
     def test_a_held_package_reads_as_installed_and_is_not_planned(self) -> None:
         rows = "less hold installed\njq install installed\ngone deinstall config-files\n"
-        result = self.run_bash(rows, "apt_missing less jq gone absent")
+        result = self.run_with_table(rows, "apt_missing less jq gone absent")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ["gone", "absent"])
 
@@ -405,6 +403,24 @@ DISTRO_ID=debian
 DISTRO_VERSION=13
 if dotnet_install; then exit 0; else exit "$?"; fi
 """)
+
+    def test_a_newest_line_install_is_recorded_as_a_change(self) -> None:
+        """The row reads the fleet line, so the newest line's own move is what the summary needs."""
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+INSTALLED=""
+apt_install() {{ INSTALLED="$*"; }}
+apt_installed_version() {{ [[ " $INSTALLED " == *" $1 "* ]] && printf '1.0'; return 0; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.fleet} {self.newer}; }}
+WITH_OPTIONAL=false
+DISTRO_ID=debian
+DISTRO_VERSION=13
+CHANGED=()
+if dotnet_install; then printf '%s\\n' "${{CHANGED[@]}}"; else exit "$?"; fi
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"{self.newer} - -> 1.0"])
 
     def test_an_empty_feed_fails_the_tool_and_lets_the_run_carry_on(self) -> None:
         result = self.install([])

@@ -13,11 +13,19 @@ runs:
       shell: bash
       run: |
         set -Eeuo pipefail
-        if [[ -f global.json ]] && jq -e '.sdk.version' global.json >/dev/null; then
-          echo "global-json-file=global.json" >> "$GITHUB_OUTPUT"
-        else
-          echo "dotnet-version=10.x" >> "$GITHUB_OUTPUT"
+        status=1
+        if [[ -f global.json ]]; then
+          status=0
+          jq -e '.sdk.version' global.json >/dev/null || status=$?
         fi
+        case "$status" in
+          0) echo "global-json-file=global.json" >> "$GITHUB_OUTPUT" ;;
+          1) echo "dotnet-version=10.x" >> "$GITHUB_OUTPUT" ;;
+          *)
+            echo "::error::jq could not read global.json (exit $status), so the SDK line it selects is unknown. Keep it plain JSON."
+            exit 1
+            ;;
+        esac
 
     - name: Setup .NET SDK step
       uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0

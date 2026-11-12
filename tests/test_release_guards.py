@@ -2355,8 +2355,11 @@ class DotnetSdkLineCase(unittest.TestCase):
     ACTION = REPO / ".github/actions/dotnet-sdk/action.yml"
     SELECT = "Select .NET SDK line step"
 
-    def select(self, global_json: str | None) -> list[str]:
-        """The outputs the selection step writes in a workspace holding `global_json`, or none."""
+    def select(self, global_json: str | None, status: int = 0) -> list[str]:
+        """The outputs the selection step writes in a workspace holding `global_json`, or none.
+
+        The step is held to exit with `status`.
+        """
         if shutil.which("jq") is None:
             self.skipTest("the selection step reads global.json with jq, which this host lacks")
         script = step_script(self.ACTION, self.SELECT)
@@ -2376,7 +2379,7 @@ class DotnetSdkLineCase(unittest.TestCase):
                 check=False,
                 timeout=30,
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.returncode, status, result.stderr)
             return output.read_text(encoding="utf-8").splitlines()
 
     def test_a_global_json_selecting_a_line_is_read(self) -> None:
@@ -2388,6 +2391,11 @@ class DotnetSdkLineCase(unittest.TestCase):
         fallback = f"dotnet-version={baseline_line()[0]}.x"
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
+
+    def test_a_global_json_jq_cannot_read_fails_the_step(self) -> None:
+        """A comment is valid to the dotnet host and not to jq, so it fails here rather than reading as no line."""
+        commented = '// the fleet line\n{"sdk": {"version": "11.0.100"}}'
+        self.assertEqual(self.select(commented, status=1), [])
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.

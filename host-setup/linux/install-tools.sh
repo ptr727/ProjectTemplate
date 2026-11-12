@@ -956,9 +956,22 @@ dotnet_install() {
         packages+=("$latest")
     fi
 
+    # The dotnet row reads the fleet line, so apply_tool's summary does not see the newest line move.
+    # It is recorded here instead, where the newest line is a package of its own.
+    local before=""
+    if [[ $latest != "$fleet" ]]; then
+        before=$(apt_installed_version "$latest")
+    fi
+
     # Each set is one apt_install, so apt's exit status is the function's.
     # That matters because apply_tool runs this function with set -e off, where a failed call in a sequence would be passed over.
     apt_install "${packages[@]}" || return 1
+
+    if [[ $latest != "$fleet" ]]; then
+        local now
+        now=$(apt_installed_version "$latest")
+        [[ $now == "$before" ]] || CHANGED+=("$latest ${before:--} -> ${now:--}")
+    fi
 
     if [[ $WITH_OPTIONAL == true ]]; then
         local -a optional=()
