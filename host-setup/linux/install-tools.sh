@@ -854,16 +854,49 @@ dotnet_sdk_packages() {
 
 dotnet_sdk_latest() { dotnet_sdk_packages | tail -1; }
 
+# The SDK line the fleet's .NET repositories select, such as 10.0, read from the global.json baseline every one of them carries.
+# A TFM move edits that file, so the line moves here with it rather than being written into this script.
+# It is read with awk rather than jq, since a run selecting dotnet alone can reach a host jq is not yet on.
+# An empty result means the tree this script runs from carries no readable baseline.
+dotnet_fleet_line() {
+    local baseline
+    baseline="$(dirname -- "${BASH_SOURCE[0]}")/../../catalog/snippets/configs/global.json"
+    [[ -f $baseline ]] || return 0
+    awk -F'"' '$2 == "version" && split($4, part, ".") >= 2 { print part[1] "." part[2]; exit }' "$baseline"
+}
+
+# The fleet line's SDK package, printed only where the feed carries it.
+dotnet_sdk_fleet() {
+    local line package
+    line=$(dotnet_fleet_line)
+    [[ -n $line ]] || return 0
+    while read -r package; do
+        if [[ $package == "dotnet-sdk-$line" ]]; then
+            printf '%s' "$package"
+            return 0
+        fi
+    done < <(dotnet_sdk_packages)
+}
+
+# The package the dotnet row reports on.
+# The fleet line comes first, since a host holding only a newer line builds no fleet .NET repository.
+dotnet_sdk_primary() {
+    local package
+    package=$(dotnet_sdk_fleet)
+    [[ -n $package ]] || package=$(dotnet_sdk_latest)
+    printf '%s' "$package"
+}
+
 dotnet_version() {
     local package
-    package=$(dotnet_sdk_latest)
+    package=$(dotnet_sdk_primary)
     [[ -n $package ]] || return 0
     apt_installed_version "$package"
 }
 
 dotnet_target() {
     local package
-    package=$(dotnet_sdk_latest)
+    package=$(dotnet_sdk_primary)
     [[ -n $package ]] || return 0
     apt_candidate_version "$package"
 }
@@ -905,7 +938,9 @@ microsoft_feed() {
     apt_refresh
 }
 
-# The default set is the newest SDK.
+# The default set is the fleet's SDK line and the newest line, one package where the two are the same.
+# The fleet line is the one every fleet .NET repository's global.json selects, so a host without it builds none of them.
+# The newest line is installed beside it, so a newer line stays an addition rather than a replacement.
 # The optional set is every other SDK line the feed carries, for a host that has to build against more than one.
 dotnet_install() {
     dotnet_feed || return 0
@@ -914,12 +949,24 @@ dotnet_install() {
     latest=$(dotnet_sdk_latest)
     [[ -n $latest ]] || die "No .NET SDK package is available for $DISTRO_ID $DISTRO_VERSION"
 
-    apt_install "$latest"
+    local line fleet
+    line=$(dotnet_fleet_line)
+    fleet=$(dotnet_sdk_fleet)
+    if [[ -z $line ]]; then
+        warn "No global.json baseline is readable beside this script, so only the newest SDK line is installed"
+    elif [[ -z $fleet ]]; then
+        warn "The feed carries no dotnet-sdk-$line, so fleet .NET repositories will not build on this host"
+    else
+        apt_install "$fleet"
+    fi
+    if [[ $latest != "$fleet" ]]; then
+        apt_install "$latest"
+    fi
 
     [[ $WITH_OPTIONAL == true ]] || return 0
     local package
     while read -r package; do
-        if [[ $package != "$latest" ]]; then
+        if [[ $package != "$latest" && $package != "$fleet" ]]; then
             apt_install "$package"
         fi
     done < <(dotnet_sdk_packages)
@@ -1125,9 +1172,14 @@ tool_note() {
     dotnet)
         local -a sdks=()
         readarray -t sdks < <(dotnet_sdk_packages)
+        local line
+        line=$(dotnet_fleet_line)
         if [[ ${#sdks[@]} -eq 0 ]]; then
             note "dotnet" "no SDK package available, Microsoft's feed is not configured"
         else
+            if [[ -n $line && -z $(dotnet_sdk_fleet) ]]; then
+                note "dotnet" "the feed carries no dotnet-sdk-$line, the line fleet .NET repositories select"
+            fi
             readarray -t missing < <(apt_missing "${sdks[@]}")
             if [[ ${#missing[@]} -gt 0 ]]; then
                 note "dotnet" "SDK line(s) not installed: ${missing[*]}"
@@ -1433,7 +1485,7 @@ list_tools() {
     log "Package sets:"
     info "python default  : ${PYTHON_PACKAGES[*]}"
     info "python optional : ${PYTHON_OPTIONAL[*]}"
-    info "dotnet default  : the newest SDK line the feed carries"
+    info "dotnet default  : the SDK line the fleet's global.json selects, and the newest line the feed carries"
     info "dotnet optional : every other SDK line the feed carries"
 }
 

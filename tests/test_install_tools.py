@@ -352,6 +352,171 @@ if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
         )
 
 
+BASELINE = ROOT / "catalog" / "snippets" / "configs" / "global.json"
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxDotnetSets(unittest.TestCase):
+    """The dotnet sets follow the fleet line the global.json baseline selects, beside the newest line.
+
+    The functions run from a made-up tree, so the baseline they find is the one each test writes.
+    """
+
+    def setUp(self) -> None:
+        self.tree = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.functions = self.tree / "host-setup" / "linux" / "functions.sh"
+        self.functions.parent.mkdir(parents=True)
+        self.functions.write_text(linux_functions(), encoding="utf-8")
+        self.baseline = self.tree / "catalog" / "snippets" / "configs" / "global.json"
+        self.baseline.parent.mkdir(parents=True)
+
+    def install(self, feed: list[str], optional: bool = False) -> subprocess.CompletedProcess[str]:
+        """Run `dotnet_install` with `feed` as the packages apt sees and apt_install recording each call."""
+        body = f"""
+source "{self.functions}"
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+apt_install() {{ echo "INSTALL $*"; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
+WITH_OPTIONAL={"true" if optional else "false"}
+dotnet_install
+"""
+        return subprocess.run(
+            ["bash", "-c", body],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+
+    def select(self, version: str) -> None:
+        self.baseline.write_text(
+            json.dumps({"sdk": {"version": version}}, indent=4), encoding="utf-8"
+        )
+
+    def test_the_fleet_line_installs_beside_a_newer_one(self) -> None:
+        self.select("10.0.100")
+        result = self.install(["dotnet-sdk-8.0", "dotnet-sdk-10.0", "dotnet-sdk-11.0"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(), ["INSTALL dotnet-sdk-10.0", "INSTALL dotnet-sdk-11.0"]
+        )
+
+    def test_the_optional_set_skips_both_default_lines(self) -> None:
+        self.select("10.0.100")
+        result = self.install(
+            ["dotnet-sdk-8.0", "dotnet-sdk-10.0", "dotnet-sdk-11.0"], optional=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["INSTALL dotnet-sdk-10.0", "INSTALL dotnet-sdk-11.0", "INSTALL dotnet-sdk-8.0"],
+        )
+
+    def test_a_fleet_line_that_is_the_newest_installs_once(self) -> None:
+        self.select("10.0.100")
+        result = self.install(["dotnet-sdk-9.0", "dotnet-sdk-10.0"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["INSTALL dotnet-sdk-10.0"])
+
+    def test_a_feed_without_the_fleet_line_is_named(self) -> None:
+        self.select("10.0.100")
+        result = self.install(["dotnet-sdk-11.0"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["INSTALL dotnet-sdk-11.0"])
+        self.assertIn("carries no dotnet-sdk-10.0", result.stderr)
+
+    def test_a_missing_baseline_installs_the_newest_line_and_says_so(self) -> None:
+        result = self.install(["dotnet-sdk-10.0", "dotnet-sdk-11.0"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["INSTALL dotnet-sdk-11.0"])
+        self.assertIn("No global.json baseline is readable", result.stderr)
+
+    def test_the_line_moves_with_the_baseline(self) -> None:
+        self.select("11.0.100")
+        result = self.install(["dotnet-sdk-10.0", "dotnet-sdk-11.0", "dotnet-sdk-12.0"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(), ["INSTALL dotnet-sdk-11.0", "INSTALL dotnet-sdk-12.0"]
+        )
+
+    def test_the_real_baseline_selects_a_line(self) -> None:
+        shutil.copyfile(BASELINE, self.baseline)
+        result = subprocess.run(
+            ["bash", "-c", f'source "{self.functions}"\ndotnet_fleet_line'],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        version = json.loads(BASELINE.read_text(encoding="utf-8"))["sdk"]["version"]
+        self.assertEqual(result.stdout, ".".join(version.split(".")[:2]) + "\n")
+
+
+WINDOWS_FLEET_MAJOR_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Get-DotnetFleetMajor')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+function die { param([string]$Message) throw "DIE: $Message" }
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    try {
+        $results[$case.Name] = Get-DotnetFleetMajor -Baseline $case.Value
+    } catch {
+        $results[$case.Name] = $_.Exception.Message
+    }
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsDotnetFleetMajor(unittest.TestCase):
+    """The winget SDK package's major comes from the same global.json baseline the Linux line does."""
+
+    def test_the_major_follows_the_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            selects_eleven = Path(directory, "eleven.json")
+            selects_eleven.write_text(
+                json.dumps({"sdk": {"version": "11.0.100"}}), encoding="utf-8"
+            )
+            selects_nothing = Path(directory, "nothing.json")
+            selects_nothing.write_text(json.dumps({"sdk": {}}), encoding="utf-8")
+            result = run_pwsh_harness(
+                WINDOWS_FLEET_MAJOR_HARNESS,
+                {
+                    "real": str(BASELINE),
+                    "eleven": str(selects_eleven),
+                    "nothing": str(selects_nothing),
+                    "missing": str(Path(directory, "missing.json")),
+                },
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        majors = json.loads(result.stdout)
+        version = json.loads(BASELINE.read_text(encoding="utf-8"))["sdk"]["version"]
+        self.assertEqual(majors["real"], int(version.split(".")[0]))
+        self.assertEqual(majors["eleven"], 11)
+        self.assertTrue(
+            majors["nothing"].startswith("DIE: The global.json baseline at"), majors["nothing"]
+        )
+        self.assertTrue(
+            majors["missing"].startswith("DIE: No global.json baseline is readable"),
+            majors["missing"],
+        )
+
+
 WINDOWS_HARNESS = r"""
 param([string]$Installer, [string]$Awkward, [string]$Mode)
 $ErrorActionPreference = 'Stop'

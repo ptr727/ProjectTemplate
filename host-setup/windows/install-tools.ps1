@@ -632,6 +632,24 @@ function Write-InstallFailure {
 
 # --- Tools ---
 
+# The SDK major the fleet's .NET repositories select, such as 10, read from the global.json baseline every one of them carries.
+# A TFM move edits that file, so the winget package moves with it rather than being written into this script.
+function Get-DotnetFleetMajor {
+    param([string]$Baseline = (Join-Path $PSScriptRoot '../../catalog/snippets/configs/global.json'))
+    try {
+        $json = Get-Content -LiteralPath $Baseline -Raw | ConvertFrom-Json
+    } catch {
+        die "No global.json baseline is readable at ${Baseline}: $($_.Exception.Message)"
+    }
+    $version = ''
+    if ($json.PSObject.Properties['sdk'] -and $json.sdk.PSObject.Properties['version']) { $version = [string]$json.sdk.version }
+    $match = [regex]::Match($version, '^(\d+)\.\d+\.')
+    if (-not $match.Success) { die "The global.json baseline at $Baseline selects no SDK line: '$version'" }
+    return [int]$match.Groups[1].Value
+}
+
+$DOTNET_MAJOR = Get-DotnetFleetMajor
+
 # Managed tools, in the order a report lists them.
 # Every one is a single winget package, which is what makes this a table where the Linux script needs several functions per tool.
 # Probe names the executable that proves the tool is present when winget knows no package for it.
@@ -652,7 +670,7 @@ $TOOLS = @(
     @{ Name = 'uv'; Package = 'astral-sh.uv'; Probe = 'uv'; Optional = @(); Family = '' }
     @{ Name = 'docker'; Package = 'Docker.DockerDesktop'; Probe = 'docker'; Optional = @(); Family = '' }
     @{ Name = 'node'; Package = 'OpenJS.NodeJS.LTS'; Probe = 'node'; Optional = @(); Family = 'OpenJS.NodeJS' }
-    @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.9', 'Microsoft.DotNet.SDK.8'); Family = '' }
+    @{ Name = 'dotnet'; Package = "Microsoft.DotNet.SDK.$DOTNET_MAJOR"; Probe = 'dotnet'; Optional = @("Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 1)", "Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 2)"); Family = '' }
 )
 
 function Get-Tool {

@@ -105,16 +105,18 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
 
   The major tracks the repo's .NET TFM (`net10.0`), never a `netstandard` target an analyzer or
   source-generator project carries beside it. It moves only with that TFM (`11.0.100` alongside
-  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows and composite actions install the SDK line through
-  `setup-dotnet`'s `dotnet-version`, and the hub's devcontainer snippet through its image tag. A
-  repo calling them therefore cannot move to a new major alone, since CI would then find no
-  compatible SDK. Such a move starts in the hub, as a fleet-wide change. The hub's steps and image
-  provide both lines until every repo has moved. A repo still on
-  `10.0.100` would otherwise find no compatible SDK once the hub installs only the new line.
+  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows and
+  composite actions install the line the calling repo's own `global.json` selects, through
+  `setup-dotnet`'s `global-json-file`, so CI follows each repo's file. The hub's devcontainer
+  snippet still installs its line through its image tag. The hub's host installers install the
+  line the `catalog/snippets/configs/global.json` baseline selects, beside the newest line. So a
+  major move still starts in the hub, as a fleet-wide change to that baseline and the image tag.
+  The image provides both lines until every repo has moved.
 
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
-  rather than silently drifting. Install the line's SDK beside the newer one.
+  rather than silently drifting. The hub's host installers install the line's SDK beside the newer
+  one by default.
 
 **`LangVersion` is left unset** in every `.props` or `.targets` file the repo holds and every
 project targeting a .NET TFM. The SDK's own targets derive it, which is the point. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it

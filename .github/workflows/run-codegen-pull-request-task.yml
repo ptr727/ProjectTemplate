@@ -38,16 +38,19 @@ jobs:
           client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
-      - name: Setup .NET SDK step
-        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: 10.x
-
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ matrix.target.ref }}
           token: ${{ steps.app-token.outputs.token }}
+
+      # The SDK follows the checkout, since the caller's global.json selects its line.
+      # 10.x is the line for a caller carrying no global.json yet.
+      - name: Setup .NET SDK step
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: ${{ hashFiles('global.json') != '' && 'global.json' || '' }}
+          dotnet-version: ${{ hashFiles('global.json') == '' && '10.x' || '' }}
 
       - name: Run codegen hook step
         if: ${{ hashFiles('.github/actions/codegen/action.yml') != '' }}
