@@ -43,17 +43,21 @@ Options:
 '@
 }
 
-# The first candidate that is a Python 3, since the writer holds its own 3.11 floor for a host that has an agent.
+# The first candidate that is a Python 3.11 or newer, which the writer needs where an agent is present.
+# Where none is, the first Python 3 runs.
+# A host with no agent still works, and a host with one is told the 3.11 need.
 function Find-Python {
     $candidates = @(
         @{ Exe = 'py'; Arguments = @('-3') },
         @{ Exe = 'python3'; Arguments = @() },
         @{ Exe = 'python'; Arguments = @() }
     )
-    foreach ($candidate in $candidates) {
-        if (-not (Get-Command $candidate.Exe -ErrorAction SilentlyContinue)) { continue }
-        & $candidate.Exe @($candidate.Arguments) -c 'import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)' 2>$null
-        if ($LASTEXITCODE -eq 0) { return $candidate }
+    foreach ($floor in 11, 0) {
+        foreach ($candidate in $candidates) {
+            if (-not (Get-Command $candidate.Exe -ErrorAction SilentlyContinue)) { continue }
+            & $candidate.Exe @($candidate.Arguments) -c "import sys; sys.exit(0 if sys.version_info[0] == 3 and sys.version_info[1] >= $floor else 1)" 2>$null
+            if ($LASTEXITCODE -eq 0) { return $candidate }
+        }
     }
     return $null
 }

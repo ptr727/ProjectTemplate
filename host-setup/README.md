@@ -71,7 +71,7 @@ One action brings a host's coding agents fully current, and one reports whether 
 .\bootstrap.ps1 -AgentStatus
 ```
 
-A running agent session keeps the rules it started with. Restart agent sessions after a setup to load the new hooks and rules. The menu offers the same two actions as "Report agent setup" and "Update agent setup". Either action also takes `--from-tree PATH` (`-FromTree` on Windows) from a hub checkout. That runs from the tree in place instead of fetching one. `--agent-setup` then registers the checkout rather than the kept tree, and `--agent-status` only reports and registers nothing.
+A running agent session keeps the rules it started with. Restart agent sessions after a setup to load the new hooks and rules. The menu offers the same two actions as "Report agent setup" and "Update agent setup". Either action also takes `--from-tree PATH` (`-FromTree` on Windows) from a hub checkout. That runs from the tree in place instead of fetching one. `--agent-setup` then registers the checkout rather than the kept tree, and `--agent-status` only reports and registers nothing. Where Claude Code already holds a registration for another existing directory, the skills installer leaves it. It prints the command that moves it, so run that to point the plugin at the checkout.
 
 Each tool also runs on its own, on a host that already has a checkout:
 

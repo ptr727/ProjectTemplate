@@ -428,8 +428,12 @@ agent_status() {
     if ((${#skipped[@]} > 0)); then
         info "Not checked: ${skipped[*]}"
     fi
-    if ((${#behind[@]} == 0 && ${#skipped[@]} == 0)); then
-        info "Every agent setup step reports current"
+    # The agent tools report lists versions without comparing them to upstream, so it is an inventory and never called current.
+    if ((${#skipped[@]} == 0)); then
+        info "Agent tools: listed above, versions not compared with upstream"
+    fi
+    if ((${#behind[@]} == 0)); then
+        info "Every other agent setup step reports current"
     fi
 }
 
@@ -579,12 +583,6 @@ run_mode() {
 main() {
     parse_args "$@"
 
-    command -v curl >/dev/null ||
-        die "curl is required to fetch the tooling. Install it with this host's package manager, then run this again."
-    command -v tar >/dev/null || die "tar is required to unpack the tooling"
-    command -v flock >/dev/null ||
-        die "flock is required to keep two runs from replacing each other's trees. Install util-linux with this host's package manager, then run this again."
-
     # A run with no action and no terminal reports rather than guessing, which is what a pipe into a shell is.
     # The remedy is printed rather than assumed, since somebody reaching this has just pasted a one-line install.
     if [[ -z $MODE ]]; then
@@ -610,6 +608,13 @@ main() {
         info "Ran from $TREE, which this run left as it was"
         return 0
     fi
+
+    # A given tree fetches nothing, so these are needed only from here on.
+    command -v curl >/dev/null ||
+        die "curl is required to fetch the tooling. Install it with this host's package manager, then run this again."
+    command -v tar >/dev/null || die "tar is required to unpack the tooling"
+    command -v flock >/dev/null ||
+        die "flock is required to keep two runs from replacing each other's trees. Install util-linux with this host's package manager, then run this again."
 
     # Resolved only now, since the default depends on the action, which the menu may have just chosen.
     [[ -n $DIR ]] || DIR=$(default_dir)

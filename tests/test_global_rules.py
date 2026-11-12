@@ -9,6 +9,7 @@ No case therefore reads or writes the invoking user's own files.
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -206,6 +207,64 @@ class TestOldPython(Case):
         self.assertFalse((self.codex / "AGENTS.md").exists())
 
 
+class TestWrapperInterpreterChoice(Case):
+    """The wrappers prefer a Python 3.11 or newer and fall back to any Python 3 only when none is."""
+
+    PROBE_STUB = """#!/bin/sh
+case "$*" in
+*">= 11"*) exit {modern} ;;
+*"[0] == 3"*) exit 0 ;;
+esac
+echo "ran-{name}"
+"""
+
+    def stub(self, name: str, modern: bool) -> None:
+        path = self.empty_bin / name
+        path.write_text(
+            self.PROBE_STUB.format(name=name, modern=0 if modern else 1), encoding="utf-8"
+        )
+        path.chmod(0o755)
+
+    def run_wrapper(self, command: list[str]) -> subprocess.CompletedProcess[str]:
+        env = dict(self.env)
+        env["PATH"] = f"{self.empty_bin}{os.pathsep}/usr/bin{os.pathsep}/bin"
+        env.pop("SUDO_USER", None)
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env,
+            timeout=60,
+        )
+
+    def wrappers(self) -> list[tuple[str, list[str]]]:
+        found = [("bash", ["bash", str(ROOT / "host-setup" / "linux" / "install-global-rules.sh")])]
+        pwsh = shutil.which("pwsh")
+        if pwsh:
+            script = ROOT / "host-setup" / "windows" / "install-global-rules.ps1"
+            found.append(("pwsh", [pwsh, "-NoProfile", "-File", str(script)]))
+        return found
+
+    def test_a_modern_later_candidate_is_preferred_over_an_older_earlier_one(self) -> None:
+        self.stub("python3", modern=False)
+        self.stub("python", modern=True)
+        for label, command in self.wrappers():
+            with self.subTest(wrapper=label):
+                result = self.run_wrapper(command)
+                self.assertIn("ran-python\n", result.stdout + "\n", result.stderr)
+                self.assertNotIn("ran-python3", result.stdout)
+
+    def test_with_no_modern_candidate_the_first_python_3_is_used(self) -> None:
+        self.stub("python3", modern=False)
+        self.stub("python", modern=False)
+        for label, command in self.wrappers():
+            with self.subTest(wrapper=label):
+                result = self.run_wrapper(command)
+                self.assertIn("ran-python3", result.stdout, result.stderr)
+
+
 class TestKitWrapperReport(Case):
     @unittest.skipUnless(sys.platform != "win32", "runs the Linux wrapper")
     def test_a_report_under_a_dry_run_runs_the_installer_for_real(self) -> None:
@@ -291,7 +350,10 @@ class TestWriting(Case):
     def test_a_symlinked_target_stays_a_link_and_its_destination_takes_the_content(self) -> None:
         destination = self.root / "dotfiles-agents.md"
         destination.write_text("", encoding="utf-8")
-        (self.codex / "AGENTS.md").symlink_to(destination)
+        try:
+            (self.codex / "AGENTS.md").symlink_to(destination)
+        except OSError as error:
+            self.skipTest(f"this host refuses to create a symlink for this user ({error})")
         result = self.run_script("--agent", "codex")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.codex / "AGENTS.md").is_symlink())
