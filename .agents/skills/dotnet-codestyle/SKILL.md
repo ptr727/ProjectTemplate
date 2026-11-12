@@ -128,10 +128,11 @@ Analyzer output can still differ between feature bands on one line, such as a di
 
 A repo whose projects still carry per-project analyzer settings or versioned `PackageReference`
 items is drifted. Move the shared property or version up to the root file rather than editing it
-in place. A repo with no `global.json`, or with a `LangVersion` the rule above does not allow, is
-drifted too. So is
-an `sdk` block whose major differs from the .NET TFM's, whose `rollForward` is not
-`latestFeature`, or whose `allowPrerelease` is not `false`.
+in place. A repo with no `global.json`, a `global.json` with no `sdk` block, or a `LangVersion`
+the rule above does not allow is drifted too. So is an `sdk` block whose `version` is not the
+TFM major's `100` band (`10.0.100`). So is one whose `rollForward` is not `latestFeature` or whose
+`allowPrerelease` is not `false`. A higher band, such as the `10.0.3xx` that
+`dotnet new globaljson` writes on a newer host, refuses a host holding only an older band.
 
 ### Build tasks
 
