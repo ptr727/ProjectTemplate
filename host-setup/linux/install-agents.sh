@@ -257,18 +257,15 @@ npm_package() {
     esac
 }
 
-# The global root of the npm on PATH, real-pathed, asked once and empty where npm cannot say.
-NPM_ROOT=""
-NPM_ROOT_READ=false
+# The global root of the npm on PATH, real-pathed, and empty where npm cannot say.
+# Every caller runs this inside $(...), so nothing it set would outlive the call, and it caches nothing.
 npm_root() {
-    if [[ $NPM_ROOT_READ == false ]]; then
-        NPM_ROOT_READ=true
-        if command -v npm >/dev/null; then
-            NPM_ROOT=$(timeout 30 npm root -g 2>/dev/null </dev/null) || NPM_ROOT=""
-            [[ -z $NPM_ROOT ]] || NPM_ROOT=$(readlink -f -- "$NPM_ROOT" 2>/dev/null) || NPM_ROOT=""
-        fi
+    local root=""
+    if command -v npm >/dev/null; then
+        root=$(timeout 30 npm root -g 2>/dev/null </dev/null) || root=""
+        [[ -z $root ]] || root=$(readlink -f -- "$root" 2>/dev/null) || root=""
     fi
-    printf '%s' "$NPM_ROOT"
+    printf '%s' "$root"
 }
 
 # What owns the installed copy, read from where the command resolves to rather than from how it was meant to be installed.
@@ -358,8 +355,7 @@ manager_plan() {
         fi
         if [[ $manager == "npm" ]]; then
             # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
-            dir=$(timeout 30 npm root -g 2>/dev/null </dev/null) || dir=""
-            dir=$(readlink -f -- "$dir" 2>/dev/null) || dir=""
+            dir=$(npm_root)
             if [[ -z $dir || $real != "$dir"/* ]]; then
                 PLAN_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
                 return 0
