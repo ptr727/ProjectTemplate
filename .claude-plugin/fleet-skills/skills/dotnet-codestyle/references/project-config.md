@@ -1,10 +1,11 @@
 # .NET Project Configuration
 
-1. **Target framework and SDK line**: .NET 10.0 (`<TargetFramework>net10.0</TargetFramework>`),
-   with the root `global.json` `sdk` block on the same line (`"version": "10.0.100"`,
-   `"rollForward": "latestFeature"`), per `SKILL.md`'s "Central build and package configuration".
-   `LangVersion` stays unset, so the C# version follows the TFM. The TFM and the `sdk` major move
-   together, in one change.
+1. **Target framework and SDK line**: .NET 10.0 (`<TargetFramework>net10.0</TargetFramework>`).
+   The root `global.json` `sdk` block selects the same line (`"version": "10.0.100"`,
+   `"rollForward": "latestFeature"`, `"allowPrerelease": false`). See `SKILL.md`'s "Central build
+   and package configuration". `LangVersion` stays unset, so the C# version follows the TFM. The
+   TFM and the `sdk` major move together, and only after the hub's `setup-dotnet` steps install
+   the new line.
 2. **AOT compatibility**: `<IsAotCompatible>true</IsAotCompatible>` unconditionally, and
    `<VerifyReferenceAotCompatibility>true</VerifyReferenceAotCompatibility>` only in a
    `<PropertyGroup Condition="'$(PublishAot)' == 'true'">`. That group is placed in the `.csproj` after

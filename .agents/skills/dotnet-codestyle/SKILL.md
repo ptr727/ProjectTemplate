@@ -77,8 +77,10 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   declares every dependency version once as a `PackageVersion` item. As a result, a `.csproj`'s
   `PackageReference` items are versionless. One file to review on a bump, one Dependabot surface,
   no version skew between projects.
-- **`global.json`** is required in every .NET repo. It selects the SDK line with an `sdk` block,
-  beside the `test` runner key an MTP-based test project needs (see Testing conventions below):
+- **`global.json`** is required in every .NET repo. It selects the SDK line with an `sdk` block.
+  The example also carries the `test` runner key, which only a repo with an MTP-based test project
+  adds (see Testing conventions below). A repo still on VSTest leaves the `test` key out, since it
+  switches `dotnet test` to the MTP driver:
 
   ```json
   {
@@ -94,12 +96,22 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   ```
 
   With `latestFeature`, `10.0.100` means the newest installed 10.0.x SDK. It is a floor on the
-  line rather than a pin to one release, so it never goes stale and is not Dependabot-managed. Its
-  major moves only with the TFM (`11.0.100` alongside `net11.0`), the same deliberate bump as
-  `setup-dotnet`'s `dotnet-version`. Without the block, the `dotnet` host picks the newest
-  installed SDK. A host carrying a newer major than CI then runs `dotnet format`, `dotnet build`,
-  and `dotnet test` on a different SDK than CI does. A host with no SDK on the line fails with a clear
-  "compatible SDK not found" error rather than silently drifting.
+  line rather than a pin to one release, so it never goes stale and is not Dependabot-managed.
+  `allowPrerelease` is `false` because it defaults to `true` outside Visual Studio, which would let
+  a 10.0 preview band win. Without the block, the `dotnet` host picks the newest installed SDK. A
+  host carrying a newer major than CI then runs `dotnet format`, `dotnet build`, and `dotnet test`
+  on a different SDK than CI does.
+
+  The major tracks the repo's .NET TFM (`net10.0`), never a `netstandard` target an analyzer or
+  source-generator project carries beside it. It moves only with that TFM (`11.0.100` alongside
+  `net11.0`). The hub's workflows and composite actions install the SDK line through
+  `setup-dotnet`'s `dotnet-version`. A repo calling them therefore cannot move to a new major
+  alone, since CI would then find no compatible SDK. Such a move starts in the hub, as a fleet-wide
+  change.
+
+  A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
+  major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
+  rather than silently drifting. Install the line's SDK beside the newer one.
 
 **`LangVersion` is left unset**, in every project and props file, so the C# version follows the
 TFM (`net10.0` gives C# 14 under any SDK). Never set it to `latest`, `latestMajor`, or `preview`.
@@ -114,7 +126,8 @@ Analyzer output can still differ between feature bands on one line, such as a di
 A repo whose projects still carry per-project analyzer settings or versioned `PackageReference`
 items is drifted. Move the shared property or version up to the root file rather than editing it
 in place. A repo with no `global.json` or with a `LangVersion` set anywhere is drifted too. So is
-an `sdk` block whose major differs from the TFM or whose `rollForward` is not `latestFeature`.
+an `sdk` block whose major differs from the .NET TFM's, whose `rollForward` is not
+`latestFeature`, or whose `allowPrerelease` is not `false`.
 
 ### Build tasks
 
