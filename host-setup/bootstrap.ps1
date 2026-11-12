@@ -615,12 +615,22 @@ function Invoke-SkillsInstall {
 # The kit and the rules each skip an agent that is not installed.
 # The whole action is therefore safe on a host with any of them.
 function Invoke-AgentSetup {
+    $toolsFailed = $false
     if (Test-AgentsUser) {
-        Invoke-Tool -Tool 'install-agents.ps1' -Arguments '-Upgrade'
+        Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Upgrade'
+        if ($LASTEXITCODE -eq 3) {
+            $toolsFailed = $true
+        } elseif ($LASTEXITCODE -ne 0) {
+            die "install-agents.ps1 exited $LASTEXITCODE"
+        }
     }
     Invoke-SkillsInstall
     Invoke-Tool -Tool 'install-safety-kit.ps1'
     Invoke-Tool -Tool 'install-global-rules.ps1'
+    if ($toolsFailed) {
+        info 'Not current: agent tools (an upgrade failed, see above)'
+        die 'The agent tools step failed, and the steps after it still ran'
+    }
 }
 
 # The counterpart of Invoke-AgentSetup that changes nothing in the agent setup, one report per step in the same order.
