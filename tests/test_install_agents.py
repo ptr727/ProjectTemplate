@@ -875,13 +875,26 @@ class TestInstallAgentsWindows(unittest.TestCase):
             "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
             f"'{SCRIPT_PS}', [ref]$null, [ref]$null)\n"
             "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
-            " if ($f.Name -in 'Resolve-FinalPath', 'Test-ProtectedPath') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
+            " if ($f.Name -in 'Resolve-FinalPath', 'Test-ProtectedPath', 'Hide-Home') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
             + body
         )
         return subprocess.run(
             [PWSH, "-NoProfile", "-Command", driver],
             capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
         )  # fmt: skip
+
+    def test_hide_home_shortens_only_paths_inside_the_profile(self) -> None:
+        # $HOME is read-only in PowerShell, so the paths are built from the real profile and a sibling of it.
+        body = (
+            "'inside=' + (Hide-Home -Path (Join-Path $HOME '.bun'))\n"
+            "$sibling = $HOME.TrimEnd('/', '\\') + '2/bin'\n"
+            "'sibling-kept=' + ((Hide-Home -Path $sibling) -eq $sibling)\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inside, sibling = result.stdout.split("\n")[:2]
+        self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
+        self.assertEqual(sibling, "sibling-kept=True")
 
     def test_a_protected_root_matches_only_at_a_path_component(self) -> None:
         root = self.dir / "Program Files"

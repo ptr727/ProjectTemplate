@@ -82,8 +82,10 @@ function note {
 function Hide-Home {
     param([string]$Path)
     if (-not $Path -or -not $HOME) { return $Path }
-    if ($Path.StartsWith($HOME, [StringComparison]::OrdinalIgnoreCase)) {
-        return '%USERPROFILE%' + $Path.Substring($HOME.Length)
+    # The match ends at a path component, so a sibling profile such as the same name with a suffix is shown as it is.
+    $profileRoot = $HOME.TrimEnd('\', '/')
+    if ($Path -ieq $profileRoot -or $Path.StartsWith("$profileRoot\", [StringComparison]::OrdinalIgnoreCase) -or $Path.StartsWith("$profileRoot/", [StringComparison]::OrdinalIgnoreCase)) {
+        return '%USERPROFILE%' + $Path.Substring($profileRoot.Length)
     }
     return $Path
 }
