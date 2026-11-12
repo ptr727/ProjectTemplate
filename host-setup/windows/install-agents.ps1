@@ -11,6 +11,8 @@
 # The npm on PATH owns a tool only where the prefix it reports holds it, rather than where a path merely looks like npm's.
 # The package name is a per-tool record in this file (Get-NpmPackage), because a manager's shim does not always carry it.
 # An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
+# The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
@@ -82,8 +84,10 @@ function note {
 function Hide-Home {
     param([string]$Path)
     if (-not $Path -or -not $HOME) { return $Path }
-    if ($Path.StartsWith($HOME, [StringComparison]::OrdinalIgnoreCase)) {
-        return '%USERPROFILE%' + $Path.Substring($HOME.Length)
+    # The match ends at a path component, so a sibling profile such as the same name with a suffix is shown as it is.
+    $profileRoot = $HOME.TrimEnd('\', '/')
+    if ($Path -ieq $profileRoot -or $Path.StartsWith("$profileRoot\", [StringComparison]::OrdinalIgnoreCase) -or $Path.StartsWith("$profileRoot/", [StringComparison]::OrdinalIgnoreCase)) {
+        return '%USERPROFILE%' + $Path.Substring($profileRoot.Length)
     }
     return $Path
 }
@@ -127,6 +131,8 @@ refuses them here and names the documented route rather than inventing one.
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
+
+It exits 0 on success, 3 where a tool failed or was refused while the others still ran, and 1 where the run itself refused or stopped.
 
 Examples:
   install-agents.ps1                        Report on every tool
@@ -277,25 +283,35 @@ function Get-NpmPackage {
 # Each component is resolved, since a link can sit above the last one, as scoop's current junction does.
 # It is the one link resolver here, so ownership, writability, and the manager read all see the same real path.
 function Resolve-FinalPath {
-    param([string]$Path, [int]$Depth = 0)
-    # A bound on the walk, so a link cycle ends in the path as given rather than in a stack overflow.
-    if ($Depth -gt 64) { return $Path }
+    param([string]$Path)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if (-not $item) { return $Path }
     if ($item.LinkTarget) {
         $target = $item.ResolveLinkTarget($true)
-        if ($target) { return Resolve-FinalPath -Path $target.FullName -Depth ($Depth + 1) }
+        if ($target) { return Resolve-FinalPath -Path $target.FullName }
     }
     $parent = Split-Path -Parent $item.FullName
     if (-not $parent -or $parent -eq $item.FullName) { return $item.FullName }
-    return Join-Path (Resolve-FinalPath -Path $parent -Depth ($Depth + 1)) $item.Name
+    return Join-Path (Resolve-FinalPath -Path $parent) $item.Name
+}
+
+# Whether a path is the root or sits under it, with both sides read with either separator and without a trailing one.
+# The match ends at a path component, so a sibling such as Program FilesPortable is not read as under Program Files.
+# Below leaves out the root itself, for a caller that needs something inside it.
+function Test-PathUnder {
+    param([string]$Path, [string]$Root, [switch]$Below)
+    $where = ($Path -replace '/', '\').TrimEnd('\')
+    $base = ($Root -replace '/', '\').TrimEnd('\')
+    if (-not $base) { return $false }
+    if (-not $Below -and $where -ieq $base) { return $true }
+    return $where.StartsWith("$base\", [StringComparison]::OrdinalIgnoreCase)
 }
 
 # Whether a directory sits under one of the roots a normal user cannot write.
 function Test-ProtectedPath {
     param([string]$Directory, [string[]]$Roots)
     foreach ($root in ($Roots | Where-Object { $_ })) {
-        if (($Directory -replace '/', '\').StartsWith(($root -replace '/', '\'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if (Test-PathUnder -Path $Directory -Root $root) { return $true }
     }
     return $false
 }
@@ -340,14 +356,27 @@ function Test-NpmOwnership {
     $where = ($resolved -replace '/', '\')
     $cut = $where.LastIndexOf('\')
     $directory = if ($cut -gt 0) { $where.Substring(0, $cut).TrimEnd('\') } else { '' }
-    return ($directory -ieq $prefix -or $where.StartsWith("$prefix\node_modules\", [StringComparison]::OrdinalIgnoreCase))
+    return ($directory -ieq $prefix -or (Test-PathUnder -Path $where -Root "$prefix\node_modules" -Below))
 }
 
 # The scoop roots this script knows, the user's and the global one.
 # SCOOP else the profile's scoop, and SCOOP_GLOBAL else the scoop under ProgramData.
 function Get-ScoopRoot {
-    $roots = @([pscustomobject]@{ Root = $(if ($env:SCOOP) { $env:SCOOP } else { Join-Path $HOME 'scoop' }); Global = $false })
-    $global = if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { $null }
+    # Scoop's own config names the roots when the environment does not, as the scoop command itself reads it.
+    $config = $null
+    $configHome = if ($env:XDG_CONFIG_HOME) { $env:XDG_CONFIG_HOME } else { Join-Path $HOME '.config' }
+    $configFile = Join-Path (Join-Path $configHome 'scoop') 'config.json'
+    if (Test-Path -LiteralPath $configFile -PathType Leaf) {
+        try { $config = Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } catch { $config = $null }
+    }
+    $fromConfig = {
+        param([string]$Key)
+        if ($config -and $config.PSObject.Properties[$Key] -and $config.$Key -is [string] -and $config.$Key) { return $config.$Key }
+        return $null
+    }
+    $user = if ($env:SCOOP) { $env:SCOOP } elseif (& $fromConfig 'root_path') { & $fromConfig 'root_path' } else { Join-Path $HOME 'scoop' }
+    $roots = @([pscustomobject]@{ Root = $user; Global = $false })
+    $global = if ($env:SCOOP_GLOBAL) { $env:SCOOP_GLOBAL } elseif (& $fromConfig 'global_path') { & $fromConfig 'global_path' } elseif ($env:ProgramData) { Join-Path $env:ProgramData 'scoop' } else { $null }
     if ($global) { $roots += [pscustomobject]@{ Root = $global; Global = $true } }
     return $roots
 }
@@ -355,11 +384,12 @@ function Get-ScoopRoot {
 # Whether a path sits under the shims or apps directory of a scoop root this script knows.
 function Test-UnderScoop {
     param([string]$Path)
-    $where = $Path -replace '/', '\'
     foreach ($entry in (Get-ScoopRoot)) {
-        $root = ($entry.Root -replace '/', '\').TrimEnd('\')
         foreach ($sub in 'shims', 'apps') {
-            if ($where.StartsWith("$root\$sub\", [StringComparison]::OrdinalIgnoreCase)) { return $true }
+            # Joined as text rather than with Join-Path, which fails for a root on a drive that is not present.
+            # The root's trailing separator is trimmed first, as Get-ScoopApp does, so a root written as D:\Tools\ still matches.
+            $base = ($entry.Root -replace '/', '\').TrimEnd('\')
+            if (Test-PathUnder -Path $Path -Root "$base\$sub" -Below) { return $true }
         }
     }
     return $false
@@ -375,7 +405,7 @@ function Get-ScoopApp {
     $where = $Path -replace '/', '\'
     foreach ($entry in (Get-ScoopRoot)) {
         $apps = (($entry.Root -replace '/', '\').TrimEnd('\')) + '\apps\'
-        if ($where.StartsWith($apps, [StringComparison]::OrdinalIgnoreCase)) {
+        if (Test-PathUnder -Path $where -Root $apps -Below) {
             $name = ($where.Substring($apps.Length) -split '\\')[0]
             if ($name) { return [pscustomobject]@{ App = $name; Global = $entry.Global } }
         }
@@ -392,7 +422,7 @@ function Test-NpmPackageOwnership {
     $directory = Join-Path (Join-Path $prefix 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
     if (-not (Test-Path -LiteralPath (Join-Path $directory 'package.json') -PathType Leaf)) { return $false }
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
-    if ($resolved.StartsWith((($directory -replace '/', '\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+    if (Test-PathUnder -Path $resolved -Root $directory -Below) { return $true }
     # A shim is a script beside the package rather than a link into it, so its text must name the package's directory.
     $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
     if (-not $text) { return $false }
@@ -404,14 +434,25 @@ function Test-NpmPackageOwnership {
 # On Windows bun copies a shim into its bin directory rather than linking into the package, so the shim alone names no package.
 # There the shim must sit in bun's bin directory and the recorded package must be installed globally, as the npm branch checks package.json.
 # The .bunx file beside the shim records the target, but its format is undocumented, so it is not read.
+# Bun's bin directory, where its copied shims sit, and its global package directory, each resolved and without a trailing separator.
+# BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR are honored, and the install.globalDir in bunfig.toml is not read.
+function Get-BunDirectory {
+    $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
+    $globalDir = if ($env:BUN_INSTALL_GLOBAL_DIR) { $env:BUN_INSTALL_GLOBAL_DIR } else { Join-Path (Join-Path $bun 'install') 'global' }
+    return [pscustomobject]@{
+        Bin    = ((Resolve-FinalPath -Path (Join-Path $bun 'bin')) -replace '/', '\').TrimEnd('\')
+        Global = ((Resolve-FinalPath -Path $globalDir) -replace '/', '\').TrimEnd('\')
+    }
+}
+
 function Test-BunPackageOwnership {
     param([string]$Path, [string]$Package)
-    $bun = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $HOME '.bun' }
-    $directory = Join-Path (Join-Path (Join-Path (Join-Path $bun 'install') 'global') 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
+    $bun = Get-BunDirectory
+    $directory = Join-Path (Join-Path $bun.Global 'node_modules') ($Package -replace '/', '\')
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     $inside = (Resolve-FinalPath -Path $directory) -replace '/', '\'
-    if ($resolved.StartsWith($inside.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return $true }
-    $bin = ((Resolve-FinalPath -Path (Join-Path $bun 'bin')) -replace '/', '\').TrimEnd('\')
+    if (Test-PathUnder -Path $resolved -Root $inside -Below) { return $true }
+    $bin = $bun.Bin
     $cut = $resolved.LastIndexOf('\')
     $shimDirectory = if ($cut -gt 0) { $resolved.Substring(0, $cut) } else { '' }
     return ($shimDirectory -ieq $bin -and (Test-Path -LiteralPath (Join-Path $directory 'package.json')))
@@ -494,6 +535,13 @@ function Get-ToolManager {
         if ($candidate -like '*\WinGet\Packages\*' -or $candidate -like '*\Microsoft\WinGet\Links\*') { return 'winget' }
         if ((Test-UnderScoop -Path $candidate) -or $candidate -like '*\scoop\*') { return 'scoop' }
         if ($candidate -like '*\chocolatey\*') { return 'choco' }
+        # On Windows bun's shim is a copy in its bin directory, so bun is recognized by that directory and its global one.
+        # A relocated bun carries no .bun segment, so BUN_INSTALL and BUN_INSTALL_GLOBAL_DIR name them.
+        $bunDirectory = Get-BunDirectory
+        $where = $candidate -replace '/', '\'
+        foreach ($bunRoot in @($bunDirectory.Bin, $bunDirectory.Global)) {
+            if (Test-PathUnder -Path $where -Root $bunRoot -Below) { return 'bun' }
+        }
         # A bun global package also sits under a node_modules, so bun is read first, as on Linux.
         if ($candidate -like '*\.bun\*') { return 'bun' }
         if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
@@ -642,16 +690,19 @@ function Show-Report {
             if ($version) { $installed = $version }
             $manager = Get-ToolManager $path
             $status = 'present'
+            $upgrades = $true
             if ($manager -ne 'self') {
                 $plan = Get-ManagerPlan -Tool $tool -Path $path -Manager $manager
                 if ($plan.Command) {
                     note $tool "installed through $manager, -Upgrade runs: $($plan.Command) $($plan.Arguments -join ' ')"
                 } else {
                     note $tool "installed through $manager, -Upgrade does not run it: $($plan.Why)"
+                    $upgrades = $false
                 }
-            } elseif ($tool -eq 'herdr') {
-                Add-HerdrNote
             }
+            # The post step runs after the self-updater and after a manager upgrade alike, so the notes about it do too.
+            # A manager that does not run leaves the post step unrun, so the notes would promise what -Upgrade does not do.
+            if ($tool -eq 'herdr' -and $upgrades) { Add-HerdrNote }
             $restart = Get-RestartPending $tool
         }
         $shown = if ($path) { Hide-Home $path } else { $null }
@@ -694,6 +745,27 @@ function Show-Report {
 
 # --- Apply ---
 
+function Add-VersionChange {
+    param([string]$ToolName, [string]$Installed)
+    $path = Get-ToolPath $ToolName
+    $now = if ($path) { Get-ToolVersion $path } else { '' }
+    if ($now -eq $Installed) { return }
+    $before = if ($Installed) { $Installed } else { '-' }
+    $after = if ($now) { $now } else { '-' }
+    $script:CHANGED.Add("$ToolName $before -> $after")
+}
+
+function Get-CswapLauncherHolder {
+    param([string]$Path)
+    $directory = Split-Path -Parent $Path
+    $extension = [IO.Path]::GetExtension($Path)
+    $launchers = @('cswap', 'claude-swap') | ForEach-Object { [IO.Path]::GetFullPath((Join-Path $directory "$_$extension")) }
+    return @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $running = $_.Path
+            $running -and ($launchers | Where-Object { [string]::Equals($_, [IO.Path]::GetFullPath($running), [StringComparison]::OrdinalIgnoreCase) })
+        } | ForEach-Object { $_.Id })
+}
+
 function Invoke-ToolUpgrade {
     param([string]$ToolName)
     $tool = Get-Tool $ToolName
@@ -718,31 +790,36 @@ function Invoke-ToolUpgrade {
         return
     }
 
+    if ($ToolName -eq 'cswap') {
+        $holders = @(Get-CswapLauncherHolder $path)
+        if ($holders.Count -gt 0) {
+            log "cswap: at $shownVersion, and a running cswap (process $($holders -join ', ')) holds its launcher, which uv cannot replace while it runs, close it and run this again to update it"
+            return
+        }
+    }
+
     log "${ToolName}: at $shownVersion, running its updater"
     if ((& $tool.Upgrade) -ne 0) {
         warn "${ToolName}: its updater failed"
         $script:FAILED.Add($ToolName)
+        Add-VersionChange -ToolName $ToolName -Installed $installed
         return
     }
-    # Resolved again, since an updater may put the new binary somewhere that now comes first on PATH.
-    $path = Get-ToolPath $ToolName
-    $now = if ($path) { Get-ToolVersion $path } else { '' }
-    if ($now -ne $installed) {
-        $before = if ($installed) { $installed } else { '-' }
-        $after = if ($now) { $now } else { '-' }
-        $script:CHANGED.Add("$ToolName $before -> $after")
-    }
+    Add-VersionChange -ToolName $ToolName -Installed $installed
 
-    # Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
-    if ($ToolName -eq 'herdr') {
-        if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
-        if (-not $script:DRY_RUN) {
-            $pending = Get-HerdrRestartPending
-            if ($pending -eq $true) {
-                log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
-            } elseif ($null -eq $pending) {
-                log 'herdr: could not read whether a running server needs a restart'
-            }
+    if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
+}
+
+# Run whether or not the version moved, since an integration can be outdated against a herdr that was already current.
+# One path for the self-updater and for a manager, so both reinstall the integrations and give the same restart guidance.
+function Invoke-HerdrAfterUpgrade {
+    if ((Invoke-HerdrPost) -ne 0) { $script:FAILED.Add('herdr integrations') }
+    if (-not $script:DRY_RUN) {
+        $pending = Get-HerdrRestartPending
+        if ($pending -eq $true) {
+            log 'herdr: a running server is on the previous binary and is left running, restart it when no pane needs it'
+        } elseif ($null -eq $pending) {
+            log 'herdr: could not read whether a running server needs a restart'
         }
     }
 }
@@ -761,15 +838,11 @@ function Invoke-ManagerUpgrade {
     if ((Invoke-Step -Command $plan.Command -Arguments $plan.Arguments) -ne 0) {
         warn "${ToolName}: $Manager failed to upgrade it"
         $script:FAILED.Add($ToolName)
+        Add-VersionChange -ToolName $ToolName -Installed $Installed
         return
     }
-    $newPath = Get-ToolPath $ToolName
-    $now = if ($newPath) { Get-ToolVersion $newPath } else { '' }
-    if ($now -ne $Installed) {
-        $before = if ($Installed) { $Installed } else { '-' }
-        $after = if ($now) { $now } else { '-' }
-        $script:CHANGED.Add("$ToolName $before -> $after")
-    }
+    Add-VersionChange -ToolName $ToolName -Installed $Installed
+    if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
 
 function Invoke-ToolInstall {
@@ -822,7 +895,7 @@ function Invoke-Apply {
     if ($script:FAILED.Count -gt 0) {
         log ''
         warn "Failed: $($script:FAILED -join ' ')"
-        return 1
+        return 3
     }
     return 0
 }

@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "host-setup" / "linux" / "install-agents.sh"
 
 # The manager calls that only read, which the tests do not count as a change.
-READS = {"npm root -g", "npm prefix -g", "mise ls --json"}
+READS = {"npm root -g", "npm prefix -g", "mise ls --json", "mise which opencode"}
 
 AWKWARD = 'a "quoted" back\\slash\ttab\nnewline\rreturn \x01\x1f é end'
 
@@ -44,6 +44,7 @@ case "$*" in
 "root -g") cat "$STUB_DIR/npm_root" 2>/dev/null || true ;;
 "prefix -g") cat "$STUB_DIR/npm_prefix" 2>/dev/null || true ;;
 "ls --json") cat "$STUB_DIR/mise_ls.json" 2>/dev/null || true ;;
+"which opencode") cat "$STUB_DIR/mise_which" 2>/dev/null || true ;;
 esac
 exit 0
 """
@@ -62,6 +63,11 @@ update)
 esac
 exit 0
 """
+
+
+RELOCATING_FAILING_STUB = RELOCATING_STUB.replace(
+    "    ;;\nesac\nexit 0\n", "    exit 1\n    ;;\nesac\nexit 0\n"
+)
 
 
 @unittest.skipUnless(sys.platform == "linux", "runs the Linux updater")
@@ -93,7 +99,9 @@ class TestInstallAgents(unittest.TestCase):
             (self.bin / name).symlink_to(path)
         return path
 
-    def run_script(self, *arguments: str, pane: bool = False) -> subprocess.CompletedProcess[str]:
+    def run_script(
+        self, *arguments: str, pane: bool = False, extra_env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
         env = {
             "PATH": f"{self.dir / 'front'}:{self.bin}:/usr/bin:/bin",
             "HOME": str(self.home),
@@ -103,6 +111,7 @@ class TestInstallAgents(unittest.TestCase):
         }
         if pane:
             env["HERDR_PANE_ID"] = "test-pane"
+        env.update(extra_env or {})
         return subprocess.run(
             [str(SCRIPT), *arguments],
             capture_output=True,
@@ -141,6 +150,15 @@ class TestInstallAgents(unittest.TestCase):
         result = self.run_script("--upgrade", "--yes", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
+
+    def test_a_failed_upgrade_that_moved_the_version_is_still_listed_as_changed(self) -> None:
+        stub = self.bin / "claude"
+        stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("claude: its updater failed", result.stderr)
+        self.assertIn("Changed:\n  claude 2.1.0 -> 2.2.0", result.stdout)
 
     def codex_in_npm(self) -> Path:
         node_modules = self.dir / "lib" / "node_modules"
@@ -217,7 +235,7 @@ class TestInstallAgents(unittest.TestCase):
         failing.chmod(0o755)
         self.stub("claude", "2.1.0 (Claude Code)")
         result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 3)
         self.assertIn("codex: npm failed to upgrade it", result.stderr)
         self.assertIn("Failed: codex", result.stderr)
         self.assertEqual(self.called(), ["claude update", "npm install -g @openai/codex@latest"])
@@ -343,6 +361,87 @@ class TestInstallAgents(unittest.TestCase):
             "it sits inside mise's Node, and the npm on PATH does not own it", result.stdout
         )
 
+    def test_bun_honors_its_global_dir_variable_and_not_bunfig(self) -> None:
+        custom = self.dir / "custom-global"
+        self.stub("opencode", "1.0.0", where=custom / "node_modules" / "opencode-ai" / "bin")
+        self.stub("bun", "1.1.0")
+        (self.home / "bunfig.toml").write_text(
+            '[install]\nglobalDir = "/elsewhere"\n', encoding="utf-8"
+        )
+        result = self.run_script(
+            "--upgrade", "--yes", "opencode", extra_env={"BUN_INSTALL_GLOBAL_DIR": str(custom)}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["bun install -g opencode-ai@latest"])
+
+    def mise_shim(self, resolves: bool) -> None:
+        """A mise shim, a symlink to the mise executable that Homebrew keeps in its Cellar."""
+        cellar = self.dir / "linuxbrew" / "Cellar" / "mise" / "2024.1.1" / "bin"
+        mise = self.stub("mise", "mise 2024.1.1", where=cellar)
+        install = self.dir / "mise" / "installs" / "npm-opencode-ai" / "1.0.0"
+        real = install / "lib" / "node_modules" / "opencode-ai" / "bin" / "opencode"
+        real.parent.mkdir(parents=True)
+        real.write_text("#!/bin/bash\necho 1.0.0\n", encoding="utf-8")
+        real.chmod(0o755)
+        (self.bin / "opencode").symlink_to(mise)
+        (self.dir / "mise_ls.json").write_text(
+            json.dumps({"npm:opencode-ai": [{"install_path": str(install)}]}), encoding="utf-8"
+        )
+        if resolves:
+            (self.dir / "mise_which").write_text(str(real), encoding="utf-8")
+        self.stub("brew", "Homebrew 4.0.0")
+
+    def test_a_mise_shim_is_resolved_through_mise_which_and_never_upgrades_mise_itself(
+        self,
+    ) -> None:
+        self.mise_shim(resolves=True)
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["mise upgrade npm:opencode-ai"])
+        self.assertNotIn("brew", " ".join(self.called()))
+
+    def test_a_mise_shim_mise_cannot_resolve_is_reported_and_nothing_runs(self) -> None:
+        self.mise_shim(resolves=False)
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn("is a mise shim and mise which could not resolve it", result.stdout)
+
+    def test_the_report_names_outdated_integrations_for_a_manager_owned_herdr(self) -> None:
+        self.stub(
+            "herdr",
+            "herdr 0.9.4",
+            where=self.dir / "linuxbrew" / "Cellar" / "herdr" / "0.9.4" / "bin",
+        )
+        self.stub("brew", "Homebrew 4.0.0")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        notes = self.report()["herdr"]["notes"]
+        self.assertIn("integrations outdated: claude, --upgrade reinstalls them", notes)
+        self.assertTrue(any("--upgrade runs: brew upgrade herdr" in n for n in notes))
+
+    def test_the_report_makes_no_post_step_promise_for_a_herdr_the_manager_will_not_run(
+        self,
+    ) -> None:
+        self.stub("herdr", "herdr 0.9.4", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
+        self.stub("npm", "npm 10.0.0")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        notes = " ".join(self.report()["herdr"]["notes"])
+        self.assertNotIn("integrations outdated", notes)
+
+    def test_herdr_upgraded_by_a_manager_gets_the_same_post_step(self) -> None:
+        self.stub(
+            "herdr",
+            "herdr 0.9.4",
+            where=self.dir / "linuxbrew" / "Cellar" / "herdr" / "0.9.4" / "bin",
+        )
+        self.stub("brew", "Homebrew 4.0.0")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        result = self.run_script("--upgrade", "--yes", "herdr")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.called()
+        self.assertEqual(calls[0], "brew upgrade herdr")
+        self.assertIn("herdr integration install claude", calls)
+
     def mise_layout(self, listed: bool = True) -> Path:
         """An npm-backend tool laid out as mise does, a node_modules inside its install directory, and mise's listing of it."""
         install = self.dir / "mise" / "installs" / "npm-opencode-ai" / "1.0.0"
@@ -370,6 +469,19 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("mise upgrade", " ".join(self.called()))
         self.assertIn("upgrade it with mise by hand", result.stdout)
+
+    def test_a_relocated_mise_tool_is_read_from_mises_listing_not_its_path(self) -> None:
+        # MISE_DATA_DIR moved: no /mise/installs/ segment, and a plain binary that would otherwise read as self.
+        install = self.dir / "agent-tools" / "installs" / "opencode" / "1.0.0"
+        self.stub("opencode", "1.0.0", where=install / "bin")
+        listing = {"opencode": [{"install_path": str(install)}]}
+        (self.dir / "mise_ls.json").write_text(json.dumps(listing), encoding="utf-8")
+        self.stub("mise", "mise 2024.1.1")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["mise upgrade opencode"])
+        self.assertEqual(self.report()["opencode"]["manager"], "mise")
 
     def test_a_tool_with_no_recorded_package_name_is_reported_not_guessed(self) -> None:
         self.stub("herdr", "herdr 0.9.0", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
@@ -408,7 +520,7 @@ class TestInstallAgents(unittest.TestCase):
         nix = self.plan("codex", "/nix/store/x/bin/codex", "nix")
         self.assertTrue(nix.startswith("|Nix is declarative, so update it where it is declared"))
 
-    def classify(self, path: str, npm_root: str) -> str:
+    def classify(self, path: str, npm_root: str, env: dict[str, str] | None = None) -> str:
         """Runs the script's own tool_manager, with npm's global root fixed and main cut off so it can be sourced."""
         body = SCRIPT.read_text(encoding="utf-8").rsplit('\nmain "$@"', 1)[0]
         harness = self.dir / "classify.sh"
@@ -419,10 +531,16 @@ class TestInstallAgents(unittest.TestCase):
         result = subprocess.run(
             ["bash", str(harness)],
             capture_output=True, text=True, encoding="utf-8", check=False, timeout=30,
-            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)},
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home), **(env or {})},
         )  # fmt: skip
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
+
+    def test_a_bun_moved_by_bun_install_alone_is_buns_and_not_npms(self) -> None:
+        bun_install = f"{self.dir}/bunhome"
+        path = f"{bun_install}/install/global/node_modules/opencode-ai/bin/opencode"
+        manager = self.classify(path, "/usr/lib/node_modules", {"BUN_INSTALL": bun_install})
+        self.assertEqual(manager, "bun")
 
     def test_an_npm_root_under_a_bun_directory_is_npms_and_not_buns(self) -> None:
         root = "/opt/tools/.bun/npm/lib/node_modules"
@@ -683,6 +801,9 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("-Upgrade runs: npm install -g @openai/codex@latest", result.stdout)
         self.assertNotIn("which upgrades it", result.stdout)
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "root can write the unwritable directory"
+    )
     def test_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
         prefix = self.dir / "npmprefix"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
@@ -713,7 +834,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         failing.chmod(0o755)
         self.stub("claude", "2.1.0 (Claude Code)")
         result = self.run_script("-Upgrade", "-Yes", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 3)
         self.assertIn("npm failed to upgrade it", result.stderr)
         self.assertIn("claude update", self.recorded())
 
@@ -779,6 +900,106 @@ class TestInstallAgentsWindows(unittest.TestCase):
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=fork)
         self.assertNotIn("bun install", " ".join(self.recorded()))
         self.assertIn("not under bun's global package opencode-ai", result.stdout)
+
+    def test_bun_honors_its_global_dir_variable_and_not_bunfig(self) -> None:
+        custom = self.dir / "custom-global"
+        bun_bin = custom / "node_modules" / "opencode-ai" / "bin"
+        self.stub("opencode", "1.0.0", bun_bin)
+        self.stub("bun", "1.1.0")
+        (self.home / "bunfig.toml").write_text(
+            '[install]\nglobalDir = "/elsewhere"\n', encoding="utf-8"
+        )
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "opencode",
+            extra_path=bun_bin,
+            extra_env={"BUN_INSTALL_GLOBAL_DIR": str(custom)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bun install -g opencode-ai@latest", self.recorded())
+
+    def test_a_relocated_bun_is_recognized_by_its_copied_shim_in_its_bin_directory(self) -> None:
+        # The real Windows layout with both bun variables moved: a copied shim in BUN_INSTALL\bin, no .bun segment.
+        bun_install = self.dir / "tools" / "bunhome"
+        global_dir = self.dir / "tools" / "bunglobal"
+        self.stub("opencode", "1.0.0", bun_install / "bin")
+        package = global_dir / "node_modules" / "opencode-ai"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text('{"name": "opencode-ai"}', encoding="utf-8")
+        self.stub("bun", "1.1.0")
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "opencode",
+            extra_path=bun_install / "bin",
+            extra_env={"BUN_INSTALL": str(bun_install), "BUN_INSTALL_GLOBAL_DIR": str(global_dir)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bun install -g opencode-ai@latest", self.recorded())
+        self.assertNotIn("opencode upgrade", " ".join(self.recorded()))
+
+    def test_the_report_names_outdated_integrations_for_a_scoop_owned_herdr(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("herdr", "herdr 0.9.4", shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        result = self.run_script(
+            "-Report", "-Json", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        notes = json.loads(result.stdout)["tools"][0]["notes"]
+        self.assertIn("integrations outdated: claude, -Upgrade reinstalls them", notes)
+
+    def test_herdr_upgraded_by_scoop_gets_the_same_post_step(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("herdr", "herdr 0.9.4", shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
+        (self.dir / "outdated").write_text("claude: outdated (v9) (/x/hook.sh)\n", encoding="utf-8")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.recorded()
+        self.assertIn("scoop update herdr", calls)
+        self.assertIn("herdr integration install claude", calls)
+
+    def test_a_scoop_root_written_with_a_trailing_separator_still_matches(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("herdr", "herdr 0.9.4", shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": f"{root}/"}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update herdr", self.recorded())
+
+    def test_scoops_own_config_names_the_root_when_the_environment_does_not(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        config = self.home / ".config" / "scoop"
+        config.mkdir(parents=True)
+        (config / "config.json").write_text(json.dumps({"root_path": str(root)}), encoding="utf-8")
+        report = self.run_script("-Report", "-Json", "opencode", extra_path=shims)
+        self.assertEqual(json.loads(report.stdout)["tools"][0]["manager"], "scoop")
+        self.scoop_which(f"{root}/apps/opencode/current/opencode.exe")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
+
+    def test_an_unreadable_scoop_config_falls_back_to_the_defaults(self) -> None:
+        config = self.home / ".config" / "scoop"
+        config.mkdir(parents=True)
+        (config / "config.json").write_text("{ not json", encoding="utf-8")
+        shims = self.home / "scoop" / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        self.scoop_which("~\\scoop\\apps\\opencode\\current\\opencode.exe")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
 
     def test_a_global_scoop_app_is_reported_with_its_elevated_command(self) -> None:
         glob = self.dir / "GlobalScoop"
@@ -868,47 +1089,6 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertNotIn("npm install", " ".join(self.recorded()))
         self.assertIn("not under the prefix of the npm on PATH", result.stdout)
 
-    def run_functions(self, body: str) -> subprocess.CompletedProcess[str]:
-        """Runs the script's own helper functions, lifted by AST so main is not run."""
-        assert PWSH is not None
-        driver = (
-            "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
-            f"'{SCRIPT_PS}', [ref]$null, [ref]$null)\n"
-            "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
-            " if ($f.Name -in 'Resolve-FinalPath', 'Test-ProtectedPath') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
-            + body
-        )
-        return subprocess.run(
-            [PWSH, "-NoProfile", "-Command", driver],
-            capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
-        )  # fmt: skip
-
-    def test_a_link_into_a_user_writable_directory_is_resolved_before_the_protected_rule(
-        self,
-    ) -> None:
-        """A symlink stands in for the junction nvm-windows makes, since pwsh on Linux cannot create a junction.
-
-        The Program Files rule itself is Windows-only, so this covers the resolution and the rule apart.
-        """
-        protected = self.dir / "Program Files"
-        protected.mkdir()
-        appdata = self.dir / "appdata" / "nvm"
-        appdata.mkdir(parents=True)
-        (protected / "nodejs").symlink_to(appdata, target_is_directory=True)
-        body = (
-            f"$link = '{protected / 'nodejs'}'\n"
-            "$real = Resolve-FinalPath -Path $link\n"
-            f"'resolved=' + ($real -eq '{appdata}')\n"
-            f"'link-protected=' + (Test-ProtectedPath -Directory $link -Roots @('{protected}'))\n"
-            f"'target-protected=' + (Test-ProtectedPath -Directory $real -Roots @('{protected}'))\n"
-        )
-        result = self.run_functions(body)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout.split(),
-            ["resolved=True", "link-protected=True", "target-protected=False"],
-        )
-
     def test_winget_is_left_to_upgrade_host(self) -> None:
         links = self.dir / "Microsoft" / "WinGet" / "Links"
         self.stub("opencode", "1.0.0", links)
@@ -951,7 +1131,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
 
     def test_install_refuses_codex_and_opencode_without_a_windows_installer(self) -> None:
         result = self.run_script("-Install", "-Yes", "codex", "opencode")
-        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.returncode, 3)
         self.assertIn("codex documents no Windows installer", result.stderr)
         self.assertIn("opencode documents no Windows installer", result.stderr)
         self.assertIn("Failed: codex opencode", result.stderr)
@@ -1014,6 +1194,43 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
 
+    def test_a_failed_upgrade_that_moved_the_version_is_still_listed_as_changed(self) -> None:
+        stub = self.bin / "claude"
+        stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=self.dir / "front")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("claude: its updater failed", result.stderr)
+        self.assertIn("Changed:\n  claude 2.1.0 -> 2.2.0", result.stdout)
+
+    def hold_cswap_launcher(self) -> int:
+        """Runs a copy of bash as the cswap launcher and returns its pid, with uv stubbed beside it."""
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("needs bash to stand in for a running cswap")
+        launcher = self.bin / "cswap"
+        shutil.copy(os.path.realpath(bash), launcher)
+        launcher.chmod(0o755)
+        self.stub("uv", "uv 0.5.0")
+        running = subprocess.Popen([str(launcher), "-c", "sleep 120; :"])
+        self.addCleanup(running.wait, 10)
+        self.addCleanup(running.kill)
+        return running.pid
+
+    def test_cswap_is_skipped_while_a_running_cswap_holds_its_launcher(self) -> None:
+        pid = self.hold_cswap_launcher()
+        result = self.run_script("-Upgrade", "-Yes", "cswap")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"a running cswap (process {pid}) holds its launcher", result.stdout)
+        self.assertNotIn("uv tool upgrade claude-swap", self.recorded())
+
+    def test_a_dry_run_also_skips_cswap_while_a_running_cswap_holds_its_launcher(self) -> None:
+        pid = self.hold_cswap_launcher()
+        result = self.run_script("-Upgrade", "-Yes", "-DryRun", "cswap")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"a running cswap (process {pid}) holds its launcher", result.stdout)
+        self.assertNotIn("uv tool upgrade claude-swap", result.stdout)
+
     def test_restart_pending_is_null_when_unreadable(self) -> None:
         self.stub("herdr", "herdr 0.9.4")
         for unreadable in (
@@ -1038,6 +1255,153 @@ class TestInstallAgentsWindows(unittest.TestCase):
         helped = self.run_script("-Help")
         self.assertEqual(helped.returncode, 0, helped.stderr)
         self.assertTrue(helped.stdout.startswith("Usage: install-agents.ps1"))
+
+
+@unittest.skipUnless(PWSH, "needs pwsh")
+class TestInstallAgentsWindowsHelpers(unittest.TestCase):
+    """`install-agents.ps1`'s pure path helpers, lifted by AST, so they also run on a native Windows runner.
+
+    Unlike TestInstallAgentsWindows, they need no stub tool and no unelevated shell.
+    So a hosted Windows runner exercises their separator, case, and root-boundary handling on real paths.
+    """
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def run_functions(
+        self, body: str, script: Path = SCRIPT_PS
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs a script's own helper functions, lifted by AST so main is not run."""
+        assert PWSH is not None
+        driver = (
+            "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
+            f"'{script}', [ref]$null, [ref]$null)\n"
+            "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
+            " if ($f.Name -in 'Resolve-FinalPath', 'Test-PathUnder', 'Test-ProtectedPath', 'Hide-Home', 'Get-CswapLauncherHolder') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
+            + body
+        )
+        return subprocess.run(
+            [PWSH, "-NoProfile", "-Command", driver],
+            capture_output=True, text=True, encoding="utf-8", check=False, timeout=60,
+        )  # fmt: skip
+
+    def test_hide_home_shortens_only_paths_inside_the_profile(self) -> None:
+        # $HOME is read-only in PowerShell, so the paths are built from the real profile and a sibling of it.
+        body = (
+            "'inside=' + (Hide-Home -Path (Join-Path $HOME '.bun'))\n"
+            "$sibling = $HOME.TrimEnd('/', '\\') + '2/bin'\n"
+            "'sibling-kept=' + ((Hide-Home -Path $sibling) -eq $sibling)\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inside, sibling = result.stdout.split("\n")[:2]
+        self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
+        self.assertEqual(sibling, "sibling-kept=True")
+
+    def test_a_cswap_launcher_holder_is_either_launcher_in_any_case_and_nothing_else(self) -> None:
+        body = (
+            f"$dir = '{self.dir}'\n"
+            "function Get-Process {\n"
+            "  [pscustomobject]@{ Id = 41; Path = (Join-Path $dir 'cswap.exe') }\n"
+            "  [pscustomobject]@{ Id = 42; Path = (Join-Path $dir.ToUpperInvariant() 'CLAUDE-SWAP.EXE') }\n"
+            "  [pscustomobject]@{ Id = 43; Path = (Join-Path $dir 'cswap-other.exe') }\n"
+            "  [pscustomobject]@{ Id = 44; Path = $null }\n"
+            "}\n"
+            "(Get-CswapLauncherHolder (Join-Path $dir 'cswap.exe')) -join ','\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "41,42", result.stderr)
+
+    def test_install_tools_hides_home_the_same_way_and_the_two_copies_are_identical(self) -> None:
+        tools = ROOT / "host-setup" / "windows" / "install-tools.ps1"
+
+        def function_text(path: Path) -> str:
+            text = path.read_text(encoding="utf-8")
+            start = text.index("function Hide-Home {")
+            return text[start : text.index("\n}\n", start) + 3]
+
+        self.assertEqual(function_text(tools), function_text(SCRIPT_PS))
+        body = (
+            "'inside=' + (Hide-Home -Path (Join-Path $HOME '.bun'))\n"
+            "$sibling = $HOME.TrimEnd('/', '\\') + '2/bin'\n"
+            "'sibling-kept=' + ((Hide-Home -Path $sibling) -eq $sibling)\n"
+        )
+        result = self.run_functions(body, script=tools)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inside, sibling = result.stdout.split("\n")[:2]
+        self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
+        self.assertEqual(sibling, "sibling-kept=True")
+
+    def test_path_under_reads_the_root_and_its_children_but_not_a_sibling(self) -> None:
+        root = self.dir / "Program Files"
+        body = (
+            f"'equal=' + (Test-PathUnder -Path '{root}' -Root '{root}')\n"
+            f"'trailing=' + (Test-PathUnder -Path '{root}/' -Root '{root}\\')\n"
+            f"'child=' + (Test-PathUnder -Path '{root / 'nodejs'}' -Root '{root}')\n"
+            f"'case=' + (Test-PathUnder -Path '{str(root).upper()}/NODEJS' -Root '{root}')\n"
+            f"'sibling=' + (Test-PathUnder -Path '{self.dir / 'Program FilesPortable'}' -Root '{root}')\n"
+            f"'below-root=' + (Test-PathUnder -Path '{root}' -Root '{root}' -Below)\n"
+            f"'below-child=' + (Test-PathUnder -Path '{root / 'nodejs'}' -Root '{root}' -Below)\n"
+            "'empty-root=' + (Test-PathUnder -Path 'x' -Root '')\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split(),
+            [
+                "equal=True",
+                "trailing=True",
+                "child=True",
+                "case=True",
+                "sibling=False",
+                "below-root=False",
+                "below-child=True",
+                "empty-root=False",
+            ],
+        )
+
+    def test_a_protected_root_matches_only_at_a_path_component(self) -> None:
+        root = self.dir / "Program Files"
+        body = (
+            f"'root=' + (Test-ProtectedPath -Directory '{root}' -Roots @('{root}'))\n"
+            f"'child=' + (Test-ProtectedPath -Directory '{root / 'nodejs'}' -Roots @('{root}'))\n"
+            f"'sibling=' + (Test-ProtectedPath -Directory '{self.dir / 'Program FilesPortable' / 'npm'}' -Roots @('{root}'))\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["root=True", "child=True", "sibling=False"])
+
+    def test_a_link_into_a_user_writable_directory_is_resolved_before_the_protected_rule(
+        self,
+    ) -> None:
+        """A symlink stands in for the junction nvm-windows makes, since pwsh on Linux cannot create a junction.
+
+        The Program Files rule itself is Windows-only, so this covers the resolution and the rule apart.
+        """
+        protected = self.dir / "Program Files"
+        protected.mkdir()
+        appdata = self.dir / "appdata" / "nvm"
+        appdata.mkdir(parents=True)
+        try:
+            (protected / "nodejs").symlink_to(appdata, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"this host cannot create a directory symlink: {error}")
+        body = (
+            f"$link = '{protected / 'nodejs'}'\n"
+            "$real = Resolve-FinalPath -Path $link\n"
+            # Windows may spell the resolved target differently from the temp path Python made, such as in 8.3 form.
+            # So the test asks only that it lands in the user-writable directory the link points at.
+            "'resolved=' + (($real -replace '/', '\\').TrimEnd('\\') -like '*\\appdata\\nvm')\n"
+            f"'link-protected=' + (Test-ProtectedPath -Directory $link -Roots @('{protected}'))\n"
+            f"'target-protected=' + (Test-ProtectedPath -Directory $real -Roots @('{protected}'))\n"
+        )
+        result = self.run_functions(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.split(),
+            ["resolved=True", "link-protected=True", "target-protected=False"],
+        )
 
 
 if __name__ == "__main__":
