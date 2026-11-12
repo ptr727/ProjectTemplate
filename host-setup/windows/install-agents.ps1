@@ -3,9 +3,13 @@
 # For the same reason it drives each tool's updater rather than replacing it.
 # An upgrade touches only a tool already present, so a host where nobody installed codex never gets codex from a scheduled run.
 #
-# A tool installed through a package manager (winget, scoop, choco, npm, bun) is reported and left to that manager.
-# This is because running the tool's own updater over it would fight the manager for the same files.
+# A tool installed through a package manager is never given its own updater, which would fight the manager for the same files.
+# An upgrade runs that manager's own upgrade for that one package instead: npm, bun, and scoop.
 # The winget packages are already upgraded by upgrade-host.ps1, so winget is not repeated here.
+# A choco package needs an elevated shell and this script never elevates, so it is reported with its command and nothing is run.
+# The same holds for an npm directory under Program Files that a normal user cannot write.
+# The package name is a per-tool record in this file (Get-NpmPackage), because a manager's shim does not always carry it.
+# The scoop and choco names are read from where the manager put the files.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
@@ -105,7 +109,10 @@ With no tool named, -Report and -Upgrade select every managed tool, while -Insta
 none, so an install always names what it installs, or says -All.
 
 A tool reads as "self" when no package manager owns it, so this script runs its update, and as
-the name of a package manager when one owns it, which -Upgrade leaves to that manager. herdr's
+the name of a package manager when one owns it. -Upgrade then runs that manager's upgrade for
+that one package: npm or bun install the latest tag, and scoop updates the app. winget is
+upgraded by upgrade-host.ps1. choco needs an elevated shell and an npm directory under Program
+Files needs one too, so each is reported with its command and nothing is run. herdr's
 agent integrations are reinstalled after an upgrade wherever herdr reports one outdated, and a
 herdr server still running the previous binary is left running and reported as needing a
 restart, since stopping it would end every pane inside it.
@@ -248,6 +255,90 @@ function Get-ToolVersion {
     $result = Invoke-Captured -Command $Path -Arguments @('--version') -TimeoutSec $script:READ_TIMEOUT
     if ($result.Output -match '([0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*)') { return $Matches[1] }
     return ''
+}
+
+# The npm registry name of a tool, which npm and bun both install from, or nothing where none is recorded.
+# These are the names each tool's own documentation gives, and herdr and cswap are not published there.
+function Get-NpmPackage {
+    param([string]$Tool)
+    switch ($Tool) {
+        'claude' { return '@anthropic-ai/claude-code' }
+        'codex' { return '@openai/codex' }
+        'opencode' { return 'opencode-ai' }
+    }
+    return $null
+}
+
+# The directory npm installs a global package into, read from where the command resolves to.
+function Get-NpmGlobalDirectory {
+    param([string]$Path)
+    $p = $Path -replace '\\', '/'
+    $at = $p.IndexOf('/node_modules/')
+    if ($at -ge 0) { return $p.Substring(0, $at) + '/node_modules' }
+    return (Split-Path -Parent $p)
+}
+
+# Whether this user can write a directory, without elevating to find out.
+# Windows keeps a per-user npm directory writable, and an install under Program Files needs an elevated shell.
+function Test-DirectoryWritable {
+    param([string]$Directory)
+    if ($IsWindows) {
+        $protected = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData) | Where-Object { $_ }
+        foreach ($root in $protected) {
+            if (($Directory -replace '/', '\').StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        }
+        return $true
+    }
+    & test -w $Directory
+    return ($LASTEXITCODE -eq 0)
+}
+
+# What an upgrade does for a tool a package manager owns.
+# Command and Arguments hold the command to run, or Why holds the reason none runs, and never both.
+# The reason names the command where one exists, so the person can run it where this script may not.
+function Get-ManagerPlan {
+    param([string]$Tool, [string]$Path, [string]$Manager)
+    $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
+    switch ($Manager) {
+        'winget' { $plan.Why = 'winget owns it and upgrade-host upgrades it' }
+        { $_ -in 'npm', 'bun' } {
+            $pkg = Get-NpmPackage -Tool $Tool
+            if (-not $pkg) {
+                $plan.Why = "no $Manager package name is recorded for $Tool, so upgrade it with $Manager by hand"
+            } elseif (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
+                $plan.Why = "$Manager is not on PATH, so run: $Manager install -g $pkg@latest"
+            } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmGlobalDirectory -Path $Path))) {
+                $plan.Why = "the npm global directory $(Hide-Home -Path (Get-NpmGlobalDirectory -Path $Path)) is not writable by this user, so run in an elevated shell: npm install -g $pkg@latest"
+            } else {
+                # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
+                $plan.Command = $Manager
+                $plan.Arguments = @('install', '-g', "$pkg@latest")
+            }
+        }
+        'scoop' {
+            $app = $null
+            if (Get-Command scoop -CommandType Application -ErrorAction SilentlyContinue) {
+                $which = Invoke-Captured -Command 'scoop' -Arguments @('which', $Tool) -TimeoutSec $script:READ_TIMEOUT
+                if ($which.ExitCode -eq 0 -and ($which.Output -replace '/', '\') -match '\\apps\\([^\\]+)\\') { $app = $Matches[1] }
+            }
+            if ($app) {
+                $plan.Command = 'scoop'
+                $plan.Arguments = @('update', $app)
+            } else {
+                $plan.Why = "scoop's name for $Tool could not be read, so run scoop update with it by hand"
+            }
+        }
+        'choco' {
+            $pkg = '<package>'
+            $lib = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { $null }
+            if ($lib -and (Test-Path -LiteralPath $lib -PathType Container)) {
+                $hit = Get-ChildItem -LiteralPath $lib -Recurse -Filter "$Tool.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($hit) { $pkg = ($hit.FullName.Substring($lib.Length).TrimStart('\', '/') -split '[\\/]')[0] }
+            }
+            $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade $pkg -y"
+        }
+    }
+    return $plan
 }
 
 # What owns the installed copy, read from where the command resolves to rather than from how it was meant to be installed.
@@ -409,7 +500,12 @@ function Show-Report {
             $manager = Get-ToolManager $path
             $status = 'present'
             if ($manager -ne 'self') {
-                note $tool "installed through $manager, which upgrades it, so -Upgrade leaves it alone"
+                $plan = Get-ManagerPlan -Tool $tool -Path $path -Manager $manager
+                if ($plan.Command) {
+                    note $tool "installed through $manager, -Upgrade runs: $($plan.Command) $($plan.Arguments -join ' ')"
+                } else {
+                    note $tool "installed through $manager, -Upgrade does not run it: $($plan.Why)"
+                }
             } elseif ($tool -eq 'herdr') {
                 Add-HerdrNote
             }
@@ -467,7 +563,7 @@ function Invoke-ToolUpgrade {
     $installed = Get-ToolVersion $path
     $shownVersion = if ($installed) { $installed } else { 'an unreadable version' }
     if ($manager -ne 'self') {
-        log "${ToolName}: installed through $manager, leaving it to $manager"
+        Invoke-ManagerUpgrade -ToolName $ToolName -Path $path -Manager $manager -Installed $installed
         return
     }
 
@@ -505,6 +601,31 @@ function Invoke-ToolUpgrade {
                 log 'herdr: could not read whether a running server needs a restart'
             }
         }
+    }
+}
+
+# Upgrades a tool through the package manager that owns it, or says why nothing runs.
+# A failing manager is recorded and the other tools still run, as a failing updater is.
+function Invoke-ManagerUpgrade {
+    param([string]$ToolName, [string]$Path, [string]$Manager, [string]$Installed)
+    $plan = Get-ManagerPlan -Tool $ToolName -Path $Path -Manager $Manager
+    if (-not $plan.Command) {
+        log "${ToolName}: installed through $Manager, not run here: $($plan.Why)"
+        return
+    }
+    $shown = if ($Installed) { $Installed } else { 'an unreadable version' }
+    log "${ToolName}: at $shown, installed through $Manager, running: $($plan.Command) $($plan.Arguments -join ' ')"
+    if ((Invoke-Step -Command $plan.Command -Arguments $plan.Arguments) -ne 0) {
+        warn "${ToolName}: $Manager failed to upgrade it"
+        $script:FAILED.Add($ToolName)
+        return
+    }
+    $newPath = Get-ToolPath $ToolName
+    $now = if ($newPath) { Get-ToolVersion $newPath } else { '' }
+    if ($now -ne $Installed) {
+        $before = if ($Installed) { $Installed } else { '-' }
+        $after = if ($now) { $now } else { '-' }
+        $script:CHANGED.Add("$ToolName $before -> $after")
     }
 }
 

@@ -136,17 +136,137 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
 
-    def test_a_package_manager_install_is_left_to_its_manager(self) -> None:
-        self.stub(
-            "codex",
-            "codex-cli 0.149.1",
-            where=self.dir / "lib" / "node_modules" / "@openai" / "codex" / "bin",
+    def codex_in_npm(self) -> Path:
+        node_modules = self.dir / "lib" / "node_modules"
+        self.stub("codex", "codex-cli 0.149.1", where=node_modules / "@openai" / "codex" / "bin")
+        return node_modules
+
+    def test_an_npm_install_is_upgraded_through_npm_for_that_one_package(self) -> None:
+        self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["npm install -g @openai/codex@latest"])
+        self.assertEqual(self.report()["codex"]["manager"], "npm")
+
+    def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
+        self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("--upgrade", "--yes", "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[dry run] npm install -g @openai/codex@latest", result.stdout)
+        self.assertEqual(self.called(), [])
+
+    def test_the_report_names_the_command_an_upgrade_will_run(self) -> None:
+        self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        notes = self.report()["codex"]["notes"]
+        self.assertEqual(
+            notes, ["installed through npm, --upgrade runs: npm install -g @openai/codex@latest"]
         )
+        self.assertNotIn("which upgrades it", " ".join(notes))
+
+    def test_an_unwritable_npm_directory_is_reported_with_its_command_and_not_run(self) -> None:
+        node_modules = self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        node_modules.chmod(0o555)
+        self.addCleanup(node_modules.chmod, 0o755)
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), [])
-        self.assertIn("codex: installed through npm, leaving it to npm", result.stdout)
-        self.assertEqual(self.report()["codex"]["manager"], "npm")
+        self.assertIn(
+            "is not writable by this user, so run as its owner: npm install -g @openai/codex@latest",
+            result.stdout,
+        )
+        self.assertNotIn("sudo", result.stdout)
+        self.assertIn("--upgrade does not run it", " ".join(self.report()["codex"]["notes"]))
+
+    def test_a_failing_manager_is_reported_and_the_other_tools_still_run(self) -> None:
+        self.codex_in_npm()
+        failing = self.bin / "npm"
+        failing.write_text(
+            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\nexit 3\n', encoding="utf-8"
+        )
+        failing.chmod(0o755)
+        self.stub("claude", "2.1.0 (Claude Code)")
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("codex: npm failed to upgrade it", result.stderr)
+        self.assertIn("Failed: codex", result.stderr)
+        self.assertEqual(self.called(), ["claude update", "npm install -g @openai/codex@latest"])
+
+    def test_bun_is_upgraded_through_bun(self) -> None:
+        self.stub("opencode", "1.18.18", where=self.home / ".bun" / "bin")
+        self.stub("bun", "1.1.0")
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["bun install -g opencode-ai@latest"])
+
+    def test_homebrew_formula_and_cask_are_upgraded_by_the_name_in_their_path(self) -> None:
+        self.stub(
+            "opencode",
+            "1.0.0",
+            where=self.dir / "linuxbrew" / "Cellar" / "opencode" / "1.0.0" / "bin",
+        )
+        self.stub(
+            "claude",
+            "2.0.0",
+            where=self.dir / "opt" / "homebrew" / "Caskroom" / "claude-code" / "2.0.0",
+        )
+        self.stub("brew", "Homebrew 4.0.0")
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            sorted(self.called()), ["brew upgrade --cask claude-code", "brew upgrade opencode"]
+        )
+
+    def test_mise_upgrades_the_backend_tool_its_directory_names(self) -> None:
+        self.stub(
+            "opencode",
+            "1.0.0",
+            where=self.dir / "mise" / "installs" / "npm-opencode-ai" / "1.0.0" / "bin",
+        )
+        self.stub("mise", "mise 2024.1.1")
+        result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["mise upgrade npm:opencode-ai"])
+
+    def test_a_tool_with_no_recorded_package_name_is_reported_not_guessed(self) -> None:
+        self.stub("herdr", "herdr 0.9.0", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("--upgrade", "--yes", "herdr")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn("no npm package name is recorded for herdr", result.stdout)
+
+    def plan(self, tool: str, path: str, manager: str) -> str:
+        """Runs the script's own manager_plan, with the final call to main cut off so it can be sourced."""
+        body = SCRIPT.read_text(encoding="utf-8").rsplit('\nmain "$@"', 1)[0]
+        harness = self.dir / "plan.sh"
+        harness.write_text(
+            body
+            + f'\nmanager_plan {tool} {path} {manager}\nprintf "%s|%s" "${{PLAN_CMD[*]}}" "$PLAN_WHY"\n',
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            ["bash", str(harness)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(self.home)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_apt_is_left_to_upgrade_host_and_nix_is_reported_not_run(self) -> None:
+        self.assertEqual(
+            self.plan("codex", "/usr/bin/codex", "apt"),
+            "|apt owns it and upgrade-host.sh upgrades it",
+        )
+        nix = self.plan("codex", "/nix/store/x/bin/codex", "nix")
+        self.assertTrue(nix.startswith("|Nix is declarative, so update it where it is declared"))
 
     def test_install_names_what_it_installs(self) -> None:
         result = self.run_script("--install", "--yes")
@@ -352,13 +472,97 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("uv tool upgrade claude-swap", self.recorded())
         self.assertNotIn("cswap upgrade", self.recorded())
 
-    def test_node_modules_path_reads_as_npm_and_is_skipped(self) -> None:
+    def test_node_modules_path_reads_as_npm_and_is_upgraded_through_npm(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("installed through npm, leaving it to npm", result.stdout)
+        self.assertIn("npm install -g @openai/codex@latest", self.recorded())
         self.assertNotIn("codex update", self.recorded())
+
+    def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
+        npm_bin = self.dir / "node_modules" / ".bin"
+        self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "-DryRun", "codex", extra_path=npm_bin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[dry run] npm install -g @openai/codex@latest", result.stdout)
+        self.assertNotIn("npm install -g @openai/codex@latest", self.recorded())
+
+    def test_the_report_names_the_command_and_not_the_false_claim(self) -> None:
+        npm_bin = self.dir / "node_modules" / ".bin"
+        self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Report", "codex", extra_path=npm_bin)
+        self.assertIn("-Upgrade runs: npm install -g @openai/codex@latest", result.stdout)
+        self.assertNotIn("which upgrades it", result.stdout)
+
+    def test_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
+        node_modules = self.dir / "node_modules"
+        self.stub("codex", "codex-cli 0.1.0", node_modules / ".bin")
+        self.stub("npm", "npm 10.0.0")
+        node_modules.chmod(0o555)
+        self.addCleanup(node_modules.chmod, 0o755)
+        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=node_modules / ".bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("is not writable by this user", result.stdout)
+        self.assertNotIn("npm install -g @openai/codex@latest", self.recorded())
+
+    def test_a_failing_manager_is_reported_and_the_other_tools_still_run(self) -> None:
+        npm_bin = self.dir / "node_modules" / ".bin"
+        self.stub("codex", "codex-cli 0.1.0", npm_bin)
+        failing = self.bin / "npm"
+        failing.write_text(
+            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\nexit 3\n', encoding="utf-8"
+        )
+        failing.chmod(0o755)
+        self.stub("claude", "2.1.0 (Claude Code)")
+        result = self.run_script("-Upgrade", "-Yes", extra_path=npm_bin)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("npm failed to upgrade it", result.stderr)
+        self.assertIn("claude update", self.recorded())
+
+    def test_bun_is_upgraded_through_bun(self) -> None:
+        bun_bin = self.dir / ".bun" / "bin"
+        self.stub("opencode", "1.0.0", bun_bin)
+        self.stub("bun", "1.1.0")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=bun_bin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("bun install -g opencode-ai@latest", self.recorded())
+
+    def test_scoop_updates_the_app_its_which_names(self) -> None:
+        shims = self.dir / "scoop" / "shims"
+        self.stub("opencode", "1.0.0", shims)
+        scoop = self.bin / "scoop"
+        scoop.write_text(
+            '#!/bin/bash\nprintf "scoop %s\\n" "$*" >>"$CALLS"\n[[ $1 == which ]] && echo "C:\\\\scoop\\\\apps\\\\opencode\\\\current\\\\opencode.exe"\nexit 0\n',
+            encoding="utf-8",
+        )
+        scoop.chmod(0o755)
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update opencode", self.recorded())
+
+    def test_winget_is_left_to_upgrade_host(self) -> None:
+        links = self.dir / "Microsoft" / "WinGet" / "Links"
+        self.stub("opencode", "1.0.0", links)
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=links)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("winget owns it and upgrade-host upgrades it", result.stdout)
+        self.assertEqual([c for c in self.recorded() if not c.endswith("--version")], [])
+
+    def test_choco_is_reported_with_its_command_and_never_run(self) -> None:
+        bin_dir = self.dir / "chocolatey" / "bin"
+        self.stub("opencode", "1.0.0", bin_dir)
+        self.stub("choco", "choco 2.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=bin_dir)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade",
+            result.stdout,
+        )
+        self.assertNotIn("choco upgrade", " ".join(self.recorded()))
 
     def test_install_without_names_is_refused(self) -> None:
         result = self.run_script("-Install", "-Yes")
