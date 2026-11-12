@@ -42,7 +42,7 @@ Each Windows command stops on a failed download, so a stale earlier copy of the 
 1. Upgrades the coding-agent tools already installed, and adds none.
 2. Installs the fleet skills for Codex, opencode, and Claude Code, from a tree the bootstrap keeps.
 3. Installs the Claude Code safety kit where Claude Code is present, and skips it with a line saying so where it is not.
-4. Writes the host-wide rules to the global instruction file of each of Codex and opencode that is installed.
+4. Writes the host-wide rules to the global instruction file of each of Codex and opencode that is installed. A Codex `AGENTS.override.md` that is not blank takes precedence over that file, so the status reports it as SHADOWED and the setup warns. Neither touches the override.
 
 ## Report It
 
