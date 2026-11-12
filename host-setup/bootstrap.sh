@@ -399,10 +399,14 @@ agent_setup() {
 agent_status() {
     # A report is read-only, so it runs for real under --dry-run rather than printing that it would.
     local DRY_RUN=false
-    local -a behind=()
-    if agents_user && ! run_tool install-agents.sh --report; then
-        info "The agent tools step did not report, and the output above says why"
-        behind+=("agent tools")
+    local -a behind=() skipped=()
+    if agents_user; then
+        if ! run_tool install-agents.sh --report; then
+            info "The agent tools step did not report, and the output above says why"
+            behind+=("agent tools")
+        fi
+    else
+        skipped+=("agent tools (running as root)")
     fi
     if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
         info "The fleet skills step did not report a current copy, and the output above says why"
@@ -420,7 +424,11 @@ agent_status() {
         local joined
         joined=$(printf '%s, ' "${behind[@]}")
         info "Not current: ${joined%, }"
-    else
+    fi
+    if ((${#skipped[@]} > 0)); then
+        info "Not checked: ${skipped[*]}"
+    fi
+    if ((${#behind[@]} == 0 && ${#skipped[@]} == 0)); then
         info "Every agent setup step reports current"
     fi
 }

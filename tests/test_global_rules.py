@@ -144,9 +144,9 @@ class TestNote(Case):
                 self.assertTrue(lines[0].startswith("<!-- Written by ProjectTemplate"))
                 self.assertEqual(lines[1], "")
                 self.assertEqual(lines[2], global_rules.NOTE)
-                self.assertIn("no hook enforces these rules here yet", lines[2])
+                self.assertIn("no hook guards its sessions yet", lines[2])
                 self.assertIn("describe Claude Code only", lines[2])
-                self.assertIn("ptr727/ProjectTemplate#781", lines[2])
+                self.assertNotIn("#781", lines[2])
 
     def test_the_block_text_is_not_edited(self) -> None:
         self.install_both()
@@ -401,6 +401,7 @@ class TestInterrupt(Case):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
         )
         assert process.stdout is not None
         self.assertEqual(process.stdout.readline().strip(), "ready")

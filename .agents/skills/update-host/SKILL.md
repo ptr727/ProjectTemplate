@@ -49,7 +49,7 @@ Run the status after the setup, and run it alone to answer "is this machine curr
 Report each step's status as the output states it, in the order above, and name every step the status run lists as not current. Then say plainly:
 
 - Restart agent sessions to load the new hooks and rules. A running session keeps what it started with.
-- Codex and opencode get the rules but no hooks yet. Their hook installers are not built and are tracked in issue 781, so their sessions are not mechanically guarded.
+- Codex and opencode get the rules but no hooks yet. No hook guards their sessions yet, so those sessions are not mechanically guarded.
 
 ## When the Run Is Refused
 

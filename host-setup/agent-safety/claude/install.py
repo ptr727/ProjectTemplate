@@ -620,6 +620,9 @@ def source_ref():
                 handed = (root / BOOTSTRAP_COMMIT_MARKER).read_text(encoding="utf-8").strip()
             except (OSError, UnicodeDecodeError):
                 handed = ""
+            # A malformed marker is no commit, so it falls through to the commit-less archive record.
+            if not FULL_COMMIT.fullmatch(handed):
+                handed = ""
         if handed:
             return {"vcs": "archive", "commit": handed, "dirty": False}
         # A bootstrap tree whose loader resolved no commit is still an archive.

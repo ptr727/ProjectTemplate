@@ -606,6 +606,7 @@ function Invoke-AgentSetup {
 # The names are collected and said again at the end, so a long report does not bury them.
 function Invoke-AgentStatus {
     $behind = @()
+    $skipped = @()
     # A report is read-only, so it runs for real under -DryRun rather than printing that it would.
     $wasDryRun = $script:DRY_RUN
     $script:DRY_RUN = $false
@@ -616,6 +617,8 @@ function Invoke-AgentStatus {
                 info 'The agent tools step did not report, and the output above says why'
                 $behind += 'agent tools'
             }
+        } else {
+            $skipped += 'agent tools (running elevated)'
         }
         Invoke-Tool -Tool 'install-skills.ps1' -ToleratesFailure -Arguments '-Report'
         if ($LASTEXITCODE -ne 0) {
@@ -634,7 +637,11 @@ function Invoke-AgentStatus {
         }
         if ($behind.Count -gt 0) {
             info "Not current: $($behind -join ', ')"
-        } else {
+        }
+        if ($skipped.Count -gt 0) {
+            info "Not checked: $($skipped -join ', ')"
+        }
+        if ($behind.Count -eq 0 -and $skipped.Count -eq 0) {
             info 'Every agent setup step reports current'
         }
     } finally {

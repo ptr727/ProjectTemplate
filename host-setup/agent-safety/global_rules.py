@@ -91,9 +91,8 @@ def present(agent: Agent) -> bool:
 # Said under the header because the blocks below describe Claude Code's hooks as the mechanical layer.
 # Neither agent has such a hook, so a session of either would otherwise read a backstop that is not there.
 NOTE = (
-    "Note for this agent: no hook enforces these rules here yet. "
-    "Sentences below that name a hook describe Claude Code only. "
-    "The gap is tracked at ptr727/ProjectTemplate#781."
+    "Note for this agent: no hook guards its sessions yet. "
+    "Sentences below that name a hook describe Claude Code only."
 )
 
 

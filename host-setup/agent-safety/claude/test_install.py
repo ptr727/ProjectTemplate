@@ -269,6 +269,16 @@ class TestSourceRefFromAnArchive(unittest.TestCase):
             install.source_ref(), {"vcs": "archive", "commit": self.COMMIT, "dirty": False}
         )
 
+    def test_a_malformed_marker_falls_through_to_the_commit_less_archive_record(self):
+        tree = self.tmp / "tree"
+        (tree / ".bootstrap-owned").touch()
+        for text in ("not-a-commit\n", "abc123\n", ("a" * 40) + "0\n", "A" * 40 + "\n"):
+            with self.subTest(text=text):
+                (tree / ".bootstrap-commit").write_text(text, encoding="utf-8")
+                self.assertEqual(
+                    install.source_ref(), {"vcs": "archive", "commit": None, "dirty": False}
+                )
+
     def test_the_variable_wins_over_the_marker(self):
         tree = self.tmp / "tree"
         (tree / ".bootstrap-owned").touch()

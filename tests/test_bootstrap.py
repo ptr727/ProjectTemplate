@@ -1864,6 +1864,13 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     @unittest.skipIf(
         hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
     )
+    @requires_unprivileged_root
+    def test_an_agent_status_as_root_says_the_agent_tools_were_not_checked(self) -> None:
+        result = self.run_main(action="--agent-status", root=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Not checked: agent tools (running as root)", result.stdout)
+        self.assertNotIn("Every agent setup step reports current", result.stdout)
+
     def test_an_agent_status_names_every_step_that_is_not_current_and_still_finishes(self) -> None:
         for failing, name in (
             ("install-agents.sh --report", "agent tools"),
@@ -2219,6 +2226,12 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         result = self.run_handoff("$script:DRY_RUN = $true\nInvoke-AgentStatus")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), list(POWERSHELL_AGENT_STATUS_STEPS), result.stdout)
+
+    def test_an_elevated_agent_status_says_the_agent_tools_were_not_checked(self) -> None:
+        result = self.run_handoff("Invoke-AgentStatus", elevated=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Not checked: agent tools (running elevated)", result.stdout)
+        self.assertNotIn("Every agent setup step reports current", result.stdout)
 
     def test_an_agent_status_runs_each_report_in_order(self) -> None:
         result = self.run_handoff("Invoke-AgentStatus")
