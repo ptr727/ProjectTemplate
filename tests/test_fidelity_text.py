@@ -103,7 +103,7 @@ class LinkCase(unittest.TestCase):
         )
         self.assertEqual(
             fidelity_text.link_definitions(text),
-            [fidelity_text.LinkDefinition("docs", "https://example.com/a", 0)],
+            [fidelity_text.LinkDefinition("docs", "https://example.com/a", 0, 1)],
         )
         self.assertEqual(fidelity_text.reference_key("Docs"), fidelity_text.reference_key("docs"))
 
@@ -115,6 +115,13 @@ class LinkCase(unittest.TestCase):
         self.assertEqual(
             [(d.label, d.url, d.line) for d in fidelity_text.link_definitions(text)],
             [("spaced", "a b.md", 7), ("split", "s.md", 8), ("quoted", "q.md", 11)],
+        )
+
+    def test_a_definition_ends_where_the_parser_ends_it(self) -> None:
+        text = "[titled]: t.md\n  'Title'\n[bare]: b.md\nProse after it.\n"
+        self.assertEqual(
+            [(d.label, d.line, d.end) for d in fidelity_text.link_definitions(text)],
+            [("titled", 0, 2), ("bare", 2, 3)],
         )
 
     def test_an_escape_in_a_label_or_an_angle_destination_is_read_through(self) -> None:

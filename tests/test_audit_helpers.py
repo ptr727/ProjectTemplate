@@ -721,6 +721,21 @@ class CheckInterfaceCase(unittest.TestCase):
         self.assertIn("job 'check-workflow-status'", message)
         self.assertIn("on a run other than pull_request", message)
 
+    def test_a_gate_without_a_pull_request_trigger_gets_the_trigger_finding(self) -> None:
+        on = "on:\n  push:\n    branches: ['**']\n  workflow_dispatch:\n"
+        for label, check, others in (
+            ("literal name", PR_CHECK, ["on a run other than pull_request"]),
+            ("pull_request-only name", PR_CHECK.replace(PR_CHECK_NAME, PR_ONLY_EXPRESSION), []),
+        ):
+            with self.subTest(label):
+                text = PR_HEAD.replace("on: pull_request\n", on) + check
+                trigger, *rest = audit.check_interface("wf", PR_CONTRACT, text)
+                self.assertEqual(trigger[0], "DRIFT")
+                self.assertIn("has no pull_request trigger", trigger[1])
+                self.assertEqual(len(rest), len(others))
+                for (_, message), want in zip(rest, others, strict=True):
+                    self.assertIn(want, message)
+
 
 class ShippedPullRequestStubCase(unittest.TestCase):
     """Every pull request stub the hub ships passes the contract spec/files.json gives a carried one."""
@@ -2676,13 +2691,7 @@ def holding(*paths: str) -> Callable[..., Any]:
     return fake
 
 
-ALT_CASES = [
-    (("codecov.yml",), ("codecov.yml", "codecov.yml"), "only the declared path"),
-    ((".codecov.yml",), (".codecov.yml", ".codecov.yml"), "only the alternative"),
-    (("codecov.yml", ".codecov.yml"), ("codecov.yml", "codecov.yml"), "both, declared wins"),
-    ((), ("codecov.yml", None), "neither"),
-]
-BASELINE_UNIT = {"path": "codecov.yml", "fidelity": "intent", "intentRef": "WORKFLOW.md"}
+BASELINE_UNIT = {"path": ".codecov.yml", "fidelity": "intent", "intentRef": "WORKFLOW.md"}
 
 
 class DriftnoteCase(unittest.TestCase):
@@ -2932,42 +2941,38 @@ class GroundTruthCase(unittest.TestCase):
             f"repo_tree -> truncated={truncated}, whole={whole}",
         )
 
-    def test_read_baseline_file_alternatives(self) -> None:
-        for held, (want_path, want_name), label in ALT_CASES:
+    def test_read_baseline_file(self) -> None:
+        for held, want, label in (
+            ((".codecov.yml",), ".codecov.yml", "the declared path"),
+            (("codecov.yml",), None, "only another name Codecov reads"),
+            ((), None, "neither"),
+        ):
             with self.subTest(label):
                 with mock.patch.object(audit, "gh", holding(*held)):
-                    got_path, got = audit.read_baseline_file(
-                        "o/r", "main", "codecov.yml", [".codecov.yml"]
-                    )
-                got_name = got["name"] if got is not None else None
-                self.assertEqual(
-                    (got_path, got_name),
-                    (want_path, want_name),
-                    f"read_baseline_file, {label} -> {got_path}, {got_name}",
-                )
+                    got = audit.read_baseline_file("o/r", "main", ".codecov.yml")
+                self.assertEqual(got["name"] if got is not None else None, want, label)
 
-    def test_baseline_file_findings_only_the_alternative(self) -> None:
+    def test_baseline_file_findings_present(self) -> None:
         with mock.patch.object(audit, "gh", holding(".codecov.yml")):
-            found, alt_content, _, alt_findings = audit.baseline_file_findings(
-                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT
+            content, text, findings = audit.baseline_file_findings(
+                "o/r", "main", ".codecov.yml", BASELINE_UNIT
             )
-        self.assertEqual(found, ".codecov.yml")
-        self.assertIsNotNone(alt_content)
-        self.assertEqual(alt_findings, [])
+        self.assertIsNotNone(content)
+        self.assertEqual((text, findings), ("x", []))
 
-    def test_baseline_file_findings_neither(self) -> None:
-        with mock.patch.object(audit, "gh", holding()):
-            _, _, _, none_findings = audit.baseline_file_findings(
-                "o/r", "main", "codecov.yml", [".codecov.yml"], BASELINE_UNIT
+    def test_baseline_file_findings_absent(self) -> None:
+        with mock.patch.object(audit, "gh", holding("codecov.yml")):
+            _, _, findings = audit.baseline_file_findings(
+                "o/r", "main", ".codecov.yml", BASELINE_UNIT
             )
-        want_none = [
-            (
-                "LETTER",
-                "file: codecov.yml or .codecov.yml absent on main (verify intent per AUDIT.md section 7)",
-            )
-        ]
         self.assertEqual(
-            none_findings, want_none, f"baseline_file_findings, neither -> {none_findings}"
+            findings,
+            [
+                (
+                    "LETTER",
+                    "file: .codecov.yml absent on main (verify intent per AUDIT.md section 7)",
+                )
+            ],
         )
 
 
@@ -2981,7 +2986,6 @@ def intent_run(baseline: dict[str, Any], content: dict[str, str], notes: list[st
     run.head = {"commit": {"sha": "c0ffee"}}
     run.__dict__["baseline"] = {p: (item, set(), set()) for p, item in baseline.items()}
     run.content.update(content)
-    run.found.update({p: p for p in content})
     return run
 
 
@@ -3003,7 +3007,7 @@ class IntentAdvisoryCase(unittest.TestCase):
         trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
         for down, want in (("same", None), ("x", trailing)):
             with self.subTest(down=down), self.patched(texts):
-                got = audit.intent_trail("o/r", "main", "widget.json", unit, down, "widget.json")
+                got = audit.intent_trail("o/r", "main", "widget.json", unit, down)
             self.assertEqual(got, want)
 
     def test_the_trail_dates_by_the_intent_ref_anchor(self) -> None:
@@ -3018,30 +3022,19 @@ class IntentAdvisoryCase(unittest.TestCase):
             self.patched({"DOC.md": "the doc"}),
             mock.patch.object(audit, "hub_last_change", change),
         ):
-            audit.intent_trail("o/r", "main", "widget.json", unit, "x", "widget.json")
+            audit.intent_trail("o/r", "main", "widget.json", unit, "x")
         self.assertEqual(asked, [("DOC.md", "widget")])
 
     def test_a_reference_unit_ignores_the_hub_file_at_path(self) -> None:
         unit = {"path": "w.yml", "fidelity": "intent", "reference": "snip/w.yml"}
         with self.patched({"snip/w.yml": "snippet", "w.yml": "same"}):
-            self.assertIsNotNone(audit.intent_trail("o/r", "main", "w.yml", unit, "same", "w.yml"))
+            self.assertIsNotNone(audit.intent_trail("o/r", "main", "w.yml", unit, "same"))
 
     def test_a_copy_newer_than_the_canonical_is_current(self) -> None:
         unit = {"path": "w.json", "fidelity": "intent", "intentRef": "DOC.md"}
         newer = [{"commit": {"committer": {"date": "2021-01-01T00:00:00+00:00"}}}]
         with self.patched({"DOC.md": "canonical"}, newer):
-            self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x", "w.json"))
-
-    def test_the_trail_reads_the_alternative_it_was_found_at(self) -> None:
-        asked: list[str] = []
-
-        def fake(ep: str, ok404: bool = False) -> Any:
-            asked.append(ep)
-            return OLD_COMMIT
-
-        with self.patched({"WORKFLOW.md": "canonical"}), mock.patch.object(audit, "gh", fake):
-            audit.intent_trail("o/r", "main", "codecov.yml", BASELINE_UNIT, "x", ".codecov.yml")
-        self.assertEqual(asked, ["repos/o/r/commits?path=.codecov.yml&sha=main&per_page=1"])
+            self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x"))
 
     def test_the_finding_names_the_intent_canonical(self) -> None:
         trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
@@ -3084,7 +3077,7 @@ class IntentAdvisoryCase(unittest.TestCase):
             findings = audit.check_files_intent(run)
         self.assertEqual([t.split(" ", 2)[1] for _, t in findings], ["w.json"])
 
-    def test_check_files_intent_keys_a_copy_by_the_alternative_it_was_read_at(self) -> None:
+    def test_check_files_intent_keys_a_copy_by_its_dotfile_path(self) -> None:
         asked: list[str] = []
 
         def fake(ep: str, ok404: bool = False) -> Any:
@@ -3095,8 +3088,7 @@ class IntentAdvisoryCase(unittest.TestCase):
             ([], [".codecov.yml"]),
             (["`.codecov.yml@abc1234` (files.intent)"], []),
         ):
-            run = intent_run({"codecov.yml": BASELINE_UNIT}, {"codecov.yml": "x"}, notes)
-            run.found["codecov.yml"] = ".codecov.yml"
+            run = intent_run({".codecov.yml": BASELINE_UNIT}, {".codecov.yml": "x"}, notes)
             asked.clear()
             with (
                 self.subTest(notes=notes),
@@ -3164,18 +3156,6 @@ class AnchoredLastChangeCase(unittest.TestCase):
             with self.subTest(path=item["path"], intentRef=item["intentRef"]):
                 text = (audit.ROOT / rel).read_text(encoding="utf-8")
                 self.assertIsNotNone(audit.extract_anchored(text, anchor))
-
-
-class AlternativesManifestCase(unittest.TestCase):
-    """declared_alternatives against the live manifest."""
-
-    def test_declared_alternatives_on_the_live_manifest(self) -> None:
-        live_alts = audit.declared_alternatives(audit.load("spec/files.json")["baseline"])
-        self.assertEqual(
-            live_alts.get("codecov.yml"),
-            [".codecov.yml"],
-            f"declared_alternatives on the live manifest -> {live_alts}",
-        )
 
 
 class CoverageTypesCase(unittest.TestCase):
@@ -5380,9 +5360,9 @@ class IntentCanonicalRelCase(unittest.TestCase):
             ),
             (
                 "reference wins over intentRef when the manifest sets both",
-                {"reference": "catalog/snippets/configs/codecov.yml", "intentRef": "WORKFLOW.md"},
-                "codecov.yml",
-                "catalog/snippets/configs/codecov.yml",
+                {"reference": "catalog/snippets/configs/.codecov.yml", "intentRef": "WORKFLOW.md"},
+                ".codecov.yml",
+                "catalog/snippets/configs/.codecov.yml",
             ),
             (
                 "a literal '#' in reference is preserved rather than treated as an anchor",

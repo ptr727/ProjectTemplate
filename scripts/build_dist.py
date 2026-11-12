@@ -386,6 +386,33 @@ def include_source(rel):
     return path
 
 
+def _trailing_definitions(lines, start, reader):
+    """The line where the file's trailing link-reference definitions begin, or `len(lines)` where none trail it.
+
+    Only a body running to the end of the file reaches them, and they belong to the whole document rather than to its last section.
+    Copied into a skill, each one is a definition nothing there uses.
+    The parser decides which lines a definition spans, so a line it ends a definition before is content.
+    The HTML comments that group them by type belong to the block too.
+    The walk goes back from the end and stops at the first line that is none of these, or at `start`.
+    """
+    text = "\n".join(lines)
+    owner = {index: d.line for d in reader.link_definitions(text) for index in range(d.line, d.end)}
+    cut = len(lines)
+    found = False
+    index = len(lines) - 1
+    while index > start:
+        stripped = lines[index].strip()
+        if index in owner:
+            cut = index = owner[index]
+            found = True
+        elif stripped.startswith("<!--") and stripped.endswith("-->"):
+            cut = index
+        elif stripped:
+            break
+        index -= 1
+    return cut if found else len(lines)
+
+
 def heading_body(lines, heading, key):
     """The lines under the one heading whose text case-folds to `heading`, up to the next heading at its level or above.
 
@@ -395,7 +422,8 @@ def heading_body(lines, heading, key):
     a blockquote, or a list item is content to both, and so is a setext heading.
     They match on the parsed text case-folded, so a re-cased heading still resolves. Two matches are
     two answers to one question, refused rather than resolved to the first. A body ends at any
-    heading of its level or above, level one included. A fidelity region ends only at the next
+    heading of its level or above, level one included. One that runs to the end of the file ends
+    before the file's trailing link-reference definitions instead, which belong to the whole document. A fidelity region ends only at the next
     level-two heading.
     """
     reader = _fidelity_text()
@@ -415,6 +443,8 @@ def heading_body(lines, heading, key):
     end = next(
         (index for index, level, _ in headings if index > start and level <= depth), len(lines)
     )
+    if end == len(lines):
+        end = _trailing_definitions(lines, start, reader)
     blocks = [b for b in reader.code_blocks(text) if start < b.start < end]
     if any(b.fenced and not b.closed for b in blocks):
         # A fence the body leaves open would swallow the end marker on the next scan and blame the skill for a defect in its source.

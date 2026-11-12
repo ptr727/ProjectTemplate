@@ -188,8 +188,8 @@ class FakeResponse:
 
 SHA_BODY = SHA.encode()
 PROSE_PATH = hub.PROSE_GATE_PATH
-RESOLVED = f"ptr727/ProjectTemplate@{SHA} (hub-fetch-run main)"
-UNRESOLVED = "ptr727/ProjectTemplate@main (hub-fetch-run, commit unresolved)"
+RESOLVED = f"ptr727/ProjectTemplate@{SHA} (hub_fetch_run.py main)"
+UNRESOLVED = "ptr727/ProjectTemplate@main (hub_fetch_run.py, commit unresolved)"
 RECORD = (
     b"import os, sys\n"
     b"with open(sys.argv[1], 'w') as out:\n"
@@ -319,7 +319,7 @@ class ProvenanceTests(unittest.TestCase):
         """A rate-limited API lookup still fetches both files at one commit, so they pair."""
         self.git.return_value = (GIT_SHA, "")
         seen = self.run_main(RATE_LIMITED)
-        self.assertEqual(seen, f"ptr727/ProjectTemplate@{GIT_SHA} (hub-fetch-run main)")
+        self.assertEqual(seen, f"ptr727/ProjectTemplate@{GIT_SHA} (hub_fetch_run.py main)")
         fetched = [u for u in self.urls() if u != hub.HUB_MAIN_SHA_URL]
         self.assertEqual(
             fetched,
@@ -483,10 +483,9 @@ LINT_TASKS = {
     "Lint: Markdown": "markdownlint",
     "Lint: Spelling": "cspell",
 }
-TASK_SNIPPETS = {
-    "vscode-tasks.json": ".husky/hub_fetch_run.py",
-    "vscode-tasks-python.json": "hub_fetch_run.py",
-}
+HELPER = "${workspaceFolder}/hub_fetch_run.py"
+TASK_SNIPPETS = ("vscode-tasks.json", "vscode-tasks-python.json")
+HUSKY_HOOK = ROOT / "catalog" / "snippets" / "husky" / "pre-commit"
 
 
 def snippet_tasks(name: str) -> dict[str, dict]:
@@ -505,13 +504,53 @@ class LintTaskTests(unittest.TestCase):
         return forms
 
     def test_each_docker_lint_task_runs_the_wrapper_through_the_helper(self) -> None:
-        for name, helper in TASK_SNIPPETS.items():
+        for name in TASK_SNIPPETS:
             tasks = snippet_tasks(name)
             for label, linter in LINT_TASKS.items():
                 for form in self.forms(tasks[label]):
                     with self.subTest(snippet=name, task=label, command=form[0]):
-                        self.assertIn(f"${{workspaceFolder}}/{helper}", form)
+                        self.assertIn(HELPER, form)
                         self.assertEqual(form[-3:], [DOCKER_LINT, "--linter", linter])
+
+    def test_every_helper_reference_names_the_root_copy(self) -> None:
+        """A task naming the helper anywhere but the root fails in a repo that keeps it there."""
+        for name in TASK_SNIPPETS:
+            for label, task in snippet_tasks(name).items():
+                for form in self.forms(task) if "command" in task else []:
+                    for arg in form:
+                        if arg.endswith("hub_fetch_run.py"):
+                            with self.subTest(snippet=name, task=label, arg=arg):
+                                self.assertEqual(arg, HELPER)
+
+    def test_husky_hook_calls_the_root_copy_after_moving_to_the_top_level(self) -> None:
+        """The hook resolves the helper from the repo root, so the move to the top level comes first."""
+        lines = HUSKY_HOOK.read_text(encoding="utf-8").splitlines()
+        cd = lines.index('cd "$(git rev-parse --show-toplevel)" || exit 1')
+        helper = lines.index('hub_fetch_run="$PWD/hub_fetch_run.py"')
+        self.assertLess(cd, helper)
+
+    def test_ruff_tasks_take_the_tool_s_own_casing(self) -> None:
+        """A carrying repository copies these labels, so a capitalized one is a finding there."""
+        hub_tasks = json.loads((ROOT / ".vscode" / "tasks.json").read_text(encoding="utf-8"))[
+            "tasks"
+        ]
+        sources = {
+            "vscode-tasks-python.json": list(snippet_tasks("vscode-tasks-python.json").values()),
+            ".vscode/tasks.json": hub_tasks,
+        }
+        for source, tasks in sources.items():
+            names = [task["label"] for task in tasks]
+            names += [name for task in tasks for name in task.get("dependsOn", [])]
+            with self.subTest(source=source):
+                self.assertLessEqual({"ruff format", "ruff check"}, set(names))
+                self.assertEqual(
+                    [
+                        name
+                        for name in names
+                        if name.lower().startswith("ruff") and not name.startswith("ruff")
+                    ],
+                    [],
+                )
 
     def test_no_task_binds_the_live_tree_into_a_container(self) -> None:
         """The wrapper's snapshot is the only mount, so no task may call Docker itself."""
@@ -566,7 +605,7 @@ class FetchedWrapperTests(unittest.TestCase):
         ):
             return hub.main([DOCKER_LINT, "--help"])
 
-    def test_the_wrapper_imports_from_its_fetched_companions(self) -> None:
+    def test_the_wrapper_runs_with_no_other_hub_file_beside_it(self) -> None:
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
 
     def test_the_wrapper_offers_every_linter_a_task_names(self) -> None:
@@ -575,19 +614,10 @@ class FetchedWrapperTests(unittest.TestCase):
         assert choices is not None, self.stdout
         self.assertLessEqual(set(LINT_TASKS.values()), set(choices.group(1).split(",")))
 
-    def test_a_planted_module_beside_the_scratch_directory_is_not_imported(self) -> None:
-        """A shared temporary root is writable by others, so nothing may be read from above it."""
-        planted = self.tmp / "spec"
-        planted.mkdir()
-        (planted / "git_env.py").write_text("raise SystemExit(99)\n", encoding="utf-8")
-        with mock.patch.object(tempfile, "tempdir", str(self.tmp)):
-            self.assertEqual(self.run_wrapper(), 0, self.stdout)
-
     def fetched(self, ref: str) -> list[str]:
-        paths = ("scripts/local_review.py", "spec/git_env.py", DOCKER_LINT)
-        return [f"{hub.HUB_RAW_BASE}/{ref}/{path}" for path in paths]
+        return [f"{hub.HUB_RAW_BASE}/{ref}/{DOCKER_LINT}"]
 
-    def test_every_file_comes_from_the_one_resolved_commit(self) -> None:
+    def test_the_wrapper_alone_comes_from_the_resolved_commit(self) -> None:
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
         self.assertEqual(self.urls, self.fetched(SHA))
 
@@ -596,11 +626,11 @@ class FetchedWrapperTests(unittest.TestCase):
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
         self.assertIn(f"ptr727/ProjectTemplate@{SHA}", self.stderr.getvalue())
 
-    def test_an_unresolved_commit_reads_main_twice_and_says_so(self) -> None:
-        """With no commit to pin to, the double read is what refuses a mixed set."""
+    def test_an_unresolved_commit_reads_main_once_and_says_so(self) -> None:
+        """A lone file cannot form a mixed set, so no double read guards it."""
         self.commit = None
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
-        self.assertEqual(self.urls, self.fetched("main") * 2)
+        self.assertEqual(self.urls, self.fetched("main"))
         self.assertIn("ptr727/ProjectTemplate@main", self.stderr.getvalue())
 
 
