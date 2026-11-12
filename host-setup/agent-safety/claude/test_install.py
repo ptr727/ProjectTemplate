@@ -315,6 +315,27 @@ class TestSourceRefFromAnArchive(unittest.TestCase):
         self.assertEqual(install.source_ref()["vcs"], "archive")
 
 
+class TestArchiveNote(StampCase):
+    COMMIT = "0123456789abcdef0123456789abcdef01234567"
+
+    def _report_with(self, source):
+        self.assertEqual(run(self.home).returncode, 0)
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp["source"] = source
+        self.stamp.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
+        return run(self.home, "--report")
+
+    def test_an_archive_stamp_with_a_commit_names_it_and_says_nothing_false(self):
+        r = self._report_with({"vcs": "archive", "commit": self.COMMIT, "dirty": False})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Note: installed from a fetched archive at 0123456.", r.stdout)
+        self.assertNotIn("no checkout to compare against", r.stdout)
+
+    def test_an_archive_stamp_with_no_commit_says_it_cannot_name_a_revision(self):
+        r = self._report_with({"vcs": "archive", "commit": None, "dirty": False})
+        self.assertIn("archive that recorded no commit", r.stdout)
+
+
 class TestInstalledContent(StampCase):
     """Presence is not currency. These are the cases markers and versions cannot see."""
 
@@ -1911,12 +1932,106 @@ class TestAutoMode(StampCase):
                 else:
                     self.assertNotIn(name, auto, "a list the kit owns nothing in was created")
 
-    def test_an_existing_list_without_defaults_is_reported_rather_than_rewritten(self):
+    def test_an_existing_list_without_defaults_gets_it_first_and_keeps_every_other_entry(self):
         self._write({"autoMode": {"allow": list(self.OWN)}})
         r = self.install()
-        self.assertEqual(self._settings()["autoMode"]["allow"], [*self.OWN, *self._owned("allow")])
-        self.assertIn("autoMode.allow holds no $defaults", r.stdout)
-        self.assertIn("replaces Claude Code's built-in rules", r.stdout)
+        self.assertEqual(
+            self._settings()["autoMode"]["allow"], ["$defaults", *self.OWN, *self._owned("allow")]
+        )
+        self.assertIn(
+            "autoMode.allow: $defaults added first, so Claude Code's built-in rules", r.stdout
+        )
+        self.assertIn("apply alongside this host's", r.stdout)
+        self.assertNotIn("leaves that choice", r.stdout)
+
+    def test_a_misplaced_defaults_moves_first_and_a_repeated_one_collapses_to_one(self):
+        other = "Agents leave the second example bench alone"
+        self._write(
+            {
+                "autoMode": {
+                    "environment": [self.OWN[0], "$defaults", other],
+                    "soft_deny": [other, "$defaults", self.OWN[1], "$defaults", "$defaults"],
+                }
+            }
+        )
+        r = self.install()
+        auto = self._settings()["autoMode"]
+        self.assertEqual(auto["environment"][:3], ["$defaults", self.OWN[0], other])
+        self.assertEqual(auto["soft_deny"], ["$defaults", other, self.OWN[1]])
+        self.assertIn("autoMode.environment: $defaults moved first, as this kit requires", r.stdout)
+        self.assertIn(
+            "autoMode.soft_deny: $defaults kept once, first, with 2 duplicates removed, "
+            "as this kit requires",
+            r.stdout,
+        )
+        # A misplaced or repeated splice kept the built-ins, so nothing claims they were missing.
+        for line in r.stdout.splitlines():
+            if "moved first" in line or "kept once" in line:
+                self.assertNotIn("built-in", line)
+
+    def test_all_four_lists_are_handled_and_a_missing_list_is_not_created(self):
+        self._write(
+            {"autoMode": {name: ["A constructed entry"] for name in install.AUTO_MODE_LISTS}}
+        )
+        self.install()
+        for name, held in self._settings()["autoMode"].items():
+            with self.subTest(list=name):
+                self.assertEqual(held[:2], ["$defaults", "A constructed entry"])
+        self._write({"autoMode": {"hard_deny": ["A constructed denial"]}})
+        self.install()
+        auto = self._settings()["autoMode"]
+        self.assertEqual(auto["hard_deny"], ["$defaults", "A constructed denial"])
+        self.assertNotIn("soft_deny", auto, "a list the kit owns nothing in was created")
+
+    def test_untagged_entries_keep_their_text_and_relative_order(self):
+        entries = ["zeta rule", "alpha rule", "$defaults", "Mid rule", 7, {"k": "v"}]
+        self._write({"autoMode": {"hard_deny": list(entries)}})
+        self.install()
+        expected = ["$defaults", "zeta rule", "alpha rule", "Mid rule", 7, {"k": "v"}]
+        self.assertEqual(self._settings()["autoMode"]["hard_deny"], expected)
+
+    def test_the_report_flags_each_bad_list_and_reads_current_after_an_install(self):
+        self.install()
+        data = self._settings()
+        data["autoMode"]["soft_deny"] = ["A constructed denial"]
+        data["autoMode"]["hard_deny"] = ["A constructed denial", "$defaults"]
+        data["autoMode"]["allow"] = ["$defaults", "$defaults"]
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(
+            "autoMode.soft_deny has no $defaults, so it replaces Claude Code's built-in rules",
+            r.stdout,
+        )
+        for name in ("hard_deny", "allow"):
+            with self.subTest(list=name):
+                self.assertIn(
+                    f"autoMode.{name} has $defaults but not first, exactly once, as this kit requires",
+                    r.stdout,
+                )
+        self.assertNotIn("autoMode.hard_deny has no $defaults", r.stdout)
+        self.assertNotIn("autoMode.environment has", r.stdout)
+        self.assertEqual(self.install().returncode, 0)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("CURRENT", r.stdout)
+
+    def test_a_clean_list_keeps_the_untagged_count_line_in_the_report(self):
+        self._write({"autoMode": {"environment": ["$defaults", *self.OWN]}})
+        self.install()
+        r = run(self.home, "--report")
+        self.assertIn("autoMode.environment: 2 untagged entries, with $defaults", r.stdout)
+
+    def test_a_second_run_after_a_fix_changes_nothing_and_says_nothing_about_defaults(self):
+        self._write(
+            {"autoMode": {"allow": ["A constructed entry"], "hard_deny": ["x", "$defaults"]}}
+        )
+        self.install()
+        first = (self.home / "settings.json").read_bytes()
+        r = self.install()
+        self.assertEqual((self.home / "settings.json").read_bytes(), first)
+        self.assertNotIn("$defaults added", r.stdout)
+        self.assertNotIn("$defaults moved", r.stdout)
 
     def test_a_second_run_writes_byte_identical_settings(self):
         self._write({"autoMode": {"environment": list(self.OWN), "soft_deny": ["$defaults"]}})
@@ -1992,7 +2107,7 @@ class TestAutoMode(StampCase):
         self.install()
         current = install.installed_digest(self.home)
         data = self._settings()
-        data["autoMode"]["environment"].insert(0, self.OWN[0])
+        data["autoMode"]["environment"].insert(1, self.OWN[0])
         self._write(data)
         self.assertEqual(install.installed_digest(self.home), current)
         self.assertEqual(run(self.home, "--report").returncode, 0)
@@ -2002,7 +2117,7 @@ class TestAutoMode(StampCase):
         self.install()
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("autoMode.environment: 2 untagged entries, without $defaults", r.stdout)
+        self.assertIn("autoMode.environment: 2 untagged entries, with $defaults", r.stdout)
         self.assertIn("autoMode.hard_deny: 0 untagged entries, with $defaults", r.stdout)
 
     def test_a_retired_rule_leaves_untagged_entries_and_a_bare_defaults_list(self):
@@ -2690,7 +2805,7 @@ class TestArchiveStampReport(StampCase):
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("hub 0123456", r.stdout)
-        self.assertIn("installed from a fetched archive", r.stdout)
+        self.assertIn("installed from a fetched archive at 0123456", r.stdout)
         self.assertIn("CURRENT", r.stdout)
 
     def test_a_stamp_naming_no_commit_is_current_with_a_note_rather_than_stale(self):
