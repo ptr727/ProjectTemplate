@@ -385,7 +385,9 @@ function Test-UnderScoop {
     foreach ($entry in (Get-ScoopRoot)) {
         foreach ($sub in 'shims', 'apps') {
             # Joined as text rather than with Join-Path, which fails for a root on a drive that is not present.
-            if (Test-PathUnder -Path $Path -Root "$($entry.Root)\$sub" -Below) { return $true }
+            # The root's trailing separator is trimmed first, as Get-ScoopApp does, so a root written as D:\Tools\ still matches.
+            $base = ($entry.Root -replace '/', '\').TrimEnd('\')
+            if (Test-PathUnder -Path $Path -Root "$base\$sub" -Below) { return $true }
         }
     }
     return $false

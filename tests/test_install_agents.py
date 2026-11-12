@@ -951,6 +951,17 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("scoop update herdr", calls)
         self.assertIn("herdr integration install claude", calls)
 
+    def test_a_scoop_root_written_with_a_trailing_separator_still_matches(self) -> None:
+        root = self.dir / "AgentTools"
+        shims = root / "shims"
+        self.stub("herdr", "herdr 0.9.4", shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
+        result = self.run_script(
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": f"{root}/"}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("scoop update herdr", self.recorded())
+
     def test_scoops_own_config_names_the_root_when_the_environment_does_not(self) -> None:
         root = self.dir / "AgentTools"
         shims = root / "shims"
