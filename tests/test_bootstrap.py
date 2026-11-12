@@ -951,7 +951,7 @@ $wanted = @(
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
     'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
     'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall', 'Unlock-Directory', 'main',
-    'Invoke-AgentSetup', 'Invoke-AgentStatus', 'Resolve-Mode'
+    'Invoke-AgentSetup', 'Invoke-AgentStatus', 'Resolve-Mode', 'Save-SourceCommitEnv', 'Restore-SourceCommitEnv'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -1839,6 +1839,9 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(result.returncode, 7, result.stderr)
         self.assertNotIn("install-global-rules.sh", self.agents_steps())
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
     def test_an_agent_setup_dry_run_passes_the_dry_run_to_each_step_and_keeps_no_tree(self) -> None:
         result = self.run_main(action="--agent-setup", args=("--dry-run",))
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1857,23 +1860,26 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         result = self.run_main(action="--agent-status")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.agents_steps(), list(AGENT_STATUS_STEPS), result.stderr)
-        self.assertIn("Every agent setup step reports current", result.stdout)
+        self.assertIn("Every other agent setup step reports current", result.stdout)
+        self.assertIn(
+            "Agent tools: listed above, versions not compared with upstream", result.stdout
+        )
         self.assertNotIn("Not current", result.stdout)
         self.assertFalse(self.kept.exists())
 
-    @unittest.skipIf(
-        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
-    )
     @requires_unprivileged_root
     def test_an_agent_status_as_root_says_the_agent_tools_were_not_checked(self) -> None:
         result = self.run_main(action="--agent-status", root=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Not checked: agent tools (running as root)", result.stdout)
+        self.assertNotIn("versions not compared", result.stdout)
         self.assertNotIn("Every agent setup step reports current", result.stdout)
 
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
     def test_an_agent_status_names_every_step_that_is_not_current_and_still_finishes(self) -> None:
         for failing, name in (
-            ("install-agents.sh --report", "agent tools"),
             ("install-skills.sh --report", "fleet skills"),
             ("install-safety-kit.sh --report", "Claude Code safety kit"),
             ("install-global-rules.sh --report", "host-wide rules"),
@@ -1884,6 +1890,19 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(self.agents_steps(), list(AGENT_STATUS_STEPS), result.stderr)
                 self.assertIn(f"Not current: {name}", result.stdout)
+
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "a root run skips the agent tools"
+    )
+    def test_an_agent_tools_report_that_fails_is_named_apart_from_the_not_current_steps(
+        self,
+    ) -> None:
+        result = self.run_main("install-agents.sh --report", action="--agent-status")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Agent tools: the report failed", result.stdout)
+        self.assertNotIn("versions not compared", result.stdout)
+        self.assertNotIn("Not current", result.stdout)
+        self.assertIn("Every other agent setup step reports current", result.stdout)
 
     def given_tree(self) -> Path:
         """The stub tarball extracted where a caller keeps a tree of its own, as a hub checkout is."""
@@ -1951,6 +1970,51 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertIn(
             "--from-tree is accepted with --agent-setup or --agent-status only", result.stderr
         )
+
+    def test_a_given_tree_needs_none_of_curl_tar_or_flock(self) -> None:
+        """Nothing is fetched or locked from a given tree, so a host lacking them still gets the report."""
+        bare = self.root / "bare-bin"
+        bare.mkdir()
+        for entry in Path("/usr/bin").iterdir():
+            if entry.name not in ("curl", "tar", "flock"):
+                (bare / entry.name).symlink_to(entry)
+        env = {"PATH": str(bare), "HOME": str(self.home), "STEP_LOG": str(self.log),
+               "KEPT_TREE": str(self.kept), "FAIL_STEP": ""}  # fmt: skip
+        result = subprocess.run(
+            [
+                bash_or_skip(),
+                str(BOOTSTRAP),
+                "--agent-status",
+                "--from-tree",
+                str(self.given_tree()),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("is required to", result.stderr)
+
+    def test_curl_tar_and_flock_are_still_required_to_fetch(self) -> None:
+        bare = self.root / "bare-bin"
+        bare.mkdir()
+        for entry in Path("/usr/bin").iterdir():
+            if entry.name not in ("curl", "tar", "flock"):
+                (bare / entry.name).symlink_to(entry)
+        result = subprocess.run(
+            [bash_or_skip(), str(BOOTSTRAP), "--agent-status"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env={"PATH": str(bare), "HOME": str(self.home)},
+            timeout=60,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("curl is required", result.stderr)
 
     def test_a_given_name_that_is_no_directory_is_refused(self) -> None:
         result = self.run_main(action="--agent-status", args=("--from-tree", "no/such/tree"))
@@ -2231,17 +2295,53 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         result = self.run_handoff("Invoke-AgentStatus", elevated=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Not checked: agent tools (running elevated)", result.stdout)
+        self.assertNotIn("versions not compared", result.stdout)
         self.assertNotIn("Every agent setup step reports current", result.stdout)
+
+    def test_the_source_commit_variables_are_restored_to_what_they_were(self) -> None:
+        body = (
+            "$env:SKILLS_SOURCE_COMMIT = 'before'\n"
+            "Remove-Item Env:AGENT_SAFETY_SOURCE_COMMIT -ErrorAction SilentlyContinue\n"
+            "$saved = Save-SourceCommitEnv\n"
+            "$env:SKILLS_SOURCE_COMMIT = 'during'\n"
+            "$env:AGENT_SAFETY_SOURCE_COMMIT = 'during'\n"
+            "Restore-SourceCommitEnv -Saved $saved\n"
+            'log "skills=$env:SKILLS_SOURCE_COMMIT"\n'
+            'log "kit-set=$(Test-Path Env:AGENT_SAFETY_SOURCE_COMMIT)"'
+        )
+        result = self.run_handoff(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-2:], ["skills=before", "kit-set=False"])
+
+    def test_the_windows_loader_checks_tar_only_after_the_given_tree_return(self) -> None:
+        text = BOOTSTRAP_PS.read_text(encoding="utf-8")
+        main = text[text.index("\nfunction main {") :]
+        self.assertLess(
+            main.index("        return\n    }\n"), main.index("    Test-Prerequisite\n")
+        )
+        self.assertLess(main.index("    Test-Prerequisite\n"), main.index("    Lock-Directory\n"))
+
+    def test_an_agent_tools_report_that_fails_is_named_apart_from_the_not_current_steps(
+        self,
+    ) -> None:
+        result = self.run_handoff("Invoke-AgentStatus", fail_step="install-agents.ps1 -Report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Agent tools: the report failed", result.stdout)
+        self.assertNotIn("versions not compared", result.stdout)
+        self.assertNotIn("Not current", result.stdout)
+        self.assertIn("Every other agent setup step reports current", result.stdout)
 
     def test_an_agent_status_runs_each_report_in_order(self) -> None:
         result = self.run_handoff("Invoke-AgentStatus")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), list(POWERSHELL_AGENT_STATUS_STEPS), result.stdout)
-        self.assertIn("Every agent setup step reports current", result.stdout)
+        self.assertIn("Every other agent setup step reports current", result.stdout)
+        self.assertIn(
+            "Agent tools: listed above, versions not compared with upstream", result.stdout
+        )
 
     def test_an_agent_status_names_a_step_that_is_not_current_and_still_finishes(self) -> None:
         for failing, name in (
-            ("install-agents.ps1 -Report", "agent tools"),
             ("install-skills.ps1 -Report", "fleet skills"),
             ("install-safety-kit.ps1 -Report", "Claude Code safety kit"),
             ("install-global-rules.ps1 -Report", "host-wide rules"),

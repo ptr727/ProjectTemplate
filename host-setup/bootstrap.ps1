@@ -136,7 +136,8 @@ Actions, name one, default -Report:
       -AgentSetup   Bring this user's coding agents fully current: upgrade the agent tools already
                     installed, install the fleet skills, install the Claude Code safety kit where
                     Claude Code is present, and write the host-wide rules for Codex and opencode
-      -AgentStatus  Read-only: report each step of -AgentSetup, in the same order
+      -AgentStatus  Report each step of -AgentSetup, in the same order. It changes nothing in the
+                    agent setup, though any action first installs PowerShell 7 where it is missing
   -w, -Wsl          Report the WSL platform and the distributions installed, only
   -h, -Help         Show this help
 
@@ -256,6 +257,27 @@ function Invoke-PwshHandoff {
 }
 
 # --- Fetch ---
+
+# The variables that hand a resolved commit to the installers, which a persistent console would otherwise keep after the run.
+function Save-SourceCommitEnv {
+    $saved = @{}
+    foreach ($name in 'SKILLS_SOURCE_COMMIT', 'AGENT_SAFETY_SOURCE_COMMIT') {
+        $saved[$name] = [Environment]::GetEnvironmentVariable($name)
+    }
+    return $saved
+}
+
+# A variable unset before the run is removed again rather than left empty.
+function Restore-SourceCommitEnv {
+    param([hashtable]$Saved)
+    foreach ($name in $Saved.Keys) {
+        if ($null -eq $Saved[$name]) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $Saved[$name])
+        }
+    }
+}
 
 # Resolve the ref to the commit it names, so the run reports a revision rather than a moving name.
 # The plain-text accept header returns the commit alone, which keeps this free of a JSON parser on a host that has none.
@@ -601,12 +623,14 @@ function Invoke-AgentSetup {
     Invoke-Tool -Tool 'install-global-rules.ps1'
 }
 
-# The read-only counterpart of Invoke-AgentSetup, one report per step in the same order.
+# The counterpart of Invoke-AgentSetup that changes nothing in the agent setup, one report per step in the same order.
 # A step that is not current is a finding to name and not a reason to stop naming the rest, as Show-Report does.
 # The names are collected and said again at the end, so a long report does not bury them.
 function Invoke-AgentStatus {
     $behind = @()
     $skipped = @()
+    # The agent tools report is an inventory, so its outcome is tracked apart from the steps that can be not current.
+    $toolsOutcome = 'skipped'
     # A report is read-only, so it runs for real under -DryRun rather than printing that it would.
     $wasDryRun = $script:DRY_RUN
     $script:DRY_RUN = $false
@@ -615,7 +639,9 @@ function Invoke-AgentStatus {
             Invoke-Tool -Tool 'install-agents.ps1' -ToleratesFailure -Arguments '-Report'
             if ($LASTEXITCODE -ne 0) {
                 info 'The agent tools step did not report, and the output above says why'
-                $behind += 'agent tools'
+                $toolsOutcome = 'failed'
+            } else {
+                $toolsOutcome = 'listed'
             }
         } else {
             $skipped += 'agent tools (running elevated)'
@@ -641,8 +667,14 @@ function Invoke-AgentStatus {
         if ($skipped.Count -gt 0) {
             info "Not checked: $($skipped -join ', ')"
         }
-        if ($behind.Count -eq 0 -and $skipped.Count -eq 0) {
-            info 'Every agent setup step reports current'
+        # The listing shows versions without comparing them to upstream, so it is never called current.
+        if ($toolsOutcome -eq 'listed') {
+            info 'Agent tools: listed above, versions not compared with upstream'
+        } elseif ($toolsOutcome -eq 'failed') {
+            info 'Agent tools: the report failed'
+        }
+        if ($behind.Count -eq 0) {
+            info 'Every other agent setup step reports current'
         }
     } finally {
         $script:DRY_RUN = $wasDryRun
@@ -781,7 +813,6 @@ function main {
 
     # Reached only under a confirmed pwsh 7, either started that way or handed off to above.
     $script:PWSH_PATH = (Get-Process -Id $PID).Path
-    Test-Prerequisite
     $script:DIR = Resolve-Directory
     $script:MODE = Resolve-Mode
 
@@ -811,8 +842,12 @@ function main {
         return
     }
 
+    # A given tree fetches nothing, so tar.exe is needed only from here on.
+    Test-Prerequisite
+
     # Taken before the try, so a run refused here never reaches the cleanup that would remove the trees of the run holding the lock.
     Lock-Directory
+    $savedCommitEnv = Save-SourceCommitEnv
     try {
         Resolve-Ref
         # The commit the resolve produced is handed to the skills installer, since the tarball tree it runs from has no .git to answer for it.
@@ -823,7 +858,7 @@ function main {
         Invoke-Mode
     } finally {
         # Released after the cleanup, so the cleanup still runs under the lock, and on die's exit too, which runs this finally on its way out.
-        try { Invoke-Cleanup } finally { Unlock-Directory }
+        try { Invoke-Cleanup } finally { try { Unlock-Directory } finally { Restore-SourceCommitEnv -Saved $savedCommitEnv } }
     }
 
     step 'Done'
