@@ -1958,10 +1958,16 @@ class TestAutoMode(StampCase):
         auto = self._settings()["autoMode"]
         self.assertEqual(auto["environment"][:3], ["$defaults", self.OWN[0], other])
         self.assertEqual(auto["soft_deny"], ["$defaults", other, self.OWN[1]])
-        self.assertIn("autoMode.environment: $defaults moved first", r.stdout)
+        self.assertIn("autoMode.environment: $defaults moved first, as this kit requires", r.stdout)
         self.assertIn(
-            "autoMode.soft_deny: $defaults kept once, first, with 2 duplicates removed", r.stdout
+            "autoMode.soft_deny: $defaults kept once, first, with 2 duplicates removed, "
+            "as this kit requires",
+            r.stdout,
         )
+        # A misplaced or repeated splice kept the built-ins, so nothing claims they were missing.
+        for line in r.stdout.splitlines():
+            if "moved first" in line or "kept once" in line:
+                self.assertNotIn("built-in", line)
 
     def test_all_four_lists_are_handled_and_a_missing_list_is_not_created(self):
         self._write(
@@ -1993,12 +1999,18 @@ class TestAutoMode(StampCase):
         self._write(data)
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        for name in ("soft_deny", "hard_deny", "allow"):
+        self.assertIn(
+            "autoMode.soft_deny has no $defaults, so it replaces Claude Code's built-in rules",
+            r.stdout,
+        )
+        for name in ("hard_deny", "allow"):
             with self.subTest(list=name):
                 self.assertIn(
-                    f"autoMode.{name} does not start with $defaults exactly once", r.stdout
+                    f"autoMode.{name} has $defaults but not first, exactly once, as this kit requires",
+                    r.stdout,
                 )
-        self.assertNotIn("autoMode.environment does not start", r.stdout)
+        self.assertNotIn("autoMode.hard_deny has no $defaults", r.stdout)
+        self.assertNotIn("autoMode.environment has", r.stdout)
         self.assertEqual(self.install().returncode, 0)
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

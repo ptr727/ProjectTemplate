@@ -350,6 +350,17 @@ def defaults_first(held):
     return held[:1] == [AUTO_MODE_DEFAULTS] and held.count(AUTO_MODE_DEFAULTS) == 1
 
 
+def defaults_reason(held):
+    """Why a list failing `defaults_first` fails, worded for what it is.
+
+    Claude Code splices its built-ins in wherever `$defaults` sits, so only a list with none replaces them.
+    A misplaced or repeated one keeps them and breaks only this kit's own rule.
+    """
+    if AUTO_MODE_DEFAULTS not in held:
+        return f"has no {AUTO_MODE_DEFAULTS}, so it replaces Claude Code's built-in rules"
+    return f"has {AUTO_MODE_DEFAULTS} but not first, exactly once, as this kit requires"
+
+
 def put_defaults_first(held):
     """Make `$defaults` the first entry of `held` in place, once, and say what changed (or "" where nothing did).
 
@@ -1417,10 +1428,7 @@ def registration_problems(claude_home):
         for name in AUTO_MODE_LISTS:
             held = auto.get(name) if isinstance(auto, dict) else None
             if isinstance(held, list) and not defaults_first(held):
-                out.append(
-                    f"autoMode.{name} does not start with {AUTO_MODE_DEFAULTS} exactly once, so it "
-                    "replaces Claude Code's built-in rules"
-                )
+                out.append(f"autoMode.{name} {defaults_reason(held)}")
     return out
 
 
@@ -1533,11 +1541,7 @@ def report(claude_home):
         held = auto.get(name) if isinstance(auto, dict) else None
         if isinstance(held, list):
             untagged = sum(1 for e in held if not tagged(e) and e != AUTO_MODE_DEFAULTS)
-            splice = (
-                f"with {AUTO_MODE_DEFAULTS}"
-                if defaults_first(held)
-                else f"without {AUTO_MODE_DEFAULTS} first, so it replaces Claude Code's built-in rules"
-            )
+            splice = f"with {AUTO_MODE_DEFAULTS}" if defaults_first(held) else defaults_reason(held)
             print(f"autoMode.{name}: {untagged} untagged entries, {splice}")
     foreign = foreign_prefix(settings_data)
     env_block = settings_data.get("env") if isinstance(settings_data, dict) else None
@@ -1998,10 +2002,13 @@ def main():
         change = put_defaults_first(held)
         if change:
             others = len(held) - 1
-            done.append(
-                f"autoMode.{name}: {AUTO_MODE_DEFAULTS} {change}, so Claude Code's built-in rules "
-                f"apply alongside this host's {others} entr{'y' if others == 1 else 'ies'}"
-            )
+            if change == "added first":
+                done.append(
+                    f"autoMode.{name}: {AUTO_MODE_DEFAULTS} {change}, so Claude Code's built-in rules "
+                    f"apply alongside this host's {others} entr{'y' if others == 1 else 'ies'}"
+                )
+            else:
+                done.append(f"autoMode.{name}: {AUTO_MODE_DEFAULTS} {change}, as this kit requires")
 
     # Reported after the write rather than as each edit is made, since both edits share one write.
     # A line printed before it claims a change that a later failure would leave unmade.
