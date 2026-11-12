@@ -108,13 +108,12 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows
   install the line the calling repo's own `global.json` selects, through `setup-dotnet`'s
   `global-json-file`, so CI follows each repo's file. A repo carrying no `sdk` block yet gets
-  `10.x`, the baseline's major. The hub's tests hold that fallback, and the publish snippet's
-  `10.x` for its NuGet push, to the baseline. The hub's devcontainer snippet still
-  installs its line through its image tag. The hub's host installers install the line the
+  `10.x`, the baseline's major, which the hub's tests hold to the baseline. The hub's devcontainer
+  snippet still installs its line through its image tag. The hub's host installers install the line the
   `catalog/snippets/configs/global.json` baseline selects, named in each installer and held
   equal to the baseline by the hub's tests. The Linux one adds the newest line beside it. So a
   major move still starts in the hub, as a fleet-wide change to that baseline, the installers,
-  the `10.x` fallbacks, and the image tag. The image provides both lines until every repo has moved. A host building a
+  that fallback, and the image tag. The image provides both lines until every repo has moved. A host building a
   repo not yet moved takes the old line from the installers' optional set.
 
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer

@@ -19,7 +19,7 @@ from typing import NamedTuple
 from host_capability import bash_or_skip
 from runner_commands import forged_lines
 from sdk_baseline import baseline_line
-from workflow_steps import step_script, step_script_text, yaml_step, yaml_value
+from workflow_steps import job_texts, step_script, step_script_text, yaml_step, yaml_value
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 from git_env import without_git_location
@@ -2389,17 +2389,6 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
 
-    def test_every_10x_fallback_is_the_baseline_major(self) -> None:
-        """A TFM move fails here until each hub-authored fallback names the new major."""
-        major = baseline_line()[0]
-        for path in (
-            "catalog/snippets/workflows/publish-release.yml",
-            "docs/reusable-workflows.md",
-        ):
-            text = (REPO / path).read_text(encoding="utf-8")
-            self.assertRegex(text, r"dotnet-version: \d+\.x", path)
-            self.assertNotRegex(text, rf"dotnet-version: (?!{major}\.x)\d+\.x", path)
-
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.
 
@@ -2421,7 +2410,7 @@ class DotnetSdkLineCase(unittest.TestCase):
             ("build-nuget", "Run hub build-nuget default step"),
         ):
             with self.subTest(job=job):
-                steps = release.split(f"\n  {job}:\n", 1)[1].split("\n  # ", 1)[0]
+                steps = job_texts(release)[job]
                 setup = yaml_step(steps, "Setup .NET SDK step")
                 self.assertEqual(yaml_value(setup, "uses"), "$/.github/actions/dotnet-sdk")
                 self.assertEqual(

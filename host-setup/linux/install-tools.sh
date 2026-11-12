@@ -36,7 +36,7 @@ MANAGED_TOOLS=("${TOOLS[@]}")
 readonly PYTHON_PACKAGES=(build-essential ca-certificates curl python3 python3-dev python3-venv python3-pip)
 readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-setuptools python3-wheel)
 
-# The SDK line every fleet .NET repository's global.json selects, which the dotnet default set carries wherever the feed does.
+# The SDK line a fleet .NET repository's global.json selects in its sdk block, which the dotnet default set carries wherever the feed does.
 # It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
 # The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
 readonly DOTNET_FLEET_LINE="10.0"
@@ -931,7 +931,7 @@ microsoft_feed() {
 }
 
 # The default set is the fleet's SDK line and the newest line, one package where the two are the same.
-# The fleet line is the one every fleet .NET repository's global.json selects, so a host without it builds none of them.
+# The fleet line is the one a fleet .NET repository's global.json sdk block selects, so a host without it builds no repository carrying one.
 # The newest line is installed beside it, so a newer line stays an addition rather than a replacement.
 # The optional set is every other SDK line the feed carries, for a host that has to build against more than one.
 dotnet_install() {
