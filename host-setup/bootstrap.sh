@@ -10,6 +10,7 @@
 # The commit it resolved is printed before anything runs, so a run says which revision of the fleet's tooling it used.
 #
 # A run that installs the skills keeps its tree rather than removing it, because the Claude Code marketplace it registers loads that directory in place.
+# That covers the agent setup, which installs the skills as one of its steps.
 # That tree lives under the data directory rather than the cache.
 # The bootstrap still needs no git and modifies no checkout of anyone's, because of the following.
 #   - The next such run replaces that tree whole.
@@ -27,6 +28,8 @@ KEEP=false
 DRY_RUN=false
 ASSUME_YES=false
 AGENTS=()
+# A tree already on this host, given with --from-tree, which is run from in place rather than fetched.
+FROM_TREE=""
 RESOLVED=""
 TREE=""
 # Global rather than local, since the lock it holds lasts until this process ends.
@@ -54,7 +57,7 @@ describe them come from one revision rather than from whatever a host happens to
 Actions, name one, default --report on a terminal is the menu:
   -r, --report      Report what each tool would do, change nothing
       --host        Share the sudo cache, upgrade packages, install the tools, configure git and
-                    GitHub, install the skills
+                    GitHub, set up the coding agents as --agent-setup does
       --dev         As --host, and add the tools a development machine needs
       --upgrade     Upgrade the packages of the current release, and this user's coding-agent
                     tools that are already installed
@@ -63,6 +66,11 @@ Actions, name one, default --report on a terminal is the menu:
       --tools       Install the host tools only
       --github      Configure git, the SSH key, and commit signing only
       --skills      Install the fleet skills for the current user only
+      --agent-setup Bring this user's coding agents fully current: upgrade the agent tools already
+                    installed, install the fleet skills, install the Claude Code safety kit where
+                    Claude Code is present, and write the host-wide rules for Codex and opencode
+      --agent-status
+                    Read-only: report each step of --agent-setup, in the same order
       --sudo        Share one sudo credential cache across this user's terminals only
       --release     Upgrade to the next distribution release, on its own
   -h, --help        Show this help
@@ -72,12 +80,16 @@ Options:
   -n, --dry-run     Print what each step would run, change nothing
       --ref REF     Branch, tag, pull request ref, or commit to run from, default main
       --dir PATH    Where the tree is extracted, default ${XDG_CACHE_HOME:-~/.cache}/host-setup, or
-                    ${XDG_DATA_HOME:-~/.local/share}/host-setup for --host, --dev, --skills without --dry-run
+                    ${XDG_DATA_HOME:-~/.local/share}/host-setup for --host, --dev, --skills, and
+                    --agent-setup without --dry-run
       --keep        Leave the extracted tree in place, which is removed by default
+      --from-tree PATH
+                    With --agent-setup or --agent-status only: run from this tree, a hub checkout
+                    for one, instead of fetching one. Nothing is fetched, swapped, or removed.
 
---host, --dev, and --skills keep their tree, at skills-tree under that directory, because the
-Claude Code plugin they register loads it in place. The next such run replaces it, and a --dry-run
-leaves it.
+--host, --dev, --skills, and --agent-setup keep their tree, at skills-tree under that directory,
+because the Claude Code plugin they register loads it in place. The next such run replaces it, and a
+--dry-run leaves it.
 
 With no action on a terminal, the menu asks. With no action and no terminal, the report runs, since
 a pipe is not a place to answer a question.
@@ -89,6 +101,8 @@ Examples:
   bootstrap.sh --ref develop --report   Report using the tooling on develop
   bootstrap.sh --tools --dry-run        Show what installing the tools would run
   bootstrap.sh --agents herdr,cswap     Install two coding-agent tools
+  bootstrap.sh --agent-setup            Bring this user's coding agents fully current
+  bootstrap.sh --agent-status           Report whether they are
 EOF
 }
 
@@ -124,7 +138,7 @@ resolve_ref() {
 # A dry run changes nothing, so it takes a transient tree like any other action rather than replacing the one the plugin loads.
 keeps_tree() {
     [[ $DRY_RUN != true ]] || return 1
-    [[ $MODE == "host" || $MODE == "dev" || $MODE == "skills" ]]
+    [[ $MODE == "host" || $MODE == "dev" || $MODE == "skills" || $MODE == "agent-setup" ]]
 }
 
 # A kept tree is data rather than cache, since removing it silently breaks the plugin registered against it.
@@ -301,20 +315,21 @@ run_tool() {
     [[ $DRY_RUN == true ]] && flags+=(--dry-run)
 
     # The lock's descriptor is closed for the tool, so a daemon it starts cannot inherit the lock and hold it past this run.
-    "$path" "$@" "${flags[@]}" {LOCK_FD}>&-
+    # A run from a given tree takes no lock, so there is no descriptor to close.
+    if [[ -n $LOCK_FD ]]; then
+        "$path" "$@" "${flags[@]}" {LOCK_FD}>&-
+    else
+        "$path" "$@" "${flags[@]}"
+    fi
 }
 
 report() {
     run_tool upgrade-host.sh --status
     run_tool install-tools.sh --report
     run_tool setup-github.sh --status
-    # Tolerated rather than fatal, since a missing install is a finding for a report to name and not a reason to stop naming the rest.
-    if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
-        info "The fleet skills step did not report a current copy, and the output above says why"
-    fi
-    if agents_user && ! run_tool install-agents.sh --report; then
-        info "The agent tools step did not report, and the output above says why"
-    fi
+    # The agent half is tolerated step by step inside agent_status.
+    # A missing install is a finding to name and not a reason to stop naming the rest.
+    agent_status
 }
 
 # The agent tools live in a user's home, and root's holds none on a host where a person uses them.
@@ -340,7 +355,7 @@ upgrade() {
 # The sudo step comes first, so the one credential it caches covers every step after it.
 # Packages come before the tools, so a keyring or a repository is added against a current apt state.
 # GitHub comes after the tools, because it is the only step that waits on a person in a browser.
-# The skills step comes last, and after the tools in particular, because install-tools.sh provides the interpreter it needs.
+# The agent setup comes last, and after the tools in particular, because install-tools.sh provides the interpreter it needs.
 stand_up() {
     local profile="$1"
 
@@ -352,13 +367,70 @@ stand_up() {
         run_tool install-tools.sh --install
     fi
     run_tool setup-github.sh --configure
-    install_skills
+    agent_setup
 }
 
 # The installer registers the directory it runs from, so the kept tree has to hold its name before it runs.
 install_skills() {
-    keeps_tree && swap_in
+    # A given tree is already where it runs from, so there is nothing to swap into place.
+    [[ -n $FROM_TREE ]] || { keeps_tree && swap_in; }
     SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh
+}
+
+# Everything this host installs for coding agents, in one action.
+# The tools come first, so the steps after them find the CLIs they act on current.
+# The skills come before the kit and the rules, because the kept tree has to hold its name before the skills installer registers it.
+# Only the agent tools already installed are touched, so this never adds one.
+# The kit and the rules each skip an agent that is not installed.
+# The whole action is therefore safe on a host with any of them.
+# The commit is handed to the kit because a fetched tree has no .git to answer for it.
+agent_setup() {
+    if agents_user; then
+        run_tool install-agents.sh --upgrade
+    fi
+    install_skills
+    AGENT_SAFETY_SOURCE_COMMIT="$RESOLVED" run_tool install-safety-kit.sh
+    run_tool install-global-rules.sh
+}
+
+# The read-only counterpart of agent_setup, one report per step in the same order.
+# A step that is not current is a finding to name and not a reason to stop naming the rest, as report does.
+# The names are collected and said again at the end, so a long report does not bury them.
+agent_status() {
+    # A report is read-only, so it runs for real under --dry-run rather than printing that it would.
+    local DRY_RUN=false
+    local -a behind=() skipped=()
+    if agents_user; then
+        if ! run_tool install-agents.sh --report; then
+            info "The agent tools step did not report, and the output above says why"
+            behind+=("agent tools")
+        fi
+    else
+        skipped+=("agent tools (running as root)")
+    fi
+    if ! SKILLS_SOURCE_COMMIT="$RESOLVED" run_tool install-skills.sh --report; then
+        info "The fleet skills step did not report a current copy, and the output above says why"
+        behind+=("fleet skills")
+    fi
+    if ! AGENT_SAFETY_SOURCE_COMMIT="$RESOLVED" run_tool install-safety-kit.sh --report; then
+        info "The Claude Code safety kit step did not report current, and the output above says why"
+        behind+=("Claude Code safety kit")
+    fi
+    if ! run_tool install-global-rules.sh --report; then
+        info "The host-wide rules step did not report current, and the output above says why"
+        behind+=("host-wide rules")
+    fi
+    if ((${#behind[@]} > 0)); then
+        local joined
+        joined=$(printf '%s, ' "${behind[@]}")
+        info "Not current: ${joined%, }"
+    fi
+    if ((${#skipped[@]} > 0)); then
+        info "Not checked: ${skipped[*]}"
+    fi
+    if ((${#behind[@]} == 0 && ${#skipped[@]} == 0)); then
+        info "Every agent setup step reports current"
+    fi
 }
 
 # Names the host in the menu heading.
@@ -380,7 +452,7 @@ menu() {
     log "  2  Upgrade the packages of the current release, and the agent tools already installed"
     log "  3  Install the host tools"
     log "  4  Configure git and GitHub"
-    log "  5  Install the fleet skills"
+    log "  5  Set up the coding agents (agent tools, skills, safety kit, global rules)"
     log "  6  Share one sudo credential cache across this user's terminals"
     log "  7  All of the above, which is a host stood up"
     log "  8  All of the above plus the development tools"
@@ -394,7 +466,7 @@ menu() {
     2) MODE="upgrade" ;;
     3) MODE="tools" ;;
     4) MODE="github" ;;
-    5) MODE="skills" ;;
+    5) MODE="agent-setup" ;;
     6) MODE="sudo" ;;
     7) MODE="host" ;;
     8) MODE="dev" ;;
@@ -418,6 +490,8 @@ parse_args() {
         --tools) actions+=(tools) ;;
         --github) actions+=(github) ;;
         --skills) actions+=(skills) ;;
+        --agent-setup) actions+=(agent-setup) ;;
+        --agent-status) actions+=(agent-status) ;;
         --sudo) actions+=(sudo) ;;
         --release) actions+=(release) ;;
         --agents)
@@ -450,6 +524,11 @@ parse_args() {
             REF="$2"
             shift
             ;;
+        --from-tree)
+            [[ $# -ge 2 ]] || die "--from-tree takes the path of a tree on this host"
+            FROM_TREE=$(cd -- "$2" 2>/dev/null && pwd) || die "--from-tree $2 is not a directory"
+            shift
+            ;;
         --dir)
             [[ $# -ge 2 ]] || die "--dir takes a path"
             # An absolute path, and never the root, since everything below is created and removed under it.
@@ -472,7 +551,29 @@ parse_args() {
         die "More than one action given (${actions[*]}), name one"
     fi
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+    # A given tree is never fetched, swapped, or removed, so only the actions that read or install from a tree in place accept one.
+    if [[ -n $FROM_TREE && $MODE != "agent-setup" && $MODE != "agent-status" ]]; then
+        die "--from-tree is accepted with --agent-setup or --agent-status only"
+    fi
     return 0
+}
+
+# The action the run was given, dispatched once the tree it acts on is in place.
+run_mode() {
+    case "$MODE" in
+    report) report ;;
+    upgrade) upgrade ;;
+    agents) run_tool install-agents.sh --install "${AGENTS[@]}" ;;
+    tools) run_tool install-tools.sh --install ;;
+    github) run_tool setup-github.sh --configure ;;
+    skills) install_skills ;;
+    agent-setup) agent_setup ;;
+    agent-status) agent_status ;;
+    sudo) run_tool install-tools.sh --sudo-timestamp ;;
+    release) run_tool upgrade-host.sh --release ;;
+    host) stand_up host ;;
+    dev) stand_up dev ;;
+    esac
 }
 
 main() {
@@ -498,6 +599,18 @@ main() {
         fi
     fi
 
+    # Run from a given tree in place, so there is no tree to fetch, lock, swap, or clean up.
+    # The installers resolve the commit of this tree themselves, so none is handed to them.
+    if [[ -n $FROM_TREE ]]; then
+        [[ -d $FROM_TREE/host-setup/linux ]] || die "--from-tree $FROM_TREE holds no host-setup/linux, so it is not a tree to run from"
+        TREE="$FROM_TREE"
+        step "Running from $TREE"
+        run_mode
+        step "Done"
+        info "Ran from $TREE, which this run left as it was"
+        return 0
+    fi
+
     # Resolved only now, since the default depends on the action, which the menu may have just chosen.
     [[ -n $DIR ]] || DIR=$(default_dir)
     [[ $DIR == /* ]] || DIR="./$DIR"
@@ -508,18 +621,7 @@ main() {
     resolve_ref
     download_tree
 
-    case "$MODE" in
-    report) report ;;
-    upgrade) upgrade ;;
-    agents) run_tool install-agents.sh --install "${AGENTS[@]}" ;;
-    tools) run_tool install-tools.sh --install ;;
-    github) run_tool setup-github.sh --configure ;;
-    skills) install_skills ;;
-    sudo) run_tool install-tools.sh --sudo-timestamp ;;
-    release) run_tool upgrade-host.sh --release ;;
-    host) stand_up host ;;
-    dev) stand_up dev ;;
-    esac
+    run_mode
 
     step "Done"
     if keeps_tree; then

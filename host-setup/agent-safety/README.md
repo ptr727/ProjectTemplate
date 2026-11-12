@@ -184,8 +184,10 @@ every agent.
 | Agent | Status | Implementation |
 | --- | --- | --- |
 | Claude Code | Every requirement, via `PreToolUse` hooks, a shell prefix, and a `SessionEnd` sweep | [`claude/README.md`][claude] |
-| Codex | No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
-| opencode | No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
+| Codex | Host-wide rules only, written by [`global_rules.py`][global-rules]. No hook yet -- tracked at [issue #781][issue-781] | [`codex/README.md`][codex] |
+| opencode | Host-wide rules only, written by [`global_rules.py`][global-rules]. No hook yet -- tracked at [issue #781][issue-781] | [`opencode/README.md`][opencode] |
+
+The host-wide rules are the same text the Claude kit renders into the user `CLAUDE.md`. `global_rules.py` writes that text to Codex's and opencode's global instruction files, and the bootstrap's agent setup runs it. It is a behavioral layer only. It is not one of the requirements above and it blocks nothing.
 
 GitHub Copilot carries no subdirectory here. It reviews through GitHub's own hosted infrastructure rather than running local shell commands under the maintainer's credentials. So it has no analogous
 local host-safety hazard for this kit to cover.
@@ -204,6 +206,7 @@ audit the Claude hooks against the spec" or "ask Codex to implement Codex's own 
 [claude]: ./claude/README.md
 [codex]: ./codex/README.md
 [opencode]: ./opencode/README.md
+[global-rules]: ./global_rules.py
 [governance]: ../../GOVERNANCE.md
 [issue-781]: https://github.com/ptr727/ProjectTemplate/issues/781
 [issue-1073]: https://github.com/ptr727/ProjectTemplate/issues/1073

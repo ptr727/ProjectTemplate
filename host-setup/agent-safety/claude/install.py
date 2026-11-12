@@ -21,6 +21,7 @@ Usage: python3 install.py            (installs to ~/.claude).
        AGENT_SAFETY_DIRTY_OVERRIDE=0/1 python3 install.py   (force the dirty-checkout signal, for testing).
        AGENT_SAFETY_CONTAINMENT_OVERRIDE=0/1 python3 install.py   (force the containment-capable signal, for testing).
        AGENT_FLEET_LOCAL_INSTRUCTIONS=/x.md python3 install.py   (override the host-local file, for testing).
+       AGENT_SAFETY_SOURCE_COMMIT=<40 hex> python3 install.py   (name the commit of a tree git cannot answer for, which the bootstrap sets).
 """
 
 import argparse
@@ -90,6 +91,13 @@ BLOCK_MARKERS = tuple(marker for marker, _ in CLAUDE_MD_BLOCKS)
 # Another agent's global file is rendered from these same parts, so adding one changes no part of this.
 LOCAL_INSTRUCTIONS_ENV = "AGENT_FLEET_LOCAL_INSTRUCTIONS"
 LOCAL_MARKER = "host-local"
+
+# The marker the bootstrap writes into a tree it extracted, and the variable it hands that tree's commit in.
+# A tarball has no .git to answer for it, so the loader resolves its ref to a commit before downloading and passes it here.
+BOOTSTRAP_OWNED_MARKER = ".bootstrap-owned"
+BOOTSTRAP_COMMIT_MARKER = ".bootstrap-commit"
+SOURCE_COMMIT_ENV = "AGENT_SAFETY_SOURCE_COMMIT"
+FULL_COMMIT = re.compile(r"[0-9a-f]{40}")
 
 # The files whose bytes this kit actually places on a machine, the hook first and then each block.
 # Derived rather than listed, so a block added above enters the digest without a second edit.
@@ -573,6 +581,11 @@ def source_ref():
     The SHA still names a commit, but the bytes installed are not that commit's.
     A stamp that claims otherwise is the thing this exists to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
 
+    A tree the bootstrap extracted is asked nothing of git, which would answer for whatever repository encloses it.
+    The commit it resolved arrives in AGENT_SAFETY_SOURCE_COMMIT and is recorded as an archive, clean by construction.
+    Only a full 40-character lowercase hex commit is honored, so a stray or truncated value is never recorded as a commit.
+    A git tree ignores the variable.
+
     AGENT_SAFETY_DIRTY_OVERRIDE, read as exactly "0" or "1", replaces the git-derived dirty
     signal with a fixed one, and honoring it prints a warning below. Any other value, unset
     included, falls through to the git status read below, so a stray or misspelled setting
@@ -596,8 +609,25 @@ def source_ref():
             return None
         return r.stdout.strip() if r.returncode == 0 else None
 
-    sha = git("rev-parse", "HEAD")
+    # Resolves an archive commit as scripts/skills_install.py source_ref does: the handed variable first, then the .bootstrap-commit marker.
+    root = HERE.parent.parent.parent
+    extracted = (root / BOOTSTRAP_OWNED_MARKER).is_file()
+    sha = None if extracted else git("rev-parse", "HEAD")
     if not sha:
+        handed = os.environ.get(SOURCE_COMMIT_ENV, "")
+        if not FULL_COMMIT.fullmatch(handed):
+            try:
+                handed = (root / BOOTSTRAP_COMMIT_MARKER).read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                handed = ""
+            # A malformed marker is no commit, so it falls through to the commit-less archive record.
+            if not FULL_COMMIT.fullmatch(handed):
+                handed = ""
+        if handed:
+            return {"vcs": "archive", "commit": handed, "dirty": False}
+        # A bootstrap tree whose loader resolved no commit is still an archive.
+        if extracted:
+            return {"vcs": "archive", "commit": None, "dirty": False}
         return {"vcs": "none"}
     ref = {"vcs": "git", "commit": sha}
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
@@ -858,17 +888,20 @@ def read_local_instructions(local_path):
     return text, None
 
 
-def render_instructions(local_path, local_text):
+def render_instructions(local_path, local_text, header=None):
     """The whole global instruction file in newline form: a header, each block, then the local file.
+
+    A caller writing the same content for another agent passes its own header, which is the only part that differs.
 
     Rendered whole rather than merged into whatever the file held. Hand-written sections outside the
     blocks were never written or checked, so they restated rules in wording the fleet had since changed.
     Every session on the host read them anyway.
     """
-    header = (
-        "<!-- Written by ProjectTemplate host-setup/agent-safety, which rewrites this whole file on "
-        f"every install. Put host-specific content in {local_path}, appended below. -->"
-    )
+    if header is None:
+        header = (
+            "<!-- Written by ProjectTemplate host-setup/agent-safety, which rewrites this whole file on "
+            f"every install. Put host-specific content in {local_path}, appended below. -->"
+        )
     parts = [header]
     parts += [
         (HERE / filename).read_text(encoding="utf-8").strip() for _, filename in CLAUDE_MD_BLOCKS
@@ -1373,7 +1406,7 @@ def stamp_line(stamp):
     )
     if host.get("wsl"):
         where += " (WSL)"
-    commit = str(src.get("commit", "unknown"))[:7] + ("-dirty" if src.get("dirty") else "")
+    commit = str(src.get("commit") or "unknown")[:7] + ("-dirty" if src.get("dirty") else "")
     held = stamp.get("blocks")
     blocks = (
         ", ".join(f"{k} {v}" for k, v in sorted(held.items()))
@@ -1398,7 +1431,7 @@ def report(claude_home):
     """
     path = claude_home / "agent-safety-stamp.json"
     current = payload_digest()
-    print(f"This checkout: payload {current}, hub {source_ref().get('commit', 'unknown')[:7]}")
+    print(f"This checkout: payload {current}, hub {(source_ref().get('commit') or 'unknown')[:7]}")
     try:
         raw = read_regular_file(path)
         if raw is None:
@@ -1429,6 +1462,14 @@ def report(claude_home):
         )
         return 2
     print(f"This machine:  {stamp_line(stamp)}")
+    # The payload digest decides currency, so neither source shape below is a problem in itself.
+    held_source = stamp.get("source", {})
+    if held_source.get("vcs") == "archive":
+        print("Note: installed from a fetched archive, which has no checkout to compare against.")
+    elif held_source.get("vcs") == "none":
+        print(
+            "Note: installed from a tree that named no commit, so the stamp cannot say which hub revision it holds."
+        )
     # The stamp says what was installed; the machine says what is there now.
     # A block edited or deleted by hand since the install makes both true and only the second current.
     live = blocks_present(claude_home / "CLAUDE.md")
