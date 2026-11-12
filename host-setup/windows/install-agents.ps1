@@ -408,12 +408,14 @@ function Get-ToolManager {
     $item = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
     if ($item -and $item.LinkTarget) { $p = "$p`n" + (($item.LinkTarget -replace '/', '\')) }
     foreach ($candidate in ($p -split "`n")) {
+        # The npm on PATH is asked first where it installs, since its shims sit directly in the prefix, as in Program Files\nodejs.
+        # It comes before every path shape, because a Node that scoop, choco, or winget installed puts npm's prefix under that manager's tree.
+        # Read by shape there, an npm global would upgrade Node itself rather than the tool.
+        # The path shape stays as a fallback so a copy npm cannot confirm is still never given the tool's own updater.
+        if (Test-NpmOwnership -Path $candidate) { return 'npm' }
         if ($candidate -like '*\WinGet\Packages\*' -or $candidate -like '*\Microsoft\WinGet\Links\*') { return 'winget' }
         if ($candidate -like '*\scoop\*') { return 'scoop' }
         if ($candidate -like '*\chocolatey\*') { return 'choco' }
-        # The npm on PATH is asked first where it installs, since its shims sit directly in the prefix, as in Program Files\nodejs.
-        # The path shape stays as a fallback so a copy npm cannot confirm is still never given the tool's own updater.
-        if (Test-NpmOwnership -Path $candidate) { return 'npm' }
         if ($candidate -like '*\node_modules\*' -or $candidate -like '*\npm\*') { return 'npm' }
         if ($candidate -like '*\.bun\*') { return 'bun' }
     }

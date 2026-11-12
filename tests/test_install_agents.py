@@ -661,6 +661,17 @@ class TestInstallAgentsWindows(unittest.TestCase):
         row = json.loads(result.stdout)["tools"][0]
         self.assertEqual(row["manager"], "npm")
 
+    def test_an_npm_global_under_a_scoop_node_is_npms_and_not_scoops(self) -> None:
+        prefix = self.dir / "scoop" / "persist" / "nodejs" / "bin"
+        (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
+        self.stub("codex", "codex-cli 0.1.0", prefix)
+        self.stub("npm", "npm 10.0.0")
+        self.scoop_which(f"{self.dir}/scoop/apps/nodejs/current/node.exe")
+        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=prefix)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("npm install -g @openai/codex@latest", " ".join(self.recorded()))
+        self.assertNotIn("scoop update", " ".join(self.recorded()))
+
     def test_files_outside_the_npm_prefix_are_not_claimed_by_that_npm(self) -> None:
         (self.dir / "npm_prefix").write_text(str(self.dir / "somewhere"), encoding="utf-8")
         elsewhere = self.dir / "node_modules" / ".bin"
