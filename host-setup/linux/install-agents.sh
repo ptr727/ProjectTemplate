@@ -465,7 +465,7 @@ mise_step() {
         return 0
     fi
     # A Node runtime is never changed for an agent in it.
-# An upgrade would leave the agent behind, and a removal would take the runtime from under it.
+    # An upgrade would leave the agent behind, and a removal would take the runtime from under it.
     case "$name" in
     node | core:node | nodejs)
         MISE_WHY="it sits inside mise's Node, and the npm on PATH does not own it, so $action it where it was installed"
