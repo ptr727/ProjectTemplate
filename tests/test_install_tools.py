@@ -1206,7 +1206,7 @@ function warn { param([string]$Message) Write-Host "WARN $Message" }
 function die { param([string]$Message) throw $Message }
 function Get-Tool { param([string]$Name) @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.11', 'Microsoft.DotNet.SDK.9', 'Microsoft.DotNet.SDK.8', 'Microsoft.DotNet.SDK.7') } }
 function Get-ToolState { param([hashtable]$Tool) @{ Package = 'Microsoft.DotNet.SDK.10'; Installed = $null; Rows = @(); Available = '10.0.300'; Scope = @(); Status = 'missing' } }
-function Get-WingetInstalled { param([string]$Id) if ($Id -eq 'Microsoft.DotNet.SDK.8') { return , @(@{ Version = '8.0.1' }) } if ($Id -eq 'Microsoft.DotNet.SDK.7') { return $null } return , @() }
+function Get-WingetInstalled { param([string]$Id) if ($Id -eq 'Microsoft.DotNet.SDK.8') { return , @(@{ Version = '8.0.1' }) } if ($codes.PSObject.Properties['unknown'] -and $Id -eq $codes.unknown) { return $null } return , @() }
 function Resolve-InstalledVersion { param($Version) return $null }
 function Write-InstallFailure { param($ToolName, $Package, $Code, $Since, $Probe, $Executable) Write-Host "FAILURE $Package $Code" }
 $NOT_FOUND = -1978335212
@@ -1235,6 +1235,7 @@ class TestWindowsOptionalDotnetLine(unittest.TestCase):
     def test_only_winget_not_found_skips_an_optional_line(self) -> None:
         cases = {
             "not carried": ({"Microsoft.DotNet.SDK.11": -1978335212}, "FAILED "),
+            "unknown": ({"unknown": "Microsoft.DotNet.SDK.7"}, "FAILED dotnet"),
             "failed": ({"Microsoft.DotNet.SDK.11": 1}, "FAILED dotnet"),
         }
         for label, (codes, failed) in cases.items():
@@ -1249,8 +1250,9 @@ class TestWindowsOptionalDotnetLine(unittest.TestCase):
         self.assertIn("INSTALL Microsoft.DotNet.SDK.9", skipped)
         self.assertNotIn("INSTALL Microsoft.DotNet.SDK.8", skipped)
         self.assertIn("Microsoft.DotNet.SDK.8 is already installed", skipped)
-        self.assertNotIn("INSTALL Microsoft.DotNet.SDK.7", skipped)
-        self.assertIn("WARN dotnet: winget did not answer whether Microsoft.DotNet.SDK.7", skipped)
+        unknown = run_pwsh_harness(OPTIONAL_APPLY_HARNESS, cases["unknown"][0]).stdout
+        self.assertNotIn("INSTALL Microsoft.DotNet.SDK.7", unknown)
+        self.assertIn("WARN dotnet: winget did not answer whether Microsoft.DotNet.SDK.7", unknown)
 
 
 DOTNET_SDK_HARNESS = r"""

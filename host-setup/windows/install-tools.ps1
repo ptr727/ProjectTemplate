@@ -299,12 +299,12 @@ function Get-WingetInstalled {
     return , (Read-WingetTable -Text $text -Id $Id)
 }
 
-# Whether winget lists a package as installed, as installed, absent, or unknown where winget did not answer.
+# Whether winget lists a package: installed, absent, or unknown where winget did not answer.
 function Get-WingetPresence {
     param([Parameter(Mandatory)][string]$Id)
     $rows = Get-WingetInstalled -Id $Id
     if ($null -eq $rows) { return 'unknown' }
-    if (@($rows | Where-Object { $_ }).Count -gt 0) { return 'installed' }
+    if ($rows.Count -gt 0) { return 'installed' }
     return 'absent'
 }
 
@@ -1674,6 +1674,7 @@ function Invoke-ToolApply {
         }
         if ($presence -eq 'unknown') {
             warn "${ToolName}: winget did not answer whether $package is installed, so it is skipped"
+            $script:FAILED += $ToolName
             continue
         }
         $started = Get-Date
