@@ -2140,7 +2140,7 @@ def check_secrets_names(run):
 
 
 def check_dependabot_ecosystems(run):
-    """An ecosystem the tree implies, github-actions for workflows and devcontainers for a .devcontainer, is declared."""
+    """An ecosystem the tree implies, github-actions for workflows and devcontainers for .devcontainer/ or .devcontainer.json, is declared."""
     text = contents_text(
         gh(f"repos/{run.slug}/contents/.github/dependabot.yml?ref={run.ref}", ok404=True)
     )
@@ -2160,8 +2160,10 @@ def check_dependabot_ecosystems(run):
         e["name"].endswith((".yml", ".yaml")) for e in workflows
     ):
         implied["github-actions"] = ".github/workflows/ is present"
-    if gh(f"repos/{run.slug}/contents/.devcontainer?ref={run.ref}", ok404=True) is not None:
-        implied["devcontainers"] = ".devcontainer/ is present"
+    for path in (".devcontainer", ".devcontainer.json"):
+        if gh(f"repos/{run.slug}/contents/{path}?ref={run.ref}", ok404=True) is not None:
+            implied["devcontainers"] = f"{path} is present"
+            break
     return [
         (
             "DRIFT",
