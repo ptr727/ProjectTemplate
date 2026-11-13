@@ -1314,6 +1314,10 @@ class InterruptTests(unittest.TestCase):
     whether its `gh` outlived it.
     """
 
+    @unittest.skipIf(
+        signal.getsignal(signal.SIGINT) is signal.SIG_IGN,
+        "the script keeps a SIGINT it inherits as ignored, as a background job's is",
+    )
     def test_a_signal_mid_run_stops_gh_and_ends_the_script_by_it(self) -> None:
         """A SIGTERM right after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
         for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
