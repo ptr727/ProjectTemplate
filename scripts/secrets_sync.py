@@ -348,8 +348,14 @@ def title_for(home: Path, raw: str) -> str:
 
 
 def is_link(path: Path) -> bool:
-    """A symbolic link, or on Windows a directory junction, which `is_symlink` reads as False."""
-    return path.is_symlink() or path.is_junction()
+    """A symbolic link, or on Windows a directory junction, which `is_symlink` reads as False.
+
+    Python 3.12 raises where a parent denies search, so that case is refused by name.
+    """
+    try:
+        return path.is_symlink() or path.is_junction()
+    except OSError as exc:
+        raise Refusal(f"{path} cannot be inspected: {exc.strerror or type(exc).__name__}") from exc
 
 
 def first_link(home: Path, title: str) -> Path | None:
@@ -531,15 +537,21 @@ def selected(
 
 
 def secrets_files(home: Path) -> list[str]:
-    """Titles of the regular files under the home's `.secrets` directory, read by name only."""
+    """Titles of the regular files under the home's `.secrets` directory, read by name only.
+
+    The list is informational, so an entry that cannot be read is left out rather than failing.
+    """
     root = home / SECRETS_DIR
-    if is_link(root) or not root.is_dir():
+    try:
+        if is_link(root) or not root.is_dir():
+            return []
+    except Refusal:
         return []
     found: list[str] = []
     for directory, _dirs, files in os.walk(root, followlinks=False):
         for name in files:
             path = Path(directory) / name
-            with contextlib.suppress(FileNotFoundError):
+            with contextlib.suppress(OSError):
                 if stat.S_ISREG(os.lstat(path).st_mode):
                     found.append(path.relative_to(home).as_posix())
     return sorted(found)
@@ -652,7 +664,7 @@ def plan_line(plan: Plan) -> str:
 def push_plans(
     a: argparse.Namespace, op: Op, home: Path, vault: Vault | None, items: dict[str, Item]
 ) -> list[Plan]:
-    override = int(a.mode, 8) if a.mode else None
+    override = int(a.mode, 8) if a.mode is not None else None
     if a.paths:
         titles = [title_for(home, p) for p in a.paths]
         if len({t.casefold() for t in titles}) != len(titles):
@@ -858,7 +870,7 @@ def write_secret(path: Path, data: bytes, mode: int | None) -> None:
 
 
 def cmd_pull(a: argparse.Namespace, op: Op) -> int:
-    if a.home:
+    if a.home is not None:
         home = Path(os.path.abspath(a.home))
         check_restore_home(home)
     else:
@@ -1207,10 +1219,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap = build_parser()
     a = ap.parse_args(argv)
     named = getattr(a, "bucket", None)
-    for bucket in named if isinstance(named, list) else [named] if named else []:
+    for bucket in named if isinstance(named, list) else [] if named is None else [named]:
         if not BUCKET.fullmatch(bucket):
             ap.error(f"--bucket takes lowercase letters, digits, and hyphens, not {bucket!r}")
-    if getattr(a, "mode", None) and (not MODE_ARG.fullmatch(a.mode) or int(a.mode, 8) > 0o777):
+    if getattr(a, "home", None) == "":
+        ap.error("--home takes a directory, not an empty string")
+    if getattr(a, "mode", None) is not None and (
+        not MODE_ARG.fullmatch(a.mode) or int(a.mode, 8) > 0o777
+    ):
         ap.error(f"--mode takes an octal permission such as 0600, not {a.mode!r}")
     dry_run = bool(getattr(a, "dry_run", False))
     try:

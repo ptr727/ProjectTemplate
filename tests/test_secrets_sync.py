@@ -1036,6 +1036,10 @@ class TestStatus(Case):
     def test_the_unheld_list_never_changes_the_exit_status(self) -> None:
         self.write(".secrets/unheld")
         self.assertEqual(self.run_main("status")[0], 0)
+        os.chmod(self.home / ".secrets", 0o600)
+        self.addCleanup(os.chmod, self.home / ".secrets", 0o700)
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 0, err)
 
     def test_with_a_bucket_it_compares_content_and_mode(self) -> None:
         vid = self.vault()
@@ -1088,6 +1092,18 @@ class TestArchive(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.fake.writes(), [["item", "delete", iid, "--vault", vid, "--archive"]])
         self.assertEqual([it["title"] for it in self.fake.items[vid].values()], [".secrets/beta"])
+        self.assertEqual(len(self.asked), 1)
+
+    def test_a_declined_archive_removes_nothing(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET)
+        self.reply = False
+        code, _, _ = self.run_main(
+            "archive", "--bucket", "alpha", str(self.home / ".secrets/alpha")
+        )
+        self.assertEqual(code, 1)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(len(self.fake.items[vid]), 1)
 
     def test_a_dry_run_archive_sends_nothing(self) -> None:
         vid = self.vault()
@@ -1310,6 +1326,23 @@ class TestOutput(Case):
             outcome = ss.run([])
         self.assertEqual(outcome, signal.SIGTERM)
         self.assertEqual(cleaned, [True])
+
+    def test_an_empty_value_is_never_read_as_absent(self) -> None:
+        for argv in (
+            ["pull", "--bucket", "alpha", "--home", ""],
+            ["push", "--bucket", "", "alpha"],
+            ["archive", "--bucket", "", "alpha"],
+            ["push", "--bucket", "alpha", "--mode", "", "alpha"],
+        ):
+            with (
+                self.subTest(argv=argv),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as raised,
+            ):
+                ss.main(argv)
+            with self.subTest(argv=argv):
+                self.assertEqual(raised.exception.code, 1)
+        self.assertEqual(self.fake.calls, [])
 
     def test_mode_takes_an_octal_permission(self) -> None:
         for mode in ("999", "1777", "rw", "60"):
