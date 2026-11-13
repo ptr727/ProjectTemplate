@@ -14,9 +14,9 @@ Much of what follows is external product state that the fleet observes rather th
 
 ## Coverage
 
-As of October 2026 both candidates run on their open-source tiers alone. Neither CodeRabbit nor Qodo reviews a private repository, so a private repository has Copilot as its only pull request reviewer. Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. CodeRabbit's open-source tier auto-reviews only a repository with at least ten stars, so on `ProjectTemplate`, which holds fewer, it reviews only on an explicit trigger. Qodo's open-source program auto-reviews only a public repository past a 200-star threshold, so in this fleet it auto-reviews `PlexCleaner` alone. The Claude GitHub App is installed on the account. It is not configured as a reviewer, since the `local-strict-review` Skill already runs a review pass before every push toward a pull request.
+As of October 2026 both candidates run on their open-source tiers alone. CodeRabbit does review the fleet's private repositories. Where one goes unreviewed, CodeRabbit posts a "Review limit reached" comment naming the plan's review rate limit. That limit, not visibility, is the constraint. It is why the explicit, once-per-pull-request policy suits a private repository. No Qodo comment or review appears on the recent private pull requests checked. Qodo's paid app is uninstalled, so a private repository gets no Qodo review. Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. CodeRabbit's open-source tier auto-reviews only a repository with at least ten stars, so on `ProjectTemplate`, which holds fewer, it reviews only on an explicit trigger. Qodo's open-source program auto-reviews only a public repository past a 200-star threshold, so in this fleet it auto-reviews `PlexCleaner` alone. The Claude GitHub App is installed on the account. It is not configured as a reviewer, since the `local-strict-review` Skill already runs a review pass before every push toward a pull request.
 
-The consequence a review loop actually needs: **a private repository has Copilot alone**, and no trigger produces a candidate review there. **A public repository below CodeRabbit's star gate still has a CodeRabbit review for the asking**. **A repository below Qodo's star gate gets no automatic Qodo review**, so its absence there is not waited on. `pr-review-conduct` "Which Reviewers a Repository Actually Has" states the rule an agent applies. That rule needs none of the facts above, since the skill is carried into repositories that hold no copy of this file.
+The consequence a review loop actually needs: **a private repository gets no Qodo review**, and its CodeRabbit reviews are bounded by the plan's rate limit. **A public repository below CodeRabbit's star gate still has a CodeRabbit review for the asking**. **A repository below Qodo's star gate gets no automatic Qodo review**, so its absence there is not waited on. `pr-review-conduct` "Which Reviewers a Repository Actually Has" states the rule an agent applies. That rule needs none of the facts above, since the skill is carried into repositories that hold no copy of this file.
 
 ## Interaction and Operations
 
@@ -47,6 +47,8 @@ The review body provides an actionable summary and links each finding to an inli
 Automatic review skips a pull request whose base is not the repository default unless `.coderabbit.yaml` lists the base under [`reviews.auto_review.base_branches`][coderabbit-auto-review]. The hub's file does so for `develop`. The default branch is always included, and each entry is a regex. On the open-source tier, automatic review also needs the repository to hold at least ten stars, which `ProjectTemplate` does not. So a review here is triggered by commenting `@coderabbitai review`. Until then CodeRabbit's summary comment says so in place of a review, while its status check reports success.
 
 Its collapsed analysis is verbose and can dominate API output. Its status context reports success while actionable comments remain, so finding state is read from review threads rather than from that check.
+
+A clean pass leaves no pull request review object. After an explicit `@coderabbitai review`, CodeRabbit can rewrite its summary and post "Review finished". It then leaves no review and no inline thread, as on HomeAutomation-Config pull request 1855. A count of review objects shows no CodeRabbit round for a clean pass. Only that comment tells a clean pass from no pass. CodeRabbit reads `.coderabbit.yaml` from the pull request's head branch. Its [configuration guide][coderabbit-yaml] names "the configuration present in the feature branch under review". A branch cut before a policy change keeps the old behavior until rebased. `pr_review.py` reads the agent policy from the base branch, so the two can disagree.
 
 On the open-source tier it is also rate limited. A rate-limited pull request receives a notice naming when a review can next run, in place of the review. The notice has the same shape as the star-gate skip notice while behaving oppositely. Re-triggering returns the notice again rather than a review.
 
@@ -86,7 +88,7 @@ The paid trials are over, and both candidates run on their no-cost open-source t
 
 [CodeRabbit's current plan documentation][coderabbit-plans] provides an open-source tier for public repositories with rate limits. Product plans are external state, so confirm the terms again before relying on them.
 
-Private repositories remain Copilot-only unless a candidate's approved plan, data terms, and GitHub App permissions receive a separate review.
+Qodo's use on a private repository needs a separate review of its approved plan, data terms, and GitHub App permissions.
 
 <!-- Docs -->
 
@@ -105,6 +107,7 @@ Private repositories remain Copilot-only unless a candidate's approved plan, dat
 
 [coderabbit-auto-review]: https://docs.coderabbit.ai/configuration/auto-review
 [coderabbit-config]: https://docs.coderabbit.ai/reference/configuration
+[coderabbit-yaml]: https://docs.coderabbit.ai/getting-started/yaml-configuration
 [coderabbit-plans]: https://docs.coderabbit.ai/management/plans
 [copilot-customize]: https://docs.github.com/en/copilot/tutorials/customize-code-review
 [copilot-exclusion]: https://docs.github.com/en/copilot/how-tos/configure-content-exclusion/exclude-content-from-copilot
