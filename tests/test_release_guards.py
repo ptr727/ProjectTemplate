@@ -18,7 +18,8 @@ from typing import NamedTuple
 
 from host_capability import bash_or_skip
 from runner_commands import forged_lines
-from workflow_steps import step_script, step_script_text, yaml_step, yaml_value
+from sdk_baseline import baseline_line
+from workflow_steps import job_texts, step_script, step_script_text, yaml_step, yaml_value
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 from git_env import without_git_location
@@ -2346,6 +2347,101 @@ gh() {
                         [(1, label)],
                         mislabeled_posix_blocks(f"```{label}\n{body}\n```\n"),
                     )
+
+
+class DotnetSdkLineCase(unittest.TestCase):
+    """The hub's .NET SDK steps install the line the caller's global.json selects, else 10.x."""
+
+    ACTION = REPO / ".github/actions/dotnet-sdk/action.yml"
+    SELECT = "Select .NET SDK line step"
+    last_stdout = ""
+
+    def select(self, global_json: str | None) -> list[str]:
+        """The outputs the selection step writes in a workspace holding `global_json`, or none.
+
+        The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
+        """
+        if shutil.which("jq") is None:
+            self.skipTest("the selection step reads global.json with jq, which this host lacks")
+        script = step_script(self.ACTION, self.SELECT)
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            if global_json is not None:
+                (workspace / "global.json").write_text(global_json, encoding="utf-8")
+            output = workspace / "github-output"
+            output.write_text("", encoding="utf-8")
+            result = run(
+                [bash_or_skip(), "-c", script],
+                cwd=workspace,
+                env={**os.environ, "GITHUB_OUTPUT": str(output)},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.last_stdout = result.stdout
+            return output.read_text(encoding="utf-8").splitlines()
+
+    def test_a_global_json_selecting_a_line_is_read(self) -> None:
+        selects = json.dumps({"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}})
+        self.assertEqual(self.select(selects), ["global-json-file=global.json"])
+
+    def test_a_caller_without_an_sdk_version_gets_10x(self) -> None:
+        runner_only = json.dumps({"test": {"runner": "Microsoft.Testing.Platform"}})
+        fallback = f"dotnet-version={baseline_line()[0]}.x"
+        self.assertEqual(self.select(runner_only), [fallback])
+        self.assertEqual(self.select(None), [fallback])
+
+    def test_a_global_json_jq_cannot_read_falls_back_with_a_warning(self) -> None:
+        """A comment is valid to the dotnet host and not to jq, so the fallback names the cause rather than failing."""
+        commented = '// the fleet line\n{"sdk": {"version": "11.0.100"}}'
+        self.assertEqual(self.select(commented), [f"dotnet-version={baseline_line()[0]}.x"])
+        self.assertIn(
+            f"::warning::jq could not read global.json (exit 5), so this installs the"
+            f" {baseline_line()[0]}.x fallback",
+            self.last_stdout,
+        )
+
+    def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
+        """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.
+
+        The two release defaults carry no SDK step of their own. The release task runs the shared
+        action ahead of each, under the condition that selects the default.
+        """
+        hub_files = [
+            *(REPO / ".github/workflows").glob("*.yml"),
+            *(REPO / ".github/actions").glob("*/action.yml"),
+        ]
+        self.assertIn(self.ACTION, hub_files)
+        for path in hub_files:
+            if path != self.ACTION:
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("actions/setup-dotnet@", text, path.relative_to(REPO))
+        # The action reads global.json from the workspace, so a step ahead of the checkout installs the fallback.
+        users = []
+        for path in (REPO / ".github/workflows").glob("*.yml"):
+            for job, body in job_texts(path.read_text(encoding="utf-8")).items():
+                use = body.find("uses: $/.github/actions/dotnet-sdk")
+                if use != -1:
+                    users.append(f"{path.name}:{job}")
+                    checkout = body.find("- name: Checkout code step")
+                    self.assertTrue(0 <= checkout < use, f"{path.name}:{job}")
+        self.assertGreaterEqual(len(users), 6, users)
+        release = (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        for job, default in (
+            ("dotnet-publish", "Run hub dotnet-publish default step"),
+            ("build-nuget", "Run hub build-nuget default step"),
+        ):
+            with self.subTest(job=job):
+                steps = job_texts(release)[job]
+                setup = yaml_step(steps, "Setup .NET SDK step")
+                self.assertEqual(yaml_value(setup, "uses"), "$/.github/actions/dotnet-sdk")
+                self.assertEqual(
+                    yaml_value(setup, "if"), yaml_value(yaml_step(steps, default), "if")
+                )
+                self.assertLess(steps.index("Setup .NET SDK step"), steps.index(default))
 
 
 if __name__ == "__main__":

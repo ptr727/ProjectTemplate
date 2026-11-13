@@ -189,6 +189,11 @@ jobs:
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
           project-file: ${{ inputs.dotnet_publish_project }}
 
+      # The hub default runs on the SDK line the caller's global.json selects, or the dotnet-sdk action's fallback line.
+      - name: Setup .NET SDK step
+        if: ${{ hashFiles('.github/actions/dotnet-publish/action.yml') == '' }}
+        uses: $/.github/actions/dotnet-sdk
+
       - name: Run hub dotnet-publish default step
         if: ${{ hashFiles('.github/actions/dotnet-publish/action.yml') == '' }}
         uses: $/.github/actions/dotnet-publish-default
@@ -227,6 +232,11 @@ jobs:
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           assembly-informational-version: ${{ needs.get-version.outputs.AssemblyInformationalVersion }}
           project-file: ${{ inputs.nuget_project }}
+
+      # The hub default runs on the SDK line the caller's global.json selects, or the dotnet-sdk action's fallback line.
+      - name: Setup .NET SDK step
+        if: ${{ hashFiles('.github/actions/build-nuget/action.yml') == '' }}
+        uses: $/.github/actions/dotnet-sdk
 
       - name: Run hub build-nuget default step
         if: ${{ hashFiles('.github/actions/build-nuget/action.yml') == '' }}

@@ -36,6 +36,11 @@ MANAGED_TOOLS=("${TOOLS[@]}")
 readonly PYTHON_PACKAGES=(build-essential ca-certificates curl python3 python3-dev python3-venv python3-pip)
 readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-setuptools python3-wheel)
 
+# The SDK line a fleet .NET repository's global.json selects in its sdk block, which the dotnet default set carries wherever the feed does.
+# It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
+# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
+readonly DOTNET_FLEET_LINE="10.0"
+
 MODE="report"
 DRY_RUN=false
 JSON_OUTPUT=false
@@ -854,16 +859,36 @@ dotnet_sdk_packages() {
 
 dotnet_sdk_latest() { dotnet_sdk_packages | tail -1; }
 
+# The fleet line's SDK package, printed only where the feed carries it.
+dotnet_sdk_fleet() {
+    local package
+    while read -r package; do
+        if [[ $package == "dotnet-sdk-$DOTNET_FLEET_LINE" ]]; then
+            printf '%s' "$package"
+            return 0
+        fi
+    done < <(dotnet_sdk_packages)
+}
+
+# The package the dotnet row reports on.
+# The fleet line comes first, since a host holding only a newer line builds no fleet .NET repository.
+dotnet_sdk_primary() {
+    local package
+    package=$(dotnet_sdk_fleet)
+    [[ -n $package ]] || package=$(dotnet_sdk_latest)
+    printf '%s' "$package"
+}
+
 dotnet_version() {
     local package
-    package=$(dotnet_sdk_latest)
+    package=$(dotnet_sdk_primary)
     [[ -n $package ]] || return 0
     apt_installed_version "$package"
 }
 
 dotnet_target() {
     local package
-    package=$(dotnet_sdk_latest)
+    package=$(dotnet_sdk_primary)
     [[ -n $package ]] || return 0
     apt_candidate_version "$package"
 }
@@ -905,24 +930,73 @@ microsoft_feed() {
     apt_refresh
 }
 
-# The default set is the newest SDK.
+# The default set is the fleet's SDK line and the newest line, one package where the two are the same.
+# The fleet line is the one a fleet .NET repository's global.json sdk block selects, so a host without it builds no repository carrying one.
+# The newest line is installed beside it, so a newer line stays an addition rather than a replacement.
 # The optional set is every other SDK line the feed carries, for a host that has to build against more than one.
 dotnet_install() {
     dotnet_feed || return 0
 
     local latest
     latest=$(dotnet_sdk_latest)
-    [[ -n $latest ]] || die "No .NET SDK package is available for $DISTRO_ID $DISTRO_VERSION"
+    if [[ -z $latest ]]; then
+        warn "No .NET SDK package is available for $DISTRO_ID $DISTRO_VERSION"
+        return 1
+    fi
 
-    apt_install "$latest"
-
-    [[ $WITH_OPTIONAL == true ]] || return 0
-    local package
-    while read -r package; do
-        if [[ $package != "$latest" ]]; then
-            apt_install "$package"
+    local fleet
+    fleet=$(dotnet_sdk_fleet)
+    local -a packages=()
+    if [[ -z $fleet ]]; then
+        # The run carries on, so a stand-up on a distro that lags the fleet line still completes, and the warning and report name the gap.
+        if [[ $(dotnet_source) == "packages.microsoft.com" ]]; then
+            warn "Microsoft's feed carries no dotnet-sdk-$DOTNET_FLEET_LINE for $DISTRO_ID $DISTRO_VERSION, so a fleet .NET repository selecting it will not build here"
+        else
+            warn "The distro feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, so a fleet .NET repository selecting it will not build here. Adding Microsoft's feed beside the distro's .NET packages is the mixing that breaks a host, so install that line by hand from a source that does not mix with them"
         fi
-    done < <(dotnet_sdk_packages)
+    else
+        packages+=("$fleet")
+    fi
+    if [[ $latest != "$fleet" ]]; then
+        packages+=("$latest")
+    fi
+
+    # The dotnet row reads the fleet line, so apply_tool's summary does not see the newest line move.
+    # It is recorded here instead, where the newest line is a package of its own.
+    # Without a fleet line the row reads the newest line itself, so apply_tool already records it.
+    local before=""
+    if [[ -n $fleet && $latest != "$fleet" ]]; then
+        before=$(apt_installed_version "$latest")
+    fi
+    local row_before
+    row_before=$(dotnet_version)
+
+    # Each set is one apt_install, so apt's exit status is the function's.
+    # That matters because apply_tool runs this function with set -e off, where a failed call in a sequence would be passed over.
+    apt_install "${packages[@]}" || return 1
+
+    if [[ -n $fleet && $latest != "$fleet" ]]; then
+        local now
+        now=$(apt_installed_version "$latest")
+        [[ $now == "$before" ]] || CHANGED+=("$latest ${before:--} -> ${now:--}")
+    fi
+
+    if [[ $WITH_OPTIONAL == true ]]; then
+        local -a optional=()
+        local package
+        while read -r package; do
+            if [[ $package != "$latest" && $package != "$fleet" ]]; then
+                optional+=("$package")
+            fi
+        done < <(dotnet_sdk_packages)
+        if [[ ${#optional[@]} -gt 0 ]] && ! apt_install "${optional[@]}"; then
+            # A failed tool gets no change recorded by apply_tool, so the default set's move is recorded before failing.
+            local row_now
+            row_now=$(dotnet_version)
+            [[ $row_now == "$row_before" ]] || CHANGED+=("dotnet ${row_before:--} -> ${row_now:--}")
+            return 1
+        fi
+    fi
 }
 
 # --- powershell ---
@@ -1128,6 +1202,22 @@ tool_note() {
         if [[ ${#sdks[@]} -eq 0 ]]; then
             note "dotnet" "no SDK package available, Microsoft's feed is not configured"
         else
+            local fleet latest
+            fleet=$(dotnet_sdk_fleet)
+            latest=$(dotnet_sdk_latest)
+            if [[ -z $fleet ]]; then
+                note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select"
+            fi
+            # The row reads the fleet line, so a pending upgrade of the newest line, also in the default set, is named here.
+            # Without a fleet line the row reads the newest line itself, so its own status already says so.
+            if [[ -n $fleet && $latest != "$fleet" ]]; then
+                local have want
+                have=$(apt_installed_version "$latest")
+                want=$(apt_candidate_version "$latest")
+                if [[ -n $have && $(tool_status "$have" "$want") == "outdated" ]]; then
+                    note "dotnet" "$latest is at $have and the feed carries $want, --upgrade moves it"
+                fi
+            fi
             readarray -t missing < <(apt_missing "${sdks[@]}")
             if [[ ${#missing[@]} -gt 0 ]]; then
                 note "dotnet" "SDK line(s) not installed: ${missing[*]}"
@@ -1433,7 +1523,7 @@ list_tools() {
     log "Package sets:"
     info "python default  : ${PYTHON_PACKAGES[*]}"
     info "python optional : ${PYTHON_OPTIONAL[*]}"
-    info "dotnet default  : the newest SDK line the feed carries"
+    info "dotnet default  : dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select, and the newest line the feed carries"
     info "dotnet optional : every other SDK line the feed carries"
 }
 

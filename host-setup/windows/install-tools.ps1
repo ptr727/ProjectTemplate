@@ -634,6 +634,11 @@ function Write-InstallFailure {
 
 # --- Tools ---
 
+# The SDK major a fleet .NET repository's global.json selects in its sdk block, the winget package's major.
+# It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
+# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
+$DOTNET_MAJOR = 10
+
 # Managed tools, in the order a report lists them.
 # Every one is a single winget package, which is what makes this a table where the Linux script needs several functions per tool.
 # Probe names the executable that proves the tool is present when winget knows no package for it.
@@ -654,7 +659,7 @@ $TOOLS = @(
     @{ Name = 'uv'; Package = 'astral-sh.uv'; Probe = 'uv'; Optional = @(); Family = '' }
     @{ Name = 'docker'; Package = 'Docker.DockerDesktop'; Probe = 'docker'; Optional = @(); Family = '' }
     @{ Name = 'node'; Package = 'OpenJS.NodeJS.LTS'; Probe = 'node'; Optional = @(); Family = 'OpenJS.NodeJS' }
-    @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.9', 'Microsoft.DotNet.SDK.8'); Family = '' }
+    @{ Name = 'dotnet'; Package = "Microsoft.DotNet.SDK.$DOTNET_MAJOR"; Probe = 'dotnet'; Optional = @("Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 1)", "Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 2)"); Family = '' }
 )
 
 function Get-Tool {
