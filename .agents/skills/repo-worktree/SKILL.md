@@ -225,10 +225,10 @@ in the new tree.
   already holds, as the Husky.Net step above does, changes nothing and is not this case. Switching
   installers is the same act, since `prek install` over a pre-commit framework hook moves the original aside and chains to it. That chaining has left every commit in every checkout failing on the
   chained script. A missing or wrong shared hook is not repaired from the worktree. It is put to
-  the maintainer through the interface's prompt, per `GOVERNANCE.md` "Communicating with the
-  User". A line in a handoff does not discharge that. A seat with no prompt, such as a dispatched
-  one, escalates it to whoever dispatched it, per `pr-review-conduct` "Escalate to the maintainer
-  when". The question names the
+  the maintainer per `GOVERNANCE.md` "Communicating with the User", through the interface's prompt
+  where there is one. A line in a handoff does not discharge that. A seat that cannot reach the
+  maintainer directly, such as a dispatched one, escalates it per `pr-review-conduct` "Escalate to
+  the maintainer when". The question names the
   repository's documented install command and whether the hooks pass on this platform. An install
   that fails every commit is a cost it must name. On the maintainer's yes, the agent runs that
   command against the base clone by absolute path. One install there covers every linked worktree
