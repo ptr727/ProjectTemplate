@@ -346,6 +346,11 @@ QUOTA_REFUSED = (
     "review has reached their quota limit."
 )
 
+BILLING_REFUSED = (
+    "The job was not started because a payment on this account failed or its spending limit "
+    "is too low."
+)
+
 # Quoted from the corpus rather than invented: CodeRabbit's own comment, trimmed to the marker and its opening line.
 # The rest is CodeRabbit's ordinary walkthrough prose.
 RATE_LIMITED_COMMENT = (
@@ -1393,6 +1398,26 @@ class TestQuotaRefusal(GqlCase):
         """The same opening-line anchor that protects `refusal_of` protects this reading too."""
         body = "## Pull request overview\n\nThis PR documents: " + QUOTA_REFUSED + "\n"
         self.assertFalse(pr_review_rounds.quota_refusal({"body": body}))
+
+    def test_a_billing_failure_notice_covers_nothing_and_owes_no_acknowledgment(self) -> None:
+        """A job that never started reviewed nothing, so it is no round on any head.
+
+        Read as a review, it counted toward the round cap and held the head for an acknowledgment
+        of a body with no overview. On an earlier head it left a noted part `merge` refused on.
+        """
+        self.assertTrue(pr_review_rounds.quota_refusal({"body": BILLING_REFUSED}))
+        self.assertEqual(
+            0, pr_review_rounds.reviewed_heads(payload([review(body=BILLING_REFUSED)]))
+        )
+        self.answer(payload([review(body=BILLING_REFUSED)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=QUOTA", out)
+        self.assertNotIn("review_on_head=yes", out)
+        self.assertNotIn("shapes=HELD", out)
+        self.answer(payload([review(oid=OLD, body=BILLING_REFUSED, rid="A"), review(rid="B")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("shapes=NOTED", out)
+        self.assertNotIn("the body carries no", out)
 
 
 class TestRawLogRead(unittest.TestCase):

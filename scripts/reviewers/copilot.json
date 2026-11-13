@@ -3,9 +3,14 @@
   "vetted": true,
   "format_marker": "ccr-overview-v2",
   "comment_heading": "",
-  "refusal_openings": ["wasn.t able to review", "was not able to review", "unable to review"],
+  "refusal_openings": [
+    "wasn.t able to review",
+    "was not able to review",
+    "unable to review",
+    "job was not started"
+  ],
   "refusal_kinds": {
-    "quota": ["reached (?:their|its|his|her|your|my) quota limit"],
+    "quota": ["reached (?:their|its|his|her|your|my) quota limit", "spending limit"],
     "error": ["encountered an error"],
     "file_count": ["maximum number of files"],
     "excluded": ["review any files in this pull request"]
