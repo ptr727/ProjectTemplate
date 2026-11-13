@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Exercise secrets_sync.py's guards against a fake `op` holding in-memory vaults.
 
-Every case drives the real subcommands through `main`, with `run_op` replaced by the fake. The
-properties under test are what the tool decides and in what order it writes, not what `op` does.
-The interrupt cases are the exception. They run the script under its interpreter with an
+The cases drive the real subcommands through `main`, with `run_op` replaced by the fake, and a
+few call a parser directly. The properties under test are what the tool decides and in what order
+it writes, not what `op` does. The interrupt cases are the exception. They run the script under its interpreter with an
 executable stub `op` on PATH, since only a real child can show it is stopped.
 
 Every name, title, and value here is constructed. No case reads the real home directory.
@@ -75,6 +75,14 @@ class FakeOp:
         self.fail_before: set[tuple[str, ...]] = set()
         self.fail_after: set[tuple[str, ...]] = set()
         self.raise_on: dict[tuple[str, ...], BaseException] = {}
+        self.signin_output = (
+            b'# a constructed comment line\nexport OP_SESSION_alpha="constructed-token"\n'
+        )
+        self.signin_token = "constructed-token"
+        self.edit_moves_id = False
+        self.merge_tags = False
+        self.archive_noop = False
+        self.omit_updated = False
 
     def add_vault(self, name: str) -> str:
         vid = f"v{next(self.ids)}"
@@ -133,10 +141,8 @@ class FakeOp:
             signed_in = self.token is not None and env.get("OP_SESSION_alpha") == self.token
             return ok(b"constructed-user") if self.ambient or signed_in else FAILED
         if key == ("signin",):
-            self.token = "constructed-token"
-            return ok(
-                b'# a constructed comment line\nexport OP_SESSION_alpha="constructed-token"\n'
-            )
+            self.token = self.signin_token
+            return ok(self.signin_output)
         if key == ("signout",):
             self.token = None
             return ok()
@@ -158,6 +164,8 @@ class FakeOp:
                     "title": it["title"],
                     "updated_at": it["updated_at"],
                 }
+                if self.omit_updated:
+                    del row["updated_at"]
                 tags = it["tags"]
                 if tags:
                     row["tags"] = list(tags) if isinstance(tags, tuple) else tags
@@ -180,13 +188,18 @@ class FakeOp:
             assert isinstance(content, bytes)
             return ok(content + (b"corrupted" if self.corrupt else b""))
         if key == ("item", "edit"):
-            vault[argv[2]].update(
-                tags=tuple(opt(argv, "--tags").split(",")), updated_at=self.stamp()
-            )
+            tags = tuple(opt(argv, "--tags").split(","))
+            previous = vault[argv[2]]["tags"]
+            if self.merge_tags and isinstance(previous, tuple):
+                tags = (*previous, *tags)
+            vault[argv[2]].update(tags=tags, updated_at=self.stamp())
+            if self.edit_moves_id:
+                vault[f"i{next(self.ids)}"] = vault.pop(argv[2])
             return ok()
         if key == ("item", "delete"):
             assert "--archive" in argv, argv
-            vault.pop(argv[2])
+            if not self.archive_noop:
+                vault.pop(argv[2])
             return ok()
         raise AssertionError(f"unexpected op call {argv}")
 
@@ -356,6 +369,30 @@ class TestSession(Case):
         self.assertIn("session ended", err)
         self.assertEqual(self.fake.writes(), [])
 
+    def test_a_session_whoami_refuses_is_signed_out_and_fails(self) -> None:
+        self.fake.ambient = False
+        self.fake.signin_token = "another-token"
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 2)
+        self.assertIn("does not accept", err)
+        self.assertEqual(self.fake.keys()[-1], ("signout",))
+
+    def test_signin_output_that_does_not_parse_is_still_signed_out(self) -> None:
+        self.fake.ambient = False
+        self.fake.signin_output = b"constructed output with no assignment\n"
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 2)
+        self.assertIn("session assignment", err)
+        self.assertEqual(self.fake.keys()[-1], ("signout",))
+
+    def test_a_failed_signin_leaves_nothing_to_sign_out(self) -> None:
+        self.fake.ambient = False
+        self.fake.fail_before.add(("signin",))
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 2)
+        self.assertIn("op signin failed", err)
+        self.assertNotIn(("signout",), self.fake.keys())
+
 
 class TestTitles(Case):
     def test_unsafe_titles_are_refused_alike_on_every_platform(self) -> None:
@@ -441,6 +478,15 @@ class TestTitles(Case):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
             ss.main(["status", "--bucket", "Alpha"])
         self.assertEqual(raised.exception.code, 1)
+
+    def test_a_windows_junction_on_the_path_is_never_written_through(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        (self.home / ".secrets").mkdir()
+        with unittest.mock.patch.object(Path, "is_junction", lambda path: path.name == ".secrets"):
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 1)
+        self.assertIn("link", err)
+        self.assertEqual(list((self.home / ".secrets").iterdir()), [])
 
 
 @POSIX_ONLY
@@ -587,6 +633,64 @@ class TestPush(Case):
         self.assertEqual(code, 1)
         self.assertIn("case-insensitively", err)
 
+    def test_a_file_changed_after_the_plan_is_not_pushed(self) -> None:
+        path = self.write(".secrets/alpha")
+
+        def change(question: str) -> bool:
+            path.write_bytes(b"changed\n")
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", change):
+            code, _, err = self.push(str(path))
+        self.assertEqual(code, 1)
+        self.assertIn("changed after the plan", err)
+        self.assertEqual([key_of(a) for a in self.fake.writes()], [("vault", "create")])
+
+    def test_an_edit_that_moves_the_item_to_another_id_fails(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n")
+        self.write(".secrets/alpha")
+        self.fake.edit_moves_id = True
+        code, _, err = self.push()
+        self.assertEqual(code, 2)
+        self.assertIn("different item", err)
+
+    def test_tags_that_merge_rather_than_replace_fail(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode:0640",))
+        self.write(".secrets/alpha")
+        self.fake.merge_tags = True
+        code, _, err = self.push()
+        self.assertEqual(code, 2)
+        self.assertIn("mode tags", err)
+
+    def test_a_vault_create_that_reports_failure_but_landed_is_used(self) -> None:
+        path = self.write(".secrets/alpha")
+        self.fake.fail_after.add(("vault", "create"))
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.fake.keys().count(("vault", "create")), 1)
+        self.assertEqual(list(self.fake.vaults.values()), ["Secrets alpha"])
+
+    def test_a_vault_create_that_failed_stops_the_push(self) -> None:
+        path = self.write(".secrets/alpha")
+        self.fake.fail_before.add(("vault", "create"))
+        code, _, _ = self.push(str(path))
+        self.assertEqual(code, 2)
+        self.assertEqual([key_of(a) for a in self.fake.writes()], [("vault", "create")])
+
+    def test_two_paths_differing_only_in_case_are_refused(self) -> None:
+        upper = self.write(".secrets/Token")
+        lower = self.write(".secrets/token")
+        code, _, err = self.push(str(upper), str(lower))
+        self.assertEqual(code, 1)
+        self.assertIn("differ only in case", err)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_a_directory_at_a_title_is_refused(self) -> None:
+        (self.home / ".secrets/alpha").mkdir(parents=True)
+        code, _, err = self.push(str(self.home / ".secrets/alpha"))
+        self.assertEqual(code, 1)
+        self.assertIn("not a regular file", err)
+
 
 class TestWindowsModes(Case):
     """Windows behavior, reached by patching the platform switch, so it runs on every platform."""
@@ -711,6 +815,39 @@ class TestPull(Case):
         self.assertEqual(self.run_main("pull", "--bucket", "alpha", "--yes")[0], 0)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_a_file_written_during_the_prompt_is_not_replaced(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET)
+        self.fake.add_item(vid, ".secrets/beta", SECRET)
+        self.write(".secrets/beta", b"local\n")
+
+        def race(question: str) -> bool:
+            self.write(".secrets/alpha", b"raced\n")
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", race):
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 1)
+        self.assertIn("changed locally", err)
+        self.assertEqual((self.home / ".secrets/alpha").read_bytes(), b"raced\n")
+
+    def test_a_restore_home_that_is_absent_or_a_file_is_refused(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        regular = self.scratch / "regular"
+        regular.write_bytes(b"")
+        for target in (self.scratch / "absent", regular):
+            with self.subTest(target=target.name):
+                code, _, err = self.run_main("pull", "--bucket", "alpha", "--home", str(target))
+                self.assertEqual(code, 1)
+                self.assertIn("--home", err)
+
+    def test_a_directory_at_a_title_is_refused(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        (self.home / ".secrets/alpha").mkdir(parents=True)
+        code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 1)
+        self.assertIn("not a regular file", err)
+
 
 @POSIX_ONLY
 class TestStatus(Case):
@@ -776,6 +913,32 @@ class TestArchive(Case):
         self.assertEqual(code, 1)
         self.assertEqual(self.fake.writes(), [])
 
+    def test_a_delete_that_reports_failure_but_landed_is_verified(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        self.fake.fail_after.add(("item", "delete"))
+        code, _, err = self.run_main(
+            "archive", "--bucket", "alpha", str(self.home / ".secrets/alpha")
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("no longer listed", err)
+
+    def test_a_delete_that_failed_is_reported(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        self.fake.fail_before.add(("item", "delete"))
+        code, _, _ = self.run_main(
+            "archive", "--bucket", "alpha", str(self.home / ".secrets/alpha")
+        )
+        self.assertEqual(code, 2)
+
+    def test_an_item_still_listed_after_archive_fails(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        self.fake.archive_noop = True
+        code, _, err = self.run_main(
+            "archive", "--bucket", "alpha", str(self.home / ".secrets/alpha")
+        )
+        self.assertEqual(code, 2)
+        self.assertIn("still listed", err)
+
 
 class TestSelftest(Case):
     def test_selftest_measures_in_a_scratch_vault_and_removes_it(self) -> None:
@@ -803,6 +966,14 @@ class TestSelftest(Case):
             code, out, _ = self.run_main("selftest")
         self.assertEqual(code, 1)
         self.assertIn("FAILS", out)
+        self.assertEqual(self.fake.vaults, {})
+
+    def test_a_missing_update_time_field_is_measured_before_it_stops_the_run(self) -> None:
+        self.fake.omit_updated = True
+        with unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)):
+            code, out, _ = self.run_main("selftest")
+        self.assertEqual(code, 2)
+        self.assertRegex(out, r"FAILS\s+item list carries 'updated_at'")
         self.assertEqual(self.fake.vaults, {})
 
 
@@ -847,6 +1018,18 @@ class TestOutput(Case):
                 ss.main(argv)
             with self.subTest(argv=argv):
                 self.assertEqual(raised.exception.code, expected)
+        self.assertEqual(self.fake.calls, [])
+
+    def test_mode_takes_an_octal_permission(self) -> None:
+        for mode in ("999", "1777", "rw", "60"):
+            with (
+                self.subTest(mode=mode),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as raised,
+            ):
+                ss.main(["push", "--bucket", "alpha", "--mode", mode, "alpha"])
+            with self.subTest(mode=mode):
+                self.assertEqual(raised.exception.code, 1)
         self.assertEqual(self.fake.calls, [])
 
 

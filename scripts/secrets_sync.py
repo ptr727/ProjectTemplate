@@ -249,10 +249,10 @@ def session(op: Op) -> Iterator[None]:
     signin = run_op(op.argv(["signin"]), op.env(), attached=True)
     if signin.returncode != 0:
         raise Execution(f"op signin failed rc={signin.returncode}")
-    name, value = parse_session(signin.stdout)
-    op.session = {name: value}
     op.created = True
     try:
+        name, value = parse_session(signin.stdout)
+        op.session = {name: value}
         if op.probe(["whoami"]).returncode != 0:
             raise Execution("op whoami does not accept the session op signin printed")
         yield
@@ -321,12 +321,17 @@ def title_for(home: Path, raw: str) -> str:
     return validate_title(relative.as_posix())
 
 
+def is_link(path: Path) -> bool:
+    """A symbolic link, or on Windows a directory junction, which `is_symlink` reads as False."""
+    return path.is_symlink() or path.is_junction()
+
+
 def refuse_symlinks(home: Path, title: str) -> None:
-    """Refuse a title whose path below the home directory passes through a symbolic link."""
+    """Refuse a title whose path below the home directory passes through a link."""
     current = home
     for part in title.split("/"):
         current = current / part
-        if current.is_symlink():
+        if is_link(current):
             raise Refusal(
                 f"{title}: {current} is a symbolic link, which this tool never reads or writes through"
             )
@@ -463,8 +468,6 @@ def read_local(path: Path) -> Local:
         st = os.lstat(path)
     except FileNotFoundError:
         return Local(None, None, None)
-    if stat.S_ISLNK(st.st_mode):
-        raise Refusal(f"{path} is a symbolic link, which this tool never reads or writes through")
     if not stat.S_ISREG(st.st_mode):
         raise Refusal(f"{path} is not a regular file")
     moment = datetime.datetime.fromtimestamp(st.st_mtime, tz=datetime.UTC)
@@ -493,15 +496,15 @@ def selected(
 def secrets_files(home: Path) -> list[str]:
     """Titles of the regular files under the home's `.secrets` directory, read by name only."""
     root = home / SECRETS_DIR
-    if root.is_symlink() or not root.is_dir():
+    if is_link(root) or not root.is_dir():
         return []
     found: list[str] = []
-    for directory, dirs, files in os.walk(root, followlinks=False):
-        dirs[:] = [d for d in dirs if not (Path(directory) / d).is_symlink()]
+    for directory, _dirs, files in os.walk(root, followlinks=False):
         for name in files:
             path = Path(directory) / name
-            if stat.S_ISREG(os.lstat(path).st_mode):
-                found.append(path.relative_to(home).as_posix())
+            with contextlib.suppress(FileNotFoundError):
+                if stat.S_ISREG(os.lstat(path).st_mode):
+                    found.append(path.relative_to(home).as_posix())
     return sorted(found)
 
 
@@ -611,8 +614,8 @@ def push_plans(
     override = int(a.mode, 8) if a.mode else None
     if a.paths:
         titles = [title_for(home, p) for p in a.paths]
-        if len(set(titles)) != len(titles):
-            raise Refusal("a path is named more than once")
+        if len({t.casefold() for t in titles}) != len(titles):
+            raise Refusal("two paths name one title, or titles that differ only in case")
         for title in titles:
             for existing in items:
                 if existing != title and existing.casefold() == title.casefold():
@@ -771,7 +774,7 @@ def check_restore_home(home: Path) -> None:
         st = os.lstat(home)
     except FileNotFoundError as exc:
         raise Refusal(f"--home {home} does not exist") from exc
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
+    if is_link(home) or not stat.S_ISDIR(st.st_mode):
         raise Refusal(f"--home {home} is not a directory")
     if not IS_WINDOWS and stat.S_IMODE(st.st_mode) != 0o700:
         raise Refusal(
@@ -784,10 +787,6 @@ def ensure_parents(home: Path, title: str) -> None:
     current = home
     for part in title.split("/")[:-1]:
         current = current / part
-        if current.is_symlink():
-            raise Refusal(
-                f"{title}: {current} is a symbolic link, which this tool never writes through"
-            )
         if not current.exists():
             os.mkdir(current, 0o700)
         elif not current.is_dir():
@@ -855,6 +854,10 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
         refuse_symlinks(home, plan.title)
+        if read_local(plan.path) != plan.local:
+            raise Refusal(
+                f"{plan.title} changed locally after the plan was printed, so it was not written"
+            )
         ensure_parents(home, plan.title)
         assert plan.remote is not None
         if plan.action == "chmod":
@@ -917,6 +920,18 @@ def listed(op: Op, vault: Vault, title: str) -> Item:
     return item
 
 
+def measure_fields(op: Op, vault: Vault, results: list[Measured]) -> None:
+    """Read the raw listing's field names before any parse, so a missing field is reported."""
+    raw = op.json(
+        ["item", "list", "--vault", vault.id, "--categories", "Document", "--format", "json"]
+    )
+    keys = sorted(raw[0]) if isinstance(raw, list) and raw and isinstance(raw[0], dict) else []
+    results.append(
+        Measured("item list carries 'updated_at'", "updated_at" in keys, f"row keys {keys}")
+    )
+    results.append(Measured("item list carries 'tags'", "tags" in keys, f"row keys {keys}"))
+
+
 def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured]) -> None:
     """Measure each `op` behavior the sync relies on, with constructed content only."""
     created: dict[str, Item] = {}
@@ -939,6 +954,8 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
             write=True,
             detail=title,
         )
+        if not created:
+            measure_fields(op, vault, results)
         item = listed(op, vault, title)
         created[label] = item
         back = download(op, vault, item)
@@ -952,14 +969,6 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
             f"tags read back as {list(first.tags)}",
         )
     )
-    raw = op.json(
-        ["item", "list", "--vault", vault.id, "--categories", "Document", "--format", "json"]
-    )
-    keys = sorted(raw[0]) if isinstance(raw, list) and raw and isinstance(raw[0], dict) else []
-    results.append(
-        Measured("item list carries 'updated_at'", "updated_at" in keys, f"row keys {keys}")
-    )
-    results.append(Measured("item list carries 'tags'", "tags" in keys, f"row keys {keys}"))
     op.call(
         ["item", "edit", first.id, "--vault", vault.id, "--tags", "mode:0640"],
         write=True,
@@ -1166,15 +1175,20 @@ def run(argv: Sequence[str]) -> int | signal.Signals:
     """`main`, or the signal that interrupted it once every `finally` has released what it held."""
     received: list[int] = []
 
-    def on_sigterm(signum: int, _frame: FrameType | None) -> None:
+    def on_signal(signum: int, _frame: FrameType | None) -> None:
+        """Unwind on the first signal, passing over a later one that would cut the cleanup short."""
+        if received:
+            return
         received.append(signum)
         raise KeyboardInterrupt
 
-    signal.signal(signal.SIGTERM, on_sigterm)
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
     try:
         return main(argv)
     except KeyboardInterrupt:
-        signum = signal.Signals(received[-1] if received else signal.SIGINT)
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
         print(f"secrets_sync: interrupted by {signum.name}.", file=sys.stderr)
         return signum
 
