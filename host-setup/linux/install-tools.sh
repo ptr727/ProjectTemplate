@@ -370,7 +370,7 @@ dpkg_owns_path() {
 }
 
 # Return true when no dpkg package owns a path.
-# A failed ownership query stops the run rather than reading as unowned, since a caller removes what this calls unowned.
+# A failed ownership query dies rather than reading as unowned, since a caller removes what this calls unowned.
 path_is_unowned() {
     local path="$1" status=0
     dpkg_owns_path "$path" || status=$?
@@ -396,15 +396,19 @@ unowned_command_path() {
 remove_unowned_command() {
     local tool="$1" command="$2" label="$3" only="${4:-}" resolved
     while true; do
-        resolved=$(unowned_command_path "$command")
+        # The ownership test's own die ends only this substitution, so the run is ended here.
+        resolved=$(unowned_command_path "$command") || exit 1
         [[ -n $resolved ]] || break
         if [[ -n $only && $resolved != "$only" ]]; then
             warn "$tool: $resolved belongs to no package and is not $only, so it stays and keeps answering ahead of the package"
             break
         fi
-        log "$tool: removing downloaded copy at $resolved before the apt install"
+        log "$tool: removing downloaded copy at $resolved, which answers ahead of the package"
         confirm "  Remove $resolved?" || die "Declined, downloaded $label left as it is"
-        run_root rm -f "$resolved"
+        run_root rm -f "$resolved" || {
+            warn "$tool: failed to remove $resolved, it keeps answering ahead of the package"
+            break
+        }
         [[ $DRY_RUN == true ]] && break
         hash -r
     done
@@ -549,9 +553,6 @@ gh_target() { apt_candidate_version gh; }
 gh_install() {
     ensure_prerequisites
 
-    # The keyring moved to /etc/apt/keyrings and the sources file to deb822, so both predecessors are cleared.
-    remove_stale "$SOURCES_DIR/github-cli.list" "/usr/share/keyrings/githubcli-archive-keyring.gpg"
-
     if install_keyring "https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
         "$KEYRING_DIR/githubcli-archive-keyring.gpg" \
         "https://cli.github.com/packages/dists/stable/InRelease" false; then
@@ -562,6 +563,10 @@ gh_install() {
         "$KEYRING_DIR/githubcli-archive-keyring.gpg"; then
         APT_DIRTY=true
     fi
+
+    # The keyring moved to /etc/apt/keyrings and the sources file to deb822, so both predecessors are cleared.
+    # That happens once the replacement is written, so a key that fails its proof leaves the old source working.
+    remove_stale "$SOURCES_DIR/github-cli.list" "/usr/share/keyrings/githubcli-archive-keyring.gpg"
 
     apt_install gh
 }
@@ -845,7 +850,6 @@ docker_install() {
     fi
 
     ensure_prerequisites
-    remove_stale "$SOURCES_DIR/docker.list"
 
     if install_keyring "https://download.docker.com/linux/$DISTRO_ID/gpg" \
         "$KEYRING_DIR/docker.gpg" \
@@ -857,6 +861,7 @@ docker_install() {
         "$KEYRING_DIR/docker.gpg"; then
         APT_DIRTY=true
     fi
+    remove_stale "$SOURCES_DIR/docker.list"
 
     apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
@@ -1069,8 +1074,8 @@ powershell_non_apt_paths() {
     # A relative PATH entry such as "." or "./bin" is never trusted.
     # This is the same guard used by tool_shadow_path.
     local resolved
-    resolved=$(type -P pwsh 2>/dev/null || true)
-    if [[ $resolved == /* ]] && path_is_unowned "$resolved"; then
+    resolved=$(unowned_command_path pwsh) || exit 1
+    if [[ -n $resolved ]]; then
         case "$resolved" in
         /usr/local/bin/pwsh | /opt/microsoft/powershell/7/pwsh) ;;
         *) die "Non-apt pwsh at $resolved is outside the known cleanup paths, remove it before installing powershell" ;;
@@ -1121,9 +1126,6 @@ op_install() {
 
     ensure_prerequisites
 
-    # The vendor's documented one-line file goes first, since it names a different keyring and apt refuses two Signed-By values for one repository.
-    remove_stale "$SOURCES_DIR/1password.list"
-
     if install_keyring "https://downloads.1password.com/linux/keys/1password.asc" \
         "$KEYRING_DIR/1password-archive-keyring.gpg" \
         "https://downloads.1password.com/linux/debian/$ARCH/dists/stable/InRelease" true; then
@@ -1135,8 +1137,9 @@ op_install() {
         APT_DIRTY=true
     fi
 
-    # The vendor's keyring goes last, once no sources file this script writes still names it.
-    remove_stale "/usr/share/keyrings/1password-archive-keyring.gpg"
+    # The vendor's one-line file names another keyring, and apt refuses two Signed-By values for one repository.
+    # It goes once the replacement is written, so a key that fails its proof leaves the vendor's source working.
+    remove_stale "$SOURCES_DIR/1password.list" "/usr/share/keyrings/1password-archive-keyring.gpg"
 
     apt_install 1password-cli || return 1
     # Removed only once the package is in place, so a failed install leaves the working copy.
@@ -1263,7 +1266,7 @@ tool_note() {
         ;;
     ripgrep)
         local resolved
-        resolved=$(unowned_command_path rg)
+        resolved=$(unowned_command_path rg) || exit 1
         if [[ -n $resolved ]]; then
             note "ripgrep" "$(hide_home "$resolved") is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
         fi
@@ -1339,11 +1342,11 @@ tool_note() {
             note "op" "1Password's repository is not configured, so apt reads no upstream version yet"
         fi
         local resolved
-        resolved=$(unowned_command_path op)
+        resolved=$(unowned_command_path op) || exit 1
         if [[ $resolved == "$BIN_DIR/op" ]]; then
-            note "op" "$resolved is an unowned downloaded copy and an install or upgrade removes it once apt has installed the 1Password CLI"
+            note "op" "$resolved is an unowned downloaded copy, which an install that adds the package or any upgrade removes"
         elif [[ -n $resolved ]]; then
-            note "op" "$(hide_home "$resolved") belongs to no package and answers ahead of the package's copy, and an install leaves it in place"
+            note "op" "$(hide_home "$resolved") belongs to no package, and an install or upgrade leaves it in place in case it is a wrapper or a shim"
         fi
         ;;
     *) ;;
@@ -1442,6 +1445,7 @@ tool_unshadow() {
         ;;
     op)
         # Only beside an installed package, so the copy is never removed before anything replaces it.
+        # Under --install, apply_tool reaches this only while $BIN_DIR/op is absent, so --install never removes a newer download.
         if [[ -n $(op_version) ]]; then
             op_remove_download
         fi
@@ -1461,7 +1465,7 @@ tool_unshadow() {
 
             # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
             # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
-            if dpkg_owns_path "$resolved"; then
+            if ! path_is_unowned "$resolved"; then
                 warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
                 break
             fi
@@ -1513,8 +1517,7 @@ apply_tool() {
     # --upgrade brings $BIN_DIR current regardless, and --install with nothing there yet has nothing to protect.
     # --install with a managed copy already in place leaves it at its version by design.
     # So removing a newer shadow first would downgrade what PATH resolves to.
-    # An apt managed tool keeps no managed copy in $BIN_DIR, so a file there under its name is the download its unshadowing removes.
-    if [[ $MODE == "upgrade" || $(tool_mechanism "$tool") != "binary" || ! -x "$BIN_DIR/$tool" ]]; then
+    if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
         tool_unshadow "$tool"
     elif [[ -n $(tool_shadow_path "$tool") ]]; then
         log "$tool: still shadowed on PATH, --upgrade removes it, --install leaves it to avoid downgrading what's shadowing it"

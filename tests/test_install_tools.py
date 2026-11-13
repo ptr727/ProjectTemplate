@@ -409,14 +409,16 @@ op_remove_download() { printf 'REMOVE\\n'; }
         binary.chmod(0o755)
         return directory
 
-    def removal(self, owned: int, only: str) -> subprocess.CompletedProcess[str]:
-        """Run the shared removal over an `op` first on PATH, under a stubbed ownership answer."""
+    def removal(
+        self, owned: int, only: str, setup: str = "DRY_RUN=true"
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the shared removal over an `op` first on PATH, as apply_tool runs an install, with errexit off."""
         directory = self.unowned_copy()
         body = (
             f'PATH="{directory}:$PATH"\n'
             f"dpkg_owns_path() {{ return {owned}; }}\n"
-            "DRY_RUN=true\n"
-            f'remove_unowned_command op op "1Password CLI" "{only}"'
+            f"{setup}\n"
+            f'if remove_unowned_command op op "1Password CLI" "{only}"; then exit 0; else exit "$?"; fi'
         )
         return self.run_bash(body)
 
@@ -425,13 +427,13 @@ op_remove_download() { printf 'REMOVE\\n'; }
         self.assertEqual(result.returncode, 0, result.stderr)
         site = "https://downloads.1password.com/linux"
         keyring = "/etc/apt/keyrings/1password-archive-keyring.gpg"
+        vendor_keyring = "/usr/share/keyrings/1password-archive-keyring.gpg"
         self.assertEqual(
             result.stdout.splitlines(),
             [
-                "STALE /etc/apt/sources.list.d/1password.list",
                 f"KEYRING {site}/keys/1password.asc {keyring} {site}/debian/arm64/dists/stable/InRelease true",
                 f"SOURCES 1password {site}/debian/arm64 stable main {keyring}",
-                "STALE /usr/share/keyrings/1password-archive-keyring.gpg",
+                f"STALE /etc/apt/sources.list.d/1password.list {vendor_keyring}",
                 "APT 1password-cli",
                 "REMOVE",
             ],
@@ -474,6 +476,23 @@ if op_install; then exit 0; else exit "$?"; fi"""
         self.assertNotIn("rm -f", result.stdout)
         self.assertIn("Cannot determine dpkg ownership", result.stderr)
 
+    def test_a_failed_removal_warns_once_rather_than_looping(self) -> None:
+        result = self.removal(1, "", "ASSUME_YES=true\nrun_root() { return 1; }")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr.count("failed to remove"), 1, result.stderr)
+
+    def test_a_failed_ownership_query_stops_the_shadow_removal_too(self) -> None:
+        directory = self.unowned_copy()
+        (directory / "op").rename(directory / "jq")
+        body = f"""PATH="{directory}:$PATH"
+dpkg_owns_path() {{ return 2; }}
+DRY_RUN=true
+if tool_unshadow jq; then exit 0; else exit "$?"; fi"""
+        result = self.run_bash(body)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("rm -f", result.stdout)
+        self.assertIn("Cannot determine dpkg ownership", result.stderr)
+
     def test_unshadowing_waits_for_the_package(self) -> None:
         body = """op_version() { :; }
 op_remove_download() { printf 'REMOVE\\n'; }
@@ -482,8 +501,8 @@ tool_unshadow op"""
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_install_unshadows_before_reading_the_package_current(self) -> None:
-        body = """MODE=install
+    def test_upgrade_unshadows_beside_a_package_that_reads_current(self) -> None:
+        body = """MODE=upgrade
 op_version() { printf '2.42.0-1'; }
 op_target() { printf '2.42.0-1'; }
 tool_configured() { return 0; }
@@ -508,8 +527,8 @@ tool_effective_status op 2.42.0-1 2.42.0-1"""
 
     def test_the_report_names_an_unconfigured_repository_and_an_unowned_copy(self) -> None:
         cases = {
-            "/usr/local/bin/op": "is an unowned downloaded copy and an install or upgrade removes it",
-            "/opt/example/bin/op": "belongs to no package and answers ahead of the package's copy",
+            "/usr/local/bin/op": "is an unowned downloaded copy, which an install that adds",
+            "/opt/example/bin/op": "belongs to no package, and an install or upgrade leaves it",
         }
         for path, expected in cases.items():
             with self.subTest(path=path):
