@@ -2394,13 +2394,13 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
 
-    def test_a_global_json_jq_cannot_read_falls_back_with_a_warning(self) -> None:
-        """A comment is valid to the dotnet host and not to jq, so the fallback names the cause rather than failing."""
+    def test_a_global_json_jq_cannot_read_goes_to_setup_dotnet(self) -> None:
+        """A comment is valid to the dotnet host and to setup-dotnet's JSON5 read, so the file selects the line."""
         commented = '// the fleet line\n{"sdk": {"version": "11.0.100"}}'
-        self.assertEqual(self.select(commented), [f"dotnet-version={baseline_line()[0]}.x"])
+        self.assertEqual(self.select(commented), ["global-json-file=global.json"])
         self.assertIn(
-            f"::warning::jq could not read global.json (exit 5), so this installs the"
-            f" {baseline_line()[0]}.x fallback",
+            "::notice::jq could not read global.json (exit 5), so setup-dotnet reads the SDK line"
+            " from it as JSON5.",
             self.last_stdout,
         )
 
