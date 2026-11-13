@@ -90,6 +90,8 @@ class FakeOp:
         self.drop_create = False
         self.raw: dict[tuple[str, ...], bytes] = {}
         self.vault_create_noop = False
+        self.captured: list[bool] = []
+        self.account_add_lists = 1
 
     def add_vault(self, name: str) -> str:
         vid = f"v{next(self.ids)}"
@@ -124,9 +126,12 @@ class FakeOp:
     def writes(self) -> list[list[str]]:
         return [argv for argv, _, _ in self.calls if key_of(argv) in WRITE_KEYS]
 
-    def __call__(self, argv: Sequence[str], env: Mapping[str, str], attached: bool) -> ss.Outcome:
+    def __call__(
+        self, argv: Sequence[str], env: Mapping[str, str], attached: bool, capture: bool = True
+    ) -> ss.Outcome:
         argv = list(argv)
         self.calls.append((list(argv), dict(env), attached))
+        self.captured.append(capture)
         if "--account" in argv:
             index = argv.index("--account")
             del argv[index : index + 2]
@@ -146,6 +151,9 @@ class FakeOp:
 
         if key == ("account", "list"):
             return ok(json.dumps([{}] * self.accounts).encode())
+        if key == ("account", "add"):
+            self.accounts = self.account_add_lists
+            return ok()
         if key == ("whoami",):
             signed_in = self.token is not None and env.get("OP_SESSION_alpha") == self.token
             return ok(b"constructed-user") if self.ambient or signed_in else FAILED
@@ -333,9 +341,38 @@ class TestSession(Case):
         for argv, _, _ in self.fake.calls[2:]:
             self.assertEqual(argv[-2:], ["--account", "alpha"])
 
-    def test_no_configured_account_is_a_refusal(self) -> None:
+    def test_no_configured_account_without_a_terminal_is_a_refusal(self) -> None:
         self.fake.accounts = 0
-        self.assertEqual(self.run_main("status")[0], 1)
+        self.tty = False
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 1)
+        self.assertIn("op account add", err)
+        self.assertNotIn(("account", "add"), self.fake.keys())
+
+    def test_a_missing_account_is_added_on_the_terminal(self) -> None:
+        self.fake.accounts = 0
+        code, out, err = self.run_main("status")
+        self.assertEqual(code, 0, err)
+        index = self.fake.keys().index(("account", "add"))
+        self.assertTrue(self.fake.calls[index][2], "account add runs attached to the terminal")
+        self.assertFalse(
+            self.fake.captured[index], "account add keeps its own output on the terminal"
+        )
+        self.assertEqual(self.fake.keys()[index + 1], ("account", "list"))
+        self.assertNotIn("@", out + err)
+
+    def test_an_account_add_that_fails_or_lists_nothing_stops_the_run(self) -> None:
+        for fail in (True, False):
+            with self.subTest(fail=fail):
+                fake = FakeOp()
+                fake.accounts = 0
+                fake.account_add_lists = 0
+                if fail:
+                    fake.fail_before.add(("account", "add"))
+                with unittest.mock.patch.object(ss, "run_op", fake):
+                    code, _, err = self.run_main("status")
+                self.assertEqual(code, 2)
+                self.assertIn("op account add", err)
 
     def test_root_is_refused_before_any_call(self) -> None:
         with unittest.mock.patch.object(ss.os, "geteuid", lambda: 0, create=True):
@@ -650,20 +687,18 @@ class TestPush(Case):
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("item", "edit")])
         self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0640",))
 
-    def test_a_mode_change_against_a_newer_remote_tag_is_stale_too(self) -> None:
+    def test_a_mode_only_change_is_planned_without_a_time_check(self) -> None:
         vid = self.vault()
         self.fake.add_item(
             vid, ".secrets/alpha", SECRET, ("mode:0600",), updated="2099-01-01T00:00:00Z"
         )
-        path = self.write(".secrets/alpha", mode=0o644)
-        code, out, _ = self.push()
-        self.assertEqual(code, 0)
-        self.assertIn("--overwrite-newer", out)
-        code, _, err = self.push(str(path))
-        self.assertEqual(code, 1)
-        self.assertIn("--overwrite-newer", err)
-        self.assertEqual(self.fake.writes(), [])
-        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0600",))
+        self.write(".secrets/alpha", mode=0o644)
+        code, out, err = self.push()
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out, r"retag\s+\.secrets/alpha")
+        self.assertEqual(len(self.asked), 1)
+        self.assertEqual([key_of(a) for a in self.fake.writes()], [("item", "edit")])
+        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0644",))
 
     def test_a_malformed_tag_on_an_existing_item_needs_mode(self) -> None:
         vid = self.vault()
@@ -837,7 +872,10 @@ class TestPush(Case):
         lower = self.write(".secrets/token")
         code, _, err = self.push(str(upper), str(lower))
         self.assertEqual(code, 1)
-        self.assertIn("differ only in case", err)
+        if upper.samefile(lower):
+            self.assertIn("differs in case", err)
+        else:
+            self.assertIn("differ only in case", err)
         self.assertEqual(self.fake.writes(), [])
 
     def test_a_directory_at_a_title_is_refused(self) -> None:
@@ -1013,6 +1051,37 @@ class TestPull(Case):
         self.assertEqual(seen, [0o600])
         self.assertEqual(stat.S_IMODE((self.home / ".secrets/alpha").stat().st_mode), 0o644)
 
+    def test_a_replaced_file_keeps_its_group_and_a_new_one_takes_the_default(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
+        self.fake.add_item(vid, ".secrets/beta", SECRET)
+        path = self.write(".secrets/alpha", b"local\n")
+        seen: list[int] = []
+
+        def chown(fd: int, uid: int, gid: int) -> None:
+            self.assertEqual(uid, -1)
+            seen.append(gid)
+
+        with unittest.mock.patch.object(ss.os, "fchown", chown):
+            code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(seen, [path.stat().st_gid])
+        self.assertEqual(path.read_bytes(), SECRET)
+
+    def test_a_group_that_cannot_be_kept_is_refused_and_nothing_is_replaced(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha", b"local\n")
+
+        def refuse(fd: int, uid: int, gid: int) -> None:
+            raise PermissionError(1, "Operation not permitted")
+
+        with unittest.mock.patch.object(ss.os, "fchown", refuse):
+            code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("cannot keep its group", err)
+        self.assertEqual(path.read_bytes(), b"local\n")
+        self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["alpha"])
+
     def test_the_temporary_file_is_removed_when_the_rename_fails(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
 
@@ -1096,7 +1165,7 @@ class TestPull(Case):
     def test_a_read_back_that_differs_from_what_was_written_fails(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
 
-        def short_write(path: Path, data: bytes, mode: int | None) -> None:
+        def short_write(path: Path, data: bytes, mode: int | None, group: int | None) -> None:
             path.write_bytes(data[:-1])
 
         with unittest.mock.patch.object(ss, "write_secret", short_write):

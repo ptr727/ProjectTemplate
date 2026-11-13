@@ -13,10 +13,11 @@ Every `op` call goes through `run_op`, one at a time. The session reaches a chil
 environment and never through its argument list. Output never carries a secret, a full digest, or
 any of `op`'s JSON. A digest is shown as eight hex characters of an HMAC keyed per run.
 
-Several `op` behaviors are assumptions no official page states. They are the byte-exact document
-round-trip, the item list's `updated_at` and `tags` fields, and `--tags` replacing rather than
-adding. Each is read strictly here, so a different shape fails loudly rather than being guessed at.
-The `selftest` subcommand measures each one against a scratch vault.
+No official page states the `op` behaviors this relies on, so `selftest` measures them in a
+scratch vault. On `op` 2.42.0 it measured the byte-exact document round-trip, the item list's
+`updated_at` and `tags` fields, and `--tags` replacing rather than adding. It also measured the POSIX
+signin form. The PowerShell form, a desktop-app sign-in, several accounts, and Windows stay
+unmeasured. Each shape is read strictly, so a different one fails loudly rather than being guessed.
 """
 
 from __future__ import annotations
@@ -94,19 +95,22 @@ class Outcome(typing.NamedTuple):
     stderr: bytes
 
 
-def run_op(argv: Sequence[str], env: Mapping[str, str], attached: bool) -> Outcome:
+def run_op(
+    argv: Sequence[str], env: Mapping[str, str], attached: bool, capture: bool = True
+) -> Outcome:
     """Run one `op` command and return its exit status and both streams as bytes.
 
     Every call reaches `op` here, so the tests replace this one function with a fake.
     Output stays bytes, since a document body is a secret that must round-trip byte-exact.
     An attached call inherits the terminal's stdin and stderr, which is how `op signin` prompts.
+    One that does not capture inherits stdout too, for a command whose prompts are its output.
     The child is stopped in `finally`, so an interrupt never leaves it running.
     """
     try:
         child = subprocess.Popen(
             ["op", *argv],
             stdin=None if attached else subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE if capture else None,
             stderr=None if attached else subprocess.PIPE,
             env=dict(env),
         )
@@ -118,7 +122,7 @@ def run_op(argv: Sequence[str], env: Mapping[str, str], attached: bool) -> Outco
         if child.poll() is None:
             child.terminate()
             child.wait()
-    return Outcome(child.returncode, out, err or b"")
+    return Outcome(child.returncode, out or b"", err or b"")
 
 
 def report_stderr(err: bytes) -> None:
@@ -248,7 +252,7 @@ def session(op: Op) -> Iterator[None]:
     """
     accounts = count_accounts(op.json(["account", "list", "--format", "json"]))
     if accounts == 0:
-        raise Refusal("no 1Password account is configured, so add one with 'op account add' first")
+        accounts = bootstrap_account(op)
     if accounts > 1 and not op.account:
         raise Refusal(f"{accounts} 1Password accounts are configured, so name one with --account")
     if op.probe(["whoami"]).returncode == 0:
@@ -284,6 +288,24 @@ def signout(op: Op) -> None:
         sys.stderr.write(
             f"warning: op signout failed rc={result.returncode}, so the session stays valid until it idles out\n"
         )
+
+
+def bootstrap_account(op: Op) -> int:
+    """Run `op account add` on the terminal, then count the accounts again.
+
+    `op` prints its own prompts, so nothing here names the account it adds.
+    """
+    if not stdin_is_tty():
+        raise Refusal("no 1Password account is configured, so add one with 'op account add' first")
+    sys.stderr.write("op account add\n")
+    sys.stderr.flush()
+    added = run_op(["account", "add"], op.env(), attached=True, capture=False)
+    if added.returncode != 0:
+        raise Execution(f"op account add failed rc={added.returncode}")
+    accounts = count_accounts(op.json(["account", "list", "--format", "json"]))
+    if accounts == 0:
+        raise Execution("op account add exited 0, yet no account is listed")
+    return accounts
 
 
 def recheck(op: Op) -> None:
@@ -407,6 +429,7 @@ class Local:
     data: bytes | None
     mode: int | None
     mtime: datetime.datetime | None
+    gid: int | None = None
 
 
 def rows(data: object, what: str, fields: Sequence[str]) -> list[dict[str, object]]:
@@ -440,7 +463,7 @@ def find_vault(vaults: Sequence[Vault], bucket: str) -> Vault | None:
 
 
 def parse_item(row: dict[str, object]) -> Item:
-    """One item list row, its `tags` and `updated_at` field names being assumptions `selftest` measures.
+    """One item list row, its `tags` and `updated_at` fields as `selftest` measured them on 2.42.0.
 
     An absent `tags` field reads as no tags, the shape a listing gives an untagged item.
     """
@@ -525,7 +548,7 @@ def read_local(path: Path) -> Local:
     except OSError as exc:
         raise Refusal(f"{path} cannot be read: {exc.strerror or type(exc).__name__}") from exc
     moment = datetime.datetime.fromtimestamp(st.st_mtime, tz=datetime.UTC)
-    return Local(data, stat.S_IMODE(st.st_mode), moment)
+    return Local(data, stat.S_IMODE(st.st_mode), moment, None if IS_WINDOWS else st.st_gid)
 
 
 def selected(
@@ -717,9 +740,11 @@ def push_plans(
             plans.append(Plan("create", title, path, local, None, mode))
             continue
         remote = download(op, vault, item)
-        same_bytes = remote == local.data
-        if same_bytes and mode_or_none(item) == mode:
-            print(f"  same      {title}")
+        if remote == local.data:
+            if mode_or_none(item) == mode:
+                print(f"  same      {title}")
+            else:
+                plans.append(Plan("retag", title, path, local, item, mode, remote))
             continue
         assert local.mtime is not None
         if item.updated > local.mtime and not a.overwrite_newer:
@@ -733,9 +758,7 @@ def push_plans(
                 " so pass --overwrite-newer to replace it"
             )
             continue
-        plans.append(
-            Plan("retag" if same_bytes else "update", title, path, local, item, mode, remote)
-        )
+        plans.append(Plan("update", title, path, local, item, mode, remote))
     return plans
 
 
@@ -867,10 +890,11 @@ def ensure_parents(home: Path, title: str) -> None:
             os.mkdir(current, 0o700)
 
 
-def write_secret(path: Path, data: bytes, mode: int | None) -> None:
+def write_secret(path: Path, data: bytes, mode: int | None, group: int | None) -> None:
     """Write through a temporary file created exclusively at 0600 beside `path`, then rename it over.
 
-    The mode is set on the open descriptor before the rename, so the file never appears with another.
+    The group and mode are set on the open descriptor before the rename, so neither changes in view.
+    A group it cannot keep is a refusal, since a service may read the file through that group.
     The temporary file is removed in `finally`, which also runs on SIGINT and SIGTERM.
     """
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=TEMP_PREFIX, suffix=".tmp")
@@ -880,6 +904,13 @@ def write_secret(path: Path, data: bytes, mode: int | None) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
+            if group is not None:
+                try:
+                    os.fchown(handle.fileno(), -1, group)
+                except OSError as exc:
+                    raise Refusal(
+                        f"{path} cannot keep its group {group}: {exc.strerror or type(exc).__name__}"
+                    ) from exc
             if mode is not None:
                 os.fchmod(handle.fileno(), mode)
         os.replace(temp, path)
@@ -944,7 +975,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
             assert plan.mode is not None
             os.chmod(plan.path, plan.mode)
         else:
-            write_secret(plan.path, plan.remote, plan.mode)
+            write_secret(plan.path, plan.remote, plan.mode, plan.local.gid)
         if plan.path.read_bytes() != plan.remote:
             raise Execution(f"{plan.title} reads back differently from what was written")
     print(f"Wrote {len(plans)} file(s) under {home}.")
