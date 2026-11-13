@@ -265,6 +265,28 @@ class AuditRepoHeadCommitCase(unittest.TestCase):
         )
 
 
+class AuditRepoDevcontainerEcosystemCase(unittest.TestCase):
+    """audit_repo owes the devcontainers ecosystem for a root .devcontainer.json, not only the directory."""
+
+    DECLARED = ".github/dependabot.yml"
+
+    def ecosystem_findings(self, ecosystems: str) -> list[str]:
+        texts = {self.DECLARED: f"updates:\n{ecosystems}"}
+        tree = CARRIED | {".codecov.yml", self.DECLARED, ".devcontainer.json"}
+        findings, _ = run_audit(tree, texts=texts)
+        return [text for _, text in findings if text.startswith("dependabot:")]
+
+    def test_a_root_devcontainer_file_without_the_ecosystem_is_reported(self) -> None:
+        got = self.ecosystem_findings("  - package-ecosystem: uv\n")
+
+        self.assertEqual(len(got), 1, got)
+        self.assertIn("devcontainers ecosystem not declared though .devcontainer.json", got[0])
+
+    def test_a_root_devcontainer_file_with_the_ecosystem_is_clean(self) -> None:
+        """The control, showing the file alone is what drew the finding above."""
+        self.assertEqual(self.ecosystem_findings("  - package-ecosystem: devcontainers\n"), [])
+
+
 class AuditRepoHubOnlyCase(unittest.TestCase):
     """audit_repo leaves a carrier's own test module out of the hub-only check.
 

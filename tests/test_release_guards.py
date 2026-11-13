@@ -1224,6 +1224,17 @@ gh() {
             text=True,
             encoding="utf-8",
         )
+        root_file_api = missing_api.replace(
+            "printf '%s\\n' .devcontainer .github", "printf '%s\\n' .devcontainer.json .github"
+        )
+        self.assertNotEqual(root_file_api, missing_api)
+        root_file = run(
+            [bash_or_skip(), "-c", f"{root_file_api}\n{probe}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
 
         self.assertEqual(0, success.returncode, success.stderr)
         self.assertIn("github-actions: present", success.stdout)
@@ -1236,6 +1247,8 @@ gh() {
         self.assertEqual(0, missing.returncode, missing.stderr)
         self.assertIn("github-actions: MISSING", missing.stdout)
         self.assertIn("devcontainers: MISSING", missing.stdout)
+        self.assertEqual(0, root_file.returncode, root_file.stderr)
+        self.assertIn("devcontainers: MISSING", root_file.stdout)
         # The suppressed-output probe this guard replaced must not come back.
         self.assertNotIn(
             'gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1',
