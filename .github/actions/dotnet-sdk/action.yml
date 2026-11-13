@@ -28,7 +28,8 @@ runs:
         path = Path("global.json")
         selected = False
         if path.is_file():
-            text = path.read_text(encoding="utf-8-sig")
+            # A byte that is not UTF-8 is replaced, as setup-dotnet's own UTF-8 read does, and the dotnet host does not validate it.
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
             comments = re.compile(r'("(?:\\.|[^"\\])*")|//[^\n]*|/\*.*?\*/', re.S)
             # A comment becomes blanks that keep its newlines, so a parse error names the line in the caller's file.
             text = comments.sub(lambda match: match.group(1) or re.sub(r"[^\n]", " ", match.group(0)), text)

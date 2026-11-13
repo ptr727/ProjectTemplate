@@ -2356,7 +2356,7 @@ class DotnetSdkLineCase(unittest.TestCase):
     SELECT = "Select .NET SDK line step"
     last_stdout = ""
 
-    def select(self, global_json: str | None) -> list[str]:
+    def select(self, global_json: str | bytes | None) -> list[str]:
         """The outputs the selection step writes in a workspace holding `global_json`, or none.
 
         The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
@@ -2371,7 +2371,9 @@ class DotnetSdkLineCase(unittest.TestCase):
         script = step_script(self.ACTION, self.SELECT)
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
-            if global_json is not None:
+            if isinstance(global_json, bytes):
+                (workspace / "global.json").write_bytes(global_json)
+            elif global_json is not None:
                 (workspace / "global.json").write_text(global_json, encoding="utf-8")
             output = workspace / "github-output"
             output.write_text("", encoding="utf-8")
@@ -2412,6 +2414,8 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(commented), ["global-json-file=global.json"])
         runner_only = '// MTP\n{"test": {"runner": "Microsoft.Testing.Platform"}}'
         self.assertEqual(self.select(runner_only), fallback)
+        latin_1_comment = b'// caf\xe9\n{"sdk": {"version": "11.0.100"}}'
+        self.assertEqual(self.select(latin_1_comment), ["global-json-file=global.json"])
         byte_order_mark = '\ufeff{"sdk": {"version": "11.0.100"}}'
         self.assertEqual(self.select(byte_order_mark), ["global-json-file=global.json"])
         slashes_in_a_string = (
