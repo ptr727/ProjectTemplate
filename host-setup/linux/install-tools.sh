@@ -472,7 +472,8 @@ install_keyring() {
         return 1
     fi
 
-    # Callers run this with errexit off and go on to remove the old source, so a failed write ends the run here.
+    # Callers run this with errexit off, and the gh, docker, and op installs go on to remove the old source.
+    # So a failed write ends the run here.
     run_root install -d -m 0755 "$KEYRING_DIR" || die "Cannot create $KEYRING_DIR"
     run_root install -m 0644 "$staged" "$path" || die "Cannot install the keyring at $path"
     return 0
@@ -496,7 +497,8 @@ write_sources() {
         return 0
     fi
 
-    # Callers run this with errexit off and go on to remove the old source, so a failed write ends the run here.
+    # Callers run this with errexit off, and the gh, docker, and op installs go on to remove the old source.
+    # So a failed write ends the run here.
     printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null || die "Cannot write $path"
     return 0
 }
@@ -955,7 +957,8 @@ microsoft_feed() {
     local deb="$TMP_DIR/packages-microsoft-prod.deb"
     fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb" ||
         die "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION"
-    # The caller runs with errexit off and goes on to remove a working copy, so a failed install ends the run here.
+    # The PowerShell install runs this with errexit off and goes on to remove a working pwsh.
+    # So a failed install ends the run here, on the dotnet path as well.
     run_root dpkg -i "$deb" || die "Cannot install Microsoft's feed from $deb"
     APT_DIRTY=true
     apt_refresh
