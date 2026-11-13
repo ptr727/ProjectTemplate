@@ -22,7 +22,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import tomllib
 import typing
 import unittest
@@ -35,6 +34,7 @@ import backlog_metrics as bm
 import gh_graphql
 import pr_review_copilot
 import pr_review_rounds
+from test_pre_commit_hook import assert_group_ended, end_group, wait_until_started
 
 
 def issue(*labels: str) -> dict[str, object]:
@@ -1290,22 +1290,7 @@ class MainTests(unittest.TestCase):
         )
 
 
-def ended(pid: int) -> bool:
-    """Whether `pid` is gone, or a zombie its new reaper has yet to collect after its parent died.
-
-    The script kills its `gh` and need not reap it, since it ends by the signal straight after.
-    """
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return True
-    stat = Path(f"/proc/{pid}/stat")
-    with contextlib.suppress(OSError):
-        return stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] == "Z"
-    return False
-
-
-HELD_GH = '#!/bin/sh\necho $$ > "$GH_PID_FILE"\nexec sleep 60\n'
+HELD_GH = '#!/bin/sh\n: > "$GH_READY"\nexec sleep 60\n'
 
 
 @unittest.skipIf(sys.platform == "win32", "Windows cannot deliver either signal for a script")
@@ -1314,7 +1299,9 @@ class InterruptTests(unittest.TestCase):
 
     The script runs under this interpreter directly, since `uv run` would exit with a status
     rather than die by the signal. The `gh` it starts is `HELD_GH`, a stub ahead of the real one on
-    PATH. The stub records its pid and then holds the run open, so the signal lands mid-call.
+    PATH. The stub marks itself started and then holds the run open, so the signal lands mid-call.
+    The script leads a process group of its own, so the pre-commit hook test's harness can read
+    whether its `gh` outlived it.
     """
 
     def test_a_signal_mid_run_stops_gh_and_ends_the_script_by_it(self) -> None:
@@ -1326,11 +1313,11 @@ class InterruptTests(unittest.TestCase):
                 gh = bin_dir / "gh"
                 gh.write_text(HELD_GH, encoding="utf-8")
                 gh.chmod(0o755)
-                pid_file = bin_dir / "gh.pid"
+                ready = bin_dir / "started"
                 env = {
                     **os.environ,
                     "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
-                    "GH_PID_FILE": str(pid_file),
+                    "GH_READY": str(ready),
                 }
                 script = subprocess.Popen(
                     [sys.executable, str(SCRIPTS / "backlog_metrics.py"), "--owner", "o"]
@@ -1340,29 +1327,18 @@ class InterruptTests(unittest.TestCase):
                     text=True,
                     encoding="utf-8",
                     env=env,
+                    start_new_session=True,
                 )
                 try:
-                    deadline = time.monotonic() + 60
-                    while not pid_file.exists() or not pid_file.read_text().strip():
-                        if script.poll() is not None or time.monotonic() > deadline:
-                            raise AssertionError("the script never reached gh")
-                        time.sleep(0.05)
-                    gh_pid = int(pid_file.read_text())
+                    wait_until_started(script, ready)
                     for each in sigs:
                         script.send_signal(each)
                     _, stderr = script.communicate(timeout=60)
                 finally:
-                    if script.poll() is None:
-                        script.kill()
-                        script.communicate(timeout=60)
+                    end_group(script)
                 self.assertEqual(-sig, script.returncode, stderr)
                 self.assertEqual(f"backlog_metrics.py: interrupted by {sig.name}.\n", stderr)
-                deadline = time.monotonic() + 10
-                while not ended(gh_pid):
-                    if time.monotonic() > deadline:
-                        os.kill(gh_pid, signal.SIGKILL)
-                        raise AssertionError(f"gh {gh_pid} outlived the script")
-                    time.sleep(0.05)
+                assert_group_ended(script.pid)
 
 
 METADATA_BLOCK = re.compile(
