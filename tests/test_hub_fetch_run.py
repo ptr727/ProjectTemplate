@@ -373,7 +373,9 @@ class InterruptTests(unittest.TestCase):
     exit with a status rather than die by the signal.
     """
 
-    def interrupt(self, sig: signal.Signals, group: bool) -> tuple[int, str, list[str]]:
+    def interrupt(
+        self, sigs: tuple[signal.Signals, ...], group: bool
+    ) -> tuple[int, str, list[str]]:
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         ready, stubs, scratch = outside / "started", outside / "bin", outside / "tmp"
         stubs.mkdir()
@@ -398,7 +400,8 @@ class InterruptTests(unittest.TestCase):
         try:
             wait_until_started(helper, ready)
             self.assertNotEqual([], list(scratch.iterdir()), "the helper holds no fetched tree")
-            (os.killpg if group else os.kill)(helper.pid, sig)
+            for sig in sigs:
+                (os.killpg if group else os.kill)(helper.pid, sig)
             _, stderr = helper.communicate(timeout=TIMEOUT)
             assert_group_ended(helper.pid)
         finally:
@@ -406,10 +409,12 @@ class InterruptTests(unittest.TestCase):
         return helper.returncode, stderr, [p.name for p in scratch.iterdir()]
 
     def test_a_signal_mid_run_stops_the_script_and_removes_the_tree(self) -> None:
-        for sig in (signal.SIGINT, signal.SIGTERM):
+        """A SIGTERM straight after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
+        for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
+            sig = sigs[0]
             for group in (False, True):
-                with self.subTest(signal=sig.name, group=group):
-                    status, stderr, left = self.interrupt(sig, group)
+                with self.subTest(signals=[s.name for s in sigs], group=group):
+                    status, stderr, left = self.interrupt(sigs, group)
                     self.assertEqual(-sig, status, stderr)
                     self.assertIn(f"hub_fetch_run: interrupted by {sig.name}.", stderr)
                     self.assertNotIn("Traceback", stderr)

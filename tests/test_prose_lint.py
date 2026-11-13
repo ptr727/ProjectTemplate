@@ -8371,20 +8371,34 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         self.assertEqual(0, status, said)
 
     def test_a_merge_reads_a_move_its_resolution_makes(self) -> None:
-        """Both diffs record a move the resolution makes, so what it breaks is the merge's own."""
+        """A file only the merged-in parent added, moved by the resolution, is the merge's own move.
+
+        Against HEAD the new path is added rather than moved, so only the MERGE_HEAD diff records it.
+        """
         self.moved_doc()
         self.git("checkout", "-qb", "feature")
-        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd, feature.\n")
-        self.git("commit", "-qam", "feature edits the end")
+        self.write("tool.py", "value = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "feature edits another file")
         self.git("checkout", "-q", "develop")
-        self.write("docs/a.md", "See [it](gone.py), develop.\n\n\n\nEnd.\n")
-        self.git("commit", "-qam", "develop edits the start")
+        self.write("docs/b.md", "See [it](gone.py).\n\n\n\nEnd.\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "develop adds a doc")
         self.git("checkout", "-q", "feature")
         self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
-        self.git("mv", "docs/a.md", "a.md")
+        self.git("mv", "docs/b.md", "b.md")
         status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
         self.assertEqual(1, status, said)
-        self.assertIn("a.md:1: dead-path", said)
+        self.assertIn("b.md:1: dead-path", said)
+
+    def test_a_tree_git_cannot_read_is_refused_against_head(self) -> None:
+        """No repository holds the file, so the refusal names the base a commit would use."""
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.root = outside
+        self.write("tool.py", "value = 1\n")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(2, status, said)
+        self.assertIn("cannot diff against 'HEAD'", said)
 
     def merge_in_progress(self) -> None:
         """Develop lands a comment, and feature merges it in without committing the merge."""
@@ -8501,8 +8515,10 @@ class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
     """
 
     def test_a_signal_mid_run_ends_the_gate_by_it(self) -> None:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            with self.subTest(signal=sig.name):
+        """A SIGTERM straight after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
+        for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
+            sig = sigs[0]
+            with self.subTest(signals=[s.name for s in sigs]):
                 outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
                 ready = outside / "started"
                 launcher = outside / "launch.py"
@@ -8522,7 +8538,8 @@ class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
                         if gate.poll() is not None or time.monotonic() > deadline:
                             raise AssertionError("the gate never reached git")
                         time.sleep(0.05)
-                    gate.send_signal(sig)
+                    for each in sigs:
+                        gate.send_signal(each)
                     _, stderr = gate.communicate(timeout=60)
                 finally:
                     if gate.poll() is None:

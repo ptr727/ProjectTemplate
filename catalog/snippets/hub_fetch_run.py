@@ -182,24 +182,27 @@ def main(argv: list[str]) -> int:
 received: list[int] = []
 
 
-def on_sigterm(signum: int, _frame: object) -> None:
-    """Record SIGTERM and raise it as KeyboardInterrupt, so both signals unwind one path.
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
 
-    A second SIGTERM is ignored, since `uv run` forwards the one its process group already took.
+    A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
+    `uv run` forwards to a process group the terminal's SIGINT already reached.
     """
-    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if received:
+        return
     received.append(signum)
     raise KeyboardInterrupt
 
 
 def run(argv: list[str]) -> int | signal.Signals:
     """Run main, returning its status, or the signal that interrupted it once its cleanup ran."""
-    signal.signal(signal.SIGTERM, on_sigterm)
+    signal.signal(signal.SIGTERM, on_signal)
+    # A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
     try:
         return main(argv)
     except KeyboardInterrupt:
-        # A SIGTERM arriving now is the same interrupt forwarded, so it no longer unwinds anything.
-        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         signum = signal.Signals(received[-1] if received else signal.SIGINT)
         print(f"hub_fetch_run: interrupted by {signum.name}.", file=sys.stderr)
         return signum
