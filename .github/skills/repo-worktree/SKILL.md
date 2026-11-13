@@ -224,17 +224,8 @@ in the new tree.
   checkout of the repository, the maintainer's own included. Rewriting a setting to the value it
   already holds, as the Husky.Net step above does, changes nothing and is not this case. Switching
   installers is the same act, since `prek install` over a pre-commit framework hook moves the original aside and chains to it. That chaining has left every commit in every checkout failing on the
-  chained script. A missing or wrong shared hook is not repaired from the worktree. It is put to
-  the maintainer per `GOVERNANCE.md` "Communicating with the User", through the interface's prompt
-  where there is one. A line in a handoff does not discharge that. A seat that cannot reach the
-  maintainer directly, such as a dispatched one, passes it to whoever dispatched it. Every such question names what each answer costs, such as an install that
-  fails every commit or one that changes other checkouts. Where nothing executable sits at the
-  pre-commit framework's hook path, the question also names the repository's documented install
-  command. A missing hook does not stop the task, which continues without it meanwhile. On the maintainer's yes,
-  the agent runs that command against the base clone by absolute path. One install there covers
-  every linked worktree where `core.hooksPath` is unset. On a no, the task continues without the hook, since that answer
-  settles the setup the paragraph below says to fix. Any other case is the maintainer's to settle,
-  and the task follows the answer.
+  chained script. A missing or wrong shared hook is reported to the maintainer, not repaired from
+  the worktree.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The exception is that none of them may change a shared hook or setting
   from a linked worktree, per the bullet above. Do not infer a replacement command from
   the language alone.
