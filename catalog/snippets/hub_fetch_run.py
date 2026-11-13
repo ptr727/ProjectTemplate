@@ -6,12 +6,15 @@ A fetch failure fails the caller loudly rather than silently skipping the gate i
 The script runs as `uv run --no-project --script`.
 The packages its PEP 723 block declares therefore resolve, beside the data files it reads, which are fetched from the same ref.
 Usage: hub_fetch_run.py <hub-relative-path> [script-args...]
-Example: hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
+Example: hub_fetch_run.py .github/actions/prose-gate/prose_lint.py --diff-commit -- <paths>
+On SIGINT or SIGTERM it stops the script, removes the fetched tree, and re-raises the signal.
 """
 
+import contextlib
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -30,9 +33,7 @@ COMPANIONS = {
     PROSE_GATE_PATH: (".github/actions/prose-gate/prose-gate.json",),
     "scripts/docker_lint.py": (),
 }
-PROBE_TIMEOUT = 30
 LOOKUP_TIMEOUT = 5
-EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 def lookup_via_git() -> tuple[str | None, str]:
@@ -99,56 +100,6 @@ def resolve_main_commit() -> str | None:
     return None
 
 
-def head_is_unborn() -> bool:
-    """Whether HEAD is confirmed unborn (a real branch, no commits yet), never guessed.
-
-    `git rev-parse --verify -q HEAD` exits 1 with empty stderr for a confirmed unborn HEAD,
-    verified directly: a fresh `git init` with no commits gives exactly that signature.
-    Any other shape is a probe failure to propagate, never a reason to guess at the scope.
-    Those shapes include:
-    - a non-git directory (exit 128, a `fatal:` message even with `-q`)
-    - a missing or broken git executable (raised as OSError)
-    - a hung probe (a timeout)
-    - a permission error
-    - any other failure
-    """
-    try:
-        probe = subprocess.run(
-            ["git", "rev-parse", "--verify", "-q", "HEAD"],
-            capture_output=True,
-            check=False,
-            timeout=PROBE_TIMEOUT,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        print(f"hub_fetch_run: could not run git to probe HEAD: {exc}", file=sys.stderr)
-        sys.exit(1)
-    if probe.returncode == 1 and not probe.stderr:
-        return True
-    if probe.returncode == 0:
-        return False
-    print(
-        f"hub_fetch_run: git rev-parse --verify -q HEAD failed unexpectedly "
-        f"(exit {probe.returncode}): {probe.stderr.decode(errors='replace').strip()}",
-        file=sys.stderr,
-    )
-    sys.exit(1)
-
-
-def resolve_unborn_head(argv: list[str]) -> list[str]:
-    """Replace a `--diff HEAD` pair with git's empty-tree hash when HEAD does not exist yet.
-
-    A brand-new repository's first commit has no HEAD to diff against.
-    The fetched gate scripts refuse to widen to a whole-tree scan rather than report the backlog as new.
-    The empty tree diffs cleanly against everything staged, which is the correct scope for a first commit.
-    Any other `--diff` value passes through unchanged.
-    """
-    out = list(argv)
-    for i, token in enumerate(out[:-1]):
-        if token == "--diff" and out[i + 1] == "HEAD" and head_is_unborn():
-            out[i + 1] = EMPTY_TREE
-    return out
-
-
 class FetchError(Exception):
     def __init__(self, url: str, cause: Exception) -> None:
         super().__init__(url)
@@ -180,7 +131,7 @@ def main(argv: list[str]) -> int:
         problem = f"unknown option {argv[0]!r}, " if argv else ""
         print(f"hub_fetch_run: {problem}{USAGE}", file=sys.stderr)
         return 2
-    hub_path, script_args = argv[0], resolve_unborn_head(argv[1:])
+    hub_path, script_args = argv[0], argv[1:]
     is_prose_gate = hub_path == PROSE_GATE_PATH
     commit = resolve_main_commit() if hub_path in COMPANIONS else None
     ref = commit or "main"
@@ -219,8 +170,58 @@ def main(argv: list[str]) -> int:
             target.write_bytes(content)
         script = Path(scratch) / hub_path
         cmd = [uv, "run", "--no-project", "--script", str(script), *script_args]
-        return subprocess.run(cmd, env=env, check=False).returncode
+        child = subprocess.Popen(cmd, env=env)
+        try:
+            return child.wait()
+        finally:
+            child.terminate()
+            child.wait()
+
+
+# The first signal the handler took, where one interrupted the run.
+received: list[int] = []
+
+
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
+    `uv run` forwards to a process group the terminal's SIGINT already reached.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def run(argv: list[str]) -> int | signal.Signals:
+    """Run main, returning its status, or the signal that interrupted it once its cleanup ran."""
+    signal.signal(signal.SIGTERM, on_signal)
+    # A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
+    try:
+        return main(argv)
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[-1] if received else signal.SIGINT)
+        print(f"hub_fetch_run: interrupted by {signum.name}.", file=sys.stderr)
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    status = run(sys.argv[1:])
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)

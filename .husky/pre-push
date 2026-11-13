@@ -6,6 +6,21 @@ set -Eeuo pipefail
 # Belt and braces for an invocation that does not come from git, which always runs a hook from the top level.
 cd "$(git rev-parse --show-toplevel)"
 
+# An interrupt stops the review engine and re-raises the signal, per CODESTYLE.md "Interrupts in Shell".
+pids=()
+# shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
+interrupted() {
+    if [ "${#pids[@]}" -ne 0 ]; then
+        kill "${pids[@]}" 2>/dev/null || :
+        wait "${pids[@]}" || :
+    fi
+    echo "pre-push: interrupted by SIG$1." >&2
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+trap 'interrupted INT; exit 130' INT
+trap 'interrupted TERM; exit 143' TERM
+
 # A branch update whose object id is not HEAD is content this checkout does not hold.
 # The all-zero id is a delete, whose length differs between a SHA-1 and a SHA-256 repository.
 # Reading stdin without a pipeline keeps the flags in this shell rather than in a subshell.
@@ -67,16 +82,16 @@ fi
 # The py launcher answers first because it reaches a registered interpreter whatever is active.
 # By contrast, a bare python3 is reached through PATH, and a virtual environment can answer there instead.
 if py -3 --version >/dev/null 2>&1; then
-    run_py() { py -3 "$@"; }
-    py_name="py -3"
+    py=(py -3)
 elif python3 --version >/dev/null 2>&1; then
-    run_py() { python3 "$@"; }
-    py_name=python3
+    py=(python3)
 else
     echo "pre-push: neither 'py -3 --version' nor 'python3 --version' ran, so the review gate did not run." >&2
     echo "pre-push: see docs/host-setup.md 'What a Host Must Provide'." >&2
     exit 1
 fi
+py_name="${py[*]}"
+run_py() { "${py[@]}" "$@"; }
 
 # The engine imports datetime.UTC at module level.
 # So an interpreter below the floor fails at import and exits 1, which reads as a refusal rather than as the gate never running.
@@ -98,8 +113,12 @@ fi
 # One gate, over whether a recorded pass covers this branch's diff.
 # The canonical-unit half is swept weekly by .github/workflows/canonical-review-sweep.yml instead of gated here, per GOVERNANCE.md "Verification Discipline".
 # No --target: a target read from the environment is set inline on the very command being gated.
+# It runs in the background and is waited for, since bash runs a trap only once a foreground command returns.
+"${py[@]}" scripts/local_review.py check &
+pids=("$!")
 diff_status=0
-run_py scripts/local_review.py check || diff_status=$?
+wait "${pids[0]}" || diff_status=$?
+pids=()
 if [ "$diff_status" -eq 0 ]; then
     exit 0
 fi

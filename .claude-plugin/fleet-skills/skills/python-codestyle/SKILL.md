@@ -125,12 +125,14 @@ A **build**-profile directory in its pip form builds its environment the way CI 
 pip interface, which writes no `uv.lock`. It installs every `requirements*.txt` in one command, since
 separate installs let one file's pins downgrade what another resolved. Where its `pyproject.toml`
 carries a `[project]` table it then installs the directory itself as editable. Without that, a
-`src`-layout package is not importable and pytest fails locally where CI passes:
+`src`-layout package is not importable and pytest fails locally where CI passes. Both installs pass
+`--python .venv/bin/python`, since `uv pip install` targets an active `VIRTUAL_ENV` ahead of
+`./.venv`:
 
 ```sh
 uv venv --clear                           # creates .venv, replacing an existing one
-uv pip install -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
-uv pip install -e .                       # only where pyproject.toml has a [project] table
+uv pip install --python .venv/bin/python -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
+uv pip install --python .venv/bin/python -e .   # only where pyproject.toml has a [project] table
 # in a declared directory whose .venv installs ruff, .venv/bin/python -m ruff replaces uvx ruff@latest
 uvx ruff@latest format                    # auto-format
 uvx ruff@latest check --fix               # auto-fix lint
@@ -286,7 +288,7 @@ Before pushing or opening a PR:
 A command-line script is one a person or an agent runs by name. A hook its host runs, taking its input from that host rather than from a command line, is not one.
 
 - **Every command-line script answers `--help` and `-h`** with the same text on stdout, then exits 0, changing nothing. That text opens on a usage line naming the script. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted. A PowerShell script declaring its own parameters answers `-Help` and `-h` instead, from a `-Help` switch carrying an `h` alias. That form follows PowerShell's own parameter convention, so such a script owes no answer to a literal `--help`. A wrapper that forwards its arguments to another script answers whatever that script answers.
-- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. So a PowerShell script declaring its own parameters refuses a literal `--help` like any other unrecognized argument. Where no parameter takes the remaining arguments, the binder's refusal does that. A script with such a parameter refuses a dash-prefixed leftover itself. An unrecognized first argument is never taken as a default mode or as a target.
+- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. That refusal comes from the binder only in an advanced script, one carrying `[CmdletBinding()]` or a `[Parameter()]` attribute. Without either, a plain `param()` block binds an unknown parameter into `$args` and runs on. Such a script refuses a non-empty `$args` itself, before any work. So a PowerShell script declaring its own parameters refuses a literal `--help` like any other unrecognized argument. A script with a parameter taking the remaining arguments refuses a dash-prefixed leftover itself. An unrecognized first argument is never taken as a default mode or as a target.
 
 <!-- /include -->
 
@@ -294,13 +296,14 @@ A command-line script is one a person or an agent runs by name. A hook its host 
 
 <!-- include: CODESTYLE.md > Interrupts -->
 
-This applies to every Bash and Python script. `CODESTYLE.md` "Interrupts in Python" and "Interrupts in Shell" state each language's mechanics.
+This applies to every shell and Python script. `CODESTYLE.md` "Interrupts in Python" and "Interrupts in Shell" state each language's mechanics.
 
 - **On SIGINT or SIGTERM, a script releases what it holds before it exits.** It removes the temporary paths it created, releases the locks it took, and stops the child processes it started. A path, lock, or child left behind can stop the next run from starting, or feed it a half-written input.
 - **A write to persistent state goes to a temporary path beside the target, then is renamed over it.** An interrupt then leaves the old content or the new, never a mix of both. A store with transactions of its own, such as an SQLite database, is written through those instead. A rename over an open database can corrupt it.
-- **An interrupted script prints one line naming the signal, with no traceback, and exits 130 for SIGINT or 143 for SIGTERM.** Each status is 128 plus the signal number, the status a shell reports for a process that signal ended.
+- **An interrupted script prints one line naming the signal, with no traceback, and ends by re-raising the signal.** The signal then ends the process, so a shell reports 130 for SIGINT or 143 for SIGTERM, 128 plus the signal number. At Ctrl-C, a calling shell's loop then stops rather than starting its next iteration. A script calling `exit 130` has not died by the signal, so that loop reads an ordinary non-zero exit and runs on. A launcher between them, such as `uv run`, exits with the status rather than dying by the signal, so that loop runs on there too.
 - **A script takes this rule when it is created or next edited.** An existing script is not edited for this rule alone.
-- **A script that holds a lock, temporary state, or a child process owes a test that signals it mid-run.** The test sends SIGINT or SIGTERM, then asserts the matching exit status and that nothing the script held remains. It is skipped on Windows, which cannot deliver either signal for a script to handle. A script holding none of these owes no such test.
+- **A script that holds a lock, temporary state, or a child process owes a test that signals it mid-run.** The test sends SIGINT or SIGTERM, then asserts that the script died by that signal and that nothing it held remains. It starts the script with its interpreter directly, since a launcher such as `uv run` hides the signal death. It is skipped on Windows, which cannot deliver either signal for a script to handle. A script holding none of these owes no such test.
+- **A script that ends by `exec`-ing its long-running process owes no interrupt handling for that process.** The `exec` replaces the script, so a signal reaches the process directly. A background child the script starts to outlive the `exec` is handed across it, and the script neither stops it nor waits for it. Such a child is handed across only where something else stops it, such as a container's teardown of its whole process tree. Anything else the script holds is released before the `exec`. A script that holds nothing else at any point before the `exec` owes no trap and no signal test. As PID 1, such as a container's entrypoint, it ignores a SIGTERM that arrives before the `exec`, so a stop waits for its timeout.
 
 <!-- /include -->
 
@@ -309,7 +312,7 @@ This applies to every Bash and Python script. `CODESTYLE.md` "Interrupts in Pyth
 <!-- include: CODESTYLE.md > Interrupts in Python -->
 
 - **SIGINT and SIGTERM take one path.** Python raises `KeyboardInterrupt` on SIGINT. The entry point installs a SIGTERM handler with `signal.signal` that records the signal and raises `KeyboardInterrupt`.
-- **The entry point catches `KeyboardInterrupt` once, and any handler below it that catches the exception re-raises it.** It prints the line `CODESTYLE.md` "Interrupts" requires, then exits 143 where the SIGTERM handler recorded a signal and 130 otherwise.
+- **The entry point catches `KeyboardInterrupt` once, and any handler below it that catches the exception re-raises it.** It prints the line `CODESTYLE.md` "Interrupts" requires, then re-raises SIGTERM where the SIGTERM handler recorded a signal and SIGINT otherwise. To re-raise, it flushes standard output and standard error inside `contextlib.suppress(OSError)`, restores the default handler with `signal.signal(signum, signal.SIG_DFL)`, then re-sends the signal with `os.kill(os.getpid(), signum)`. The suppression covers a pipe whose reader the same Ctrl-C ended. The default action ends the process without Python's own exit handling. So the flush comes first, and no cleanup on this path relies on an `atexit` handler or a finalizer. The re-raise runs outside every `with` block and `finally` clause, such as at the `__main__` call site, since none of them runs after it. A process the re-sent signal does not end, such as PID 1 in a container, then exits 128 plus the signal number. On Windows, `os.kill` ends the process with the signal number as its status, so there the entry point skips it and exits 130.
 - **What the script holds is released by `with` blocks and `finally` clauses as the exception unwinds.** A `subprocess.Popen` child is stopped in a `finally` clause with `terminate()`, then `wait()`, since leaving its `with` block does not stop it. That child runs without `shell=True`, so `terminate()` reaches the command rather than a shell around it.
 - **The rename over persistent state uses `os.replace`.** `os.rename` and `Path.rename` fail on Windows when the target exists.
 

@@ -65,6 +65,23 @@ class FidelityPassReadCase(unittest.TestCase):
         self.assertEqual(spread["match"], ["Fixture"])
         self.assertEqual(spread["unavailable"], [])
 
+    def test_a_unit_with_repo_owned_keys_is_never_a_promotion_candidate(self) -> None:
+        canonical = (audit.ROOT / CANONICAL).read_bytes()
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            return {"encoding": "base64", "content": base64.b64encode(canonical).decode()}
+
+        for owned, want in ((None, 1), (["coverage.status"], 0)):
+            unit = {**CODECOV, **({"repoOwnedKeys": owned} if owned else {})}
+            spec = {"registry": {"repos": [ENTRY], "defaults": {}}, "files": {"baseline": [unit]}}
+            with (
+                self.subTest(owned=owned),
+                mock.patch.object(audit, "gh", fake_gh),
+                mock.patch.object(audit, "git_file_history", lambda rel_path: []),
+            ):
+                _, promote, _ = fidelity_honesty.fidelity_pass(spec)
+                self.assertEqual(len(promote), want)
+
 
 if __name__ == "__main__":
     unittest.main()

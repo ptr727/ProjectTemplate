@@ -28,7 +28,7 @@ on:
         type: string
         default: '["3.13"]'
       test-matrix:
-        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
+        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. The hook may also run a check needing that leg's environment, and a failure there fails the leg before its Python tests run. Empty runs the python-versions legs with no hook.
         required: false
         type: string
         default: ''
@@ -129,6 +129,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # The fleet doc-lint block, hosted once rather than carried by every repo of every type.
       # An empty markdown-exclude-globs leaves a blank line here, which the action ignores, so the default caller passes nothing extra.
@@ -537,13 +538,60 @@ jobs:
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.base_ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -Eeuo pipefail
+          reviewed_lines() {
+            local lists=$1 develop=$2 base=$3 head=$4 path=$5 rev blob rc=0
+            : > "$lists/known" || return 1
+            for rev in "$develop" "$base"; do
+              if blob=$(git rev-parse --verify --quiet "$rev:$path"); then
+                git cat-file blob "$blob" | sed 's/\r$//' >> "$lists/known" || return 1
+                printf '\n' >> "$lists/known" || return 1
+              fi
+            done
+            blob=$(git rev-parse --verify --quiet "$head:$path") || return 0
+            git cat-file blob "$blob" | sed 's/\r$//' > "$lists/head" || return 1
+            grep -qvxF -f "$lists/known" "$lists/head" || rc=$?
+            [[ "$rc" == 1 ]]
+          }
+          reviewed_content() {
+            local head=$1 develop base lists path verdict=0
+            local -a off_develop_paths off_base_paths
+            local -A off_develop=()
+            develop=$(git merge-base "$head" refs/remotes/origin/develop) || return 1
+            base=$(git merge-base "$head" "refs/remotes/origin/$BASE_REF") || return 1
+            lists=$(mktemp -d) || return 1
+            if git diff --no-renames --name-only -z "$develop" "$head" > "$lists/develop" &&
+              git diff --no-renames --name-only -z "$base" "$head" > "$lists/base"; then
+              mapfile -d '' -t off_develop_paths < "$lists/develop"
+              mapfile -d '' -t off_base_paths < "$lists/base"
+              for path in "${off_develop_paths[@]}"; do
+                off_develop[$path]=1
+              done
+              for path in "${off_base_paths[@]}"; do
+                if [[ -n "${off_develop[$path]-}" ]] && ! reviewed_lines "$lists" "$develop" "$base" "$head" "$path"; then
+                  echo "The head's $path holds a line that neither its merge base with develop nor its merge base with $BASE_REF holds there, so the head carries content no promotion carries."
+                  verdict=1
+                  break
+                fi
+              done
+            else
+              verdict=1
+            fi
+            rm -r -- "$lists"
+            return "$verdict"
+          }
           promotion=false
-          if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$HEAD_REF" == develop && "$BASE_REF" == "$DEFAULT_BRANCH" ]]; then
-            promotion=true
+          if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$BASE_REF" == "$DEFAULT_BRANCH" ]]; then
+            if [[ "$HEAD_REF" == develop ]]; then
+              promotion=true
+            elif [[ -n "$HEAD_SHA" ]] && reviewed_content "$HEAD_SHA"; then
+              echo "Every line the head $HEAD_REF holds in a path it changes is in that path at its merge base with develop or with $BASE_REF, the shape of a promotion branch cut from $BASE_REF that merges develop."
+              promotion=true
+            fi
           fi
           stand_down=false
           if [[ "$promotion" == true && "$WORKFLOW_MODEL" == release ]]; then
@@ -611,6 +659,8 @@ jobs:
 
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check caller install-test-deps hook step
         if: ${{ inputs.test-matrix != '' }}
@@ -846,6 +896,8 @@ jobs:
 
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # A local composite action resolves at step time from the workspace, which is what makes this fallback expressible at all.
       # It runs the caller's own hook when it carries one, else the hub's no-op default.

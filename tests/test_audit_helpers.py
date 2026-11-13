@@ -3004,11 +3004,114 @@ class IntentAdvisoryCase(unittest.TestCase):
     def test_a_copy_matching_the_hub_file_at_path_is_current(self) -> None:
         unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
         texts = {"DOC.md": "the doc", "widget.json": "same"}
-        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)
         for down, want in (("same", None), ("x", trailing)):
             with self.subTest(down=down), self.patched(texts):
                 got = audit.intent_trail("o/r", "main", "widget.json", unit, down)
             self.assertEqual(got, want)
+
+    def test_a_repo_owned_key_never_reads_as_trailing(self) -> None:
+        unit = {
+            "path": "global.json",
+            "fidelity": "intent",
+            "reference": "snip/global.json",
+            "repoOwnedKeys": ["sdk.version"],
+        }
+        canon = '{"sdk": {"version": "10.0.100", "rollForward": "latestFeature"}}'
+        dates = ("2019-01-01T00:00:00+00:00", *HUB_CHANGE)
+        trailing = ("snip/global.json", dates, None)
+        rolled = ("snip/global.json", dates, ["sdk.rollForward"])
+        cases = [
+            (
+                "another line",
+                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}}',
+                None,
+            ),
+            (
+                "a key of its own",
+                '{"sdk": {"version": "9.0.100", "rollForward": "latestFeature"}, "test": {"runner": "x"}}',
+                None,
+            ),
+            (
+                "a fleet value changed",
+                '{"sdk": {"version": "11.0.100", "rollForward": "major"}}',
+                rolled,
+            ),
+            ("a fleet value dropped", '{"sdk": {"version": "11.0.100"}}', rolled),
+            (
+                "a leaf of its own inside a block",
+                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature", "paths": ["x"]}}',
+                None,
+            ),
+            (
+                "a byte-order mark",
+                '\ufeff{"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}}',
+                None,
+            ),
+            ("not JSON", "{", trailing),
+            ("not an object", "[]", rolled),
+        ]
+        for label, down, want in cases:
+            with self.subTest(label), self.patched({"snip/global.json": canon}):
+                got = audit.intent_trail("o/r", "main", "global.json", unit, down)
+                self.assertEqual(got, want)
+
+    def test_a_json_number_never_matches_a_json_boolean(self) -> None:
+        unit = {"repoOwnedKeys": ["sdk.version"]}
+        canon = '{"sdk": {"version": "10.0.100", "allowPrerelease": false, "paths": [true]}}'
+        cases = [
+            ('{"sdk": {"version": "11.0.100", "allowPrerelease": false, "paths": [true]}}', []),
+            (
+                '{"sdk": {"version": "11.0.100", "allowPrerelease": 0, "paths": [1]}}',
+                ["sdk.allowPrerelease", "sdk.paths"],
+            ),
+        ]
+        for down, want in cases:
+            with self.subTest(down=down):
+                self.assertEqual(audit.fleet_owned_differences(unit, canon, down), want)
+
+    def test_a_repo_owned_verdict_outranks_the_dates(self) -> None:
+        unit = {
+            "path": "global.json",
+            "fidelity": "intent",
+            "reference": "snip/global.json",
+            "repoOwnedKeys": ["sdk.version"],
+        }
+        canon = '{"sdk": {"version": "10.0.100", "rollForward": "latestFeature"}}'
+        newer = [{"commit": {"committer": {"date": "2021-01-01T00:00:00+00:00"}}}]
+        cases = [
+            (
+                "a fleet value trails",
+                '{"sdk": {"version": "11.0.100", "rollForward": "major"}}',
+                True,
+            ),
+            ("not JSON", "{", False),
+        ]
+        for label, down, reported in cases:
+            with self.subTest(label), self.patched({"snip/global.json": canon}, newer):
+                got = audit.intent_trail("o/r", "main", "global.json", unit, down)
+                self.assertEqual(got is not None, reported)
+
+    def test_a_trailing_fleet_owned_leaf_is_named(self) -> None:
+        dates = ("2021-01-01T00:00:00+00:00", *HUB_CHANGE)
+        trails = {"global.json": ("snip/global.json", dates, ["sdk.rollForward"])}
+        [(level, text)] = audit.intent_findings({}, "main", trails)
+        self.assertEqual(level, "DRIFT")
+        self.assertIn("differs from the intent canonical snip/global.json at sdk.rollForward", text)
+        self.assertNotIn("changed later", text)
+        acked = audit.intent_findings(
+            {"driftNotes": ["`global.json@abc1234` (files.intent)"]}, "main", trails
+        )
+        self.assertEqual(acked, [])
+
+    def test_a_unit_without_repo_owned_keys_compares_whole(self) -> None:
+        unit = {"path": "global.json", "fidelity": "intent", "reference": "snip/global.json"}
+        canon = '{"sdk": {"version": "10.0.100"}}'
+        with self.patched({"snip/global.json": canon}):
+            got = audit.intent_trail(
+                "o/r", "main", "global.json", unit, '{"sdk": {"version": "11.0.100"}}'
+            )
+        self.assertIsNotNone(got)
 
     def test_the_trail_dates_by_the_intent_ref_anchor(self) -> None:
         asked: list[tuple[str, str | None]] = []
@@ -3037,13 +3140,13 @@ class IntentAdvisoryCase(unittest.TestCase):
             self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x"))
 
     def test_the_finding_names_the_intent_canonical(self) -> None:
-        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)}
         findings = audit.intent_findings({}, "main", trails)
         self.assertEqual(len(findings), 1)
         self.assertIn("the intent canonical DOC.md changed later at 2020-01-01", findings[0][1])
 
     def test_an_acknowledgement_clears_the_change_it_names_and_no_other(self) -> None:
-        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)}
         cases = [
             ("the cited sha", "Verified `w.json@abc1234`, nothing to adopt (files.intent).", 0, 0),
             ("a full sha", "Verified `w.json@abc1234" + "0" * 33 + "` (files.intent).", 0, 0),
@@ -3707,8 +3810,9 @@ class SecretStemCase(unittest.TestCase):
     def test_a_bare_secrets_directory_is_read_from_the_files_naming_it(self) -> None:
         """The directory is ignored by design, so a .gitignore line and a config path are the signals."""
         bare = (
-            "runtime-secrets: {} tracked file(s) name or sit in a bare secrets/ directory, which "
-            'GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and update each: {}'
+            "runtime-secrets: {} tracked file(s) name or sit in a secrets directory not named "
+            '.secrets/, which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ '
+            "and update each: {}"
         )
         cases: list[tuple[str, dict[str, str], list[str], list[str]]] = [
             (
@@ -4178,6 +4282,40 @@ class SecretStemCase(unittest.TestCase):
                 ],
                 [".devcontainer/app/devcontainer.json"],
             ),
+            (
+                "a capitalized folder is read from a .gitignore line and a compose path",
+                {
+                    ".gitignore": "Secrets/\n",
+                    "compose.yml": "secrets:\n  s:\n    file: ./Secrets/Db_Password\n",
+                },
+                ["Secrets/Db_Password (named in compose.yml)"],
+                [".gitignore", "compose.yml"],
+            ),
+            (
+                "a floating line is not silenced by a code directory its case cannot match",
+                {
+                    ".gitignore": "secrets/\n",
+                    "src/App/Secrets/Store.cs": "",
+                },
+                [],
+                [".gitignore"],
+            ),
+            (
+                "a class matching a bare folder is a signal, and one able to name .secrets is not",
+                {
+                    ".gitignore": "[Ss]ecrets/\n",
+                    "deploy/.gitignore": ".[Ss]ecrets/\n",
+                    "ops/.gitignore": "/.Secrets/\n",
+                },
+                [],
+                [".gitignore", "ops/.gitignore"],
+            ),
+            (
+                "a .gitignore whose class names .secrets keeps its old guard line silent",
+                {".gitignore": ".[Ss]ecrets/\n[Ss]ecrets/\n"},
+                [],
+                [],
+            ),
         ]
         for label, texts, named, naming in cases:
             with self.subTest(label):
@@ -4190,7 +4328,64 @@ class SecretStemCase(unittest.TestCase):
                 if named:
                     self.assertTrue(stems[0].startswith(f"runtime-secrets: {len(named)} env"), got)
                 want = [bare.format(len(naming), ", ".join(naming))] if naming else []
-                self.assertEqual([t for _, t in got if "bare secrets/" in t], want)
+                self.assertEqual([t for _, t in got if "not named .secrets/" in t], want)
+
+    def test_a_dotted_folder_in_another_case_is_reported_and_its_files_judged(self) -> None:
+        got = audit.secret_stem_findings({".Secrets/README.md", ".Secrets/Db_Password"})
+
+        self.assertEqual(
+            [t.rsplit(": ", 1)[1] for _, t in got],
+            [".Secrets/Db_Password", ".Secrets/Db_Password, .Secrets/README.md"],
+            got,
+        )
+
+    def test_a_devcontainer_compose_set_resolves_against_its_first_file(self) -> None:
+        """Compose resolves every file of a set against the first one's directory, the project directory."""
+        texts = {
+            ".devcontainer/devcontainer.json": (
+                '{\n  // the set\n  "dockerComposeFile": ["..\\\\docker-compose.yml", "docker-compose.extend.yml"]\n}\n'
+            ),
+            ".devcontainer/docker-compose.extend.yml": (
+                "services:\n  app:\n    env_file: ./.secrets/App.env\n"
+                "    volumes:\n      - ../secrets:/run/secrets\n"
+            ),
+            ".devcontainer/other/compose.yml": "services:\n  app:\n    env_file: ./.secrets/Web.env\n",
+            "docker-compose.yml": "services: {}\n",
+        }
+
+        got = audit.secret_stem_findings(set(texts), texts.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(
+            got[0][1].endswith(
+                ": .devcontainer/other/.secrets/Web.env (named in .devcontainer/other/compose.yml), "
+                ".secrets/App.env (named in .devcontainer/docker-compose.extend.yml)"
+            ),
+            got,
+        )
+
+    def test_a_compose_file_two_sets_list_resolves_against_each_first_file(self) -> None:
+        """Each devcontainer's set has its own project directory, so a shared file is read against both."""
+        texts = {
+            ".devcontainer/a/devcontainer.json": (
+                '{"dockerComposeFile": ["../../docker-compose.yml", "../compose.shared.yml"]}\n'
+            ),
+            ".devcontainer/b/devcontainer.json": (
+                '{"dockerComposeFile": ["compose.yml", "../compose.shared.yml"]}\n'
+            ),
+            ".devcontainer/compose.shared.yml": "services:\n  app:\n    env_file: ./.secrets/App.env\n",
+        }
+
+        got = audit.secret_stem_findings(set(texts), texts.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(
+            got[0][1].endswith(
+                ": .devcontainer/b/.secrets/App.env (named in .devcontainer/compose.shared.yml), "
+                ".secrets/App.env (named in .devcontainer/compose.shared.yml)"
+            ),
+            got,
+        )
 
     def test_a_named_path_resolves_against_its_file_and_stays_inside_the_repo(self) -> None:
         """A compose path is relative to its own directory, an editor's to its workspace, and one leaving the repo is no signal."""

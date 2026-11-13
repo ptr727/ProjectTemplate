@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Drive hub_fetch_run.py's unborn-HEAD rewrite, probe-failure path, provenance, and uv run.
+"""Drive hub_fetch_run.py's commit lookup, provenance, uv run, and interrupt handling.
 
-The git cases run in constructed temp repositories, and the snippet bounds its own git probe with
-a timeout. The network is stubbed, so nothing here reaches GitHub.
+The network is stubbed, so nothing here reaches GitHub.
 
 Run as `python3 tests/test_hub_fetch_run.py`, or under `python3 -m unittest discover -s tests`.
 """
@@ -17,6 +16,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,6 +27,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Self
 from unittest import mock
+
+from test_pre_commit_hook import assert_group_ended, end_group, wait_until_started
 
 ROOT = Path(__file__).resolve().parent.parent
 SNIPPET = ROOT / "catalog" / "snippets" / "hub_fetch_run.py"
@@ -64,112 +66,6 @@ def in_dir(path: Path):
         yield
     finally:
         os.chdir(old)
-
-
-class HeadProbeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.tmp = Path(self._tmp.name)
-
-    def unborn_repo(self, name: str = "unborn") -> Path:
-        repo = self.tmp / name
-        repo.mkdir()
-        git(repo, "init", "-q")
-        return repo
-
-    def born_repo(self) -> Path:
-        repo = self.unborn_repo("born")
-        git(repo, "commit", "-q", "--allow-empty", "-m", "first")
-        return repo
-
-    def test_unborn_head_rewrites_only_diff_head(self) -> None:
-        argv = ["--check", "x", "--diff", "HEAD", ".", "--diff", "main", "HEAD"]
-        with in_dir(self.unborn_repo()):
-            result = hub.resolve_unborn_head(argv)
-        self.assertEqual(
-            result,
-            ["--check", "x", "--diff", hub.EMPTY_TREE, ".", "--diff", "main", "HEAD"],
-        )
-
-    def test_unborn_head_leaves_other_diff_values_alone(self) -> None:
-        argv = ["--diff", "origin/develop", ".", "HEAD"]
-        with in_dir(self.unborn_repo()):
-            self.assertEqual(hub.resolve_unborn_head(argv), argv)
-
-    def test_born_head_rewrites_nothing(self) -> None:
-        argv = ["--diff", "HEAD", "."]
-        with in_dir(self.born_repo()):
-            self.assertEqual(hub.resolve_unborn_head(argv), argv)
-
-    def test_input_list_is_not_mutated(self) -> None:
-        argv = ["--diff", "HEAD"]
-        with in_dir(self.unborn_repo()):
-            hub.resolve_unborn_head(argv)
-        self.assertEqual(argv, ["--diff", "HEAD"])
-
-    def test_head_is_unborn_distinguishes_states(self) -> None:
-        with in_dir(self.unborn_repo()):
-            self.assertTrue(hub.head_is_unborn())
-        with in_dir(self.born_repo()):
-            self.assertFalse(hub.head_is_unborn())
-
-    def assert_probe_exits(self, run: mock.Mock) -> str:
-        stderr = io.StringIO()
-        with (
-            mock.patch.object(hub.subprocess, "run", run),
-            contextlib.redirect_stderr(stderr),
-            self.assertRaises(SystemExit) as caught,
-        ):
-            hub.resolve_unborn_head(["--diff", "HEAD"])
-        self.assertEqual(caught.exception.code, 1)
-        return stderr.getvalue()
-
-    def test_non_git_directory_is_a_probe_failure(self) -> None:
-        plain = self.tmp / "plain"
-        plain.mkdir()
-        env = {"GIT_CEILING_DIRECTORIES": str(self.tmp)}
-        stderr = io.StringIO()
-        with (
-            in_dir(plain),
-            mock.patch.dict(os.environ, env),
-            contextlib.redirect_stderr(stderr),
-            self.assertRaises(SystemExit) as caught,
-        ):
-            hub.resolve_unborn_head(["--diff", "HEAD"])
-        self.assertEqual(caught.exception.code, 1)
-        self.assertIn("failed unexpectedly", stderr.getvalue())
-
-    def test_nonzero_exit_with_stderr_is_a_probe_failure(self) -> None:
-        probe = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"fatal: boom")
-        message = self.assert_probe_exits(mock.Mock(return_value=probe))
-        self.assertIn("boom", message)
-
-    def test_exit_two_is_a_probe_failure(self) -> None:
-        probe = subprocess.CompletedProcess([], 2, stdout=b"", stderr=b"")
-        self.assert_probe_exits(mock.Mock(return_value=probe))
-
-    def test_missing_git_executable_is_a_probe_failure(self) -> None:
-        message = self.assert_probe_exits(mock.Mock(side_effect=FileNotFoundError("git")))
-        self.assertIn("could not run git", message)
-
-    def test_hung_probe_is_a_probe_failure(self) -> None:
-        run = mock.Mock(side_effect=subprocess.TimeoutExpired("git", 30))
-        message = self.assert_probe_exits(run)
-        self.assertIn("could not run git", message)
-
-    def test_probe_is_bounded_by_a_timeout(self) -> None:
-        probe = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
-        run = mock.Mock(return_value=probe)
-        with mock.patch.object(hub.subprocess, "run", run):
-            hub.head_is_unborn()
-        self.assertIsNotNone(run.call_args.kwargs.get("timeout"))
-
-    def test_probe_is_not_run_without_a_diff_head_pair(self) -> None:
-        run = mock.Mock(side_effect=AssertionError("probe must not run"))
-        with mock.patch.object(hub.subprocess, "run", run):
-            self.assertEqual(hub.resolve_unborn_head(["--diff", "main"]), ["--diff", "main"])
-            self.assertEqual(hub.resolve_unborn_head(["HEAD", "--diff"]), ["HEAD", "--diff"])
 
 
 class FakeResponse:
@@ -344,12 +240,12 @@ class ProvenanceTests(unittest.TestCase):
         with (
             self.environment(),
             mock.patch.object(urllib.request, "urlopen", urlopen),
-            mock.patch.object(hub.subprocess, "run") as run,
+            mock.patch.object(hub.subprocess, "Popen") as popen,
             mock.patch.object(hub.shutil, "which", return_value="uv"),
             contextlib.redirect_stderr(self.stderr),
         ):
             self.assertEqual(1, hub.main([PROSE_PATH, str(self.out)]))
-        run.assert_not_called()
+        popen.assert_not_called()
         self.assertIn("mixed pair was refused", self.stderr.getvalue())
 
     def test_a_pinned_commit_is_fetched_once(self) -> None:
@@ -404,16 +300,17 @@ class ProvenanceTests(unittest.TestCase):
 
     def test_the_script_runs_through_uv_with_no_project(self) -> None:
         """A project sync would write a lock file and an environment into the caller's tree."""
-        done: subprocess.CompletedProcess[bytes] = subprocess.CompletedProcess([], 3)
+        child = mock.Mock()
+        child.wait.return_value = 3
         with (
             self.environment(),
             mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RECORD)),
-            mock.patch.object(hub.subprocess, "run", return_value=done) as run,
+            mock.patch.object(hub.subprocess, "Popen", return_value=child) as popen,
             mock.patch.object(hub.shutil, "which", return_value="uv"),
             contextlib.redirect_stderr(self.stderr),
         ):
             self.assertEqual(3, hub.main([".github/actions/repo-gate/repo_gate.py", "--x"]))
-        cmd = run.call_args.args[0]
+        cmd = popen.call_args.args[0]
         self.assertEqual(["run", "--no-project", "--script"], cmd[1:4])
         self.assertEqual(["--x"], cmd[5:])
 
@@ -437,6 +334,91 @@ class ProvenanceTests(unittest.TestCase):
         request = self.lookup_requests()[-1]
         self.assertNotIn("Authorization", request.headers)
         self.assertEqual(request.unredirected_hdrs.get("Authorization"), "Bearer tok-one")
+
+
+# Runs the snippet as `__main__` with the network stubbed, so its own re-raise is what ends it.
+INTERRUPT_LAUNCHER = """
+import runpy, sys, urllib.request
+
+class Response:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def read(self):
+        return self.body
+
+def urlopen(target, timeout=None):
+    url = target if isinstance(target, str) else target.full_url
+    return Response(SHA if url.endswith("/commits/main") else b"print('gate')\\n")
+
+SHA = sys.argv[2].encode()
+urllib.request.urlopen = urlopen
+sys.argv = [sys.argv[1], *sys.argv[3:]]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows cannot deliver either signal for a script")
+class InterruptTests(unittest.TestCase):
+    """A signal mid-run stops the script, removes the fetched tree, and ends the helper by it.
+
+    The script is a stub uv that marks itself started and then sleeps, so the signal lands while
+    the helper holds both. The helper runs under its interpreter directly, since `uv run` would
+    exit with a status rather than die by the signal.
+    """
+
+    def interrupt(
+        self, sigs: tuple[signal.Signals, ...], group: bool
+    ) -> tuple[int, str, list[str]]:
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        ready, stubs, scratch = outside / "started", outside / "bin", outside / "tmp"
+        stubs.mkdir()
+        scratch.mkdir()
+        uv = stubs / "uv"
+        uv.write_text(f'#!/bin/sh\n: >"{ready}"\nexec sleep {TIMEOUT}\n', encoding="utf-8")
+        uv.chmod(0o755)
+        launcher = outside / "launch.py"
+        launcher.write_text(INTERRUPT_LAUNCHER, encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k not in ENV_KEYS}
+        env.update(TMPDIR=str(scratch), PATH=f"{stubs}{os.pathsep}{env.get('PATH', '')}")
+        cmd = [sys.executable, str(launcher), str(SNIPPET), SHA, PROSE_PATH, "."]
+        helper = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            start_new_session=True,
+        )
+        try:
+            wait_until_started(helper, ready)
+            self.assertNotEqual([], list(scratch.iterdir()), "the helper holds no fetched tree")
+            for sig in sigs:
+                (os.killpg if group else os.kill)(helper.pid, sig)
+            _, stderr = helper.communicate(timeout=TIMEOUT)
+            assert_group_ended(helper.pid)
+        finally:
+            end_group(helper)
+        return helper.returncode, stderr, [p.name for p in scratch.iterdir()]
+
+    def test_a_signal_mid_run_stops_the_script_and_removes_the_tree(self) -> None:
+        """A SIGTERM straight after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
+        for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
+            sig = sigs[0]
+            for group in (False, True):
+                with self.subTest(signals=[s.name for s in sigs], group=group):
+                    status, stderr, left = self.interrupt(sigs, group)
+                    self.assertEqual(-sig, status, stderr)
+                    self.assertIn(f"hub_fetch_run: interrupted by {sig.name}.", stderr)
+                    self.assertNotIn("Traceback", stderr)
+                    self.assertEqual([], left)
 
 
 class GitLookupTests(unittest.TestCase):
@@ -569,7 +551,7 @@ class FetchedWrapperTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name)
         self.urls: list[str] = []
-        self.real_run = subprocess.run
+        self.real_popen = subprocess.Popen
         self.stdout = ""
         self.stderr = io.StringIO()
         self.commit: str | None = SHA
@@ -579,27 +561,30 @@ class FetchedWrapperTests(unittest.TestCase):
         _, _, path = target.partition(f"{hub.HUB_RAW_BASE}/{self.commit or 'main'}/")
         return FakeResponse((ROOT / path).read_bytes())
 
-    def uv_as_python(self, cmd: list[str], env: dict[str, str], check: bool):
-        """Stand in for `uv run --no-project --script`, with nothing from this tree importable."""
+    def uv_as_python(self, cmd: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
+        """Stand in for `uv run --no-project --script`, with nothing from this tree importable.
+
+        The real Popen is held from before the patch, since the patch replaces it module-wide.
+        """
         clean = {k: v for k, v in env.items() if k != "PYTHONPATH"}
-        done = self.real_run(
+        child = self.real_popen(
             [sys.executable, *cmd[4:]],
             env=clean,
-            check=check,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             cwd=self.tmp,
-            timeout=TIMEOUT,
         )
-        self.stdout = done.stdout + done.stderr
-        return done
+        out, err = child.communicate(timeout=TIMEOUT)
+        self.stdout = out + err
+        return child
 
     def run_wrapper(self) -> int:
         with (
             mock.patch.object(urllib.request, "urlopen", self.urlopen),
             mock.patch.object(hub.shutil, "which", return_value="uv"),
-            mock.patch.object(hub.subprocess, "run", self.uv_as_python),
+            mock.patch.object(hub.subprocess, "Popen", self.uv_as_python),
             mock.patch.object(hub, "resolve_main_commit", return_value=self.commit),
             contextlib.redirect_stderr(self.stderr),
         ):

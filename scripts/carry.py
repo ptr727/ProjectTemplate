@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2"]
 # ///
 """Check or apply manifest-owned trees, and the verbatim sections inside a mixed file, from the hub to a fleet worktree."""
 
@@ -335,7 +335,7 @@ def verify_hub(hub: pathlib.Path, registry: dict[str, Any], name: str) -> str:
         raise CarryError(
             "hub checkout is not at freshly fetched origin/main, or origin/develop for an unpromoted entry"
         )
-    if git(hub, "status", "--porcelain"):
+    if git_status_paths(hub):
         raise CarryError("hub checkout has local changes")
     return head
 

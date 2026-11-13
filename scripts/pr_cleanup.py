@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2"]
 # ///
 """Delete a merged pull request's head branch, and sweep what interrupted sessions left behind.
 
@@ -15,7 +15,9 @@ The verify-then-delete `drive-pr` and `merge-and-release` prescribe. Call it thr
 rule approves any arguments, so every check lives here. It takes the pull
 request number, never a branch name. It refuses unless all of these hold:
 
-- The pull request is merged into `develop` from a head in `--repo` itself.
+- The pull request is merged into `develop` from a head in `--repo` itself. A conflicted
+  promotion's branch cut from the default branch may merge into it instead. GitHub must then read
+  the merged head in that branch's history and the head's second parent in `develop`'s.
 - The head is not `develop`, `main`, or the default branch.
 - The owner and repository pass `handoff.py`'s write-scope check.
 - No ruleset or protection covers the branch.
@@ -61,6 +63,7 @@ from typing import NamedTuple
 import gh_graphql as shared
 import handoff
 import pr_review as core
+from pr_cleanup_rest import CleanupUnread, cleanup_rest, promotion_refusal
 
 Q_CLEANUP_TARGET = """
 query($o:String!,$r:String!,$n:Int!){
@@ -102,10 +105,6 @@ DELETE_SETTLE_DELAYS = (1, 2, 4)
 PERMANENT = ("develop", "main")
 
 
-class CleanupUnread(Exception):
-    """A read `cleanup` needed did not produce an answer, reported at exit 2."""
-
-
 def cleanup_read(query: str, **variables: object) -> dict:
     """One GraphQL read for `cleanup`, raising rather than ending the run at exit 1.
 
@@ -116,16 +115,6 @@ def cleanup_read(query: str, **variables: object) -> dict:
     except shared.GraphQLError as exc:
         sys.stderr.write(exc.detail)
         raise CleanupUnread(str(exc)) from exc
-
-
-def cleanup_rest(path: str, what: str) -> object:
-    """One REST read for `cleanup`, retried, raising with its stderr where nothing parsed."""
-    proc = core.reread(path, ".")
-    data = core.parsed_json(proc)
-    if data is None:
-        sys.stderr.write(proc.stderr)
-        raise CleanupUnread(f"the {what} read failed rc={proc.returncode} or printed no JSON")
-    return data
 
 
 def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
@@ -248,11 +237,15 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
     pr = pr_target(owner, repo, num)
     branch, head = pr["headRefName"], pr["headRefOid"]
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or ""
+    base = pr.get("baseRefName")
+    promotion = base == pr["defaultBranch"] and base != "develop"
     refusals = []
     if pr.get("merged") is not True:
         refusals.append("the pull request is not merged")
-    if pr.get("baseRefName") != "develop":
-        refusals.append(f"its base is {pr.get('baseRefName')!r}, not 'develop'")
+    if base != "develop" and not promotion:
+        refusals.append(
+            f"its base is {base!r}, neither 'develop' nor the default branch {pr['defaultBranch']!r}"
+        )
     if not in_repository(pr, owner, repo):
         refusals.append(f"its head lives in {head_repo or 'no repository'}, not {target}")
     if permanent_branch(branch, pr["defaultBranch"]):
@@ -260,6 +253,13 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
     if refusals:
         raise CleanupRefused(
             "REFUSED", f"nothing was deleted from {target} #{num}: {', and '.join(refusals)}"
+        )
+    why = promotion_refusal(owner, repo, head, pr["defaultBranch"]) if promotion else None
+    if why is not None:
+        raise CleanupRefused(
+            "REFUSED",
+            f"nothing was deleted from {target} #{num}: its base is the default branch {base!r} "
+            f"and it is no promotion merging develop, since {why}",
         )
 
     ref = cleanup_ref(owner, repo, branch)

@@ -21,6 +21,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -152,10 +153,13 @@ def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, s
     return str(result.returncode), written, result.stdout + result.stderr, called
 
 
-def run_comment_stand_down_step(model: str, facts: dict[str, str]) -> tuple[str, str, str]:
+def run_comment_stand_down_step(
+    model: str, facts: dict[str, str], cwd: Path | None = None
+) -> tuple[str, str, str]:
     """Run the workflow's own stand-down step with the caller's model and the event's facts.
 
-    Returns the exit code, the step output written, and the log.
+    `cwd` is the checkout the step reads a promotion branch's ancestry in. Returns the exit code,
+    the step output written, and the log.
     """
     script = step_script(VALIDATE_TASK_WORKFLOW, "Resolve comment stand-down step")
     with tempfile.TemporaryDirectory() as scratch:
@@ -167,6 +171,7 @@ def run_comment_stand_down_step(model: str, facts: dict[str, str]) -> tuple[str,
                 "DEFAULT_BRANCH": "main",
                 "HEAD_REF": "",
                 "HEAD_REPOSITORY": "",
+                "HEAD_SHA": "",
                 "REPOSITORY": "example/widget",
             }
             | facts
@@ -174,6 +179,7 @@ def run_comment_stand_down_step(model: str, facts: dict[str, str]) -> tuple[str,
         )
         result = subprocess.run(
             [bash_or_skip(), "-c", script],
+            cwd=cwd,
             env=env,
             text=True,
             encoding="utf-8",
@@ -593,9 +599,138 @@ class TestCharsetRule(BaitCase):
         self.assertEqual(set(), t2 & t3)
         self.assertEqual(set(), t4 & (t1 | t2 | t3))
 
+    def test_a_markdown_code_span_is_read_as_quoted_data_like_a_fence(self) -> None:
+        """A string quoted verbatim keeps its bytes inside a code span, and outside one it flags.
+
+        The tier-2 case has no figure beside it, so only the span admits it.
+        """
+        rules = {"charset", "charset-unknown"}
+        for quoted, kinds in (
+            ("\u00abr0\u00bb", ["charset-unknown", "charset-unknown"]),
+            ("Issued by Example \u00b7 Jan", ["charset"]),
+            ("left \u2014 right", ["charset"]),
+        ):
+            with self.subTest(quoted=quoted):
+                self.assertEqual([], self.kinds(f"The page printed `{quoted}`.\n", rules))
+                self.assertEqual([], self.kinds(f"```text\n{quoted}\n```\n", rules))
+                self.assertEqual(kinds, self.kinds(f"The page printed {quoted}.\n", rules))
+                self.assertEqual(kinds, self.kinds(f"`ok` then {quoted} then `ok`.\n", rules))
+
+    def test_a_code_span_in_a_table_cell_is_read_as_quoted_data(self) -> None:
+        """A cell's span is blanked within the cell, so the next cell is still read."""
+        rules = {"charset", "charset-unknown"}
+        head = "| a | b |\n| - | - |\n"
+        self.assertEqual([], self.kinds(f"{head}| `\u00ab` | plain |\n", rules))
+        self.assertEqual(["charset-unknown"], self.kinds(f"{head}| `x` | \u00ab |\n", rules))
+
+    def test_a_wrapped_or_double_backtick_span_hides_only_its_own_text(self) -> None:
+        """A span is paired the way Markdown pairs it, so the text after it is still read.
+
+        Pairing backticks one line at a time took a wrapped span's closer for an opener, and hid
+        the prose between it and the next span.
+        """
+        rules = {"charset", "charset-unknown"}
+        dash = "\u2014"
+        for text in (
+            f"See `git remote\nget-url` {dash} then `x`.\n",
+            f"See ``a ` b`` {dash} then `x`.\n",
+            f"See \\` {dash} then `x`.\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset"], self.kinds(text, rules))
+        self.assertEqual([], self.kinds("See `git remote\nget-\u00ab` here.\n", rules))
+        self.assertEqual([], self.kinds("See ``a ` \u00ab`` here.\n", rules))
+
+    def test_a_table_row_is_emptied_once_so_text_between_two_spans_is_read(self) -> None:
+        """Each cell's token maps the whole row, and emptying twice ate the text between spans."""
+        head = "| a | b |\n| --- | --- |\n"
+        self.assertEqual(
+            ["charset-unknown"],
+            self.kinds(f"{head}| `x` \u00ab `y` | z |\n", {"charset", "charset-unknown"}),
+        )
+        self.assertEqual(["semicolon"], self.kinds(f"{head}| `x`; then `y` | z |\n", {"semicolon"}))
+        self.assertEqual(["dash"], self.kinds(f"{head}| `x` - `y` | z |\n", {"dash"}))
+
+    def test_a_backtick_outside_an_inline_token_quotes_nothing(self) -> None:
+        """Front matter and an HTML block hold no code span, so each line there is read whole."""
+        rules = {"charset", "charset-unknown"}
+        for text in (
+            "---\ndescription: ids like `\u00ab`\n---\n\nBody.\n",
+            "<div>\nids like `\u00ab`\n</div>\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset-unknown"], self.kinds(text, rules))
+
+    def test_a_backtick_outside_markdown_quotes_nothing(self) -> None:
+        """Outside Markdown a backtick is structural, so a code line is read whole."""
+        rules = {"charset", "charset-unknown"}
+        self.assertEqual(
+            ["charset-unknown"], self.kinds("#!/bin/sh\n# ids like `\u00ab`\n", rules, "a.sh")
+        )
+
 
 class TestSemicolonRule(BaitCase):
     """The `semicolon` rule on Markdown prose units."""
+
+    def test_a_semicolon_inside_one_token_joins_no_clause(self) -> None:
+        """`TL;DR` holds its semicolon between word characters, so neither fix applies to it."""
+        for text in (
+            "> **TL;DR**: Short summary here.\n",
+            "A plain sentence with TL;DR inside it.\n",
+            "TL;DR, it runs on push, always.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_an_unspaced_semicolon_is_read_as_one_token_but_an_entity_is_not(self) -> None:
+        """The gate reads the token shape, so an unspaced clause break passes as `TL;DR` does.
+
+        An HTML entity's closing semicolon sits between word characters too, and is still reported.
+        """
+        self.assertEqual([], self.kinds("It runs;it stops.\n", {"semicolon"}))
+        for text in ("A word&mdash;another.\n", "A word&#8212;another.\n", "A&#x2014;b.\n"):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
+    def test_a_wrapped_code_span_hides_no_splice_after_it(self) -> None:
+        """A span is paired as Markdown pairs it, so its closer opens nothing on the next line."""
+        text = "See `git remote\nget-url` then; it runs, then `x`.\n"
+        self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+        text = "See `git remote\nget-url` then - it runs, then `x`.\n"
+        self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
+    def test_a_code_span_in_a_label_reads_as_one_word(self) -> None:
+        """A blanked span counts as one label word, so a three-word label keeps its exemption."""
+        for text in (
+            "Inputs: a, b, and c; `out` read paths: d and e.\n",
+            "Inputs: a, b, and c; ``out`` read paths: d and e.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_a_double_backtick_span_outside_an_inline_token_hides_its_code(self) -> None:
+        """Front matter pairs a span line by line with the same pattern, a backtick run included."""
+        text = "---\ndescription: Run ``a;b c`` or ``a; b`` first.\n---\n\nBody.\n"
+        self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_a_code_span_outside_an_inline_token_still_hides_its_code(self) -> None:
+        """Front matter and an HTML block hold code the prose rules skip, paired line by line."""
+        for text in (
+            "---\ndescription: Run `a; b` or `c - d` first.\n---\n\nBody.\n",
+            "<details>\n<summary>Run `a; b` or `c - d`</summary>\n</details>\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([], self.kinds(text, {"semicolon", "dash"}))
+
+    def test_a_semicolon_with_a_space_beside_it_is_still_a_splice(self) -> None:
+        """Only a word character on both sides makes one token, so a spaced splice still flags."""
+        for text in (
+            "TL;DR it runs; it stops.\n",
+            "It runs ;it stops.\n",
+            "It runs;\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
 
     def test_a_splice_is_flagged(self) -> None:
         self.assertEqual(["semicolon"], self.kinds(f"{SPLICE_BAIT}.\n", {"semicolon"}))
@@ -1060,6 +1195,17 @@ class TestDupwordRule(BaitCase):
             if kind == "dupword"
         ]
         self.assertEqual([], found)
+
+
+class TestSpanPairingInWordRules(BaitCase):
+    """The `dupword` and `spelling` rules read a code span paired as Markdown pairs it."""
+
+    def test_text_after_a_wrapped_double_or_escaped_span_is_read(self) -> None:
+        for rule, word in (("dupword", "word word"), ("spelling", "colour")):
+            for opener in ("See `a\nb`", "See ``a ` b``", "See \\`"):
+                text = f"{opener} {word} then `c`.\n"
+                with self.subTest(rule=rule, text=text):
+                    self.assertEqual([rule], self.kinds(text, {rule}))
 
 
 class TestSpellingRule(BaitCase):
@@ -2641,6 +2787,7 @@ class TestCommentAddedRule(BaitCase):
             ("HEAD_REPOSITORY", "github.event.pull_request.head.repo.full_name"),
             ("REPOSITORY", "github.repository"),
             ("HEAD_REF", "github.head_ref"),
+            ("HEAD_SHA", "github.event.pull_request.head.sha"),
             ("BASE_REF", "github.base_ref"),
             ("DEFAULT_BRANCH", "github.event.repository.default_branch"),
         ):
@@ -2724,6 +2871,18 @@ class TestSentenceSplitRule(BaitCase):
             self.kinds("A sentence that keeps\ngoing onto the next line.\n", {"sentence-split"}),
         )
 
+    def test_a_wrapped_code_span_continues_no_prose_line(self) -> None:
+        """A span's second line is code, so only the prose line after it reads as a split."""
+        path = self.tmp / "bait.md"
+        path.write_text("See `git remote\nget-url` now and\nthen it ends.\n", encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-split"})
+        self.assertEqual([(2, "sentence-split")], [(n, kind) for n, kind, _ in found])
+
+    def test_a_span_wrapped_in_a_blockquote_keeps_the_quote_marker(self) -> None:
+        """The marker is no span content, so the quoted line is still skipped as a quote."""
+        text = "> See `git remote\n> get-url` now and\nthen it ends.\n"
+        self.assertEqual([], self.kinds(text, {"sentence-split"}))
+
     def test_a_finished_sentence_does_not_continue(self) -> None:
         for text in (
             "One sentence.\nAnother sentence.\n",
@@ -2782,6 +2941,12 @@ class TestSentenceLengthRule(BaitCase):
         """Naming a symbol costs the sentence one word however long the symbol's name is."""
         span = "`" + " ".join(["token"] * prose_lint.SENTENCE_WORD_CAP) + "`"
         self.assertEqual([], self.kinds(f"The value {span} is read.\n", {"sentence-length"}))
+
+    def test_an_escaped_backtick_opens_no_span(self) -> None:
+        """Paired with the next real span's opener, it would hide every word between them."""
+        over = self.sentence_of(prose_lint.SENTENCE_WORD_CAP + 5)
+        text = f"Use \\` here. {over} End `x` now.\n"
+        self.assertEqual(["sentence-length"], self.kinds(text, {"sentence-length"}))
 
     def test_a_quotation_is_one_word(self) -> None:
         """Quoted text is someone else's prose, so its length is not the author's finding."""
@@ -3719,6 +3884,27 @@ class TestDeadPathRule(unittest.TestCase):
     def test_a_living_path_is_not_a_finding(self) -> None:
         root = self.repo()
         self.assertEqual([], self.kinds(root, "Run `scripts/kept.py` to apply.\n"))
+
+    def test_a_span_wrapped_across_a_line_hides_no_later_link(self) -> None:
+        """Paired a line at a time, its closer pairs with the next span's opener over the link."""
+        root = self.repo()
+        text = "Run the `long\nspan` and [the script](scripts/gone.py) and `x`.\n"
+        self.assertEqual(["dead-path"], self.kinds(root, text))
+
+    def test_a_span_after_a_wrapped_one_is_read(self) -> None:
+        root = self.repo()
+        text = "A wrapped `opener\nthen` and `scripts/gone.py` too.\n"
+        self.assertEqual(["dead-path"], self.kinds(root, text))
+
+    def test_an_escaped_backtick_hides_no_later_span(self) -> None:
+        root = self.repo()
+        text = "An escaped \\` tick and `scripts/gone.py` here.\n"
+        self.assertEqual(["dead-path"], self.kinds(root, text))
+
+    def test_a_link_inside_a_wrapped_span_is_code_rather_than_a_link(self) -> None:
+        root = self.repo()
+        text = "A `span [x](scripts/gone.py)\nwraps` here.\n"
+        self.assertEqual([], self.kinds(root, text))
 
     def test_a_path_with_no_history_here_is_not_a_finding(self) -> None:
         """A proposal in a backlog and another repository's layout both name unborn paths."""
@@ -8030,6 +8216,18 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
 
 
+def git_as_gate(root: Path, *args: str, check: bool = True) -> str:
+    """Run git in `root` under the gate cases' constructed identity, unsigned, failing on an error by default."""
+    identity = ("-c", "user.email=gate@example.invalid", "-c", "user.name=gate test")
+    return subprocess.run(
+        ["git", "-C", str(root), *identity, "-c", "commit.gpgsign=false", *args],
+        check=check,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+
+
 class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
     """A pull request is gated on its own change, whatever base the event recorded.
 
@@ -8058,22 +8256,7 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         self.git("merge", "-q", "--no-ff", "-m", "merge", "feature")
 
     def git(self, *args: str) -> None:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.root),
-                "-c",
-                "user.email=gate@example.invalid",
-                "-c",
-                "user.name=gate test",
-                "-c",
-                "commit.gpgsign=false",
-                *args,
-            ],
-            check=True,
-            capture_output=True,
-        )
+        git_as_gate(self.root, *args)
 
     def rev(self, ref: str) -> str:
         return subprocess.run(
@@ -8130,6 +8313,403 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         self.assertEqual(
             "prose-base", yaml_value(yaml_step(workflow, "Resolve prose base step"), "id")
         )
+
+
+class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
+    """A conflicted promotion lands from a branch cut from the default branch that merges develop.
+
+    Its head is not `develop`, so the name rule never reaches it. What it is read from is the
+    head's content. Each line in a path the head changes is in that path at the head's merge base
+    with develop or with the default branch. Both of those were reviewed. A name any branch can
+    take decides nothing.
+    """
+
+    FACTS: ClassVar[dict[str, str]] = {
+        "HEAD_REPOSITORY": "example/widget",
+        "HEAD_REF": "promote/develop-to-main",
+        "BASE_REF": "main",
+    }
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.git("init", "-q", "-b", "main", str(self.root))
+        self.write("ci.yml", "pin: 1\n")
+        self.write("kept.txt", "kept\n")
+        self.write("deps.txt", "alpha 1\nbeta\ngamma\ndelta\nomega 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-qb", "develop")
+        self.write("ci.yml", "pin: 3\n# The pin moves with the hub.\n")
+        self.write("deps.txt", "alpha 1\nbeta\ngamma\ndelta\n# Omega follows the hub.\nomega 2\n")
+        self.git("commit", "-qam", "develop moves the pin")
+        self.git("checkout", "-q", "main")
+        self.write("ci.yml", "pin: 2\n")
+        self.write("deps.txt", "alpha 2\nbeta\ngamma\ndelta\nomega 1\n")
+        self.git("commit", "-qam", "main moves the pin")
+        self.write("main-only.txt", "main only\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "main only")
+        self.git("update-ref", "refs/remotes/origin/main", "main")
+        self.git("update-ref", "refs/remotes/origin/develop", "develop")
+        self.git("checkout", "-qb", "promote/develop-to-main", "main")
+        git_as_gate(self.root, "merge", "-q", "origin/develop", check=False)
+        self.git("checkout", "--theirs", "ci.yml")
+        self.git("add", "ci.yml")
+        self.git("commit", "-qm", "take develop's side")
+
+    def git(self, *args: str) -> str:
+        return git_as_gate(self.root, *args)
+
+    def write(self, name: str, text: str) -> None:
+        (self.root / name).write_text(text, encoding="utf-8")
+
+    def stand_down(self, model: str = "release", **facts: str) -> tuple[str, str, str]:
+        head = {"HEAD_SHA": self.git("rev-parse", "HEAD")}
+        return run_comment_stand_down_step(model, self.FACTS | head | facts, self.root)
+
+    def test_the_documented_promotion_stands_down(self) -> None:
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=true"), (code, output), log)
+        self.assertIn("a promotion of develop into the default branch: true", log)
+
+    def test_a_file_the_merge_combined_from_both_sides_stands_down(self) -> None:
+        """Each side moved its own hunk, so the merged file matches neither side whole."""
+        merged = self.git("show", "HEAD:deps.txt")
+        for side in ("origin/main", "origin/develop"):
+            self.assertNotEqual(self.git("show", f"{side}:deps.txt"), merged, side)
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=true"), (code, output), log)
+
+    def test_the_name_decides_nothing(self) -> None:
+        code, output, log = self.stand_down(HEAD_REF="resolve/conflicted-release")
+        self.assertEqual(("0", "stand-down=true"), (code, output), log)
+
+    def test_a_line_the_promotion_adds_beyond_either_side_runs_the_rule(self) -> None:
+        """A commit after the merge carries a line neither branch reviewed."""
+        self.write("new.py", "# A comment no pull request reviewed.\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "an unreviewed line")
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.assertIn("new.py holds a line that neither", log)
+
+    def test_a_resolution_matching_neither_side_runs_the_rule(self) -> None:
+        """A conflict resolved by hand is new content, however small."""
+        self.write("ci.yml", "pin: 4\n")
+        self.git("commit", "-qam", "a pin neither side holds")
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.assertIn("ci.yml holds a line that neither", log)
+
+    def test_a_feature_branch_cut_from_the_default_branch_runs_the_rule(self) -> None:
+        self.git("checkout", "-qb", "feature/widget", "main")
+        self.write("kept.txt", "changed\n")
+        self.git("commit", "-qam", "a feature")
+        code, output, log = self.stand_down(HEAD_REF="feature/widget")
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+
+    def test_the_operational_model_runs_the_rule(self) -> None:
+        code, output, log = self.stand_down("operational")
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.assertIn("a promotion of develop into the default branch: true", log)
+
+    def test_a_fork_or_another_base_runs_the_rule(self) -> None:
+        for facts in ({"HEAD_REPOSITORY": "fork/widget"}, {"BASE_REF": "next"}):
+            with self.subTest(facts=facts):
+                code, output, log = self.stand_down(**facts)
+                self.assertEqual(("0", "stand-down=false"), (code, output), log)
+
+    def test_an_unreadable_ancestry_runs_the_rule_rather_than_failing(self) -> None:
+        """A missing develop ref or an unknown head is no promotion, and the step still passes."""
+        code, output, log = self.stand_down(HEAD_SHA="f" * 40)
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.git("update-ref", "-d", "refs/remotes/origin/develop")
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+
+
+class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
+    """`--diff-commit` diffs a merge against both parents, a commit against HEAD, a first commit whole.
+
+    A hook passing `--diff HEAD` read every line a merged-in parent brought as added. So a comment
+    another pull request landed failed a merge commit that adds none.
+    """
+
+    COMMENT = "# The value is read once, since the second read can disagree.\n"
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.git("init", "-q", "-b", "develop", str(self.root))
+
+    def git(self, *args: str) -> None:
+        git_as_gate(self.root, *args)
+
+    def write(self, name: str, text: str) -> None:
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+        (self.root / name).write_text(text, encoding="utf-8")
+
+    def gate(
+        self, *flags: str, check: str = "comment-added", glob: str = "*.py"
+    ) -> tuple[int, str]:
+        out, err = io.StringIO(), io.StringIO()
+        paths = sorted(str(p) for p in self.root.glob(glob))
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            status = prose_lint.main(["--check", check, *flags, "--", *paths])
+        return status, out.getvalue() + err.getvalue()
+
+    def moved_doc(self) -> None:
+        """`docs/a.md` links `gone.py`, which `docs/` holds and the top level once held."""
+        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd.\n")
+        self.write("docs/gone.py", "value = 1\n")
+        self.write("gone.py", "value = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("rm", "-q", "gone.py")
+        self.git("commit", "-qm", "delete the top-level copy")
+
+    def test_a_merge_leaves_out_a_move_only_the_branch_made(self) -> None:
+        """The branch's own move points the link at the deleted copy, which the merge adds nothing to."""
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.git("mv", "docs/a.md", "a.md")
+        self.git("commit", "-qm", "feature moves the doc")
+        self.git("checkout", "-q", "develop")
+        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd, edited.\n")
+        self.git("commit", "-qam", "develop edits the doc")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(0, status, said)
+
+    def test_a_merge_leaves_out_a_move_only_the_merged_in_parent_made(self) -> None:
+        """Against HEAD the merged-in parent's move reads as one, and it is that parent's own."""
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd, feature.\n")
+        self.git("commit", "-qam", "feature edits the doc")
+        self.git("checkout", "-q", "develop")
+        self.git("mv", "docs/a.md", "a.md")
+        self.git("commit", "-qm", "develop moves the doc")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(0, status, said)
+
+    def test_a_merge_moving_a_parent_s_moved_file_reports_neither_parent_s_backlog(self) -> None:
+        """Both diffs record a move to the new path, and a finding either source held is no one's new."""
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("tool.py", "value = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "feature edits another file")
+        self.git("checkout", "-q", "develop")
+        self.git("mv", "docs/a.md", "a.md")
+        self.git("commit", "-qm", "develop moves the doc, its link already dead there")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        self.git("mv", "a.md", "c.md")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(0, status, said)
+
+    def test_a_merge_reads_a_move_its_resolution_makes(self) -> None:
+        """A file only the merged-in parent added, moved by the resolution, is the merge's own move.
+
+        Against HEAD the new path is added rather than moved, so only the MERGE_HEAD diff records it.
+        """
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("tool.py", "value = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "feature edits another file")
+        self.git("checkout", "-q", "develop")
+        self.write("docs/b.md", "See [it](gone.py).\n\n\n\nEnd.\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "develop adds a doc")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        self.git("mv", "docs/b.md", "b.md")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(1, status, said)
+        self.assertIn("b.md:1: dead-path", said)
+
+    def test_a_merge_reads_a_move_its_resolution_makes_of_a_branch_file(self) -> None:
+        """A file only the branch added, moved by the resolution, is the merge's own move too.
+
+        Against MERGE_HEAD the new path is added rather than moved, so only the HEAD diff records it.
+        """
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("docs/b.md", "See [it](gone.py).\n\n\n\nEnd.\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "feature adds a doc")
+        self.git("checkout", "-q", "develop")
+        self.write("tool.py", "value = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "develop edits another file")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        self.git("mv", "docs/b.md", "b.md")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(1, status, said)
+        self.assertIn("b.md:1: dead-path", said)
+
+    def test_a_tree_git_cannot_read_is_refused_against_head(self) -> None:
+        """No repository holds the file, so the refusal names the base a commit would use."""
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.root = outside
+        self.write("tool.py", "value = 1\n")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(2, status, said)
+        self.assertIn("cannot diff against 'HEAD'", said)
+
+    def merge_in_progress(self) -> None:
+        """Develop lands a comment, and feature merges it in without committing the merge."""
+        self.write("tool.py", "value = 1\n")
+        self.write("other.py", "other = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-qb", "feature")
+        self.write("other.py", "other = 2\n")
+        self.git("commit", "-qam", "feature side")
+        self.git("checkout", "-q", "develop")
+        self.write("tool.py", self.COMMENT + "value = 1\n")
+        self.git("commit", "-qam", "develop side, comment landed by its own PR")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+
+    def test_a_merge_is_diffed_against_both_parents(self) -> None:
+        self.merge_in_progress()
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(0, status, said)
+        self.assertIn("diff against 'MERGE_HEAD and HEAD'", said)
+
+    def test_head_would_read_the_merged_in_comment_as_added(self) -> None:
+        """The defect itself, so the case above is known to stand on a base that would bite."""
+        self.merge_in_progress()
+        status, said = self.gate("--diff", "HEAD")
+        self.assertEqual(1, status, said)
+        self.assertIn("tool.py:1: comment-added", said)
+
+    def test_a_merge_leaves_out_a_comment_the_branch_already_committed(self) -> None:
+        """Against MERGE_HEAD alone, a file both parents changed reads the branch's own lines as new."""
+        self.write("tool.py", "value = 1\n")
+        self.write("other.py", "other = 1\n\n\n\nend = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-qb", "feature")
+        self.write("other.py", self.COMMENT + "other = 1\n\n\n\nend = 1\n")
+        self.git("commit", "-qam", "feature comment, allowed where it landed")
+        self.git("checkout", "-q", "develop")
+        self.write("other.py", "other = 1\n\n\n\nend = 2\n")
+        self.git("commit", "-qam", "develop edits the same file")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(0, status, said)
+
+    def test_a_merge_still_refuses_a_comment_its_resolution_adds(self) -> None:
+        self.merge_in_progress()
+        self.write("other.py", self.COMMENT + "other = 3\n")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(1, status, said)
+        self.assertIn("other.py:1: comment-added", said)
+        self.assertNotIn("tool.py", said)
+
+    def test_a_commit_that_is_no_merge_is_diffed_against_head(self) -> None:
+        self.write("tool.py", self.COMMENT + "value = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.write("other.py", self.COMMENT + "other = 1\n")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(1, status, said)
+        self.assertIn("diff against 'HEAD'", said)
+        self.assertIn("other.py:1: comment-added", said)
+        self.assertNotIn("tool.py", said)
+
+    def test_a_first_commit_is_diffed_against_the_empty_tree(self) -> None:
+        """No HEAD exists to diff against, and the empty tree reads everything staged as added."""
+        self.write("tool.py", self.COMMENT + "value = 1\n")
+        self.git("add", "-A")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(1, status, said)
+        self.assertIn("diff against '4b825dc642cb6eb9a060e54bf8d69288fbee4904'", said)
+        self.assertIn("tool.py:1: comment-added", said)
+
+    def test_a_first_commit_in_a_sha256_repository_hashes_its_own_empty_tree(self) -> None:
+        self.git("init", "-q", "--object-format=sha256", "-b", "develop", str(self.root / "wide"))
+        self.root = self.root / "wide"
+        self.write("tool.py", self.COMMENT + "value = 1\n")
+        self.git("add", "-A")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(1, status, said)
+        empty = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"
+        self.assertIn(f"diff against '{empty}'", said)
+
+    def test_a_base_named_beside_it_is_refused(self) -> None:
+        self.write("tool.py", "value = 1\n")
+        status, said = self.gate("--diff-commit", "--diff", "HEAD")
+        self.assertEqual(2, status, said)
+        self.assertIn("--diff and --diff-commit each choose the base", said)
+
+
+# Runs the gate as `__main__` with its first git call held open, so a signal lands mid-run.
+INTERRUPT_LAUNCHER = """
+import pathlib, runpy, subprocess, sys, time
+
+READY = pathlib.Path(sys.argv[2])
+
+def held(*args, **kwargs):
+    READY.touch()
+    time.sleep(60)
+
+subprocess.run = held
+sys.argv = [sys.argv[1], *sys.argv[3:]]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows cannot deliver either signal for a script")
+class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
+    """A signal mid-run prints one line and ends the gate by the signal, with no traceback.
+
+    The gate runs under this interpreter directly, since `uv run` would exit with a status rather
+    than die by the signal. Its git call is a stub that marks itself started and sleeps.
+    """
+
+    def test_a_signal_mid_run_ends_the_gate_by_it(self) -> None:
+        """A SIGTERM straight after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
+        for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
+            sig = sigs[0]
+            with self.subTest(signals=[s.name for s in sigs]):
+                outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
+                ready = outside / "started"
+                launcher = outside / "launch.py"
+                launcher.write_text(INTERRUPT_LAUNCHER, encoding="utf-8")
+                (outside / "doc.md").write_text("A line.\n", encoding="utf-8")
+                gate = subprocess.Popen(
+                    [sys.executable, str(launcher), str(PROSE_LINT_SCRIPT), str(ready)]
+                    + [str(outside / "doc.md")],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                )
+                try:
+                    deadline = time.monotonic() + 60
+                    while not ready.exists():
+                        if gate.poll() is not None or time.monotonic() > deadline:
+                            raise AssertionError("the gate never reached git")
+                        time.sleep(0.05)
+                    for each in sigs:
+                        gate.send_signal(each)
+                    _, stderr = gate.communicate(timeout=60)
+                finally:
+                    if gate.poll() is None:
+                        gate.kill()
+                        gate.communicate(timeout=60)
+                self.assertEqual(-sig, gate.returncode, stderr)
+                self.assertIn(f"prose_lint.py: interrupted by {sig.name}.", stderr)
+                self.assertNotIn("Traceback", stderr)
 
 
 VOCABULARY_CAP = 5

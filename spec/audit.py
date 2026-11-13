@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4", "pyyaml>=6"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2", "pyyaml==6.0.3"]
 # ///
 """Live fleet audit: the deterministic subset of AUDIT.md, run from the hub with gh and the libraries above.
 
@@ -350,11 +350,12 @@ EDITOR_CONFIG = re.compile(
     r"((?:.*/)?)(?:\.vscode/[^/]+\.jsonc?|\.devcontainer(?:/[^/]+)?/[^/]+\.jsonc?|\.devcontainer\.json"
     r"|[^/]+\.code-workspace)"
 )
-SECRET_FOLDER = r"((?:[\w.-]+/)*(\.?secrets))"
+SECRET_FOLDER = r"((?:[\w.-]+/)*(\.?(?i:secrets)))"
 SECRET_REFERENCE = re.compile(
     r"(?<![^\s\"'=:,\[(])\$\{(?:(?:file|local|container)?[wW]orkspaceFolder|workspaceRoot)\}/"
     rf"{SECRET_FOLDER}(?:/([^\s\"'`,;:)}}\]\\]*))?(?![\w.-])"
 )
+DOCKER_COMPOSE_FILES = re.compile(r'"dockerComposeFile"\s*:\s*(\[[^\]]*\]|"[^"]*")')
 WORKSPACE_FOLDER = re.compile(r'"folders"\s*:\s*\[\s*\{[^}]*?"path"\s*:\s*"([^"]*)"')
 EDITOR_COMMENT = re.compile(r"(?:^|(?<=\s))//.*$", re.MULTILINE)
 SECRET_PATH = re.compile(rf"{SECRET_FOLDER}(?:/(.*))?")
@@ -479,6 +480,21 @@ def secret_name_breaks(name, in_secrets):
     return not ENV_SECRET_NAME.fullmatch(named) or (in_secrets and named.endswith(".txt"))
 
 
+def dotted_secrets(segment):
+    """Whether one path or .gitignore segment names .secrets itself, a class such as [Ss] included, with no wildcard."""
+    return not set(segment) & set("*?") and fnmatch.fnmatchcase(".secrets", segment)
+
+
+def misnamed_secrets(segment):
+    """Whether one path or .gitignore segment names a secrets folder other than .secrets, in any letter case.
+
+    A class such as [Ss] matches as its letters do, and a segment able to name .secrets itself is not one.
+    """
+    if set(segment) & set("*?") or dotted_secrets(segment):
+        return False
+    return any(fnmatch.fnmatchcase(name, segment.lower()) for name in ("secrets", ".secrets"))
+
+
 def ignored_secrets_folder(line):
     """The secrets folder one .gitignore line ignores, itself or its files by glob, and whether it is literal.
 
@@ -491,9 +507,9 @@ def ignored_secrets_folder(line):
         return None
     body = pattern.rstrip("/")
     segments = body.lstrip("/").split("/")
-    if "secrets" not in segments:
+    at = next((i for i, segment in enumerate(segments) if misnamed_secrets(segment)), None)
+    if at is None:
         return None
-    at = segments.index("secrets")
     after = segments[at + 1 :]
     if any("*" not in segment for segment in after):
         return None
@@ -521,9 +537,10 @@ def secret_folders(tree):
         for at in range(1, len(segments)):
             folder = "/".join(segments[:at])
             directories.add(folder)
-            if segments[at - 1] == "secrets" and not own:
+            bare = segments[at - 1].lower() == "secrets"
+            if bare and not own:
                 holding.add(folder)
-            elif segments[at - 1] == "secrets" and name != "README.md":
+            elif bare and name != "README.md":
                 owned.setdefault(path, []).append(folder)
     held = {path for path, folders in owned.items() if any(f not in holding for f in folders)}
     return directories, holding, held
@@ -598,11 +615,36 @@ def secret_path_target(tree, directories, holding, root, written, rest):
     return within, resolved
 
 
+def editor_text(text):
+    """An editor config file's text with its // comments dropped and each path separator form read as /."""
+    live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
+    return live.replace("${/}", "/").replace("${pathSeparator}", "/")
+
+
+def compose_project_bases(tree, read_text):
+    """The directories each compose file a devcontainer lists resolves its paths against, each set's first file's.
+
+    Compose resolves every relative path in a multi-file set against the first file's directory.
+    A file two sets list resolves against each set's base. One no devcontainer lists keeps its own directory.
+    """
+    bases = {}
+    for path in sorted(tree):
+        if not EDITOR_CONFIG.fullmatch(path) or not path.endswith("devcontainer.json"):
+            continue
+        listing = DOCKER_COMPOSE_FILES.search(editor_text(read_text(path) or ""))
+        named = re.findall(r'"([^"]*)"', listing[1]) if listing else []
+        listed = [posixpath.normpath(posixpath.join(posixpath.dirname(path), n)) for n in named]
+        for file in listed:
+            bases.setdefault(file, set()).add(posixpath.dirname(listed[0]))
+    return bases
+
+
 def named_secret_signals(tree, read_text, directories, holding):
     """What tracked files say of the secrets directories the tree cannot show, since one is ignored by design.
 
     The files read are each .gitignore and each compose or editor config file. A compose file is
     read by its keys, for the paths compose resolves on the host against the file's own directory.
+    Where a devcontainer lists it in a dockerComposeFile set, they resolve against that set's first file's.
     An editor file is read for a path a workspace variable roots, since any other depends on a
     launch's working directory. So an absolute path such as /run/secrets/<name>, a container mount
     point, is no signal, and neither is one secret_path_target refuses. A .gitignore line is
@@ -610,12 +652,15 @@ def named_secret_signals(tree, read_text, directories, holding):
     after the move, to guard old checkouts. A compose bind source or build context, any devcontainer
     path, and an editor path with no extension may each be a directory. Each reports the folder but
     judges no file name. A .code-workspace file's paths resolve against its first listed folder.
-    Returns three lists. The first is the files naming a bare secrets/ directory. The second is each
+    Returns three lists. The first is the files naming a secrets directory not named .secrets/, in
+    any letter case. The second is each
     named secret file the tree lacks whose name breaks the rule, with the files naming it. The third
     is each file read that returned no text. A compose file that does not parse, such as a template,
     is no signal. Neither is an editor file's // comment, whether it opens a line or follows a space.
     """
     bare, named, unread = set(), {}, []
+    read_text = functools.cache(read_text)
+    bases = compose_project_bases(tree, read_text)
     moved = any(".secrets" in path.split("/")[:-1] for path in tree)
     for path in sorted(tree):
         directory, name = posixpath.split(path)
@@ -630,7 +675,7 @@ def named_secret_signals(tree, read_text, directories, holding):
         elif gitignore:
             lines = text.splitlines()
             live = [line.strip() for line in lines if not line.strip().startswith("#")]
-            if any(".secrets" in line.lstrip("!").split("/") for line in live):
+            if any(dotted_secrets(s) for line in live for s in line.lstrip("!").split("/")):
                 continue
             for line in lines:
                 found = ignored_secrets_folder(line)
@@ -642,32 +687,35 @@ def named_secret_signals(tree, read_text, directories, holding):
                 else:
                     parts = folder.split("/")
                     stop = next(
-                        i for i, p in enumerate(parts) if p == "secrets" or set(p) & set("*?[")
+                        i for i, p in enumerate(parts) if misnamed_secrets(p) or set(p) & set("*?[")
                     )
                     prefix = posixpath.join(directory, *parts[:stop])
-                    code = any(not prefix or h.startswith(f"{prefix}/") for h in holding)
+                    code = any(
+                        (not prefix or h.startswith(f"{prefix}/"))
+                        and fnmatch.fnmatchcase(posixpath.basename(h), parts[-1])
+                        for h in holding
+                    )
                     signal = not code and (not prefix or prefix in directories)
                 if signal:
                     bare.add(path)
         else:
             if compose:
-                root = directory
                 document = _yaml(text, loader=ComposeLoader)[0]
                 found = [
-                    (SECRET_PATH.fullmatch(value), file)
+                    (SECRET_PATH.fullmatch(value), file, root)
+                    for root in sorted(bases.get(path, {directory}))
                     for value, file in compose_host_paths(document)
                 ]
             else:
-                live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
-                live = live.replace("${/}", "/").replace("${pathSeparator}", "/")
+                live = editor_text(text)
                 root = editor.group(1)
                 listing = (
                     WORKSPACE_FOLDER.search(live) if path.endswith(".code-workspace") else None
                 )
                 root = posixpath.join(root, listing[1]) if listing else root
                 file = ".devcontainer" not in path
-                found = [(match, file) for match in SECRET_REFERENCE.finditer(live)]
-            for match, file in found:
+                found = [(match, file, root) for match in SECRET_REFERENCE.finditer(live)]
+            for match, file, root in found:
                 if not match:
                     continue
                 written, folder, rest = match.group(1, 2, 3)
@@ -677,7 +725,7 @@ def named_secret_signals(tree, read_text, directories, holding):
                 target = secret_path_target(tree, directories, holding, root, written, rest)
                 if not target:
                     continue
-                if folder == "secrets":
+                if folder != ".secrets":
                     bare.add(path)
                 if file and target[1] and secret_name_breaks(posixpath.basename(target[1]), True):
                     named.setdefault(target[1], set()).add(path)
@@ -688,13 +736,14 @@ def named_secret_signals(tree, read_text, directories, holding):
 def secret_stem_findings(tree, read_text=None):
     """DRIFT naming each env or secret file whose name breaks CODESTYLE.md's env and secret file rule.
 
-    Every tracked file directly in a `.secrets/` directory is one, and so is a `.env` file elsewhere
-    whose name opens on no dot. A bare `secrets/` directory holding its own tracked .gitignore,
-    .gitkeep, or .example template, or a file beside its own template, is reported. Each file
-    directly in it other than its README.md, .gitignore, and .gitkeep is judged. With `read_text`,
-    which returns a path's text or None, the tracked .gitignore, compose, and editor config files
-    are read too. They report a bare `secrets/` directory and judge each secret file they name that
-    the tree lacks.
+    Every tracked file directly in a `.secrets/` directory, in any letter case, is one. So is a
+    `.env` file elsewhere whose name opens on no dot. A `.secrets/` spelled in another case is
+    reported. So is a bare `secrets/` directory, in any case, holding its own tracked .gitignore,
+    .gitkeep, or .example template. A file beside its own template counts as one of those. Each
+    file directly in that bare one other than its README.md, .gitignore, and .gitkeep is judged. With `read_text`, which
+    returns a path's text or None, the tracked .gitignore, compose, and editor config files are read
+    too. They report a secrets directory not named `.secrets/` and judge each secret file they name
+    that the tree lacks.
     `tree` is the blob path set, or None when unread, which reports nothing.
     """
     if tree is None:
@@ -704,9 +753,10 @@ def secret_stem_findings(tree, read_text=None):
     for path in sorted(tree):
         segments = path.split("/")
         name = segments[-1]
-        in_secrets = segments[-2:-1] == [".secrets"] or (
-            path in held and segments[-2:-1] == ["secrets"]
-        )
+        parent = segments[-2].lower() if len(segments) > 1 else ""
+        in_secrets = parent == ".secrets" or (path in held and parent == "secrets")
+        if parent == ".secrets" != segments[-2]:
+            held.add(path)
         if in_secrets and name in SECRETS_DIRECTORY_EXEMPT:
             continue
         folded = name.lower().removesuffix(ENV_SECRET_TEMPLATE)
@@ -737,9 +787,9 @@ def secret_stem_findings(tree, read_text=None):
             (
                 "DRIFT",
                 (
-                    f"runtime-secrets: {len(bare)} tracked file(s) name or sit in a bare secrets/ "
-                    f'directory, which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it '
-                    f".secrets/ and update each: {capped_paths(bare)}"
+                    f"runtime-secrets: {len(bare)} tracked file(s) name or sit in a secrets directory "
+                    f'not named .secrets/, which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename '
+                    f"it .secrets/ and update each: {capped_paths(bare)}"
                 ),
             )
         )
@@ -1737,30 +1787,63 @@ def baseline_file_findings(slug, ground, path, item, ref=None):
     return content, contents_text(content), []
 
 
+def fleet_owned_differences(item, canon_text, down_text):
+    """The leaves outside a unit's `repoOwnedKeys` that its copy holds differently from its JSON canonical, or lacks.
+
+    An empty list means the copy is current, and None means the two cannot be compared.
+    A value at one of those keys is the repository's own choice, and so is a leaf the copy adds.
+    So a key the canonical drops goes unreported, and a text either side that is not plain JSON is dated as before.
+    """
+    owned = item.get("repoOwnedKeys")
+    if not owned or canon_text is None:
+        return None
+    try:
+        canon = json.loads(canon_text)
+        down = json.loads(down_text.lstrip("\ufeff"))
+    except ValueError:
+        return None
+    held = {k: json.dumps(v, sort_keys=True) for k, v in validate.json_leaves(down)}
+    return [
+        k
+        for k, v in validate.json_leaves(canon)
+        if k not in owned and held.get(k) != json.dumps(v, sort_keys=True)
+    ]
+
+
 def intent_trail(slug, ref, path, item, down_text):
-    """`(canonical, (repo_date, hub_date, hub_sha))` where a copy possibly trails its intent canonical, else None.
+    """`(canonical, (repo_date, hub_date, hub_sha), differences)` where a copy possibly trails its intent canonical, else None.
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
+    A `repoOwnedKeys` unit's copy is judged by its fleet-owned values instead, whatever the dates read.
+    `differences` names each fleet-owned leaf that copy trails, and is None for a copy judged by date.
     `ref` is the branch or commit its last change is looked up from.
     """
     canonical_rel, anchor = intent_ref(item, path)
     hub_change = hub_last_change(canonical_rel, anchor)
     if hub_change is None:
         return None
+    differences = None
     if down_text is not None:
         for rel in (canonical_rel, None if item.get("reference") else path):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
+        differences = fleet_owned_differences(
+            item, canonical_current_text(canonical_rel), down_text
+        )
+        if differences == []:
+            return None
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ref}&per_page=1")
     if not commits:
         return None
     repo_date = commits[0]["commit"]["committer"]["date"]
     hub_date, hub_sha = hub_change
-    if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
+    if differences is None and datetime.fromisoformat(hub_date) <= datetime.fromisoformat(
+        repo_date
+    ):
         return None
-    return canonical_rel, (repo_date, hub_date, hub_sha)
+    return canonical_rel, (repo_date, hub_date, hub_sha), differences
 
 
 INTENT_ID = "files.intent"
@@ -1768,7 +1851,7 @@ INTENT_ACK = re.compile(r"`([^`@]+)@([0-9a-f]{7,40})`")
 
 
 def intent_findings(entry, ground, trails):
-    """The intent advisory over `trails`, `{path: (canonical, (repo_date, hub_date, hub_sha))}`.
+    """The intent advisory over `trails`, `{path: (canonical, (repo_date, hub_date, hub_sha), differences)}`.
 
     A driftNote naming (files.intent) acknowledges a copy verified against the canonical change the
     advisory cites, as `` `<path>@<sha>` ``. It clears that copy until the canonical changes again.
@@ -1779,21 +1862,26 @@ def intent_findings(entry, ground, trails):
         for path, sha in pairs:
             acks.setdefault(path, set()).add(sha)
     used = set()
-    for path, (canonical_rel, (repo_date, hub_date, hub_sha)) in sorted(trails.items()):
+    for path, (canonical_rel, (repo_date, hub_date, hub_sha), differences) in sorted(
+        trails.items()
+    ):
         hit = next((sha for sha in acks.get(path, ()) if sha[:7] == hub_sha), None)
         if hit:
             used.add((path, hit))
             continue
-        out.append(
-            (
-                "DRIFT",
-                (
-                    f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
-                    f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
-                    f"verify intent per AUDIT.md section 7"
-                ),
+        if differences:
+            text = (
+                f"intent: {path} on {ground} differs from the intent canonical {canonical_rel} at "
+                f"{', '.join(differences)}, which last changed at {hub_date} ({hub_sha}), "
+                f"verify intent per AUDIT.md section 7"
             )
-        )
+        else:
+            text = (
+                f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
+                f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
+                f"verify intent per AUDIT.md section 7"
+            )
+        out.append(("DRIFT", text))
     stale = sorted(f"{p}@{sha}" for p, shas in acks.items() for sha in shas if (p, sha) not in used)
     if stale:
         out.append(
@@ -2140,7 +2228,7 @@ def check_secrets_names(run):
 
 
 def check_dependabot_ecosystems(run):
-    """An ecosystem the tree implies, github-actions for workflows and devcontainers for a .devcontainer, is declared."""
+    """An ecosystem the tree implies, github-actions for workflows and devcontainers for .devcontainer/ or .devcontainer.json, is declared."""
     text = contents_text(
         gh(f"repos/{run.slug}/contents/.github/dependabot.yml?ref={run.ref}", ok404=True)
     )
@@ -2160,8 +2248,10 @@ def check_dependabot_ecosystems(run):
         e["name"].endswith((".yml", ".yaml")) for e in workflows
     ):
         implied["github-actions"] = ".github/workflows/ is present"
-    if gh(f"repos/{run.slug}/contents/.devcontainer?ref={run.ref}", ok404=True) is not None:
-        implied["devcontainers"] = ".devcontainer/ is present"
+    for path in (".devcontainer", ".devcontainer.json"):
+        if gh(f"repos/{run.slug}/contents/{path}?ref={run.ref}", ok404=True) is not None:
+            implied["devcontainers"] = f"{path} is present"
+            break
     return [
         (
             "DRIFT",

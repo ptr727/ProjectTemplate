@@ -31,15 +31,19 @@ change from one resync to the next.
 
 Read RESYNC.md section 0. A repo with no instruction set at all, or a partial one, is not this
 skill's job. It is STANDUP.md sections 1A and 2 instead, since an absent carried file is a
-baseline that never arrived rather than drift to converge. Run `uv run --no-project --script spec/audit.py <RepoName>`,
+baseline that never arrived rather than drift to converge. First create the hub and target
+worktrees and verify the host, as the next section says, since no hub tool runs before the host gate.
+A stale tool answers `--version`, looks healthy, and produces a wrong answer. Then run
+`uv run --no-project --script spec/audit.py <RepoName>`,
 the target's `registry/repos.json` `name` field rather than an `owner/repo` slug or a checkout
-path. Then read whether the findings are letters (absent) or drift (present but stale). Do both before doing
+path. Then read whether the findings are letters (absent) or drift (present but stale). Do all of this before doing
 anything else. The finding kind names the procedure the repo is owed.
 
 ## Reach the hub and measure before changing anything
 
 Fetch a hub checkout of your own immediately before reading it, since a stale clone
-answers confidently instead of failing. This follows section 1 of the hub-only `RESYNC.md`.
+answers confidently instead of failing. Check out `main`, or `develop` while the target's registry entry has
+merged there but not yet reached `main`. This follows section 1 of the hub-only `RESYNC.md`.
 That file is fetched with the hub rather than present in a carrier. Never do the resync's own work in a checkout another task
 may be using, the maintainer's own primary checkout included, even one that looks current. For the
 hub and for the target repo alike, create a worktree of your own off that base clone and work
@@ -55,8 +59,9 @@ the host with `python3 scripts/host_gate.py --repo <path-to-target-worktree>`, r
 worktree, since `scripts/` is hub-hosted and no carrier holds it. Then run the audit end to end,
 `RESYNC.md` section 2. `uv run --no-project --script spec/audit.py <RepoName>` measures the target's ground-truth
 branch, which the registry's `groundTruthBranch` names and which is `main` for every cataloged
-repo today, never `develop`. That is the invocation "Confirm the procedure before starting"
-already ran, run again here. Convergence lands on a ref `main` does not hold yet, so a run that
+repo today, never `develop`. "Confirm the procedure before starting" already ran that
+invocation after this host gate, so read its findings here. A re-run is still owed before
+acting on one, as below. Convergence lands on a ref `main` does not hold yet, so a run that
 previews in-flight work names that ref: `uv run --no-project --script spec/audit.py --branch <ref> <RepoName>`. Use it
 to check whether a fix landed, since a run against `main` still reports what the in-flight ref
 already fixed. Section 2 carries two further commands that neither of these replaces. A finding is
@@ -91,8 +96,9 @@ section 3 describes.
    the artifact-name handoff, rather than copying bytes.
 5. **Settings, rulesets, and secrets.** Run
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
-   operational repo) from the hub at `main`, then `apply` for what it reports, never from a
-   carried copy. Run `uv run --no-project --script spec/audit.py <RepoName>` from the same checkout for secrets.
+   operational repo), then `apply` for what it reports, never from a carried copy. Both run from
+   the hub checkout this run fetched, at `main` or at `develop` for a registry entry not yet
+   promoted. Run `uv run --no-project --script spec/audit.py <RepoName>` from the same checkout for secrets.
 6. **Intent files last, and by hand,** since nothing mechanical judges these.
 
 Reconcile the registry entry (`status`, `types`, `releaseTrigger`, `workflowModel`,

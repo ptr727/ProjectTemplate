@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4", "pyyaml>=6"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2", "pyyaml==6.0.3"]
 # ///
 """Fidelity-honesty analysis: check the manifest's declared fidelities against fleet reality.
 
@@ -15,6 +15,7 @@ level up. It answers two questions the audit cannot:
   1. Which `intent` units are actually content-identical (after EOL normalization) across the whole fleet? Those are candidates to
      promote to `verbatim` - they would gain free drift-detection (a stale-but-present copy is invisible
      under intent, caught under verbatim). This is the class that hid the configure.sh drift.
+     A unit declaring `repoOwnedKeys` is never a candidate, since verbatim would overwrite the repo's own values.
   2. Which `verbatim` units have a downstream copy that diverges in a NON-stale way? That is either a
      mis-set label (the content legitimately varies -> should be intent) or real drift to chase.
 
@@ -90,6 +91,7 @@ def fidelity_pass(spec):
     spreads = []  # (unit dict, spread dict) for the full table
     promote = []  # intent units that are uniform fleet-wide
     mislabel = []  # verbatim units that diverge non-stale
+    owned = {e["path"] for e in spec["files"]["baseline"] if e.get("repoOwnedKeys")}
 
     for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
         unit = {"path": label, "fidelity": fid}
@@ -149,7 +151,7 @@ def fidelity_pass(spec):
         # An absent section does not disqualify it either, for the same reason an unavailable file does not.
         # Neither is evidence that a repo decided something locally, and only such evidence argues against promotion.
         # Treating absence as disqualifying would be the same conflation this bucket was split out to end.
-        if fid == "intent" and spread["match"] and not spread["differs"]:
+        if fid == "intent" and label not in owned and spread["match"] and not spread["differs"]:
             promote.append((unit, spread))
         if fid == "verbatim" and spread["differs"]:
             mislabel.append((unit, spread))
@@ -365,7 +367,9 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
     w("## Promote candidates (intent uniform -> verbatim)")
     w("")
     if not promote:
-        w("_None - no intent unit is currently fleet-uniform with the canonical._")
+        w(
+            "_None - no intent unit without `repoOwnedKeys` is currently fleet-uniform with the canonical._"
+        )
     for e, sp in promote:
         w(f"- **{e['path']}**: {len(sp['match'])} match, {len(sp['stale'])} stale, 0 hand-modified")
     w("")

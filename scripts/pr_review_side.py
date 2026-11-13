@@ -9,9 +9,12 @@ reaches GitHub on its own, and every case can drive it with constructed payloads
 
 from __future__ import annotations
 
+import re
+import urllib.parse
 from argparse import Namespace
 from collections.abc import Callable
 from datetime import UTC, datetime
+from subprocess import CompletedProcess
 
 import pr_review_policy as review_policy
 from pr_review_checks import (
@@ -40,6 +43,8 @@ from pr_review_rounds import (
 
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
+PUSHED_KEY = "_headPushedAt"
+PUSHED_JQ = 'map(select(.after == "{}") | .timestamp) | max // empty'
 
 
 def side_command(name: str, command: str = "review") -> str:
@@ -107,18 +112,36 @@ def side_asks(pr: dict, body: str) -> list[dict]:
     return sorted(asks, key=lambda n: n.get("createdAt") or "")
 
 
-def side_asked_on_head(pr: dict, body: str) -> bool:
-    """Whether a request `body` was posted since the head was committed.
+def pushed(pr: dict, rest: Callable[[str, str], CompletedProcess]) -> dict:
+    """`pr` carrying when GitHub logged the push that left its head on its branch, empty if unread.
 
-    The commit time is the one stamp that never moves once the head exists. A suite's creation
-    comes later, so an ask posted before the first suite would read as older than the head. An ask
-    for an earlier head, made after this one was committed, counts for this one too. That costs at
-    most one missed ask, never a duplicate paid round. The two stamps are compared as instants,
-    since a commit's timestamp keeps its committer's own offset where a comment's is UTC.
+    The log stamps a push on receipt, where a commit's date is its author's clock, which can run
+    behind or ahead. The newest entry ending at the head counts, so a force-push back to it does.
     """
-    since = utc_instant(head_commit(pr).get("committedDate") or "")
+    head, branch = pr.get("headRefOid") or "", pr.get("headRefName") or ""
+    where = (pr.get("headRepository") or {}).get("nameWithOwner")
+    placed = where and branch and re.fullmatch(r"[0-9a-f]{40,64}", head)
+    query = urllib.parse.urlencode({"ref": f"refs/heads/{branch}", "per_page": 100})
+    proc = rest(f"repos/{where}/activity?{query}", PUSHED_JQ.format(head)) if placed else None
+    return {**pr, PUSHED_KEY: proc.stdout.strip() if proc and proc.returncode == 0 else ""}
+
+
+def side_asked_on_head(pr: dict, body: str) -> bool:
+    """Whether a request `body` was posted since the head was pushed, both stamps GitHub's own.
+
+    No commit date, backdated or ahead, moves it. An ask in the push's own second counts as on it.
+    """
+    since = utc_instant(pr.get(PUSHED_KEY) or "")
     asked = (utc_instant(n.get("createdAt") or "") for n in side_asks(pr, body))
     return since is not None and any(at is not None and at >= since for at in asked)
+
+
+def unasked(pr: dict, name: str, body: str, lines: list[str]) -> bool:
+    """Whether `name` is still to be asked, never where an unread push hides an ask on the head."""
+    placed = utc_instant(pr.get(PUSHED_KEY) or "") is not None or not side_asks(pr, body)
+    if not placed and not side_answered(pr, name):
+        lines.append(f"note: the head's push could not be read, so {name} was not asked")
+    return placed and not side_answered(pr, name) and not side_asked_on_head(pr, body)
 
 
 def side_rounds(pr: dict, name: str, body: str) -> int:
@@ -183,14 +206,15 @@ def request_side_reviews(
 ) -> list[str]:
     """Ask each comment-triggered reviewer the policy asks explicitly in `phase`, once per head.
 
-    `phase` is the `when` value this call serves, so an on-open ask never waits behind a check
-    wait. A reviewer that answered or was asked since the head arrived is skipped before any wait,
-    and judged again on a fresh read after one. So a request that a concurrent session sent during
-    the wait is seen. Nothing is sent where its cap is spent. Nor where a cap applies and the comment
-    window is cut, since the rounds spent cannot then be counted. The merge never waits on these
-    reviewers, so a held ask is a note rather than an exit. `post` sends one comment and returns
-    `post_comment`'s answer, and an unconfirmed one ends the run, since it may have landed. A pull request
-    no longer open is asked nothing, since a peer can merge or close it while `wait` polls.
+    `phase` is the `when` value this call serves, so an on-open ask never waits behind a check wait.
+    A reviewer that answered or was asked since the push is skipped before any wait, and judged
+    again on a fresh read after one. So a request that a concurrent session sent during the wait is
+    seen. Nothing is sent where its cap is spent, or where an ask is on record and the push unread.
+    Nor where a cap applies and the comment window is cut, since the rounds spent cannot then be
+    counted. The merge never waits on these reviewers, so a held ask is a note rather than an exit.
+    `post` sends one comment and returns `post_comment`'s answer, and an unconfirmed one ends the
+    run, since it may have landed. A pull request no longer open is asked nothing, since a peer can
+    merge or close it while `wait` polls.
     """
     lines: list[str] = []
     held: str | None = None
@@ -200,7 +224,7 @@ def request_side_reviews(
     for name, bot, body in side_reviewers(pr):
         if not bot.requests() or bot.when != phase:
             continue
-        if side_answered(pr, name) or side_asked_on_head(pr, body):
+        if not unasked(pr, name, body, lines):
             continue
         if not bot.rounds_left(side_rounds(pr, name, body)):
             lines.append(
@@ -223,7 +247,7 @@ def request_side_reviews(
                     f"note: {name} is asked only once the head's checks pass, and they read {held}"
                 )
                 continue
-            if side_answered(pr, name) or side_asked_on_head(pr, body):
+            if not unasked(pr, name, body, lines):
                 continue
         made, confirmed = post(body)
         if not confirmed:
@@ -280,6 +304,7 @@ def ask(
     send: Callable[..., dict],
     dig: Callable[..., dict],
     pr: dict | bool,
+    rest: Callable[[str, str], CompletedProcess],
     phase: str,
     poll: Callable[[], str] | None = None,
 ) -> None:
@@ -299,7 +324,7 @@ def ask(
     def checks_now() -> str:
         return checks_hold(read(), datetime.now(UTC), args.check_grace, args.check_stall)
 
-    for line in request_side_reviews(read, poll or checks_now, post, phase):
+    for line in request_side_reviews(lambda: pushed(read(), rest), poll or checks_now, post, phase):
         print(line)
 
 

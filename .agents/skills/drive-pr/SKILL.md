@@ -103,6 +103,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    one per "Disposing of Every Finding" and wait again. Read `state=` in every digest `wait` or `status` prints.
    A peer can merge or close the pull request mid-drive. A digest carrying `state=MERGED` on a feature PR into develop means the merge has landed.
    Skip the merge in step 4 and go on to its post-merge path.
+   A finding still open there keeps its outcome owed. That covers an unresolved thread and every finding step 4 names, whether or not `merge` would refuse on it.
+   Give each one per "Disposing of Every Finding" before that path's cleanup, a fix landing as a fresh feature -> develop pass.
    On a promotion PR it means the drive's end state is passed, so stop and report it merged.
    A digest carrying `state=CLOSED` is a stop to report, with its `closed_at=`.
    On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried.
@@ -130,9 +132,10 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    line's route here. The hub's `scripts/README.md` "`pr_merge.py`" gives each route in full.
 
    - `next=done` is merged and cleaned up.
-   - `next=cleanup` is a merge that landed with its cleanup still owed. Run the `cleanup` command
-     below. Report a pull request another hand merged as a merge this run cannot vouch for. The
-     head that merged may be one the gate never read.
+   - `next=cleanup` is a merge that landed with its cleanup still owed. Give its open findings the
+     outcome step 3 owes after a peer merge, then run the `cleanup` command below. Report a pull
+     request another hand merged as a merge this run cannot vouch for. The head that merged may be
+     one the gate never read.
    - `next=readback` is a merge that may have landed. Read it back with `gh pr view <number> --repo
      <owner>/<repo> --json state`. `MERGED` means run `cleanup`, and `OPEN` means treat it as
      `redrive`. Only a read that still cannot answer is reported, saying the merge may have landed.
@@ -163,8 +166,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    It decides its local refusals before the remote delete. `repo-worktree` "Listing and
    Cleanup" says what a refusal after the remote delete and a `base=kept` line each leave to do.
    It takes the pull request rather than a branch name and does the verify-then-delete in
-   code. It refuses unless the pull request merged into `develop` from a head in that same
-   repository. It also refuses a permanent branch or one any ruleset or branch protection covers. It
+   code. It refuses unless the pull request merged into `develop`, or is a conflicted promotion
+   merged into `main`, from a head in that same repository. It also refuses a permanent branch or one any ruleset or branch protection covers. It
    checks the tip is still at the pull request's `headRefOid` before deleting, and reads the ref
    back to confirm.
    These exits are `cleanup`'s, read once a `status=MERGED` line printed or a standalone `cleanup`
@@ -184,7 +187,9 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
    `main` from it, GitHub has no per-branch exception). So nothing deletes an ordinary feature
    branch automatically. Stop here and report the merged PR when the target is develop only.
-5. Open the develop -> main promotion PR if it does not exist yet, or find the existing one.
+5. Open the develop -> main promotion PR if it does not exist yet, or find the existing one. Its
+   body carries the closing keywords, checked as `branching-and-release-model`'s closing-keyword
+   bullets state.
 6. Drive its review loop the same way. A finding that needs a code change never gets pushed to
    the promotion PR directly, since its head is develop. So land the fix as a fresh pass through
    steps 1 to 4 in its own worktree and branch. Then return here.

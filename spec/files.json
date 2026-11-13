@@ -27,7 +27,7 @@
         { "path": ".gitignore", "appliesTo": "*" },
         { "path": "host-tools.json", "appliesTo": "*" },
         { "path": "version.json", "fidelity": "intent", "intentRef": "WORKFLOW.md#d3---versioning-and-classification", "appliesTo": "*" },
-        { "path": "AUDIT.md", "fidelity": "intent", "intentRef": "docs/repo-config.md", "appliesTo": "*" },
+        { "path": "AUDIT.md", "fidelity": "intent", "reference": "catalog/snippets/configs/AUDIT.md", "placeholders": ["<owner>/<repo>", "<Repo>", "<model>"], "intentRef": "docs/repo-config.md", "appliesTo": "*" },
         { "path": ".github/dependabot.yml", "appliesTo": "*" },
         { "path": ".github/workflows/test-pull-request.yml", "fidelity": "interface", "contract": { "requiredJobKeys": ["check-workflow-status", "validate"], "requiredCheckName": "Check pull request workflow status job", "requireTokensInJob": { "validate": ["validate-task.yml"] } }, "intentRef": "GOVERNANCE.md#workflow-yaml-conventions", "appliesTo": "*" },
         { "path": ".github/workflows/publish-release.yml", "fidelity": "interface", "contract": { "requiredJobKeys": ["plan", "validate", "publish"], "requireTokensInJob": { "plan": ["publish-plan-task.yml"], "validate": ["validate-task.yml"], "publish": ["build-release-task.yml", "needs.validate.result == 'success'"] } }, "intentRef": "WORKFLOW.md#d4---release--publish", "appliesTo": ["two-phase", "dispatch-only"] },
@@ -35,7 +35,7 @@
         { "path": ".github/workflows/deploy-site.yml", "fidelity": "interface", "contract": { "requiredJobKeys": ["assert-ref", "validate", "deploy"], "requireTokensInJob": { "deploy": ["deploy-site-task.yml", "with:\n      environment:", "contents: read", "DEPLOY_SSH_PRIVATE_KEY"] }, "forbidTokensInJob": { "deploy": ["\n    environment:"] } }, "intentRef": "docs/reusable-workflows.md#adopting-the-type-specific-tasks", "appliesTo": ["hugo"] },
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks.json", "appliesTo": ["csharp"] },
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks-python.json", "appliesTo": ["python"] },
-        { "path": "global.json", "fidelity": "intent", "reference": "catalog/snippets/configs/global.json", "intentRef": "CODESTYLE.md", "appliesTo": ["csharp"] },
+        { "path": "global.json", "fidelity": "intent", "reference": "catalog/snippets/configs/global.json", "repoOwnedKeys": ["sdk.version"], "intentRef": "CODESTYLE.md", "appliesTo": ["csharp"] },
         { "path": ".codecov.yml", "fidelity": "intent", "reference": "catalog/snippets/configs/.codecov.yml", "intentRef": "WORKFLOW.md", "appliesTo": ["csharp", "python"] },
         { "path": ".dockerignore", "appliesTo": ["docker"] },
         { "path": "Docker/README.md", "reference": "catalog/snippets/configs/docker-hub-readme.md", "appliesTo": ["docker"] }

@@ -14,6 +14,7 @@
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
+# A tool recording a managed copy (opencode) is managed through that copy, and another copy ahead of it is reported for a fix by hand.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
@@ -164,13 +165,20 @@ With no tool named, --report and --upgrade select every managed tool, while --in
 none, so an install always names what it installs, or says --all.
 
 A tool reads as "self" when no package manager owns it, so this script runs the tool's own
-updater, and as the name of a package manager when one owns it. --upgrade then runs that
+updater, or for the managed opencode its installer, and as the name of a package manager when one owns it. --upgrade then runs that
 manager's upgrade for that one package: npm or bun install the latest tag, Homebrew upgrades the
 formula or cask, and mise upgrades the tool. apt is upgraded by upgrade-host.sh, and Nix is
 declarative, so neither is run. An npm directory this user cannot write is reported with its
 command rather than run, and nothing here ever uses sudo. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
 one outdated, and a herdr server still running the previous binary is left running and reported
 as needing a restart, since stopping it would end every pane inside it.
+
+opencode is the one tool with a managed copy, ~/.opencode/bin/opencode from its own installer,
+since it ships from several sources and opencode 2 replaced opencode 1's npm package. Running the
+installer again is how --upgrade keeps it current. Another copy PATH reaches first, an npm
+opencode-ai among them, is reported with the command that removes it and is never removed here.
+--upgrade and --install leave opencode alone while one is first on PATH, and act on the managed
+copy once none is.
 
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -259,7 +267,17 @@ npm_package() {
     case "$1" in
     claude) printf '@anthropic-ai/claude-code' ;;
     codex) printf '@openai/codex' ;;
-    opencode) printf 'opencode-ai' ;;
+    opencode) printf '@opencode/cli' ;;
+    esac
+}
+
+# Every npm registry name a tool has shipped under, current first, one per line.
+# A copy under an earlier name is still that tool's, so its removal is named by that name, as opencode 1's opencode-ai is.
+npm_packages() {
+    npm_package "$1"
+    printf '\n'
+    case "$1" in
+    opencode) printf 'opencode-ai\n' ;;
     esac
 }
 
@@ -366,6 +384,127 @@ mise_key() {
     return 0
 }
 
+# The npm or bun command for a step, upgrade or remove, on the package owning a real path, as PKG_CMD, or PKG_WHY where none runs.
+# An upgrade and a stray's removal share it.
+# An upgrade matches only the recorded package, while a removal also matches a name the tool shipped under earlier.
+# The matched name must own the files, so a fork providing the same command is never replaced or removed.
+PKG_CMD=()
+PKG_WHY=""
+
+package_step() {
+    local step="$1" tool="$2" real="$3" manager="$4" recorded pkg="" named candidate dir action names
+    local -a command=()
+    PKG_CMD=()
+    PKG_WHY=""
+    if [[ $step == "upgrade" ]]; then action="upgrade"; else action="remove"; fi
+    recorded=$(npm_package "$tool")
+    if [[ -z $recorded ]]; then
+        PKG_WHY="no $manager package name is recorded for $tool, so $action it with $manager by hand"
+        return 0
+    fi
+    # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
+    if [[ $manager == "bun" ]]; then dir="$(bun_global_dir)/node_modules"; else dir=$(npm_root); fi
+    # An upgrade under an earlier name would reinstall the version that name replaced.
+    if [[ $step == "upgrade" ]]; then names="$recorded"; else names=$(npm_packages "$tool"); fi
+    while IFS= read -r candidate; do
+        if [[ -n $candidate && -n $dir && $real == "$dir/$candidate"/* ]]; then
+            pkg="$candidate"
+            break
+        fi
+    done <<<"$names"
+    # Where npm or bun cannot say which package owns the files, a removal names the one the path itself shows.
+    named="$pkg"
+    if [[ -z $named && $step == "remove" ]]; then
+        while IFS= read -r candidate; do
+            if [[ -n $candidate && $real == */node_modules/"$candidate"/* ]]; then
+                named="$candidate"
+                break
+            fi
+        done < <(npm_packages "$tool")
+    fi
+    if [[ $step == "upgrade" ]]; then
+        # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
+        command=("$manager" install -g "${pkg:-$recorded}@latest")
+    elif [[ $manager == "bun" ]]; then
+        command=(bun remove -g "${named:-$recorded}")
+    else
+        command=(npm uninstall -g "${named:-$recorded}")
+    fi
+    if ! command -v "$manager" >/dev/null; then
+        PKG_WHY="$manager is not on PATH, so run: ${command[*]}"
+    elif [[ $manager == "bun" && -z $pkg ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under bun's global package $recorded, so that package does not own it, $action it where it was installed"
+    elif [[ -z $dir && $step == "remove" ]]; then
+        PKG_WHY="the $manager on PATH did not report where it installs, so run: ${command[*]}"
+    elif [[ -z $dir || $real != "$dir"/* ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, $action it where it was installed"
+    elif [[ -z $pkg ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under the npm package $recorded, so that package does not own it, $action it where it was installed"
+    elif [[ $manager == "npm" && ! -w $dir ]]; then
+        PKG_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: ${command[*]}"
+    else
+        PKG_CMD=("${command[@]}")
+    fi
+}
+
+# The mise command for a step, upgrade or remove, on the tool mise's listing holds at a real path.
+# It is MISE_CMD, or MISE_WHY where none runs.
+# An upgrade and a stray's removal share it, so both read the key from mise's own listing and both leave mise's Node alone.
+MISE_CMD=()
+MISE_WHY=""
+
+mise_step() {
+    local step="$1" real="$2" name action
+    MISE_CMD=()
+    MISE_WHY=""
+    if [[ $step == "upgrade" ]]; then action="upgrade"; else action="remove"; fi
+    # The tool is named by mise's own listing, matched on install path, rather than read from the directory name.
+    name=$(mise_key "$real")
+    if [[ -z $name ]]; then
+        MISE_WHY="mise and jq must both be on PATH and mise's listing must hold an entry whose install path holds $(hide_home "$real"), and none does, so $action it with mise by hand"
+        return 0
+    fi
+    # A Node runtime is never changed for an agent in it.
+    # An upgrade would leave the agent behind, and a removal would take the runtime from under it.
+    case "$name" in
+    node | core:node | nodejs)
+        MISE_WHY="it sits inside mise's Node, and the npm on PATH does not own it, so $action it where it was installed"
+        return 0
+        ;;
+    esac
+    if [[ $step == "upgrade" ]]; then MISE_CMD=(mise upgrade "$name"); else MISE_CMD=(mise unuse -g "$name"); fi
+}
+
+# The brew command for a verb, upgrade or uninstall, on the package holding a real path, as BREW_CMD, or BREW_WHY where none runs.
+# An upgrade and a stray's removal share it, so both read the name from where brew put the files and both leave Homebrew's Node alone.
+BREW_CMD=()
+BREW_WHY=""
+
+brew_step() {
+    local verb="$1" tool="$2" real="$3" name
+    BREW_CMD=()
+    BREW_WHY=""
+    if [[ $real == */Caskroom/* ]]; then
+        name="${real#*/Caskroom/}"
+        BREW_CMD=(brew "$verb" --cask "${name%%/*}")
+    elif [[ $real == */Cellar/* ]]; then
+        name="${real#*/Cellar/}"
+        name="${name%%/*}"
+        if [[ $name == "node" || $name == node@* ]]; then
+            BREW_WHY="it sits inside Homebrew's Node, and the npm on PATH does not own it, so $verb it where it was installed"
+            return 0
+        fi
+        BREW_CMD=(brew "$verb" "$name")
+    else
+        BREW_WHY="Homebrew's name for $tool could not be read from $(hide_home "$real"), so run brew $verb with it by hand"
+        return 0
+    fi
+    command -v brew >/dev/null || {
+        BREW_WHY="brew is not on PATH, so run: ${BREW_CMD[*]}"
+        BREW_CMD=()
+    }
+}
+
 # What an upgrade does for a tool a package manager owns, as PLAN_CMD (the command to run) or PLAN_WHY (why none runs).
 # Never both.
 # The reason names the command where one exists, so the person can run it where this script may not.
@@ -373,7 +512,7 @@ PLAN_CMD=()
 PLAN_WHY=""
 
 manager_plan() {
-    local tool="$1" path="$2" manager="$3" real pkg dir name
+    local tool="$1" path="$2" manager="$3" real
     PLAN_CMD=()
     PLAN_WHY=""
     if ! real=$(tool_real_path "$path"); then
@@ -388,81 +527,91 @@ manager_plan() {
         PLAN_WHY="Nix is declarative, so update it where it is declared, for example with nix profile upgrade or in your flake or home configuration"
         ;;
     npm | bun)
-        pkg=$(npm_package "$tool")
-        if [[ -z $pkg ]]; then
-            PLAN_WHY="no $manager package name is recorded for $tool, so upgrade it with $manager by hand"
-            return 0
-        fi
-        if ! command -v "$manager" >/dev/null; then
-            PLAN_WHY="$manager is not on PATH, so run: $manager install -g $pkg@latest"
-            return 0
-        fi
-        # The recorded package must be the one that owns the file, so a fork providing the same command is never replaced by it.
-        if [[ $manager == "bun" ]]; then
-            dir="$(bun_global_dir)/node_modules"
-            if [[ -z $dir || $real != "$dir/$pkg"/* ]]; then
-                PLAN_WHY="its files at $(hide_home "$real") are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
-                return 0
-            fi
-        fi
-        if [[ $manager == "npm" ]]; then
-            # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
-            dir=$(npm_root)
-            if [[ -z $dir || $real != "$dir"/* ]]; then
-                PLAN_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
-                return 0
-            fi
-            if [[ $real != "$dir/$pkg"/* ]]; then
-                PLAN_WHY="its files at $(hide_home "$real") are not under the npm package $pkg, so that package does not own it, upgrade it where it was installed"
-                return 0
-            fi
-            if [[ ! -w $dir ]]; then
-                PLAN_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: npm install -g $pkg@latest"
-                return 0
-            fi
-        fi
-        # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-        PLAN_CMD=("$manager" install -g "$pkg@latest")
+        package_step upgrade "$tool" "$real" "$manager"
+        PLAN_CMD=("${PKG_CMD[@]}")
+        PLAN_WHY="$PKG_WHY"
         ;;
     brew)
-        if [[ $real == */Caskroom/* ]]; then
-            name="${real#*/Caskroom/}"
-            name="${name%%/*}"
-            PLAN_CMD=(brew upgrade --cask "$name")
-        elif [[ $real == */Cellar/* ]]; then
-            name="${real#*/Cellar/}"
-            name="${name%%/*}"
-            if [[ $name == "node" || $name == node@* ]]; then
-                PLAN_WHY="it sits inside Homebrew's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
-                return 0
-            fi
-            PLAN_CMD=(brew upgrade "$name")
-        else
-            PLAN_WHY="Homebrew's name for $tool could not be read from $(hide_home "$real"), so run brew upgrade with it by hand"
-            return 0
-        fi
-        command -v brew >/dev/null || {
-            PLAN_WHY="brew is not on PATH, so run: ${PLAN_CMD[*]}"
-            PLAN_CMD=()
-        }
+        brew_step upgrade "$tool" "$real"
+        PLAN_CMD=("${BREW_CMD[@]}")
+        PLAN_WHY="$BREW_WHY"
         ;;
     mise)
-        # The tool is named by mise's own listing, matched on install path, rather than read from the directory name.
-        name=$(mise_key "$real")
-        if [[ -z $name ]]; then
-            PLAN_WHY="mise and jq must both be on PATH and mise's listing must hold an entry whose install path holds $(hide_home "$real"), and none does, so upgrade it with mise by hand"
-            return 0
-        fi
-        # A Node runtime is never upgraded for an agent in it, which would leave the agent behind in the old Node.
-        case "$name" in
-        node | core:node | nodejs)
-            PLAN_WHY="it sits inside mise's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
-            return 0
-            ;;
-        esac
-        PLAN_CMD=(mise upgrade "$name")
+        mise_step upgrade "$real"
+        PLAN_CMD=("${MISE_CMD[@]}")
+        PLAN_WHY="$MISE_WHY"
         ;;
     esac
+}
+
+# --- Managed Copies ---
+
+# A tool can record one managed copy, the one this script installs and upgrades.
+# Another copy PATH reaches first is reported with the commands that fix it, and never removed here, since the fix is a one-off.
+# A tool recording none keeps whatever copy it has and is upgraded through whatever owns it.
+tool_managed() {
+    if declare -F "$(tool_function "$1" managed)" >/dev/null; then
+        "$(tool_function "$1" managed)"
+    fi
+    return 0
+}
+
+# Whether a path is the tool's managed copy, compared by identity so a link to it counts.
+is_managed_copy() {
+    local tool="$1" path="$2" managed real
+    managed=$(tool_managed "$tool")
+    [[ -n $managed && -e $managed ]] || return 1
+    real=$(tool_real_path "$path") || return 1
+    [[ $real -ef $managed ]]
+}
+
+# Whether a copy of the tool PATH resolves to is another copy than its managed one.
+is_stray_copy() {
+    local tool="$1" path="$2"
+    [[ -n $(tool_managed "$tool") ]] || return 1
+    ! is_managed_copy "$tool" "$path"
+}
+
+# The command that removes a stray copy through whatever owns it, or what to do where no one command does.
+stray_removal() {
+    local tool="$1" path="$2" manager="$3" real name
+    if ! real=$(tool_real_path "$path"); then
+        printf 'remove it with mise, since mise which could not resolve its shim'
+        return 0
+    fi
+    case "$manager" in
+    npm | bun)
+        package_step remove "$tool" "$real" "$manager"
+        if ((${#PKG_CMD[@]} > 0)); then printf '%s' "${PKG_CMD[*]}"; else printf '%s' "$PKG_WHY"; fi
+        ;;
+    brew)
+        brew_step uninstall "$tool" "$real"
+        if ((${#BREW_CMD[@]} > 0)); then printf '%s' "${BREW_CMD[*]}"; else printf '%s' "$BREW_WHY"; fi
+        ;;
+    apt)
+        name=$(dpkg -S "$real" 2>/dev/null) || name=""
+        name="${name%%:*}"
+        printf 'as root, apt remove %s' "${name:-<package>}"
+        ;;
+    mise)
+        mise_step remove "$real"
+        if ((${#MISE_CMD[@]} > 0)); then printf '%s' "${MISE_CMD[*]}"; else printf '%s' "$MISE_WHY"; fi
+        ;;
+    nix)
+        printf 'remove it where Nix declares it, for example with nix profile remove'
+        ;;
+    self)
+        printf 'rm %s' "$(hide_home "$path")"
+        ;;
+    esac
+}
+
+# How to fix a stray copy by hand: its removal, then an install.
+# The install leaves a managed copy in place alone and names any stray still ahead of it.
+stray_fixup() {
+    local tool="$1" path="$2" manager="$3"
+    printf '%s is the %s copy rather than the managed %s, so remove it by hand: %s, and then run: install-agents.sh --install %s' \
+        "$(hide_home "$path")" "$manager" "$(hide_home "$(tool_managed "$tool")")" "$(stray_removal "$tool" "$path" "$manager")" "$tool"
 }
 
 # --- claude ---
@@ -479,8 +628,11 @@ codex_install() { run_installer "$(codex_source)" sh; }
 
 # --- opencode ---
 
-opencode_source() { printf 'https://opencode.ai/install'; }
-opencode_upgrade() { run opencode upgrade; }
+# The opencode tool ships from its own installer, npm, bun, Homebrew, and mise, so it records the one copy this script keeps.
+# The installer writes ~/.opencode/bin, and running it again is the documented update, which also carries an opencode 1 there to opencode 2.
+opencode_source() { printf 'https://opencode.ai/v2/install'; }
+opencode_managed() { printf '%s' "$HOME/.opencode/bin/opencode"; }
+opencode_upgrade() { run_installer "$(opencode_source)" bash; }
 opencode_install() { run_installer "$(opencode_source)" bash; }
 
 # --- herdr ---
@@ -590,8 +742,13 @@ report() {
             installed=$(tool_version "$path")
             manager=$(tool_manager "$path")
             status="present"
-            local upgrades=true
-            if [[ $manager != "self" ]]; then
+            local upgrades=true stray=false
+            if is_stray_copy "$tool" "$path"; then
+                note "$tool" "$(stray_fixup "$tool" "$path" "$manager")"
+                stray=true
+                upgrades=false
+            fi
+            if [[ $stray == false && $manager != "self" ]]; then
                 manager_plan "$tool" "$path" "$manager"
                 if ((${#PLAN_CMD[@]} > 0)); then
                     note "$tool" "installed through $manager, --upgrade runs: ${PLAN_CMD[*]}"
@@ -654,6 +811,10 @@ upgrade_tool() {
     path=$(tool_path "$tool")
     if [[ -z $path ]]; then
         log "$tool: not installed, leaving it absent"
+        return 0
+    fi
+    if is_stray_copy "$tool" "$path"; then
+        warn "$tool: $(stray_fixup "$tool" "$path" "$(tool_manager "$path")")"
         return 0
     fi
     manager=$(tool_manager "$path")
@@ -720,6 +881,10 @@ manager_upgrade() {
 install_tool() {
     local tool="$1" path now
     path=$(tool_path "$tool")
+    if [[ -n $path ]] && is_stray_copy "$tool" "$path"; then
+        warn "$tool: $(stray_fixup "$tool" "$path" "$(tool_manager "$path")")"
+        return 0
+    fi
     if [[ -n $path ]]; then
         log "$tool: already installed at $(hide_home "$path"), leaving it alone, --upgrade updates it"
         return 0

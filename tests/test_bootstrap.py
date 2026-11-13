@@ -60,6 +60,10 @@ PS_TOOLS_OPEN = re.compile(r"^\$TOOLS\s*=\s*@\(", re.MULTILINE)
 PS_TOOLS_CLOSE = re.compile(r"^\)", re.MULTILINE)
 PS_TOOL_NAME = re.compile(r"^\s*@\{\s*Name\s*=\s*'([^']+)'", re.MULTILINE)
 
+# The managed tools each installer leaves out of its default selection, read the same way.
+OPTIONAL_DECLARATION = re.compile(r"^readonly OPTIONAL_TOOLS=\(([^)]*)\)", re.MULTILINE)
+PS_OPTIONAL_DECLARATION = re.compile(r"^\$OPTIONAL_TOOLS = @\(([^)]*)\)", re.MULTILINE)
+
 # A spec tool whose name differs from the name the installer knows it by, and why.
 ALIASES = {
     "linux": {"python3": "python"},
@@ -255,7 +259,9 @@ class TestSpecCoverage(unittest.TestCase):
         )
         self.assertIsNotNone(install)
         body = install.group("body") if install else ""
-        self.assertLess(body.index("ripgrep_remove_download"), body.index("apt_install ripgrep"))
+        self.assertLess(
+            body.index("remove_unowned_command ripgrep rg"), body.index("apt_install ripgrep")
+        )
         self.assertRegex(
             windows,
             r"Name = 'ripgrep'; Package = 'BurntSushi\.ripgrep\.MSVC'; Probe = 'rg'",
@@ -463,12 +469,8 @@ class TestSpecCoverage(unittest.TestCase):
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
 
         The gate prints the remedy under a below-floor failure. A missing platform key is therefore a
-        failure that tells the operator to upgrade and not how. A remedy that hands back into an
-        installer here is also checked to name a tool that installer manages. The check makes sure
-        the command the remedy prints can actually run.
+        failure that tells the operator to upgrade and not how.
         """
-        linux_managed = self.declared_tools()
-        windows_managed = self.declared_windows_tools()
         for tool in self.spec_tools():
             name = tool["name"]
             if tool.get("minimum") is None:
@@ -492,21 +494,56 @@ class TestSpecCoverage(unittest.TestCase):
                         isinstance(command, str) and bool(command),
                         f"{name} declares a floor and no {platform} remedy, so a below-floor host there is told to upgrade and not how",
                     )
-                installer_cases = (
-                    ("linux", LINUX_INSTALLER_REMEDY, linux_managed, "install-tools.sh"),
-                    ("windows", WINDOWS_INSTALLER_REMEDY, windows_managed, "install-tools.ps1"),
-                )
-                for platform, pattern, managed, installer in installer_cases:
-                    command = remedy.get(platform)
-                    if not isinstance(command, str):
-                        continue
-                    match = pattern.match(command)
-                    if match and managed:
-                        self.assertIn(
-                            match.group(1),
-                            managed,
-                            f"{name} remedy.{platform} names {match.group(1)}, which {installer} does not manage, so the printed command fails",
-                        )
+
+    def test_every_installer_remedy_names_a_managed_tool(self) -> None:
+        """A remedy handing back into an installer names a tool it manages, floor or no floor.
+
+        The check makes sure the command the remedy prints can actually run. An entry with no
+        floor is read too, since it can still carry a remedy for a reader to run.
+        """
+        installer_cases = (
+            ("linux", LINUX_INSTALLER_REMEDY, self.declared_tools(), "install-tools.sh"),
+            (
+                "windows",
+                WINDOWS_INSTALLER_REMEDY,
+                self.declared_windows_tools(),
+                "install-tools.ps1",
+            ),
+        )
+        for tool in self.spec_tools():
+            remedy = tool.get("remedy")
+            if not isinstance(remedy, dict):
+                continue
+            for platform, pattern, managed, installer in installer_cases:
+                match = pattern.match(str(remedy.get(platform, "")))
+                if match is None:
+                    continue
+                with self.subTest(tool=tool["name"], platform=platform):
+                    self.assertIn(
+                        match.group(1),
+                        managed,
+                        f"{tool['name']} remedy.{platform} names {match.group(1)}, which {installer} does not manage",
+                    )
+
+    def test_every_optional_tool_is_one_the_installer_manages(self) -> None:
+        """An installer's optional list names only tools its own registry carries.
+
+        A name there that the registry lacks filters nothing and reads as a decision nobody made.
+        """
+        linux = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
+        windows = (WINDOWS / "install-tools.ps1").read_text(encoding="utf-8")
+        linux_match = OPTIONAL_DECLARATION.search(linux)
+        windows_match = PS_OPTIONAL_DECLARATION.search(windows)
+        if linux_match is None or windows_match is None:
+            self.fail(
+                "an installer declares no OPTIONAL_TOOLS list, so its default selection is unchecked"
+            )
+        linux_optional = set(linux_match.group(1).split())
+        windows_optional = set(re.findall(r"'([^']+)'", windows_match.group(1)))
+        self.assertLessEqual(linux_optional, self.declared_tools())
+        self.assertLessEqual(windows_optional, self.declared_windows_tools())
+        self.assertIn("op", linux_optional)
+        self.assertIn("op", windows_optional)
 
 
 class TestScriptPresence(unittest.TestCase):
@@ -2764,7 +2801,7 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Menu, [ref]$tokens, [ref]$errors)
-$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Confirm-HubRoot')
+$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Test-HubClean', 'Confirm-HubRoot')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -3125,6 +3162,14 @@ class HubRefFreshnessCases:
         self.commit("develop again")
         self.git("push", "--quiet", "origin", "develop")
         self.assert_check("develop", "refetched")
+
+    def test_a_tree_holding_an_untracked_file_is_stale_whatever_the_status_setting(self) -> None:
+        """A bare status read under status.showUntrackedFiles=no prints nothing for the file."""
+        self.fetch("main")
+        hub = self.dir / "hub"
+        self.git("config", "status.showUntrackedFiles", "no", cwd=hub)
+        (hub / "stray.md").write_text("not committed\n", encoding="utf-8")
+        self.assert_check("main", "refetched")
 
 
 class TestMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):

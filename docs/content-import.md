@@ -30,7 +30,7 @@ The sitemap is what the source advertises. The contract is what it serves. That 
 - **Consumer-visible identifiers beyond URLs get the same treatment.** A feed reader keys on the item GUID byte for byte. So a GUID carrying an `http` scheme that the import "modernizes" to `https` marks every post unread for every subscriber. Preserve what a consumer keys on, or accept the breakage deliberately and record the blast radius.
 - **The gate:** a committed golden URL list generated from the **live crawl**, never from the converter output. That is because a list derived from the output makes the check circular. Assert a floor on the list length before checking parity, because a truncated list makes every check below it pass vacuously. A missing URL is a hard failure with one annotation each, and an extra URL is a notice. That keeps the list append-only and the floor sound. Run it in CI and again against the exact tree about to deploy.
 
-## A Fetch Over HTTP Is Not the Original
+## A Fetch over HTTP Is Not the Original
 
 A source that serves optimized derivatives returns one at the original's URL, under the original's filename. This is the strongest of the three, because it produces silent quality loss rather than visible absence.
 

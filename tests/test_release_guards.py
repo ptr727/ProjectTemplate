@@ -45,9 +45,6 @@ class FencedBlock(NamedTuple):
     body: str
 
 
-# A run of three or more backticks or tildes opens or closes a code block.
-# This scan reads one only where nothing precedes the run but up to three spaces.
-# What follows the run carries no backtick or tilde of its own.
 FENCE_RUN = re.compile(r"`{3,}|~{3,}")
 FENCE_LINE = re.compile(r"^(?P<indent> {0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^`~]*)$")
 
@@ -59,51 +56,18 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     unwanted opener walks into its body. A block illustrating Markdown would then hand out the
     blocks it contains.
 
-    A line is refused unless the fence run is the whole of it bar the allowed extras. Those are up to three
-    leading spaces and an info string carrying no backtick or tilde. Some of what that refuses a
-    renderer reads, and the indent cases are why the rule is drawn there. A renderer measures a
-    fence's indent against its list item's content column and takes four spaces past that as an
-    indented code block instead. A scan guessing at the container therefore reads a block a
-    renderer does not, or misses one it does. Refusing makes a shape this cannot read fail loudly
-    rather than go unchecked, which is the whole reason the scan exists. Widening it is a
-    deliberate edit here.
+    A line carrying a fence run is refused unless it matches `FENCE_LINE`. That is up to three
+    spaces, the run, and an info string carrying no backtick or tilde. Legal Markdown is among
+    what this refuses. Widening it is a deliberate edit here.
 
-    Legal Markdown is among what this refuses. A fence under a second list level is among it, and
-    so is one carrying a tilde in its info string. The refused cases below are the list.
-    No document here uses any of it today. Only `AUDIT.md` and `docs/reusable-workflows.md` are
-    under test, so that stays true by convention rather than by check.
+    A fence line met while a block is open either closes the block or raises. A labelled opener
+    there always raises on its info string, so no labelled block is read as another's body.
 
-    One container case is left rather than refused. An HTML block holding an odd number of
-    fence-shaped lines flips the open and closed parity. That is because a renderer reads the block
-    as raw HTML and this scan reads each of those lines as a fence. An unlabelled block can be lost
-    that way. A labelled opener landing in closer position always raises on its info string. A
-    block carrying a label, which is the only kind this is read for, therefore cannot be lost
-    through it. Recognising an HTML block needs the container reasoning above, so the bound is what
-    holds rather than the shape being handled.
-
-    Only a space or a tab may follow a closing fence. This takes only a space as a body's
-    indent, where a renderer expands a tab to a column first.
-    Python calls a character whitespace, or a line ending, where a renderer keeps it as content.
-    `str.strip` with no argument, `str.isspace`, `str.splitlines` and a newline-only split each
-    read one of those as whitespace to discard. They:
-    - closed a block early and left the rest unread
-    - ate the start of a body line
-    - rewrote a separator as a line ending
-    - swallowed a body opened on a carriage return
-
-    Naming too wide a class does the same. A blank test
-    of spaces and tabs took a tab for an indent and sliced a column a renderer expands.
-    Every comparison here names the characters it means.
-    A test of its own holds that rule over this function's source,
-    since writing the next comparison bare is how each of those arrived.
+    Only a space or a tab may follow a closing fence, and only a space carries a body's indent.
     """
     blocks: list[FencedBlock] = []
     # A renderer ends a line on a newline, and on a carriage return alone or paired.
-    # It ends one on nothing else.
     # `str.splitlines` also breaks on separators a renderer keeps as text.
-    # The rejoin below would then hand back a line ending the document never carried.
-    # Splitting on the newline alone drops the other way, reading a lone return as text.
-    # That loses the body of a block opened on one.
     lines = markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     opener: re.Match[str] | None = None
     opened_at = 0
@@ -130,23 +94,14 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
                 f"line {number} does not close the block opened at line {opened_at}"
             )
         indent = len(opener.group("indent"))
-        # A renderer strips up to the opener's indent from each body line, expanding a tab first.
-        # Inside a container a line carrying less than that ends it, and so ends the block.
-        # Telling those apart needs the container this scan refuses to reason about.
         # A body line not simply carrying the indent in spaces is refused rather than guessed at.
         # A blank line here is one of spaces alone.
-        # A tab is not an indent, since a renderer expands it to a column a slice cannot find.
         for offset, line in enumerate(body):
             if line.strip(" ") and line[:indent] != " " * indent:
                 raise AssertionError(
                     f"line {opened_at + 1 + offset} is indented less than the block's opener"
                 )
-        # A renderer takes the label as the info string's first word.
-        # Every character a renderer calls whitespace is whitespace to Python too.
-        # Python calls more of them that.
-        # So this can read a label a renderer does not, and never miss one it does.
-        # An over-read adds a block to the parse, where a missed label would drop one from it.
-        words = opener.group("info").split()  # any-whitespace: over-reads only, see above
+        words = opener.group("info").split()  # any-whitespace: no matched label holds whitespace
         blocks.append(
             FencedBlock(
                 opened_at,
@@ -906,22 +861,11 @@ class ReleaseGuardCase(unittest.TestCase):
         r"""The block scanner names the characters it calls whitespace, everywhere.
 
         Python calls a character whitespace, or a line ending, where a renderer keeps it as
-        content. Five silent defects in this scanner were one bare predicate each, two written
-        with the scanner and the rest while fixing something else in it. The rule is therefore worth
-        more than the fixes.
-        A comparison needing a wider class than the characters it names states that inline and
-        says why. The exemptions are counted so a second cannot be added quietly.
+        content. A comparison needing a wider class than the characters it names states that
+        inline and says why. The exemptions are counted so a second cannot be added quietly.
 
-        A sixth defect named its characters and named one too many, `strip(" \t")` where only a
-        space carries an indent. This cannot see that: any argument opening with a quote is
-        taken as deliberate. Naming a class is where the rule stops and reading the class against
-        the format begins, which is what the behaviour cases are for.
-
-        The four functions named below are read, rather than only the one that had the defects.
-        This is because moving a predicate into another of them is the cheapest way past a check
-        that reads one. Module-level code is not read, and the set of functions is a literal here
-        rather than derived. A predicate placed outside both is therefore caught by the behaviour
-        cases or not at all.
+        The functions named below are read, and module-level code is not. A predicate outside
+        them is caught by the behaviour cases or not at all.
         """
         # The detector is run against source written to fail it.
         # One that only ever sees a clean file can stop working with nothing to show for it.
@@ -1001,9 +945,7 @@ class ReleaseGuardCase(unittest.TestCase):
         Each case pins one rule. A rule no case exercises can be dropped without any test
         noticing, so a rule added to the extractor is owed a case here. The read cases are the
         shapes this scan accepts rather than the ones these documents happen to use. This is
-        because a rule is worth pinning before a document reaches for it. Everything else is
-        refused, some of it legal Markdown a renderer reads. This is because a scan that guesses at
-        the container a fence sits in is the silent miss this scan exists to prevent.
+        because a rule is worth pinning before a document reaches for it.
         """
         read = [
             ("three backticks", "```bash\nA=1\n```\n", ["A=1"]),
@@ -1011,9 +953,7 @@ class ReleaseGuardCase(unittest.TestCase):
             ("a closer longer than its opener", "```bash\nB=3\n````\n", ["B=3"]),
             ("a tilde fence", "~~~sh\nC=3\n~~~\n", ["C=3"]),
             ("a longer tilde fence", "~~~~sh\nC=4\n~~~~\n", ["C=4"]),
-            # Two backticks are a code span's delimiter, not a fence, so this opens nothing.
             ("a two-backtick run", "``bash\nC=5\n``\n", []),
-            # Whitespace after a closing fence is not text after it, so the block still closes.
             ("trailing space on the closer", "```bash\nC=8\n``` \n", ["C=8"]),
             ("a tab after the closer", "```bash\nC=9\n```\t\n", ["C=9"]),
             # The label is the first word of the info string, wherever the whitespace falls.
@@ -1048,17 +988,12 @@ class ReleaseGuardCase(unittest.TestCase):
                 self.assertEqual(expected, shell_blocks(markdown))
 
         refused = [
-            # A fence sharing a line with anything else needs the container to read.
-            # Guessing at the container is what silently drops or swallows a block.
             ("on a list-marker line", "- ```bash\nM=1\n  ```\n"),
             ("in a blockquote", "> ```bash\nM=2\n> ```\n"),
             ("in a nested blockquote", "> > ```bash\nM=3\n> > ```\n"),
             ("behind a tab", "\t```bash\nM=4\n\t```\n"),
             ("four spaces in", "Para.\n\n    ```bash\n    M=5\n    ```\n"),
             ("a fence run mid-line", "text ```bash text\nM=6\n```\n"),
-            # A body quoting a fence is the refusal an author here is likeliest to reach.
-            # A renderer keeps such a line as content.
-            # This refuses the document instead, since the fence-run rule admits no exception.
             (
                 "a fence run inside an open block",
                 "```bash\nprintf '%s' '```bash'\nM=6b\n```\n",
@@ -1066,15 +1001,11 @@ class ReleaseGuardCase(unittest.TestCase):
             # A fence run is one character repeated.
             # Here the run is the backticks and the tildes are its info string.
             # That info string carries a tilde, so the line is refused.
-            # A scan reading the whole as one run takes a different body from the same document.
-            # The tildes would then have to be matched to close it.
             ("a mixed fence run", "```~~~\nM=6c\n```~~~\n"),
             ("a backtick in the info string", "```bash `x`\nM=7\n```\n"),
             ("a tilde in a backtick fence's info", "```bash ~x\nM=7b\n```\n"),
             ("a tilde fence in a blockquote", "> ~~~bash\n> M=7c\n> ~~~\n"),
             # Only a space or a tab may follow a closing fence.
-            # A character a renderer treats as content leaves the rest of a real block unread.
-            # The document closes cleanly.
             # A scan accepting the no-break space returns a short block rather than raising.
             # This case then fails rather than passing by luck.
             (
@@ -1083,27 +1014,18 @@ class ReleaseGuardCase(unittest.TestCase):
             ),
             # A closer matches its opener's character and is at least as long.
             # It carries nothing after it but spaces and tabs.
-            # Otherwise the block it ends is not the block that was opened.
             ("a shorter fence closing a longer one", "````bash\nM=8\n```\nM=9\n````\n"),
             ("a tilde closing a backtick fence", "```bash\nM=10\n~~~\n"),
             ("trailing text on the closer", "```bash\nM=11\n``` no\n"),
             ("a fence indented past the bound inside a body", "```bash\nM=12\n    ```\n"),
             ("an unterminated block", "padding\n\n```bash\nM=13\n"),
-            # A renderer strips up to the opener's indent, expanding a tab to a column.
-            # Inside a container it ends that container on a line carrying less than that.
-            # Either way such a line is not this block's body as printed.
             ("a body line indented partway", "- x\n\n  ```bash\n  M=14\n M=15\n  ```\n"),
             ("a body line at column zero", "- x\n\n  ```bash\n  M=16\nM=17\n  ```\n"),
             ("a tab where the indent should be", "  ```bash\n  M=18\n\tM=19\n  ```\n"),
             # A tab is not an indent even on an otherwise blank line.
-            # A renderer expands it to a column, where this scan slices characters.
             ("a body line of one tab", "  ```bash\n  M=25\n\t\n  M=26\n  ```\n"),
             # Only a space carries an indent.
-            # A merely blank-looking character is not one, so the line is not the body as printed.
             ("a body line opening on a no-break space", "  ```bash\n\u00a0\u00a0M=20\n  ```\n"),
-            # A line of characters Python calls blank is content to a renderer.
-            # This would take it for blank and slice it away.
-            # The body handed back is then one the document never printed.
             ("a body line of one no-break space", "  ```bash\n  M=21\n\u00a0\n  M=22\n  ```\n"),
             ("a body line of one form feed", "  ```bash\n  M=23\n\u000c\n  M=24\n  ```\n"),
         ]
@@ -1112,7 +1034,6 @@ class ReleaseGuardCase(unittest.TestCase):
                 shell_blocks(markdown)
 
         # A closer shorter than its opener is refused as a bad close.
-        # Left to surface as an unterminated block, it would name a line carrying no fence.
         with self.assertRaises(AssertionError) as short_close:
             shell_blocks("````bash\nM=8\n```\nM=9\n````\n")
         self.assertIn("does not close", str(short_close.exception))
@@ -1224,6 +1145,17 @@ gh() {
             text=True,
             encoding="utf-8",
         )
+        root_file_api = missing_api.replace(
+            "printf '%s\\n' .devcontainer .github", "printf '%s\\n' .devcontainer.json .github"
+        )
+        self.assertNotEqual(root_file_api, missing_api)
+        root_file = run(
+            [bash_or_skip(), "-c", f"{root_file_api}\n{probe}"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
 
         self.assertEqual(0, success.returncode, success.stderr)
         self.assertIn("github-actions: present", success.stdout)
@@ -1236,6 +1168,8 @@ gh() {
         self.assertEqual(0, missing.returncode, missing.stderr)
         self.assertIn("github-actions: MISSING", missing.stdout)
         self.assertIn("devcontainers: MISSING", missing.stdout)
+        self.assertEqual(0, root_file.returncode, root_file.stderr)
+        self.assertIn("devcontainers: MISSING", root_file.stdout)
         # The suppressed-output probe this guard replaced must not come back.
         self.assertNotIn(
             'gh api "repos/<owner>/<repo>/contents/$1?ref=<ground>" >/dev/null 2>&1',

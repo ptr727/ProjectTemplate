@@ -98,6 +98,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    another session merged meanwhile rides along, as `backlog-burndown` "Away Mode" accepts.
    Where no report named a head, a promotion made ready by hand, the go-ahead covers the head
    this step recorded.
+   Whichever case set it, run the closing-set check `branching-and-release-model` states in its
+   negated-keyword bullet on the head step 3 merges. This step runs from a hub checkout, so read
+   the range's commit messages from the target rather than with a local `git log`:
+   `gh api --paginate repos/owner/repo/compare/main...<sha> --jq '.commits[].commit.message' > <file>`.
+   Run that read on its own and stop the merge on a non-zero exit, since a failed read is not a
+   range with no closure. Then run that bullet's `grep` over `<file>`. Stop and report any closure
+   it prints that the promotion body does not state, rather than merging.
 3. `gh pr merge [number] --merge --match-head-commit <sha> --repo owner/repo`, where `<sha>` is
    the head the go-ahead covers. Attended, that is the head `drive-pr`'s ready report named, or
    the moved head the maintainer approved after step 2's re-ask. Under an away-mode grant, or
@@ -200,7 +207,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    failure, an ambiguous run match, a timeout, a failed run, or a hub refresh all still reach
    this step. So does step 2 finding the promotion already merged. The merge already landed
    by then, in step 3 or before step 2 read it. Every part below is required:
-   - The promotion PR's own worktree, where one exists: fetch and prune, remove the worktree, then bring the base
+   - A `develop`-headed promotion PR's own worktree, where one exists: fetch and prune, remove the worktree, then bring the base
      clone to current `develop`. To do so, check `develop` out first only where it sits on another
      branch, and fast-forward it with `git merge --ff-only origin/develop`. Where that checkout
      is needed, removing first, not after, matters. The reason is that the base clone cannot check out `develop`
@@ -208,6 +215,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      in two worktrees at once is refused outright. Never delete `develop`: it is the promotion PR's
      own head. The repo's auto-delete-head-branches setting is kept off fleet-wide for exactly
      this reason, so nothing does this automatically.
+   - A conflicted promotion's own branch, where one exists. That promotion's head is a branch cut
+     from `main` that merges `develop` rather than `develop` itself. Run the `cleanup <number>`
+     command the next bullet names on the promotion PR. It removes that branch's worktree, its local
+     branch, and its remote branch.
    - A defensive sweep for anything drive-pr's own cleanup should already have removed but might
      not have. The causes include an interrupted loop, a fix landed by hand outside that skill, or
      a maintainer merge in the GitHub UI. `git worktree list` for any worktree still registered under this

@@ -105,21 +105,28 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
 
   The major tracks the repo's .NET TFM (`net10.0`), never a `netstandard` target an analyzer or
   source-generator project carries beside it. It moves only with that TFM (`11.0.100` alongside
-  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows
-  install the line the calling repo's own `global.json` selects, through `setup-dotnet`'s
-  `global-json-file`, so CI follows each repo's file. A repo carrying no `sdk` block yet gets
-  `10.x`, the baseline's major, which the hub's tests hold to the baseline. The hub's devcontainer
-  snippet still installs its line through its image tag. The hub's host installers install the line the
-  `catalog/snippets/configs/global.json` baseline selects, named in each installer and held
-  equal to the baseline by the hub's tests. The Linux one adds the newest line beside it. So a
-  major move still starts in the hub, as a fleet-wide change to that baseline, the installers,
-  that fallback, and the image tag. The image provides both lines until every repo has moved. A host building a
-  repo not yet moved takes the old line from the installers' optional set.
+  `net11.0`), and such a project's fixed `LangVersion` moves with them. The line is the
+  repository's own choice, per `CODESTYLE.md` "Toolchain Versions", so a repository may lead or
+  lag the hub's baseline. Its move edits `global.json`, the TFM, its devcontainer image tag, and
+  any analyzer project's fixed `LangVersion` together, in that repository alone. A resync carries
+  the baseline's `rollForward` and `allowPrerelease` and never changes the repository's
+  `sdk.version`. The hub's workflows install the line the calling repo's own `global.json`
+  selects, through `setup-dotnet`'s `global-json-file`, so CI follows each repo's file. A repo
+  carrying no `sdk` block yet gets `10.x`, the baseline's major, which the hub's tests hold to the
+  baseline. The hub's host installers install the line the `catalog/snippets/configs/global.json`
+  baseline selects, named in each installer and held equal to the baseline by the hub's tests.
+  The Linux one adds the newest line the feed carries, and every other line under `--optional`.
+  The Windows one adds the two majors below it under `-Optional`. A fleet-wide move is a hub change to that
+  baseline, the installers, that fallback, and the devcontainer snippet's image tag. A repository
+  not yet moved keeps building on its own line.
 
-  A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
-  major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
-  rather than silently drifting. The hub's host installers install the line's SDK by default. On
-  Linux, a package feed carrying no package for the line is named in a warning and in the report.
+  A developer host now needs a release SDK on the repository's line, 10.0.x for the fleet default
+  today. A host holding only another major, or only a 10.0 preview, fails with a clear error. It
+  reads "A compatible .NET SDK was not found" rather than silently drifting. The hub's host
+  installers install the fleet default line's SDK by default. A host building a repository on
+  another line adds that line's SDK. The Linux `--optional` set, the Windows `-Optional` set for
+  an older major, or a direct install provides it. On Linux, a package feed carrying no package for the default line is named in a
+  warning and in the report.
 
 **`LangVersion` is left unset** in every `.props` or `.targets` file the repo holds and every
 project targeting a .NET TFM. The SDK's own targets derive it, which is the point. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it
@@ -177,7 +184,8 @@ updates, dependency upgrades, benchmarks) on top:
 Key rules: no `var` (always explicit types), file-scoped namespaces, Allman braces, Nullable
 enabled, modern C# features (primary constructors, pattern matching, collection expressions). Every
 public surface has XML documentation. Private fields use `_camelCase`, static fields `s_camelCase`,
-constants PascalCase. Member ordering follows StyleCop SA1201.
+constants PascalCase. Member ordering follows StyleCop SA1201 by kind first, then SA1202 by access
+within one kind.
 
 For language features, naming, code structure, and XML documentation examples, see
 `references/conventions.md`.
@@ -274,7 +282,7 @@ parameterized tests. A test project on `xunit.v3` 4.0.0 or later is MTP-based, a
 
 ## Project configuration
 
-.NET 10.0 target, AOT-compatible (`IsAotCompatible=true`, with `VerifyReferenceAotCompatibility=true` only under the `PublishAot` condition),
+Target the repository's own .NET line, .NET 10.0 for the fleet default. AOT-compatible (`IsAotCompatible=true`, with `VerifyReferenceAotCompatibility=true` only under the `PublishAot` condition),
 SourceLink, embedded untracked sources, `InternalsVisibleTo` for test/benchmark access. See
 `references/project-config.md` for the full property list.
 

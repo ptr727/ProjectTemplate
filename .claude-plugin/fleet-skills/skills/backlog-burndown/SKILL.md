@@ -215,8 +215,9 @@ for, and it binds harder than any throughput target.
 - **Genuine duplicates are one group.** Never close an issue during triage on the orchestrator's
   own judgment. Comment to cross-link the pair, and let the fix close both.
 - **Closing keywords go on the promotion pull request**, not the feature pull request, per
-  `branching-and-release-model`. A feature pull request merging into develop fires no
-  auto-close, so a `Fixes #N` line there closes nothing. **The feature pull request body instead
+  `branching-and-release-model`. A repository's squash setting can copy the body into the commit,
+  as the hub's does. Then a `Fixes #N` line there closes #N when the promotion brings that commit
+  to main, a closure no promotion body stated. **The feature pull request body instead
   carries a line reading `Closes on promotion: #N`**. It lists every issue that pull request
   actually fixes and nothing it merely mentions. The promotion body is assembled from that line,
   per "The Promotion Boundary". GitHub reads a closing keyword only where the issue reference
@@ -288,7 +289,8 @@ for, and it binds harder than any throughput target.
   reading only the comments records them as holding nothing. That is the collision this section
   exists to prevent rather than the absence of one. Read the branch itself instead:
   `git diff --name-only origin/<base>...<branch>` for what it has committed, and, for a
-  registered worktree, `git -C <worktree> status --porcelain` for what it holds uncommitted.
+  registered worktree, `git -C <worktree> status --porcelain --untracked-files=all` for what it
+  holds uncommitted.
   `<base>` is the `baseRefName` of the branch's pull request where it has one, and `develop`
   otherwise. That is because `repo-worktree` "The Base Branch" lets a task branch from `main`. Read against
   `develop`, a `main`-based branch can list files it never touched, which errs toward a collision
@@ -441,7 +443,8 @@ A group told to abandon its branch keeps a registered worktree until something r
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
-The orchestrator confirms the clone the worker reported or recorded is clean and its branch tip is at the pull request's `headRefOid` or behind it.
+The orchestrator confirms the clone the worker reported or recorded is clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
+It also confirms the clone's branch tip is at the pull request's `headRefOid` or behind it.
 `repo-worktree` "Listing and Cleanup" accepts both, since a GitHub "Update branch" merge leaves a tip behind it that holds nothing the merge lacks.
 After `git -C <clone> fetch origin <headRefOid>`, `git -C <clone> merge-base --is-ancestor refs/heads/<exact-branch> <headRefOid>` exits `0` in both cases.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
@@ -451,8 +454,8 @@ The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanu
 **Retiring a worktree and deleting its branch are two dispositions with two tests.** Citing one for
 the other is how a removal that discards nothing gets routed to the maintainer. It is also how a
 removal that discards commits gets waved through. Retiring a worktree alone, the branch left
-standing, risks only what is uncommitted in it. A clean tree is the whole test, and the branch's
-own contents do not enter it. A tree that is not clean is left exactly as it stands while the
+standing, risks only what is uncommitted in it. A tree clean by `repo-worktree` "Listing and
+Cleanup"'s hand-removal read is the whole test, and the branch's own contents do not enter it. A tree that is not clean is left exactly as it stands while the
 group is stopped for the maintainer per "Raising a Blocked Question". Deleting the branch as well
 risks what is committed, so it carries whichever branch check the group's state calls for. That is
 `repo-worktree`'s verify-before-removing for a group whose pull request merged. It is the no-merge
@@ -478,7 +481,7 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 `repo-worktree`'s verify-before-removing step to read. So that step gives way here to a check of
 what it exists to establish, that nothing unmerged is being thrown away.
 The orchestrator records the local tip with `git rev-parse refs/heads/<exact-branch>`.
-After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` must exit `0`, and the worktree must be clean.
+After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` must exit `0`, and the worktree must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
 Where both hold, the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read.
 The removal is `git worktree remove <exact-path>`, then `git update-ref -d refs/heads/<exact-branch> <tip>`.
 That delete refuses only where the branch has moved off the tip the is-ancestor check judged, so it discards nothing that check did not clear.
@@ -510,7 +513,7 @@ The orchestrator finds it under the temporary root the brief named, by the recor
 run that named another root cannot find it, so its group goes to the maintainer. The
 abandoned-worker discard above does not run there, so a dirty abandoned clone goes to the
 maintainer.
-The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
+The clone must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
 A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
 live with `git -C <clone> ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
 only copy of the branch. A clone removed with its branch and no merged pull request instead needs
@@ -573,6 +576,7 @@ that is. Waiting costs a round's latency and guessing costs another task's uncom
 Once the worker is confirmed gone, its worktree decides what follows. A standalone clone recorded
 on the claim comment is that worktree, retired or removed per "Cleanup Is the Orchestrator's".
 Where that fails, the group stops there and no fresh worker is dispatched.
+A worktree is judged clean or dirty by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
 **A clean one** is cleaned up as an abandoned group's is, per "Cleanup Is the Orchestrator's".
 That procedure confirms the branch carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
@@ -610,14 +614,15 @@ rather than a decision.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
-  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether its
+  prompt whether that worktree holds uncommitted work, by `repo-worktree` "Listing and Cleanup"'s
+  hand-removal read. For a standalone clone, say also whether its
   tip equals the remote tip, and that pushing the branch is the maintainer's. That is
   because what becomes of it is part of what is being asked, rather than something to settle while
   waiting.
 - **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
   branch already checked out somewhere, per `repo-worktree`. So a fresh worker cannot take the
   branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
-  clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
+  clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
   one branch. It is retired per "Cleanup Is the Orchestrator's", once its tip equals the remote
   tip. Only then dispatch. This is the
@@ -675,11 +680,11 @@ the issues it fixes in a `Closes on promotion:` line in its own commit message, 
    yields by handing the file over. A holder that already pushed and has an open pull request
    yields by having that pull request wait, its branch untouched. It also yields by the promotion
    fix taking the file, since the two must not be in flight on one file at once. Once the fix
-   lands, that pull request waits untouched until the freeze lifts. Reconciling its content is the
+   lands, that pull request waits untouched until the next round dispatches. Reconciling its content is the
    next round's worker's job rather than the orchestrator's, which opens no branch and edits
    nothing. The orchestrator retires that group's worktree, the branch and its pull request left
    standing. That is the worktree-only disposition "Cleanup Is the Orchestrator's" separates out,
-   and the retire-then-dispatch shape "Raising a Blocked Question" uses. The orchestrator then
+   and the retire-then-dispatch shape "Raising a Blocked Question" uses. That next round
    dispatches a fresh worker on that same branch. That worker is briefed either to merge develop in
    to pick the fix up, or to narrow the change to drop the file. Never rebase it, since its branch
    is already pushed and a rebase there needs what `GOVERNANCE.md` "Git and Commit Rules" forbids.
@@ -730,6 +735,10 @@ from a read of the body made immediately before the write, keeping every line th
 Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
 range calls for. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
+
+Run the mechanical closing-set check that `branching-and-release-model` states in its
+negated-keyword bullet, at each point that bullet names. A body naming a deferral issue
+in a sentence that negates a keyword still closes that issue, and reading the body misses it.
 
 ## Away Mode
 
@@ -846,8 +855,8 @@ subagents and holds only what they return.
    issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
-   refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a clean tree with
-   `git worktree remove <exact-path>`, leaving its branch standing. That command errors on a
+   refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a tree clean by
+   `repo-worktree` "Listing and Cleanup"'s hand-removal read with `git worktree remove <exact-path>`, leaving its branch standing. That command errors on a
    standalone clone, which takes the retire-alone checks of "Cleanup Is the Orchestrator's"
    instead. Leave a dirty tree, or a clone failing those checks, exactly as it stands. Keep its
    group parked, and name it in the report. Only the

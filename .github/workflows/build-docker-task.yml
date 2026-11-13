@@ -100,6 +100,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
 
       - name: Run caller docker-prepare hook step
         if: ${{ inputs.matrix == '' && hashFiles('.github/actions/docker-prepare/action.yml') != '' }}
@@ -161,6 +162,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
 
       - name: Require caller docker-build-base hook step
         if: ${{ hashFiles('.github/actions/docker-build-base/action.yml') == '' }}
@@ -214,6 +216,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
 
       # An arm64 build is non-native on the amd64 runner.
       # Install its QEMU emulator only when the build includes it.
