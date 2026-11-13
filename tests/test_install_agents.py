@@ -924,13 +924,27 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=stale)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
+        self.assertIn("not under the prefix of the npm on PATH", result.stderr)
+        self.assertNotIn("npm uninstall -g opencode-ai", result.stderr)
+
+    @unittest.skipIf(
+        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
+    )
+    def test_a_managed_shim_is_not_called_a_stray_where_npm_cannot_say(self) -> None:
+        # No npm on the test PATH, so nothing can tell the managed shim from another copy.
+        shims = self.dir / "npm"
+        self.own_npm(self.stub("opencode", "2.0.0", shims), self.dir, "@opencode/cli")
+        result = self.run_script("-Report", "-Json", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])
+        self.assertNotIn("remove it by hand", notes)
 
     def test_a_stray_choco_opencode_names_its_removal_and_runs_no_choco(self) -> None:
         bin_dir = self.dir / "chocolatey" / "bin"
         self.stub("opencode", "1.0.0", bin_dir)
         self.stub("choco", "choco 2.0.0")
         self.stub("npm", "npm 10.0.0")
+        (self.dir / "npm_prefix").write_text(str(self.dir / "prefix"), encoding="utf-8")
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=bin_dir)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("choco uninstall", result.stderr)
@@ -940,6 +954,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_a_stray_opencode_no_manager_owns_is_fixed_by_deleting_it(self) -> None:
         self.stub("opencode", "1.0.0")
         self.stub("npm", "npm 10.0.0")
+        (self.dir / "npm_prefix").write_text(str(self.dir / "prefix"), encoding="utf-8")
         result = self.run_script("-Upgrade", "-Yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("no package manager owns it, so delete", result.stderr)

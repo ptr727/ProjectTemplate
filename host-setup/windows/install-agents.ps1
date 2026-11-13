@@ -715,8 +715,8 @@ $TOOLS = @(
     @{
         Name    = 'opencode'
         Source  = 'npm install -g @opencode/cli'
-        Managed = @{ Manager = 'npm'; Package = '@opencode/cli' }
-        Upgrade = { Invoke-Step -Command 'opencode' -Arguments @('upgrade') }
+        # The managed copy is the npm package Get-NpmPackage records, upgraded through npm's plan, so no Upgrade of its own runs.
+        Managed = @{ Manager = 'npm' }
         Install = {
             if (-not $script:DRY_RUN -and -not (Get-ToolPath 'npm')) {
                 warn 'opencode installs on Windows as the npm package @opencode/cli, and npm is not installed (https://opencode.ai/docs/)'
@@ -769,7 +769,7 @@ function Get-ManagedRecord {
 function Get-ManagedLabel {
     param([string]$ToolName)
     $managed = Get-ManagedRecord $ToolName
-    return "the $($managed.Manager) package $($managed.Package)"
+    return "the $($managed.Manager) package $(Get-NpmPackage -Tool $ToolName)"
 }
 
 # Whether a copy PATH resolves to is another copy than the tool's managed one.
@@ -777,8 +777,11 @@ function Test-StrayCopy {
     param([string]$ToolName, [string]$Path)
     $managed = Get-ManagedRecord $ToolName
     if (-not $managed) { return $false }
+    # Where npm cannot say where it installs, no copy can be told from the managed one, so none is called a stray.
+    if (-not (Get-NpmPrefix)) { return $false }
     if ((Get-ToolManager $Path) -ne $managed.Manager) { return $true }
-    return -not (Test-NpmPackageOwnership -Path $Path -Package $managed.Package)
+    # The managed copy is the recorded package's shim inside the prefix of the npm on PATH, so a shim elsewhere naming it is a stray.
+    return -not ((Test-NpmOwnership -Path $Path) -and (Test-NpmPackageOwnership -Path $Path -Package (Get-NpmPackage -Tool $ToolName)))
 }
 
 # The command that removes a stray copy through whatever owns it, as Command and Arguments, or Why where no one command does.
