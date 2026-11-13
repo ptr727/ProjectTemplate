@@ -658,11 +658,21 @@ class TestPush(Case):
         self.write(".secrets/alpha")
         code, _, err = self.push()
         self.assertEqual(code, 1)
-        self.assertIn("pass --mode", err)
+        self.assertIn("by name with --mode", err)
         self.assertEqual(self.fake.writes(), [])
         code, _, err = self.push("--mode", "0600")
+        self.assertEqual(code, 1)
+        self.assertIn("name the files", err)
+        code, _, err = self.push("--mode", "0600", str(self.home / ".secrets/alpha"))
         self.assertEqual(code, 0, err)
         self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0600",))
+
+    def test_a_plan_shows_a_mode_the_write_changes(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode:0600",))
+        self.write(".secrets/alpha", mode=0o644)
+        code, out, err = self.push("--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertIn("mode 0600->0644", out)
 
     def test_a_symlink_source_is_refused(self) -> None:
         target = self.write("target")

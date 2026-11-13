@@ -641,7 +641,7 @@ def push_mode(local: Local, item: Item | None, override: int | None) -> int:
     try:
         current = mode_of(item) if item is not None else None
     except Refusal as exc:
-        raise Refusal(f"{exc}, so pass --mode to replace it") from exc
+        raise Refusal(f"{exc}, so push that file by name with --mode to replace it") from exc
     if not IS_WINDOWS:
         assert local.mode is not None
         return local.mode & 0o777
@@ -664,9 +664,12 @@ def warn_carriage_return(title: str, data: bytes) -> None:
     )
 
 
-def plan_line(plan: Plan) -> str:
+def plan_line(plan: Plan, was: int | None) -> str:
+    """One plan line, its mode shown as `was->now` where the write changes it."""
     remote = stamp(plan.item.updated) if plan.item else "-"
     mode = "-" if plan.mode is None else f"{plan.mode:04o}"
+    if was is not None and plan.mode is not None and was != plan.mode:
+        mode = f"{was:04o}->{mode}"
     return (
         f"  {plan.action:<9} {plan.title}  local {stamp(plan.local.mtime)}  remote {remote}"
         f"  sha {short(plan.local.data)}  mode {mode}"
@@ -677,6 +680,8 @@ def push_plans(
     a: argparse.Namespace, op: Op, home: Path, vault: Vault | None, items: dict[str, Item]
 ) -> list[Plan]:
     override = int(a.mode, 8) if a.mode is not None else None
+    if override is not None and not a.paths:
+        raise Refusal("--mode sets the tag of each file named, so name the files it applies to")
     if a.paths:
         titles = [title_for(home, p) for p in a.paths]
         if len({t.casefold() for t in titles}) != len(titles):
@@ -821,7 +826,7 @@ def cmd_push(a: argparse.Namespace, op: Op) -> int:
     name = vault_name(a.bucket)
     print(f"Plan for {name}{'' if vault else ', a vault this push creates'}:")
     for plan in plans:
-        print(plan_line(plan))
+        print(plan_line(plan, mode_or_none(plan.item) if plan.item else None))
     if not op.dry_run:
         confirm(op, a.yes, f"Push {len(plans)} change(s) to {name}?")
     if vault is None:
@@ -915,7 +920,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         return 0
     print(f"Plan for {home}:")
     for plan in plans:
-        print(plan_line(plan))
+        print(plan_line(plan, plan.local.mode))
     if op.dry_run:
         for plan in plans:
             print(f"  would write: {plan.path}")
