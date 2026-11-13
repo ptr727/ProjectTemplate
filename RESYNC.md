@@ -116,7 +116,7 @@ The advisory is a hint rather than proof, since a copy touched after the hub cha
 
 The other half is section 4 of [`AUDIT.md`][audit]: no check belonging to a project type in [`spec/project-types.json`][project-types] is mechanized at all. A clean tool run is evidence for the deterministic subset, no evidence for a type's checks, and partial evidence across the cross-cutting dimensions.
 
-Two further gaps are checked by hand, because no tool reports them. First, compare each caller workflow's pin on `ptr727/ProjectTemplate/.github/workflows/*-task.yml` with the newest hub release. A pin behind it reads clean, since no audit check compares the two, and the only pin-related check is the version-literal scan over carried prose. Second, confirm that `hub_fetch_run.py` is present and that `.husky/pre-commit` or `.pre-commit-config.yaml` calls it for the prose and EOL gates. Its absence is invisible because `parity.hooks` is an `intent` check that `spec/audit.py` never evaluates, per [GOVERNANCE.md "Running the Linters Locally"][governance-linters-locally]. Compare against `catalog/snippets/` when in doubt.
+Two further gaps are checked by hand, because no tool reports them. First, compare each caller workflow's pin on `ptr727/ProjectTemplate/.github/workflows/*-task.yml` with the newest hub release. A pin behind it reads clean, since no audit check compares the two, and the only pin-related check is the version-literal scan over carried prose. Second, confirm that `hub_fetch_run.py` (or its former name `hub-fetch-run.py`) is present and that `.husky/pre-commit` or `.pre-commit-config.yaml` calls it for the prose and EOL gates. No tool reports its absence, because `parity.hooks` is an `intent` check that `spec/audit.py` never evaluates, per [GOVERNANCE.md "Running the Linters Locally"][governance-linters-locally]. Only the hand pass of [`AUDIT.md`][audit] section 4 finds it. Compare against `catalog/snippets/` when in doubt.
 
 ## 6. Ship It
 
@@ -124,8 +124,7 @@ Two further gaps are checked by hand, because no tool reports them. First, compa
 - **The instruction set and the carried Skills tree land in one pull request.** That is section 3's step 1 and step 3's `carry.py apply`, which writes every manifest-owned tree, `.github/skills` among them. The skill paths step 3 edits in `.github/copilot-instructions.md` land with it. Each half cites the other's text, so either one alone contradicts itself until the other merges. Commit step 1 before running `carry.py check`, since `carry.py` refuses a target with uncommitted changes outside the trees it writes.
 - **Every other class waits for that pull request to merge.** Step 2's deletions, step 3's remaining re-vendors, the interface workflows, step 5's `repo-config/` deletions, and the intent files each take their own pull request. Each branches from `develop` only after it merges, in section 3's order. A class with nothing to change opens no pull request and holds nothing up. Step 5's `apply` writes no file, so it opens no pull request and runs once step 4's has merged. Where section 4 requires a pin bump before a retirement, the bump lands in the deletions pull request. Moving the trees ahead of step 2 disturbs nothing. Section 4's detector leaves out every path a `trees` entry covers, so no deletion reaches it.
 - **Never push a fix directly to a protected branch**, and never hand-edit a target outside a pull request. An operational repository commits to `develop` directly by design, and a conformance change is still a reviewable change.
-- **Close the review loop.** Request a review at the defined moments. Confirm the head commit is covered, and answer and resolve every thread. All of that follows [GOVERNANCE.md "PR Review Etiquette"][governance-linters-locally]: ./GOVERNANCE.md#running-the-linters-locally-known-working-invocations
-[governance-pr-review-etiquette] and the [Copilot review runbook][copilot-runbook].
+- **Close the review loop.** Request a review at the defined moments. Confirm the head commit is covered, and answer and resolve every thread. All of that follows [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette] and the [Copilot review runbook][copilot-runbook].
 - **The maintainer merges.** The agent drives to green and stops.
 - **Fix systemic drift in the hub instead.** Where many repositories share a drift, fix the rule or add a check here and let a re-audit re-flag it. This is instead of hand-patching each repository for a shared cause.
 
@@ -141,6 +140,7 @@ Two further gaps are checked by hand, because no tool reports them. First, compa
 [files]: ./spec/files.json
 [governance-documentation-style]: ./GOVERNANCE.md#documentation-style-conventions
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
+[governance-linters-locally]: ./GOVERNANCE.md#running-the-linters-locally-known-working-invocations
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [host-setup]: ./docs/host-setup.md
 [project-types]: ./spec/project-types.json
