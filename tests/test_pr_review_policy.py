@@ -1068,7 +1068,7 @@ class TestSideAskTiming(fixtures.GqlCase):
 
     def test_a_pull_request_merged_while_its_checks_settle_is_asked_nothing(self) -> None:
         bot = {**EXPLICIT_QODO, "when": "after-checks"}
-        before = with_policy(fixtures.payload([]), parsed(qodo=bot))
+        before = committed(with_policy(fixtures.payload([]), parsed(qodo=bot)), fixtures.EARLY)
         merged = {**copy.deepcopy(before), "state": "MERGED"}
         made = ({"url": "https://example.test/c/1", "body": "/review"}, True)
         reads, post = iter([before, merged]), mock.MagicMock(return_value=made)
@@ -1191,7 +1191,7 @@ class TestSideAskServerStamp(unittest.TestCase):
             {"after": fixtures.HEAD, "timestamp": fixtures.LATE},
             {"after": fixtures.HEAD, "timestamp": fixtures.EARLY},
         ]
-        jq = side.PUSHED_JQ.replace("@HEAD@", fixtures.HEAD)
+        jq = side.PUSHED_JQ.format(fixtures.HEAD)
         for entries, want in ((log, fixtures.LATE), (log[:1], ""), ([], "")):
             with self.subTest(entries=len(entries)):
                 proc = subprocess.run(

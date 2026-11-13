@@ -44,7 +44,7 @@ from pr_review_rounds import (
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
 PUSHED_KEY = "_headPushedAt"
-PUSHED_JQ = 'map(select(.after == "@HEAD@") | .timestamp) | max // empty'
+PUSHED_JQ = 'map(select(.after == "{}") | .timestamp) | max // empty'
 
 
 def side_command(name: str, command: str = "review") -> str:
@@ -120,11 +120,10 @@ def pushed(pr: dict, rest: Callable[[str, str], CompletedProcess]) -> dict:
     """
     head, branch = pr.get("headRefOid") or "", pr.get("headRefName") or ""
     where = (pr.get("headRepository") or {}).get("nameWithOwner")
-    if not (where and branch and re.fullmatch(r"[0-9a-f]{40,64}", head)):
-        return {**pr, PUSHED_KEY: ""}
+    placed = where and branch and re.fullmatch(r"[0-9a-f]{40,64}", head)
     query = urllib.parse.urlencode({"ref": f"refs/heads/{branch}", "per_page": 100})
-    proc = rest(f"repos/{where}/activity?{query}", PUSHED_JQ.replace("@HEAD@", head))
-    return {**pr, PUSHED_KEY: proc.stdout.strip() if proc.returncode == 0 else ""}
+    proc = rest(f"repos/{where}/activity?{query}", PUSHED_JQ.format(head)) if placed else None
+    return {**pr, PUSHED_KEY: proc.stdout.strip() if proc and proc.returncode == 0 else ""}
 
 
 def side_asked_on_head(pr: dict, body: str) -> bool:
@@ -207,14 +206,15 @@ def request_side_reviews(
 ) -> list[str]:
     """Ask each comment-triggered reviewer the policy asks explicitly in `phase`, once per head.
 
-    `phase` is the `when` value this call serves, so an on-open ask never waits behind a check
-    wait. A reviewer that answered or was asked since the head's push is skipped before any wait,
-    and judged again on a fresh read after one. So a request that a concurrent session sent during
-    the wait is seen. Nothing is sent where its cap is spent. Nor where a cap applies and the comment
-    window is cut, since the rounds spent cannot then be counted. The merge never waits on these
-    reviewers, so a held ask is a note rather than an exit. `post` sends one comment and returns
-    `post_comment`'s answer, and an unconfirmed one ends the run, since it may have landed. A pull request
-    no longer open is asked nothing, since a peer can merge or close it while `wait` polls.
+    `phase` is the `when` value this call serves, so an on-open ask never waits behind a check wait.
+    A reviewer that answered or was asked since the push is skipped before any wait, and judged
+    again on a fresh read after one. So a request that a concurrent session sent during the wait is
+    seen. Nothing is sent where its cap is spent or the push unread. Nor where a cap applies and the
+    comment window is cut, since the rounds spent cannot then be counted. The merge never waits on
+    these reviewers, so a held ask is a note rather than an exit. `post` sends one comment and
+    returns `post_comment`'s answer, and an unconfirmed one ends the run, since it may have landed.
+    A pull request no longer open is asked nothing, since a peer can merge or close it while `wait`
+    polls.
     """
     lines: list[str] = []
     held: str | None = None
