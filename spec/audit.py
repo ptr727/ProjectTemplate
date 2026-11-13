@@ -1787,10 +1787,10 @@ def baseline_file_findings(slug, ground, path, item, ref=None):
     return content, contents_text(content), []
 
 
-def fleet_owned_verdict(item, canon_text, down_text):
-    """Whether a copy of a unit declaring `repoOwnedKeys` holds every other leaf its JSON canonical holds.
+def fleet_owned_differences(item, canon_text, down_text):
+    """The leaves outside a unit's `repoOwnedKeys` that its copy holds differently from its JSON canonical, or lacks.
 
-    True where it does, False where one differs or is absent, and None where the two cannot be compared.
+    An empty list means the copy is current, and None means the two cannot be compared.
     A value at one of those keys is the repository's own choice, and so is a leaf the copy adds.
     So a key the canonical drops goes unreported, and a text either side that is not plain JSON is dated as before.
     """
@@ -1804,38 +1804,45 @@ def fleet_owned_verdict(item, canon_text, down_text):
         return None
     held = dict(validate.json_leaves(down))
     missing = object()
-    return all(held.get(k, missing) == v for k, v in validate.json_leaves(canon) if k not in owned)
+    return [
+        k for k, v in validate.json_leaves(canon) if k not in owned and held.get(k, missing) != v
+    ]
 
 
 def intent_trail(slug, ref, path, item, down_text):
-    """`(canonical, (repo_date, hub_date, hub_sha))` where a copy possibly trails its intent canonical, else None.
+    """`(canonical, (repo_date, hub_date, hub_sha), differences)` where a copy possibly trails its intent canonical, else None.
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
     A `repoOwnedKeys` unit's copy is judged by its fleet-owned values instead, whatever the dates read.
+    `differences` names each fleet-owned leaf that copy trails, and is None for a copy judged by date.
     `ref` is the branch or commit its last change is looked up from.
     """
     canonical_rel, anchor = intent_ref(item, path)
     hub_change = hub_last_change(canonical_rel, anchor)
     if hub_change is None:
         return None
-    verdict = None
+    differences = None
     if down_text is not None:
         for rel in (canonical_rel, None if item.get("reference") else path):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
-        verdict = fleet_owned_verdict(item, canonical_current_text(canonical_rel), down_text)
-        if verdict:
+        differences = fleet_owned_differences(
+            item, canonical_current_text(canonical_rel), down_text
+        )
+        if differences == []:
             return None
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ref}&per_page=1")
     if not commits:
         return None
     repo_date = commits[0]["commit"]["committer"]["date"]
     hub_date, hub_sha = hub_change
-    if verdict is None and datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
+    if differences is None and datetime.fromisoformat(hub_date) <= datetime.fromisoformat(
+        repo_date
+    ):
         return None
-    return canonical_rel, (repo_date, hub_date, hub_sha)
+    return canonical_rel, (repo_date, hub_date, hub_sha), differences
 
 
 INTENT_ID = "files.intent"
@@ -1854,15 +1861,16 @@ def intent_findings(entry, ground, trails):
         for path, sha in pairs:
             acks.setdefault(path, set()).add(sha)
     used = set()
-    for path, (canonical_rel, (repo_date, hub_date, hub_sha)) in sorted(trails.items()):
+    for path, (canonical_rel, (repo_date, hub_date, hub_sha), *rest) in sorted(trails.items()):
+        differences = rest[0] if rest else None
         hit = next((sha for sha in acks.get(path, ()) if sha[:7] == hub_sha), None)
         if hit:
             used.add((path, hit))
             continue
-        if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
+        if differences:
             text = (
-                f"intent: {path} on {ground} differs from the intent canonical {canonical_rel} at a key "
-                f"the repository does not own, as of its change at {hub_date} ({hub_sha}), "
+                f"intent: {path} on {ground} holds {', '.join(differences)} other than the intent canonical "
+                f"{canonical_rel} does, which last changed at {hub_date} ({hub_sha}), "
                 f"verify intent per AUDIT.md section 7"
             )
         else:

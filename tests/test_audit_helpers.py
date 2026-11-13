@@ -3004,7 +3004,7 @@ class IntentAdvisoryCase(unittest.TestCase):
     def test_a_copy_matching_the_hub_file_at_path_is_current(self) -> None:
         unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
         texts = {"DOC.md": "the doc", "widget.json": "same"}
-        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)
         for down, want in (("same", None), ("x", trailing)):
             with self.subTest(down=down), self.patched(texts):
                 got = audit.intent_trail("o/r", "main", "widget.json", unit, down)
@@ -3018,7 +3018,9 @@ class IntentAdvisoryCase(unittest.TestCase):
             "repoOwnedKeys": ["sdk.version"],
         }
         canon = '{"sdk": {"version": "10.0.100", "rollForward": "latestFeature"}}'
-        trailing = ("snip/global.json", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        dates = ("2019-01-01T00:00:00+00:00", *HUB_CHANGE)
+        trailing = ("snip/global.json", dates, None)
+        rolled = ("snip/global.json", dates, ["sdk.rollForward"])
         cases = [
             (
                 "another line",
@@ -3033,9 +3035,9 @@ class IntentAdvisoryCase(unittest.TestCase):
             (
                 "a fleet value changed",
                 '{"sdk": {"version": "11.0.100", "rollForward": "major"}}',
-                trailing,
+                rolled,
             ),
-            ("a fleet value dropped", '{"sdk": {"version": "11.0.100"}}', trailing),
+            ("a fleet value dropped", '{"sdk": {"version": "11.0.100"}}', rolled),
             (
                 "a leaf of its own inside a block",
                 '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature", "paths": ["x"]}}',
@@ -3047,7 +3049,7 @@ class IntentAdvisoryCase(unittest.TestCase):
                 None,
             ),
             ("not JSON", "{", trailing),
-            ("not an object", "[]", trailing),
+            ("not an object", "[]", rolled),
         ]
         for label, down, want in cases:
             with self.subTest(label), self.patched({"snip/global.json": canon}):
@@ -3076,12 +3078,19 @@ class IntentAdvisoryCase(unittest.TestCase):
                 got = audit.intent_trail("o/r", "main", "global.json", unit, down)
                 self.assertEqual(got is not None, reported)
 
-    def test_a_copy_newer_than_the_change_it_trails_is_named_by_its_key(self) -> None:
-        trails = {"global.json": ("snip/global.json", ("2021-01-01T00:00:00+00:00", *HUB_CHANGE))}
+    def test_a_trailing_fleet_owned_leaf_is_named(self) -> None:
+        dates = ("2021-01-01T00:00:00+00:00", *HUB_CHANGE)
+        trails = {"global.json": ("snip/global.json", dates, ["sdk.rollForward"])}
         [(level, text)] = audit.intent_findings({}, "main", trails)
         self.assertEqual(level, "DRIFT")
-        self.assertIn("differs from the intent canonical snip/global.json at a key", text)
+        self.assertIn(
+            "holds sdk.rollForward other than the intent canonical snip/global.json", text
+        )
         self.assertNotIn("changed later", text)
+        acked = audit.intent_findings(
+            {"driftNotes": ["`global.json@abc1234` (files.intent)"]}, "main", trails
+        )
+        self.assertEqual(acked, [])
 
     def test_a_unit_without_repo_owned_keys_compares_whole(self) -> None:
         unit = {"path": "global.json", "fidelity": "intent", "reference": "snip/global.json"}
