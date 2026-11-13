@@ -178,7 +178,7 @@ def main(argv: list[str]) -> int:
             child.wait()
 
 
-# The signal the SIGTERM handler recorded, where one interrupted the run.
+# The first signal the handler took, where one interrupted the run.
 received: list[int] = []
 
 

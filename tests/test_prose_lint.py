@@ -8391,6 +8391,27 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         self.assertEqual(1, status, said)
         self.assertIn("b.md:1: dead-path", said)
 
+    def test_a_merge_reads_a_move_its_resolution_makes_of_a_branch_file(self) -> None:
+        """A file only the branch added, moved by the resolution, is the merge's own move too.
+
+        Against MERGE_HEAD the new path is added rather than moved, so only the HEAD diff records it.
+        """
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("docs/b.md", "See [it](gone.py).\n\n\n\nEnd.\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "feature adds a doc")
+        self.git("checkout", "-q", "develop")
+        self.write("tool.py", "value = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "develop edits another file")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        self.git("mv", "docs/b.md", "b.md")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(1, status, said)
+        self.assertIn("b.md:1: dead-path", said)
+
     def test_a_tree_git_cannot_read_is_refused_against_head(self) -> None:
         """No repository holds the file, so the refusal names the base a commit would use."""
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()

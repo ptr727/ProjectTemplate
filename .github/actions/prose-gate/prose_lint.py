@@ -2232,16 +2232,21 @@ def main(argv: list[str] | None = None) -> int:
         return refuse("error-no-diff", base=a.diff)
     if scope is not None and a.diff_commit and a.diff == "MERGE_HEAD":
         # A merge commit adds only what differs from both parents, so the branch's own lines stay out.
-        # A move counts only where HEAD lacks the new path too, since the branch alone may have made it.
-        ours = changed_lines("HEAD", scan_root, tuple(a.exclude), scan_paths, {})
+        # A move counts only where the other parent lacks the new path too, since one side may have made it.
+        our_moves: dict[str, tuple[str, str]] = {}
+        ours = changed_lines("HEAD", scan_root, tuple(a.exclude), scan_paths, our_moves)
         if ours is None:
             return refuse("error-no-diff", base="HEAD")
         scope = {k: v & ours[k] for k, v in scope.items() if k in ours}
         held = git_env()
-        moves = {
-            k: m
-            for k, m in moves.items()
-            if git_text("-C", str(scan_root), "cat-file", "-e", f"HEAD:{k}", env=held) is None
+
+        def lacks(ref: str, key: str) -> bool:
+            return (
+                git_text("-C", str(scan_root), "cat-file", "-e", f"{ref}:{key}", env=held) is None
+            )
+
+        moves = {k: m for k, m in moves.items() if lacks("HEAD", k)} | {
+            k: m for k, m in our_moves.items() if lacks("MERGE_HEAD", k)
         }
         a.diff = "MERGE_HEAD and HEAD"
     if scope is not None:
@@ -2296,7 +2301,7 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if total else 0
 
 
-# The signal the SIGTERM handler recorded, where one interrupted the run.
+# The first signal the handler took, where one interrupted the run.
 received: list[int] = []
 
 
