@@ -537,13 +537,44 @@ jobs:
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           REPOSITORY: ${{ github.repository }}
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BASE_REF: ${{ github.base_ref }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -Eeuo pipefail
+          reviewed_content() {
+            local head=$1 develop base lists path
+            local -a off_develop_paths off_base_paths
+            local -A off_develop=()
+            develop=$(git merge-base "$head" refs/remotes/origin/develop) || return 1
+            base=$(git merge-base "$head" "refs/remotes/origin/$BASE_REF") || return 1
+            lists=$(mktemp -d) || return 1
+            if ! git diff --no-renames --name-only -z "$develop" "$head" > "$lists/develop" ||
+              ! git diff --no-renames --name-only -z "$base" "$head" > "$lists/base"; then
+              rm -r -- "$lists"
+              return 1
+            fi
+            mapfile -d '' -t off_develop_paths < "$lists/develop"
+            mapfile -d '' -t off_base_paths < "$lists/base"
+            rm -r -- "$lists"
+            for path in "${off_develop_paths[@]}"; do
+              off_develop[$path]=1
+            done
+            for path in "${off_base_paths[@]}"; do
+              if [[ -n "${off_develop[$path]-}" ]]; then
+                echo "The head's $path matches neither its merge base with develop nor its merge base with $BASE_REF, so the head carries content no promotion carries."
+                return 1
+              fi
+            done
+          }
           promotion=false
-          if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$HEAD_REF" == develop && "$BASE_REF" == "$DEFAULT_BRANCH" ]]; then
-            promotion=true
+          if [[ "$HEAD_REPOSITORY" == "$REPOSITORY" && "$BASE_REF" == "$DEFAULT_BRANCH" ]]; then
+            if [[ "$HEAD_REF" == develop ]]; then
+              promotion=true
+            elif [[ -n "$HEAD_SHA" ]] && reviewed_content "$HEAD_SHA"; then
+              echo "Every path the head $HEAD_REF changes holds its content at the head's merge base with develop or with $BASE_REF, the shape of a promotion branch cut from $BASE_REF that merges develop."
+              promotion=true
+            fi
           fi
           stand_down=false
           if [[ "$promotion" == true && "$WORKFLOW_MODEL" == release ]]; then

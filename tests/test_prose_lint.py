@@ -153,10 +153,13 @@ def run_comments_label_step(live: str | None, payload: str) -> tuple[str, str, s
     return str(result.returncode), written, result.stdout + result.stderr, called
 
 
-def run_comment_stand_down_step(model: str, facts: dict[str, str]) -> tuple[str, str, str]:
+def run_comment_stand_down_step(
+    model: str, facts: dict[str, str], cwd: Path | None = None
+) -> tuple[str, str, str]:
     """Run the workflow's own stand-down step with the caller's model and the event's facts.
 
-    Returns the exit code, the step output written, and the log.
+    `cwd` is the checkout the step reads a promotion branch's ancestry in. Returns the exit code,
+    the step output written, and the log.
     """
     script = step_script(VALIDATE_TASK_WORKFLOW, "Resolve comment stand-down step")
     with tempfile.TemporaryDirectory() as scratch:
@@ -168,6 +171,7 @@ def run_comment_stand_down_step(model: str, facts: dict[str, str]) -> tuple[str,
                 "DEFAULT_BRANCH": "main",
                 "HEAD_REF": "",
                 "HEAD_REPOSITORY": "",
+                "HEAD_SHA": "",
                 "REPOSITORY": "example/widget",
             }
             | facts
@@ -175,6 +179,7 @@ def run_comment_stand_down_step(model: str, facts: dict[str, str]) -> tuple[str,
         )
         result = subprocess.run(
             [bash_or_skip(), "-c", script],
+            cwd=cwd,
             env=env,
             text=True,
             encoding="utf-8",
@@ -2782,6 +2787,7 @@ class TestCommentAddedRule(BaitCase):
             ("HEAD_REPOSITORY", "github.event.pull_request.head.repo.full_name"),
             ("REPOSITORY", "github.repository"),
             ("HEAD_REF", "github.head_ref"),
+            ("HEAD_SHA", "github.event.pull_request.head.sha"),
             ("BASE_REF", "github.base_ref"),
             ("DEFAULT_BRANCH", "github.event.repository.default_branch"),
         ):
@@ -8310,6 +8316,119 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         self.assertEqual(
             "prose-base", yaml_value(yaml_step(workflow, "Resolve prose base step"), "id")
         )
+
+
+class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
+    """A conflicted promotion lands from a branch cut from the default branch that merges develop.
+
+    Its head is not `develop`, so the name rule never reaches it. What it is read from is the
+    head's content. Each path the head changes holds its content at the head's merge base with
+    develop or with the default branch. Both of those were reviewed. A name any branch can take
+    decides nothing.
+    """
+
+    FACTS: ClassVar[dict[str, str]] = {
+        "HEAD_REPOSITORY": "example/widget",
+        "HEAD_REF": "promote/develop-to-main",
+        "BASE_REF": "main",
+    }
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.git("init", "-q", "-b", "main", str(self.root))
+        self.write("ci.yml", "pin: 1\n")
+        self.write("kept.txt", "kept\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-qb", "develop")
+        self.write("ci.yml", "pin: 3\n# The pin moves with the hub.\n")
+        self.git("commit", "-qam", "develop moves the pin")
+        self.git("checkout", "-q", "main")
+        self.write("ci.yml", "pin: 2\n")
+        self.git("commit", "-qam", "main moves the pin")
+        self.write("main-only.txt", "main only\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "main only")
+        self.git("update-ref", "refs/remotes/origin/main", "main")
+        self.git("update-ref", "refs/remotes/origin/develop", "develop")
+        self.git("checkout", "-qb", "promote/develop-to-main", "main")
+        subprocess.run(
+            ["git", "-C", str(self.root), "merge", "-q", "origin/develop"],
+            capture_output=True,
+            check=False,
+        )
+        self.git("checkout", "--theirs", "ci.yml")
+        self.git("add", "ci.yml")
+        self.git("commit", "-qm", "take develop's side")
+
+    def git(self, *args: str) -> str:
+        identity = ("-c", "user.email=gate@example.invalid", "-c", "user.name=gate test")
+        return subprocess.run(
+            ["git", "-C", str(self.root), *identity, "-c", "commit.gpgsign=false", *args],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    def write(self, name: str, text: str) -> None:
+        (self.root / name).write_text(text, encoding="utf-8")
+
+    def stand_down(self, model: str = "release", **facts: str) -> tuple[str, str, str]:
+        head = {"HEAD_SHA": self.git("rev-parse", "HEAD")}
+        return run_comment_stand_down_step(model, self.FACTS | head | facts, self.root)
+
+    def test_the_documented_promotion_stands_down(self) -> None:
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=true"), (code, output), log)
+        self.assertIn("a promotion of develop into the default branch: true", log)
+
+    def test_the_name_decides_nothing(self) -> None:
+        code, output, log = self.stand_down(HEAD_REF="resolve/conflicted-release")
+        self.assertEqual(("0", "stand-down=true"), (code, output), log)
+
+    def test_a_line_the_promotion_adds_beyond_either_side_runs_the_rule(self) -> None:
+        """A commit after the merge carries a line neither branch reviewed."""
+        self.write("new.py", "# A comment no pull request reviewed.\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "an unreviewed line")
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.assertIn("new.py matches neither", log)
+
+    def test_a_resolution_matching_neither_side_runs_the_rule(self) -> None:
+        """A conflict resolved by hand is new content, however small."""
+        self.write("ci.yml", "pin: 4\n")
+        self.git("commit", "-qam", "a pin neither side holds")
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.assertIn("ci.yml matches neither", log)
+
+    def test_a_feature_branch_cut_from_the_default_branch_runs_the_rule(self) -> None:
+        self.git("checkout", "-qb", "feature/widget", "main")
+        self.write("kept.txt", "changed\n")
+        self.git("commit", "-qam", "a feature")
+        code, output, log = self.stand_down(HEAD_REF="feature/widget")
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+
+    def test_the_operational_model_runs_the_rule(self) -> None:
+        code, output, log = self.stand_down("operational")
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.assertIn("a promotion of develop into the default branch: true", log)
+
+    def test_a_fork_or_another_base_runs_the_rule(self) -> None:
+        for facts in ({"HEAD_REPOSITORY": "fork/widget"}, {"BASE_REF": "next"}):
+            with self.subTest(facts=facts):
+                code, output, log = self.stand_down(**facts)
+                self.assertEqual(("0", "stand-down=false"), (code, output), log)
+
+    def test_an_unreadable_ancestry_runs_the_rule_rather_than_failing(self) -> None:
+        """A missing develop ref or an unknown head is no promotion, and the step still passes."""
+        code, output, log = self.stand_down(HEAD_SHA="f" * 40)
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
+        self.git("update-ref", "-d", "refs/remotes/origin/develop")
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=false"), (code, output), log)
 
 
 class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):

@@ -15,7 +15,9 @@ The verify-then-delete `drive-pr` and `merge-and-release` prescribe. Call it thr
 rule approves any arguments, so every check lives here. It takes the pull
 request number, never a branch name. It refuses unless all of these hold:
 
-- The pull request is merged into `develop` from a head in `--repo` itself.
+- The pull request is merged into `develop` from a head in `--repo` itself. A conflicted
+  promotion's branch cut from the default branch may merge into it instead. GitHub must then read
+  the merged head in that branch's history and the head's second parent in `develop`'s.
 - The head is not `develop`, `main`, or the default branch.
 - The owner and repository pass `handoff.py`'s write-scope check.
 - No ruleset or protection covers the branch.
@@ -100,6 +102,7 @@ mutation($refId:ID!){
 """
 DELETE_SETTLE_DELAYS = (1, 2, 4)
 PERMANENT = ("develop", "main")
+COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
 
 
 class CleanupUnread(Exception):
@@ -118,9 +121,9 @@ def cleanup_read(query: str, **variables: object) -> dict:
         raise CleanupUnread(str(exc)) from exc
 
 
-def cleanup_rest(path: str, what: str) -> object:
+def cleanup_rest(path: str, what: str, jq: str = ".") -> object:
     """One REST read for `cleanup`, retried, raising with its stderr where nothing parsed."""
-    proc = core.reread(path, ".")
+    proc = core.reread(path, jq)
     data = core.parsed_json(proc)
     if data is None:
         sys.stderr.write(proc.stderr)
@@ -161,6 +164,53 @@ def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
     if protected:
         found.append("branch protection")
     return found
+
+
+def in_history(owner: str, repo: str, branch: str, oid: str) -> bool:
+    """Whether commit `oid` is in `branch`'s history, read from GitHub's comparison of the two."""
+    found = cleanup_rest(
+        f"repos/{owner}/{repo}/compare/{branch}...{oid}",
+        f"comparison of {oid} with {branch}",
+        "{status: .status}",
+    )
+    status = found.get("status") if isinstance(found, dict) else None
+    if status not in ("ahead", "behind", "diverged", "identical"):
+        raise CleanupUnread(
+            f"the comparison of {oid} with {branch} returned no status: {found!r}"[:400]
+        )
+    return status in ("behind", "identical")
+
+
+def promotion_refusal(owner: str, repo: str, head: str, default: str) -> str | None:
+    """Why a pull request merged into the default branch is no promotion, or None where it is one.
+
+    The documented promotion that `develop`'s rules cannot resolve is a branch cut from the
+    default branch that merges `develop`, landed by a merge commit. So its merged head is in the
+    default branch's history, and that head is a merge whose second parent is in `develop`'s.
+    Each fact is read from GitHub, never inferred from the head's name, which any branch can take.
+    """
+    if not core.safe_ref(default):
+        raise CleanupUnread(
+            f"the default branch {default!r} holds a character that changes a REST path"
+        )
+    if not COMMIT_ID.fullmatch(head):
+        raise CleanupUnread(f"the pull request's head {head!r} is no commit id")
+    if not in_history(owner, repo, default, head):
+        return (
+            f"its merged head {head} is not in {default!r}'s history, so no merge commit landed it"
+        )
+    parents = cleanup_rest(
+        f"repos/{owner}/{repo}/commits/{head}", "head commit", "[.parents[].sha]"
+    )
+    if not isinstance(parents, list) or not all(
+        isinstance(p, str) and COMMIT_ID.fullmatch(p) for p in parents
+    ):
+        raise CleanupUnread(f"the head commit read returned no parent list: {parents!r}"[:400])
+    if len(parents) != 2:
+        return f"its merged head {head} has {len(parents)} parents, so it merged no develop"
+    if not in_history(owner, repo, "develop", parents[1]):
+        return f"its merged head's second parent {parents[1]} is not in develop's history"
+    return None
 
 
 def permanent_branch(branch: str, default: str) -> bool:
@@ -248,11 +298,15 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
     pr = pr_target(owner, repo, num)
     branch, head = pr["headRefName"], pr["headRefOid"]
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or ""
+    base = pr.get("baseRefName")
+    promotion = base == pr["defaultBranch"] and base != "develop"
     refusals = []
     if pr.get("merged") is not True:
         refusals.append("the pull request is not merged")
-    if pr.get("baseRefName") != "develop":
-        refusals.append(f"its base is {pr.get('baseRefName')!r}, not 'develop'")
+    if base != "develop" and not promotion:
+        refusals.append(
+            f"its base is {base!r}, neither 'develop' nor the default branch {pr['defaultBranch']!r}"
+        )
     if not in_repository(pr, owner, repo):
         refusals.append(f"its head lives in {head_repo or 'no repository'}, not {target}")
     if permanent_branch(branch, pr["defaultBranch"]):
@@ -260,6 +314,13 @@ def cleanup_check(owner: str, repo: str, num: int) -> CleanupPlan:
     if refusals:
         raise CleanupRefused(
             "REFUSED", f"nothing was deleted from {target} #{num}: {', and '.join(refusals)}"
+        )
+    why = promotion_refusal(owner, repo, head, pr["defaultBranch"]) if promotion else None
+    if why is not None:
+        raise CleanupRefused(
+            "REFUSED",
+            f"nothing was deleted from {target} #{num}: its base is the default branch {base!r} "
+            f"and it is no promotion merging develop, since {why}",
         )
 
     ref = cleanup_ref(owner, repo, branch)

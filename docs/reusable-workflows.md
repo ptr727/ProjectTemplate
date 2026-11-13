@@ -305,7 +305,7 @@ A downstream repo replaces its own `validate-task.yml` job bodies and its `test-
 
 **No-build repos** carry the operational trigger shape [WORKFLOW.md "Branch Model"][workflow] states and [#585][issue-585] settles. In that shape a direct push to `develop` runs CI advisory (no required check binds the direct-commit allowance). In that shape a `pull_request` runs it pre-merge and actionable. A release-model repo with no build target keeps only the stub's `pull_request` and `workflow_dispatch` triggers. It has no direct-commit allowance to keep advisory. It also drops the stub's `workflow-model` input, since `release` is the default.
 
-An operational repo also names its model in the `workflow-model` input, which defaults to `release`. On that default the prose gate's `comment-added` rule stands down on a `develop -> main` promotion, since each promoted line was reviewed on its own pull request. An operational repo may commit to `develop` directly, so its promotion can be the first review those lines get, and the rule runs there:
+An operational repo also names its model in the `workflow-model` input, which defaults to `release`. On that default the prose gate's `comment-added` rule stands down on a `develop -> main` promotion, since each promoted line was reviewed on its own pull request. A conflicted promotion is opened from a branch cut from `main` that merges `develop`, and it stands down too. The gate reads that shape from the head's content, never its name. Each path the head changes has to match the head's merge base with `develop` or its merge base with `main`. An operational repo may commit to `develop` directly, so its promotion can be the first review those lines get, and the rule runs there:
 
 ```yaml
     with:

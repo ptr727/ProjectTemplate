@@ -208,6 +208,10 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      in two worktrees at once is refused outright. Never delete `develop`: it is the promotion PR's
      own head. The repo's auto-delete-head-branches setting is kept off fleet-wide for exactly
      this reason, so nothing does this automatically.
+   - A conflicted promotion's own branch, where one exists. That promotion's head is a branch cut
+     from `main` that merges `develop` rather than `develop` itself. Run the `cleanup <number>`
+     command the next bullet names on the promotion PR. It removes that branch's worktree, its local
+     branch, and its remote branch.
    - A defensive sweep for anything drive-pr's own cleanup should already have removed but might
      not have. The causes include an interrupted loop, a fix landed by hand outside that skill, or
      a maintainer merge in the GitHub UI. `git worktree list` for any worktree still registered under this

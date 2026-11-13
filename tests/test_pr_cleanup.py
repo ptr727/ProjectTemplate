@@ -20,8 +20,9 @@ import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -33,6 +34,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 
 CLEANUP_HEAD = "a" * 40
 CLEANUP_BRANCH = "feature/example-topic"
+PROMOTION_BRANCH = "promote/develop-to-main"
+MAIN_PARENT = "d" * 40
+DEVELOP_PARENT = "e" * 40
 
 
 def fork_head(number: int) -> dict:
@@ -81,10 +85,14 @@ class CleanupCase(unittest.TestCase):
         head_pages: list[list[dict]] | None = None,
         head_answer: object = None,
         base_answer: object = None,
+        compares: Mapping[str, object] | None = None,
+        parents: object = (MAIN_PARENT, DEVELOP_PARENT),
     ) -> None:
         """Answer each document in turn, `refs` holding one answer per ref read in order.
 
         A ref answer is a tip, None for no such branch, or an exception the read raises.
+        `compares` answers each `<branch>...<commit>` comparison with its status, and `parents`
+        answers the head commit's read with its parent ids.
         `head_pages` pages the heads connection, each page its nodes, where `heads` is one page
         of this repository's own. An answer given whole replaces that read's repository, or is
         raised where it is an exception.
@@ -92,6 +100,7 @@ class CleanupCase(unittest.TestCase):
         pending = list(refs if refs is not None else [CLEANUP_HEAD, None])
         local = [{"number": n, "headRepository": {"nameWithOwner": "o/r"}} for n in heads or []]
         pages = head_pages if head_pages is not None else [local]
+        branch = (pr or {}).get("headRefName", CLEANUP_BRANCH)
 
         def fake(query: str, variables: dict, **_: object) -> pr_cleanup.shared.Response:
             self.docs.append((query, variables))
@@ -99,7 +108,7 @@ class CleanupCase(unittest.TestCase):
                 repository = {"defaultBranchRef": {"name": default}, "pullRequest": pr}
                 return pr_cleanup.shared.Response({"repository": repository}, [])
             if "heads: pullRequests" in query:
-                self.assertEqual(CLEANUP_BRANCH, variables["b"])
+                self.assertEqual(branch, variables["b"])
                 if isinstance(head_answer, Exception):
                     raise head_answer
                 if head_answer is not None:
@@ -110,7 +119,7 @@ class CleanupCase(unittest.TestCase):
                 found = {"heads": {"pageInfo": page, "nodes": pages[at]}}
                 return pr_cleanup.shared.Response({"repository": found}, [])
             if "bases: pullRequests" in query:
-                self.assertEqual(CLEANUP_BRANCH, variables["b"])
+                self.assertEqual(branch, variables["b"])
                 if isinstance(base_answer, Exception):
                     raise base_answer
                 if base_answer is not None:
@@ -134,7 +143,13 @@ class CleanupCase(unittest.TestCase):
             path: str, jq: str | None = None, raw: bool = False
         ) -> subprocess.CompletedProcess:
             self.rest.append(path)
-            if "/rules/branches/" in path:
+            body: object
+            if "/compare/" in path:
+                answer = (compares or {})[path.partition("/compare/")[2]]
+                body = answer if isinstance(answer, Exception) else {"status": answer}
+            elif "/commits/" in path:
+                body = list(parents) if isinstance(parents, tuple) else parents
+            elif "/rules/branches/" in path:
                 body = rules
             else:
                 body = {"name": CLEANUP_BRANCH, "protected": protected}
@@ -250,9 +265,11 @@ class TestCleanupRefusesBeforeAnyDelete(CleanupCase):
         self.wire(cleanup_pr(merged=False))
         self.assert_refused()
 
-    def test_a_base_other_than_develop_is_refused(self) -> None:
-        self.wire(cleanup_pr(baseRefName="main"))
+    def test_a_base_other_than_develop_or_the_default_is_refused(self) -> None:
+        """A promotion is read only against the default branch, so another base reads nothing."""
+        self.wire(cleanup_pr(baseRefName="next"))
         self.assert_refused()
+        self.assertEqual([], self.rest)
 
     def test_a_head_in_another_repository_is_refused(self) -> None:
         self.wire(cleanup_pr(headRepository={"nameWithOwner": "o/r-fork"}))
@@ -435,6 +452,93 @@ def run_git(cwd: str, *args: str) -> str:
         ["git", "-C", cwd, *args], capture_output=True, text=True, encoding="utf-8", check=True
     )
     return done.stdout.strip()
+
+
+class TestCleanupRecognizesAPromotionCutFromTheDefaultBranch(CleanupCase):
+    """A conflicted promotion lands from a branch cut from the default branch that merges develop.
+
+    The shape is read from the merged head's ancestry on GitHub. A branch taking the documented
+    name without that ancestry is refused like any other base.
+    """
+
+    LANDED: ClassVar[dict[str, object]] = {
+        f"main...{CLEANUP_HEAD}": "behind",
+        f"develop...{DEVELOP_PARENT}": "behind",
+    }
+
+    def promotion(self, **overrides: object) -> dict:
+        return cleanup_pr(**{"baseRefName": "main", "headRefName": PROMOTION_BRANCH, **overrides})
+
+    def test_a_merged_promotion_branch_is_deleted(self) -> None:
+        self.wire(self.promotion(), compares=self.LANDED)
+        self.assertEqual(0, self.run_cleanup())
+        self.assertTrue(self.deleted())
+        self.assertIn("status=DELETED", self.out.getvalue())
+        self.assertIn(f"repos/o/r/compare/main...{CLEANUP_HEAD}", self.rest)
+        self.assertIn(f"repos/o/r/commits/{CLEANUP_HEAD}", self.rest)
+        self.assertIn(f"repos/o/r/compare/develop...{DEVELOP_PARENT}", self.rest)
+
+    def test_the_shape_holds_under_any_branch_name(self) -> None:
+        """The name decides nothing in either direction, so a differently named one is read too."""
+        self.wire(self.promotion(headRefName="resolve/conflicted-release"), compares=self.LANDED)
+        self.assertEqual(0, self.run_cleanup())
+        self.assertTrue(self.deleted())
+
+    def test_a_head_landed_by_no_merge_commit_is_refused(self) -> None:
+        """A squash into the default branch leaves the head outside its history."""
+        for status in ("ahead", "diverged"):
+            with self.subTest(status=status):
+                self.docs.clear()
+                self.wire(self.promotion(), compares={f"main...{CLEANUP_HEAD}": status})
+                self.assertEqual(1, self.run_cleanup())
+                self.assertFalse(self.deleted())
+                self.assertIn("no merge commit landed it", self.out.getvalue())
+
+    def test_a_head_that_is_no_merge_is_refused(self) -> None:
+        """A feature branch cut from the default branch and merged into it carries one parent."""
+        self.wire(self.promotion(), compares=self.LANDED, parents=(MAIN_PARENT,))
+        self.assertEqual(1, self.run_cleanup())
+        self.assertFalse(self.deleted())
+        self.assertIn("has 1 parents, so it merged no develop", self.out.getvalue())
+
+    def test_a_second_parent_outside_develop_is_refused(self) -> None:
+        compares = {**self.LANDED, f"develop...{DEVELOP_PARENT}": "diverged"}
+        self.wire(self.promotion(), compares=compares)
+        self.assertEqual(1, self.run_cleanup())
+        self.assertFalse(self.deleted())
+        self.assertIn("is not in develop's history", self.out.getvalue())
+
+    def test_an_unread_shape_stops_at_2_rather_than_reading_as_a_promotion(self) -> None:
+        for compares, parents in (
+            ({f"main...{CLEANUP_HEAD}": RuntimeError("unread")}, (MAIN_PARENT, DEVELOP_PARENT)),
+            ({f"main...{CLEANUP_HEAD}": None}, (MAIN_PARENT, DEVELOP_PARENT)),
+            (self.LANDED, {"message": "Not Found"}),
+            (self.LANDED, (MAIN_PARENT, "not a commit")),
+        ):
+            with self.subTest(compares=compares, parents=parents):
+                self.docs.clear()
+                self.wire(self.promotion(), compares=compares, parents=parents)
+                self.assertEqual(2, self.run_cleanup())
+                self.assertFalse(self.deleted())
+                self.assertIn("status=UNREAD", self.out.getvalue())
+
+    def test_the_default_branch_read_live_is_the_promotion_base(self) -> None:
+        """A repository whose default branch is not `main` promotes into that branch instead."""
+        compares = {f"trunk...{CLEANUP_HEAD}": "identical", f"develop...{DEVELOP_PARENT}": "behind"}
+        self.wire(self.promotion(baseRefName="trunk"), default="trunk", compares=compares)
+        self.assertEqual(0, self.run_cleanup())
+        self.assertTrue(self.deleted())
+        self.out.truncate(0)
+        self.docs.clear()
+        self.wire(self.promotion(), default="trunk", compares=self.LANDED)
+        self.assertEqual(1, self.run_cleanup())
+        self.assertFalse(self.deleted())
+
+    def test_a_permanent_head_is_refused_before_any_ancestry_read(self) -> None:
+        self.wire(self.promotion(headRefName="develop"), compares=self.LANDED)
+        self.assertEqual(1, self.run_cleanup())
+        self.assertFalse(self.deleted())
+        self.assertEqual([], self.rest)
 
 
 class LocalCleanupCase(CleanupCase):
