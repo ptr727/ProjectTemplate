@@ -7,11 +7,14 @@ The script runs as `uv run --no-project --script`.
 The packages its PEP 723 block declares therefore resolve, beside the data files it reads, which are fetched from the same ref.
 Usage: hub_fetch_run.py <hub-relative-path> [script-args...]
 Example: hub_fetch_run.py .github/actions/prose-gate/prose_lint.py . --diff HEAD
+On SIGINT or SIGTERM it stops the script, removes the fetched tree, and re-raises the signal.
 """
 
+import contextlib
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -219,8 +222,49 @@ def main(argv: list[str]) -> int:
             target.write_bytes(content)
         script = Path(scratch) / hub_path
         cmd = [uv, "run", "--no-project", "--script", str(script), *script_args]
-        return subprocess.run(cmd, env=env, check=False).returncode
+        child = subprocess.Popen(cmd, env=env)
+        try:
+            return child.wait()
+        finally:
+            child.terminate()
+            child.wait()
+
+
+# The signal the SIGTERM handler recorded, where one interrupted the run.
+received: list[int] = []
+
+
+def on_sigterm(signum: int, _frame: object) -> None:
+    """Record SIGTERM and raise it as KeyboardInterrupt, so both signals unwind one path."""
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def run(argv: list[str]) -> int | signal.Signals:
+    """Run main, returning its status, or the signal that interrupted it once its cleanup ran."""
+    signal.signal(signal.SIGTERM, on_sigterm)
+    try:
+        return main(argv)
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[-1] if received else signal.SIGINT)
+        print(f"hub_fetch_run: interrupted by {signum.name}.", file=sys.stderr)
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    status = run(sys.argv[1:])
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)

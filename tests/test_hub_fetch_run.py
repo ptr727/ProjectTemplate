@@ -17,9 +17,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -344,12 +346,12 @@ class ProvenanceTests(unittest.TestCase):
         with (
             self.environment(),
             mock.patch.object(urllib.request, "urlopen", urlopen),
-            mock.patch.object(hub.subprocess, "run") as run,
+            mock.patch.object(hub.subprocess, "Popen") as popen,
             mock.patch.object(hub.shutil, "which", return_value="uv"),
             contextlib.redirect_stderr(self.stderr),
         ):
             self.assertEqual(1, hub.main([PROSE_PATH, str(self.out)]))
-        run.assert_not_called()
+        popen.assert_not_called()
         self.assertIn("mixed pair was refused", self.stderr.getvalue())
 
     def test_a_pinned_commit_is_fetched_once(self) -> None:
@@ -404,16 +406,17 @@ class ProvenanceTests(unittest.TestCase):
 
     def test_the_script_runs_through_uv_with_no_project(self) -> None:
         """A project sync would write a lock file and an environment into the caller's tree."""
-        done: subprocess.CompletedProcess[bytes] = subprocess.CompletedProcess([], 3)
+        child = mock.Mock()
+        child.wait.return_value = 3
         with (
             self.environment(),
             mock.patch.object(urllib.request, "urlopen", self.opener(SHA_BODY, RECORD)),
-            mock.patch.object(hub.subprocess, "run", return_value=done) as run,
+            mock.patch.object(hub.subprocess, "Popen", return_value=child) as popen,
             mock.patch.object(hub.shutil, "which", return_value="uv"),
             contextlib.redirect_stderr(self.stderr),
         ):
             self.assertEqual(3, hub.main([".github/actions/repo-gate/repo_gate.py", "--x"]))
-        cmd = run.call_args.args[0]
+        cmd = popen.call_args.args[0]
         self.assertEqual(["run", "--no-project", "--script"], cmd[1:4])
         self.assertEqual(["--x"], cmd[5:])
 
@@ -437,6 +440,105 @@ class ProvenanceTests(unittest.TestCase):
         request = self.lookup_requests()[-1]
         self.assertNotIn("Authorization", request.headers)
         self.assertEqual(request.unredirected_hdrs.get("Authorization"), "Bearer tok-one")
+
+
+# Runs the snippet as `__main__` with the network stubbed, so its own re-raise is what ends it.
+INTERRUPT_LAUNCHER = """
+import runpy, sys, urllib.request
+
+class Response:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return None
+
+    def read(self):
+        return self.body
+
+def urlopen(target, timeout=None):
+    url = target if isinstance(target, str) else target.full_url
+    return Response(SHA if url.endswith("/commits/main") else b"print('gate')\\n")
+
+SHA = sys.argv[2].encode()
+urllib.request.urlopen = urlopen
+sys.argv = [sys.argv[1], *sys.argv[3:]]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows cannot deliver either signal for a script")
+class InterruptTests(unittest.TestCase):
+    """A signal mid-run stops the script, removes the fetched tree, and ends the helper by it.
+
+    The script is a stub uv that marks itself started and then sleeps, so the signal lands while
+    the helper holds both. The helper runs under its interpreter directly, since `uv run` would
+    exit with a status rather than die by the signal.
+    """
+
+    def interrupt(self, sig: signal.Signals, group: bool) -> tuple[int, str, list[str]]:
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        ready, stubs, scratch = outside / "started", outside / "bin", outside / "tmp"
+        stubs.mkdir()
+        scratch.mkdir()
+        uv = stubs / "uv"
+        uv.write_text(f'#!/bin/sh\n: >"{ready}"\nexec sleep {TIMEOUT}\n', encoding="utf-8")
+        uv.chmod(0o755)
+        launcher = outside / "launch.py"
+        launcher.write_text(INTERRUPT_LAUNCHER, encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k not in ENV_KEYS}
+        env.update(TMPDIR=str(scratch), PATH=f"{stubs}{os.pathsep}{env.get('PATH', '')}")
+        cmd = [sys.executable, str(launcher), str(SNIPPET), SHA, PROSE_PATH, "."]
+        helper = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + TIMEOUT
+            while not ready.exists():
+                if helper.poll() is not None or time.monotonic() > deadline:
+                    raise AssertionError("the stub never started: " + helper.communicate()[1])
+                time.sleep(0.05)
+            self.assertNotEqual([], list(scratch.iterdir()), "the helper holds no fetched tree")
+            (os.killpg if group else os.kill)(helper.pid, sig)
+            _, stderr = helper.communicate(timeout=TIMEOUT)
+            self.assert_group_ended(helper.pid)
+        finally:
+            if helper.poll() is None:
+                os.killpg(helper.pid, signal.SIGKILL)
+                helper.communicate(timeout=TIMEOUT)
+        return helper.returncode, stderr, [p.name for p in scratch.iterdir()]
+
+    def assert_group_ended(self, pgid: int) -> None:
+        """Every process the helper started is gone, which a survivor would fail by holding the group."""
+        deadline = time.monotonic() + TIMEOUT
+        while True:
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                return
+            if time.monotonic() > deadline:
+                os.killpg(pgid, signal.SIGKILL)
+                raise AssertionError("a process the helper started outlived it")
+            time.sleep(0.05)
+
+    def test_a_signal_mid_run_stops_the_script_and_removes_the_tree(self) -> None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            for group in (False, True):
+                with self.subTest(signal=sig.name, group=group):
+                    status, stderr, left = self.interrupt(sig, group)
+                    self.assertEqual(-sig, status, stderr)
+                    self.assertIn(f"hub_fetch_run: interrupted by {sig.name}.", stderr)
+                    self.assertNotIn("Traceback", stderr)
+                    self.assertEqual([], left)
 
 
 class GitLookupTests(unittest.TestCase):
@@ -569,7 +671,7 @@ class FetchedWrapperTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name)
         self.urls: list[str] = []
-        self.real_run = subprocess.run
+        self.real_popen = subprocess.Popen
         self.stdout = ""
         self.stderr = io.StringIO()
         self.commit: str | None = SHA
@@ -579,27 +681,30 @@ class FetchedWrapperTests(unittest.TestCase):
         _, _, path = target.partition(f"{hub.HUB_RAW_BASE}/{self.commit or 'main'}/")
         return FakeResponse((ROOT / path).read_bytes())
 
-    def uv_as_python(self, cmd: list[str], env: dict[str, str], check: bool):
-        """Stand in for `uv run --no-project --script`, with nothing from this tree importable."""
+    def uv_as_python(self, cmd: list[str], env: dict[str, str]) -> subprocess.Popen[str]:
+        """Stand in for `uv run --no-project --script`, with nothing from this tree importable.
+
+        The real Popen is held from before the patch, since the patch replaces it module-wide.
+        """
         clean = {k: v for k, v in env.items() if k != "PYTHONPATH"}
-        done = self.real_run(
+        child = self.real_popen(
             [sys.executable, *cmd[4:]],
             env=clean,
-            check=check,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
             cwd=self.tmp,
-            timeout=TIMEOUT,
         )
-        self.stdout = done.stdout + done.stderr
-        return done
+        out, err = child.communicate(timeout=TIMEOUT)
+        self.stdout = out + err
+        return child
 
     def run_wrapper(self) -> int:
         with (
             mock.patch.object(urllib.request, "urlopen", self.urlopen),
             mock.patch.object(hub.shutil, "which", return_value="uv"),
-            mock.patch.object(hub.subprocess, "run", self.uv_as_python),
+            mock.patch.object(hub.subprocess, "Popen", self.uv_as_python),
             mock.patch.object(hub, "resolve_main_commit", return_value=self.commit),
             contextlib.redirect_stderr(self.stderr),
         ):

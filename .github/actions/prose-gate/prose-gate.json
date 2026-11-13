@@ -37,6 +37,7 @@
     "error-not-a-path": "requested path(s) are not a file or a directory: {paths}. Refusing rather than falling back to the current directory, which would scan one tree and choose the rule set from another.",
     "error-many-repositories": "the requested paths span more than one repository ({roots}). Each declares its own workflow model, so no single rule set is correct for all of them. Run the gate once per repository.",
     "error-override": "{path} {why}.",
+    "error-diff-twice": "--diff and --diff-commit each choose the base, so pass one of them.",
     "error-no-diff": "cannot diff against {base!r}, so the run cannot be scoped to changed lines. Refusing to scan the whole tree instead, since that reports the existing backlog as though this change introduced it. Check the ref exists and that the checkout carries its history.",
     "error-unread-diff": "the diff against {base!r} names {count} readable file(s) this run was asked about, and the scan matched none of them: {paths}. Refusing to report a clean run, since a gate that read nothing is indistinguishable from a gate with nothing to read. Check that the run starts at the repository top level and that the requested paths cover the change.",
     "note-allowed": "comment-added stood down by {named}. In CI the composite action passes that flag from its own input instead, which the fleet's caller computes from the {label!r} label and from the run being a release-model promotion, and it clears {env} so a runner cannot decide one.",
@@ -60,6 +61,10 @@
     "--diff": {
       "metavar": "BASE",
       "help": "only report violations on lines changed vs BASE (matches the repo policy: fix as each file is next edited, not swept)"
+    },
+    "--diff-commit": {
+      "action": "store_true",
+      "help": "as --diff, against what the commit in progress adds to: MERGE_HEAD during a merge, HEAD otherwise, and the empty tree before a first commit, for a pre-commit hook"
     },
     "--allow-comments": {
       "action": "store_true",

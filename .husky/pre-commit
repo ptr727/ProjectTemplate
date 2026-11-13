@@ -18,19 +18,50 @@ set -eu
 # The relative paths below would otherwise resolve against whatever directory the caller was in.
 cd "$(git rev-parse --show-toplevel)"
 
+# An interrupt stops the running tool, removes the list file, and re-raises the signal, per CODESTYLE.md "Interrupts in Shell".
+# This is POSIX sh, so the trap removes the file itself, since dash runs no EXIT trap when the re-raised signal ends it.
+staged=""
+child=""
+interrupted() {
+    if [ -n "$child" ]; then
+        kill "$child" 2>/dev/null || :
+        wait "$child" || :
+    fi
+    if [ -n "$staged" ]; then
+        rm -f "$staged"
+    fi
+    echo "pre-commit: interrupted by SIG$1." >&2
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+trap 'if [ -n "$staged" ]; then rm -f "$staged"; fi' EXIT
+trap 'interrupted INT; exit 130' INT
+trap 'interrupted TERM; exit 143' TERM
+
+# A tool runs in the background and is waited for, since a trap runs only once a foreground command returns.
+# The trap stops it with SIGTERM, because a background child ignores SIGINT.
+run_child() {
+    "$@" &
+    child=$!
+    status=0
+    wait "$child" || status=$?
+    child=""
+    return "$status"
+}
+
 # Ruff and mypy, via uvx per this repo's own CI invocation for a repo with no `uv.lock`.
 # Ruff runs the version CI pins, taking the manifest the validator reads as a requirement.
-uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff format --check .
-uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff check .
-uvx mypy@latest
+run_child uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff format --check .
+run_child uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff check .
+run_child uvx mypy@latest
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
 # Running one rather than testing for a name is the point.
 # That is because Git Bash inherits a Windows PATH that can carry a name which fails when run.
 if py -3 --version >/dev/null 2>&1; then
-    run_py() { py -3 "$@"; }
+    run_py() { run_child py -3 "$@"; }
 elif python3 --version >/dev/null 2>&1; then
-    run_py() { python3 "$@"; }
+    run_py() { run_child python3 "$@"; }
 else
     echo "pre-commit: neither 'py -3 --version' nor 'python3 --version' ran, so the doc gates did not run." >&2
     echo "pre-commit: see docs/host-setup.md 'What a Host Must Provide'." >&2
@@ -38,7 +69,7 @@ else
 fi
 
 # The prose gate is scoped to what changed, which is the policy for prose.
-# The base is HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
+# `--diff-commit` has the gate diff against HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
 # A rule is applied as a file is next edited rather than swept across the tree.
 # Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.15.
 # The gate reads the paths this commit stages, so an unrelated untracked file cannot refuse it.
@@ -49,20 +80,13 @@ fi
 # The list goes to a file and is read from there, because a pipeline hides a failure of its first command.
 # `--skip-generated` passes over a staged file in a generated tree, as a whole-tree scan does.
 # The pull request gate reads every line the branch changes against its base.
-base=HEAD
-if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
-    base=MERGE_HEAD
-fi
+# The xargs call runs in the foreground, since a signal sent to xargs alone would not reach the gate it starts.
 staged=$(mktemp)
-trap 'rm -f "$staged"' EXIT
-# Dash runs no EXIT trap on a signal it leaves untrapped, so the two an interrupt sends are trapped.
-trap 'echo "pre-commit: interrupted by SIGINT." >&2; exit 130' INT
-trap 'echo "pre-commit: interrupted by SIGTERM." >&2; exit 143' TERM
 git diff --cached --name-only --diff-filter=ACMRT -z >"$staged"
 # shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
-xargs -0 sh -c 'base=$1; shift; for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
+xargs -0 sh -c 'for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
     [ "$#" -eq 0 ] || exec uv run --no-project --script .github/actions/prose-gate/prose_lint.py \
-        --skip-generated --diff "$base" -- "$@"' sh "$base" <"$staged"
+        --skip-generated --diff-commit -- "$@"' sh <"$staged"
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.
