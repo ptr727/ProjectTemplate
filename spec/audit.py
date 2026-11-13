@@ -1787,6 +1787,30 @@ def baseline_file_findings(slug, ground, path, item, ref=None):
     return content, contents_text(content), []
 
 
+def carries_fleet_owned_values(item, canon_text, down_text):
+    """Whether a copy of a unit declaring `repoOwnedKeys` holds every other leaf its JSON canonical holds.
+
+    A value at one of those keys is the repository's own choice, and a key the copy adds is its own too.
+    So such a copy is current whatever those hold, and a text either side that is not JSON is judged as before.
+    """
+    owned = item.get("repoOwnedKeys")
+    if not owned or canon_text is None:
+        return False
+    try:
+        canon, down = json.loads(canon_text), json.loads(down_text)
+    except ValueError:
+        return False
+    if not isinstance(canon, dict) or not isinstance(down, dict):
+        return False
+    held = dict(validate.json_leaves(down))
+    missing = object()
+    return all(
+        held.get(key, missing) == value
+        for key, value in validate.json_leaves(canon)
+        if key not in owned
+    )
+
+
 def intent_trail(slug, ref, path, item, down_text):
     """`(canonical, (repo_date, hub_date, hub_sha))` where a copy possibly trails its intent canonical, else None.
 
@@ -1803,6 +1827,8 @@ def intent_trail(slug, ref, path, item, down_text):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
+        if carries_fleet_owned_values(item, canonical_current_text(canonical_rel), down_text):
+            return None
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ref}&per_page=1")
     if not commits:
         return None

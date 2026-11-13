@@ -38,7 +38,7 @@ readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-s
 
 # The SDK line a fleet .NET repository's global.json selects in its sdk block, which the dotnet default set carries wherever the feed does.
 # It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
-# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
+# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a move of that baseline edits both.
 readonly DOTNET_FLEET_LINE="10.0"
 
 MODE="report"

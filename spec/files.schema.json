@@ -66,6 +66,7 @@
                     },
                     "placeholders": { "type": "array", "items": { "type": "string" } },
                     "reference": { "type": "string" },
+                    "repoOwnedKeys": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "uniqueItems": true },
                     "intentRef": { "type": "string" },
                     "appliesTo": { "type": ["string", "array"], "items": { "type": "string" }, "minItems": 1 },
                     "fidelity": { "enum": ["presence", "intent", "verbatim", "interface"] },

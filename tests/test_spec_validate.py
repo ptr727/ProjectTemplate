@@ -443,6 +443,51 @@ class CodecovEntryCase(unittest.TestCase):
         self.assertEqual([item["path"] for item in baseline if "alternatives" in item], [])
 
 
+class RepoOwnedKeysCase(unittest.TestCase):
+    """A files.json unit's repoOwnedKeys name leaves of a JSON intent reference, and nothing else."""
+
+    SNIPPET = "catalog/snippets/configs/global.json"
+
+    def test_the_live_global_json_unit_declares_its_sdk_version(self) -> None:
+        baseline = validate.load("spec/files.json")["baseline"]
+        unit = next(item for item in baseline if item["path"] == "global.json")
+        self.assertEqual(unit["repoOwnedKeys"], ["sdk.version"])
+        self.assertEqual(
+            validate.repo_owned_errors(
+                "global.json", "intent", self.SNIPPET, unit["repoOwnedKeys"]
+            ),
+            [],
+        )
+
+    def test_a_malformed_declaration_is_refused(self) -> None:
+        cases = [
+            ("an empty list", "intent", self.SNIPPET, [], "must be a non-empty array"),
+            ("a non-string key", "intent", self.SNIPPET, [1], "must be a non-empty array"),
+            (
+                "a verbatim unit",
+                "verbatim",
+                self.SNIPPET,
+                ["sdk.version"],
+                "needs fidelity 'intent'",
+            ),
+            ("no reference", "intent", None, ["sdk.version"], "needs fidelity 'intent'"),
+            ("a reference not JSON", "intent", "AGENTS.md", ["sdk.version"], "parses as JSON"),
+            ("a key not a leaf", "intent", self.SNIPPET, ["sdk"], "'sdk' is not a leaf"),
+            (
+                "a key absent",
+                "intent",
+                self.SNIPPET,
+                ["sdk.channel"],
+                "'sdk.channel' is not a leaf",
+            ),
+        ]
+        for label, fid, ref, owned, want in cases:
+            with self.subTest(label):
+                errors = validate.repo_owned_errors("global.json", fid, ref, owned)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertIn(want, errors[0])
+
+
 class VersionLiteralCase(unittest.TestCase):
     """The hub's instruction documents name no three-part version or commit SHA, verbatim sections included."""
 

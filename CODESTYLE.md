@@ -12,6 +12,16 @@ These rules apply to every language in the repo.
 
 Use each tool's official casing in task labels, docs, and prose, per the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub. That is not a repo-relative link, since the path is hub-local and not carried into every fleet repo.
 
+### Toolchain Versions
+
+The hub sets each language's default toolchain line once, in a carried baseline file. Each repository selects its own line in its own copy of that file. That copy is the repository's source of truth, and the hub's workflows install the line it selects. They fall back to the hub's default only where a repository carries no selector.
+
+- **A repository may lead or lag the default.** One repository can move to a newer major while the fleet stays, or hold an older line while the fleet moves.
+- **A move edits the selector and every setting that names the same line, together.** These include a target framework, a devcontainer image tag, and any fixed language version.
+- **The language level follows the selected line.** It is left unset wherever the toolchain derives it from the line, and set by hand only where it does not.
+- **A resync never changes the line a repository selects.** It carries the baseline file's fleet-owned settings and leaves the repository's own choice of line in place.
+- **The audit checks that a repository agrees with itself.** Its settings must name one line between them, and that line need not be the hub's default.
+
 ### Clean-Compile Verification
 
 Each language defines a **clean-compile** verification: the combination of build, formatter, linter, and code-analysis tools that must report clean before a commit. It is exposed as one or more **named** VS Code tasks (or, where a language ships no tasks, documented commands). Those definitions are the same across the fleet. The concrete names live in each language section below.
@@ -90,7 +100,7 @@ These rules apply repo-wide, in every directory. Markdown lints clean via `markd
 
 *This section applies only to the .NET side. A repo with no .NET projects still carries it (the file is carried whole) and ignores it.*
 
-The style guide for any .NET projects in this repo covers the zero-warnings build policy and its clean-compile task chain. It covers central `Directory.Build.props`/`Directory.Packages.props` configuration and the root `global.json` that selects the SDK line, with `LangVersion` left unset so the C# version follows the TFM. It covers C# language and naming conventions, XML documentation, and analyzer suppression scope. It covers the library-versus-application logging split, async and error-handling patterns, and xUnit v3 + AwesomeAssertions testing conventions. It covers the runner declaration, package references and version floor that an MTP-based test project needs under `WORKFLOW.md` D1.6. With them it covers the local diagnostic for a run that reports no tests. It also covers AOT-compatible project configuration.
+The style guide for any .NET projects in this repo covers the zero-warnings build policy and its clean-compile task chain. It covers central `Directory.Build.props`/`Directory.Packages.props` configuration and the root `global.json` that selects the SDK line, with `LangVersion` left unset so the C# version follows the TFM. That `global.json` is the repository's selector under "Toolchain Versions" above. It covers C# language and naming conventions, XML documentation, and analyzer suppression scope. It covers the library-versus-application logging split, async and error-handling patterns, and xUnit v3 + AwesomeAssertions testing conventions. It covers the runner declaration, package references and version floor that an MTP-based test project needs under `WORKFLOW.md` D1.6. With them it covers the local diagnostic for a run that reports no tests. It also covers AOT-compatible project configuration.
 
 This is packaged as the `dotnet-codestyle` Skill at `.agents/skills/dotnet-codestyle/SKILL.md` in the hub. That is not a repo-relative link, since the path is hub-local and not carried into every fleet repo. The summary above sketches the scope. Read the skill for the full rules, code examples, and mechanics.
 

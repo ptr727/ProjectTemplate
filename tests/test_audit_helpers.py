@@ -3010,6 +3010,48 @@ class IntentAdvisoryCase(unittest.TestCase):
                 got = audit.intent_trail("o/r", "main", "widget.json", unit, down)
             self.assertEqual(got, want)
 
+    def test_a_repo_owned_key_never_reads_as_trailing(self) -> None:
+        unit = {
+            "path": "global.json",
+            "fidelity": "intent",
+            "reference": "snip/global.json",
+            "repoOwnedKeys": ["sdk.version"],
+        }
+        canon = '{"sdk": {"version": "10.0.100", "rollForward": "latestFeature"}}'
+        trailing = ("snip/global.json", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        cases = [
+            (
+                "another line",
+                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}}',
+                None,
+            ),
+            (
+                "a key of its own",
+                '{"sdk": {"version": "9.0.100", "rollForward": "latestFeature"}, "test": {"runner": "x"}}',
+                None,
+            ),
+            (
+                "a fleet value changed",
+                '{"sdk": {"version": "11.0.100", "rollForward": "major"}}',
+                trailing,
+            ),
+            ("a fleet value dropped", '{"sdk": {"version": "11.0.100"}}', trailing),
+            ("not JSON", "{", trailing),
+        ]
+        for label, down, want in cases:
+            with self.subTest(label), self.patched({"snip/global.json": canon}):
+                got = audit.intent_trail("o/r", "main", "global.json", unit, down)
+            self.assertEqual(got, want)
+
+    def test_a_unit_without_repo_owned_keys_compares_whole(self) -> None:
+        unit = {"path": "global.json", "fidelity": "intent", "reference": "snip/global.json"}
+        canon = '{"sdk": {"version": "10.0.100"}}'
+        with self.patched({"snip/global.json": canon}):
+            got = audit.intent_trail(
+                "o/r", "main", "global.json", unit, '{"sdk": {"version": "11.0.100"}}'
+            )
+        self.assertIsNotNone(got)
+
     def test_the_trail_dates_by_the_intent_ref_anchor(self) -> None:
         asked: list[tuple[str, str | None]] = []
 

@@ -1040,6 +1040,32 @@ def short_name_errors(repo_list, pins=None):
     return errors
 
 
+def json_leaves(value, prefix=""):
+    """Each `(dotted path, value)` leaf of a parsed JSON object, an array or scalar being a leaf."""
+    if not isinstance(value, dict):
+        yield prefix, value
+        return
+    for key, child in value.items():
+        yield from json_leaves(child, f"{prefix}.{key}" if prefix else key)
+
+
+def repo_owned_errors(path, fid, ref, owned):
+    """What is wrong with a files.json unit's repoOwnedKeys, which only a JSON intent reference can carry."""
+    if not (isinstance(owned, list) and owned and all(isinstance(k, str) and k for k in owned)):
+        return [f"files.json: {path} repoOwnedKeys must be a non-empty array of dotted key paths"]
+    if fid != "intent" or not isinstance(ref, str) or not canonical_file_in_root(ref):
+        return [f"files.json: {path} repoOwnedKeys needs fidelity 'intent' and a reference file"]
+    try:
+        leaves = dict(json_leaves(json.loads((ROOT / ref).read_text(encoding="utf-8"))))
+    except ValueError:
+        return [f"files.json: {path} repoOwnedKeys needs a reference that parses as JSON"]
+    return [
+        f"files.json: {path} repoOwnedKeys entry '{key}' is not a leaf of {ref}"
+        for key in owned
+        if key not in leaves
+    ]
+
+
 def main(argv=()):
     argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None).parse_args(
         list(argv)
@@ -1897,6 +1923,9 @@ def main(argv=()):
                 errors.append(
                     f"files.json: {path} reference '{ref}' is not a file in this checkout"
                 )
+        owned = item.get("repoOwnedKeys")
+        if owned is not None:
+            errors.extend(repo_owned_errors(path, fid, ref, owned))
         if fid == "verbatim":
             src = hub_copy(item, path)
             if isinstance(src, str) and not (ROOT / src).exists():

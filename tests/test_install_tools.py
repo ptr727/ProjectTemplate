@@ -360,7 +360,7 @@ class TestInstallersNameTheBaselineLine(unittest.TestCase):
     """Each installer names the SDK line the global.json baseline selects.
 
     The installers name it rather than read the baseline, so each still runs fetched on its own.
-    This is what makes a TFM move edit all three together.
+    This is what makes a move of that baseline edit all three together.
     """
 
     def test_the_linux_line_is_the_baseline_line(self) -> None:
@@ -984,7 +984,7 @@ foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management
     . ([scriptblock]::Create($definition.Extent.Text))
 }
 $WITH_OPTIONAL = $true
-$tool = @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @() }
+$tool = @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.11') }
 $results = [ordered]@{}
 foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
     $env:PATH = $case.Value.path
@@ -1031,16 +1031,20 @@ class TestWindowsUntrackedDotnetNote(unittest.TestCase):
 
     def test_the_note_follows_what_dotnet_lists(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            paths = {name: Path(directory, name) for name in ("newer", "failing", "absent")}
+            paths = {
+                name: Path(directory, name) for name in ("newer", "failing", "absent", "optional")
+            }
             for path in paths.values():
                 path.mkdir()
             write_dotnet_stub(paths["newer"], 0, "10.0.303", "10.0.400-preview.0.1", "10.0.400")
             write_dotnet_stub(paths["failing"], 3, "10.0.400")
+            write_dotnet_stub(paths["optional"], 0, "10.0.303", "11.0.100")
             cases = {
                 "newer": {"path": str(paths["newer"]), "installed": "10.0.303"},
                 "failing": {"path": str(paths["failing"]), "installed": "10.0.303"},
                 "absent": {"path": str(paths["absent"]), "installed": "10.0.303"},
                 "unread": {"path": str(paths["newer"]), "installed": ""},
+                "optional": {"path": str(paths["optional"]), "installed": "10.0.303"},
             }
             result = run_pwsh_harness(DOTNET_NOTE_HARNESS, cases)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1050,8 +1054,8 @@ class TestWindowsUntrackedDotnetNote(unittest.TestCase):
         self.assertIn("newer than the 10.0.303 winget installed", notes["newer"][0])
         self.assertIn("other than Microsoft.DotNet.SDK.10", notes["newer"][0])
         self.assertEqual(
-            {name: notes[name] for name in ("failing", "absent", "unread")},
-            {"failing": [], "absent": [], "unread": []},
+            {name: notes[name] for name in ("failing", "absent", "unread", "optional")},
+            {"failing": [], "absent": [], "unread": [], "optional": []},
         )
 
 
