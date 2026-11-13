@@ -1555,7 +1555,7 @@ apply_tool() {
     if [[ $status == "current" ]]; then
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" ]]; then
-        # The available version is the distro's until the upstream repository is read, so quoting it here would name the wrong upstream.
+        # The available version is whatever apt already has until the managed source is written, so quoting it here could name the wrong upstream.
         log "$tool: installed without the sources file this script manages, moving it to $("$(tool_function "$tool" source)")"
     else
         log "$tool: ${status}${target:+, upstream carries $target}"
