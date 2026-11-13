@@ -3056,6 +3056,20 @@ class IntentAdvisoryCase(unittest.TestCase):
                 got = audit.intent_trail("o/r", "main", "global.json", unit, down)
                 self.assertEqual(got, want)
 
+    def test_a_json_number_never_matches_a_json_boolean(self) -> None:
+        unit = {"repoOwnedKeys": ["sdk.version"]}
+        canon = '{"sdk": {"version": "10.0.100", "allowPrerelease": false, "paths": [true]}}'
+        cases = [
+            ('{"sdk": {"version": "11.0.100", "allowPrerelease": false, "paths": [true]}}', []),
+            (
+                '{"sdk": {"version": "11.0.100", "allowPrerelease": 0, "paths": [1]}}',
+                ["sdk.allowPrerelease", "sdk.paths"],
+            ),
+        ]
+        for down, want in cases:
+            with self.subTest(down=down):
+                self.assertEqual(audit.fleet_owned_differences(unit, canon, down), want)
+
     def test_a_repo_owned_verdict_outranks_the_dates(self) -> None:
         unit = {
             "path": "global.json",

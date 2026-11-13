@@ -1802,10 +1802,11 @@ def fleet_owned_differences(item, canon_text, down_text):
         down = json.loads(down_text.lstrip("\ufeff"))
     except ValueError:
         return None
-    held = dict(validate.json_leaves(down))
-    missing = object()
+    held = {k: json.dumps(v, sort_keys=True) for k, v in validate.json_leaves(down)}
     return [
-        k for k, v in validate.json_leaves(canon) if k not in owned and held.get(k, missing) != v
+        k
+        for k, v in validate.json_leaves(canon)
+        if k not in owned and held.get(k) != json.dumps(v, sort_keys=True)
     ]
 
 

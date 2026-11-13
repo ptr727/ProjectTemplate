@@ -1923,9 +1923,8 @@ def main(argv=()):
                 errors.append(
                     f"files.json: {path} reference '{ref}' is not a file in this checkout"
                 )
-        owned = item.get("repoOwnedKeys")
-        if owned is not None:
-            errors.extend(repo_owned_errors(path, fid, ref, owned))
+        if "repoOwnedKeys" in item:
+            errors.extend(repo_owned_errors(path, fid, ref, item["repoOwnedKeys"]))
         if fid == "verbatim":
             src = hub_copy(item, path)
             if isinstance(src, str) and not (ROOT / src).exists():
