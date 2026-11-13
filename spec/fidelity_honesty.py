@@ -15,6 +15,7 @@ level up. It answers two questions the audit cannot:
   1. Which `intent` units are actually content-identical (after EOL normalization) across the whole fleet? Those are candidates to
      promote to `verbatim` - they would gain free drift-detection (a stale-but-present copy is invisible
      under intent, caught under verbatim). This is the class that hid the configure.sh drift.
+     A unit declaring `repoOwnedKeys` is never a candidate, since verbatim would overwrite the repo's own values.
   2. Which `verbatim` units have a downstream copy that diverges in a NON-stale way? That is either a
      mis-set label (the content legitimately varies -> should be intent) or real drift to chase.
 
@@ -366,7 +367,9 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
     w("## Promote candidates (intent uniform -> verbatim)")
     w("")
     if not promote:
-        w("_None - no intent unit is currently fleet-uniform with the canonical._")
+        w(
+            "_None - no intent unit without `repoOwnedKeys` is currently fleet-uniform with the canonical._"
+        )
     for e, sp in promote:
         w(f"- **{e['path']}**: {len(sp['match'])} match, {len(sp['stale'])} stale, 0 hand-modified")
     w("")
