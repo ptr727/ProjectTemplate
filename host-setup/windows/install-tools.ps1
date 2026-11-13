@@ -1658,6 +1658,10 @@ function Invoke-ToolApply {
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
+        if ($package -ne $target -and @(Get-WingetInstalled -Id $package | Where-Object { $_ }).Count -gt 0) {
+            info "${ToolName}: $package is already installed, so it is left as it is"
+            continue
+        }
         $started = Get-Date
         $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $target) {
             Invoke-WingetUpgrade -Id $package

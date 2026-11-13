@@ -1204,9 +1204,9 @@ function log { param([string]$Message = '') Write-Host "LOG $Message" }
 function info { param([string]$Message) Write-Host "INFO $Message" }
 function warn { param([string]$Message) Write-Host "WARN $Message" }
 function die { param([string]$Message) throw $Message }
-function Get-Tool { param([string]$Name) @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.11', 'Microsoft.DotNet.SDK.9') } }
+function Get-Tool { param([string]$Name) @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.11', 'Microsoft.DotNet.SDK.9', 'Microsoft.DotNet.SDK.8') } }
 function Get-ToolState { param([hashtable]$Tool) @{ Package = 'Microsoft.DotNet.SDK.10'; Installed = $null; Rows = @(); Available = '10.0.300'; Scope = @(); Status = 'missing' } }
-function Get-WingetInstalled { param([string]$Id) return , @() }
+function Get-WingetInstalled { param([string]$Id) if ($Id -eq 'Microsoft.DotNet.SDK.8') { return , @(@{ Version = '8.0.1' }) } return , @() }
 function Resolve-InstalledVersion { param($Version) return $null }
 function Write-InstallFailure { param($ToolName, $Package, $Code, $Since, $Probe, $Executable) Write-Host "FAILURE $Package $Code" }
 $NOT_FOUND = -1978335212
@@ -1247,6 +1247,8 @@ class TestWindowsOptionalDotnetLine(unittest.TestCase):
         skipped = run_pwsh_harness(OPTIONAL_APPLY_HARNESS, cases["not carried"][0]).stdout
         self.assertIn("winget carries no Microsoft.DotNet.SDK.11 yet", skipped)
         self.assertIn("INSTALL Microsoft.DotNet.SDK.9", skipped)
+        self.assertNotIn("INSTALL Microsoft.DotNet.SDK.8", skipped)
+        self.assertIn("Microsoft.DotNet.SDK.8 is already installed", skipped)
 
 
 DOTNET_SDK_HARNESS = r"""
