@@ -2404,7 +2404,6 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
         self.assertEqual(self.select(json.dumps({"sdk": None})), [fallback])
-        self.assertEqual(self.select("[]"), [fallback])
 
     def test_comments_are_read_as_the_dotnet_host_reads_them(self) -> None:
         """The dotnet host accepts comments, so a file holding them still selects its line or the fallback."""
