@@ -1182,6 +1182,13 @@ class TestSideAskServerStamp(unittest.TestCase):
         self.assertEqual("repos/fork/r/activity?ref=refs%2Fheads%2Ffix%2Fa%26b&per_page=100", path)
         self.assertIn(f'"{fixtures.HEAD}"', jq)
 
+    def test_the_query_the_asks_read_fetches_each_field_the_push_read_needs(self) -> None:
+        """Fixtures inject these fields, so a query dropping one passes here and reads empty live."""
+        held = " ".join(pr_review.Q_HELD.split())
+        for field in ("headRefOid", "headRefName", "headRepository{ nameWithOwner }"):
+            with self.subTest(field):
+                self.assertIn(field, held)
+
     def test_a_push_that_cannot_be_read_reads_empty(self) -> None:
         pr = committed(fixtures.payload([]), fixtures.EARLY)
         self.assertEqual("", side.pushed(pr, logged(fixtures.LATE, code=1))[side.PUSHED_KEY])
