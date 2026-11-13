@@ -8216,6 +8216,18 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
 
 
+def git_as_gate(root: Path, *args: str) -> str:
+    """Run git in `root` under the gate cases' constructed identity, unsigned, failing on an error."""
+    identity = ("-c", "user.email=gate@example.invalid", "-c", "user.name=gate test")
+    return subprocess.run(
+        ["git", "-C", str(root), *identity, "-c", "commit.gpgsign=false", *args],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    ).stdout.strip()
+
+
 class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
     """A pull request is gated on its own change, whatever base the event recorded.
 
@@ -8244,22 +8256,7 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
         self.git("merge", "-q", "--no-ff", "-m", "merge", "feature")
 
     def git(self, *args: str) -> None:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(self.root),
-                "-c",
-                "user.email=gate@example.invalid",
-                "-c",
-                "user.name=gate test",
-                "-c",
-                "commit.gpgsign=false",
-                *args,
-            ],
-            check=True,
-            capture_output=True,
-        )
+        git_as_gate(self.root, *args)
 
     def rev(self, ref: str) -> str:
         return subprocess.run(
@@ -8365,14 +8362,7 @@ class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
         self.git("commit", "-qm", "take develop's side")
 
     def git(self, *args: str) -> str:
-        identity = ("-c", "user.email=gate@example.invalid", "-c", "user.name=gate test")
-        return subprocess.run(
-            ["git", "-C", str(self.root), *identity, "-c", "commit.gpgsign=false", *args],
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        ).stdout.strip()
+        return git_as_gate(self.root, *args)
 
     def write(self, name: str, text: str) -> None:
         (self.root / name).write_text(text, encoding="utf-8")
@@ -8456,12 +8446,7 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         self.git("init", "-q", "-b", "develop", str(self.root))
 
     def git(self, *args: str) -> None:
-        identity = ("-c", "user.email=gate@example.invalid", "-c", "user.name=gate test")
-        subprocess.run(
-            ["git", "-C", str(self.root), *identity, "-c", "commit.gpgsign=false", *args],
-            check=True,
-            capture_output=True,
-        )
+        git_as_gate(self.root, *args)
 
     def write(self, name: str, text: str) -> None:
         (self.root / name).parent.mkdir(parents=True, exist_ok=True)

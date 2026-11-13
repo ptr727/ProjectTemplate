@@ -45,12 +45,6 @@ def promotion_refusal(owner: str, repo: str, head: str, default: str) -> str | N
     default branch's history, and that head is a merge whose second parent is in `develop`'s.
     Each fact is read from GitHub, never inferred from the head's name, which any branch can take.
     """
-    if not core.safe_ref(default):
-        raise CleanupUnread(
-            f"the default branch {default!r} holds a character that changes a REST path"
-        )
-    if not COMMIT_ID.fullmatch(head):
-        raise CleanupUnread(f"the pull request's head {head!r} is no commit id")
     if not in_history(owner, repo, default, head):
         return (
             f"its merged head {head} is not in {default!r}'s history, so no merge commit landed it"

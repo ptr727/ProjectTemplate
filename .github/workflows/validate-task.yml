@@ -547,12 +547,12 @@ jobs:
             : > "$lists/known" || return 1
             for rev in "$develop" "$base"; do
               if blob=$(git rev-parse --verify --quiet "$rev:$path"); then
-                git cat-file blob "$blob" >> "$lists/known" || return 1
+                git cat-file blob "$blob" | sed 's/\r$//' >> "$lists/known" || return 1
                 printf '\n' >> "$lists/known" || return 1
               fi
             done
             blob=$(git rev-parse --verify --quiet "$head:$path") || return 0
-            git cat-file blob "$blob" > "$lists/head" || return 1
+            git cat-file blob "$blob" | sed 's/\r$//' > "$lists/head" || return 1
             grep -qvxF -f "$lists/known" "$lists/head" || rc=$?
             [[ "$rc" == 1 ]]
           }
