@@ -15,8 +15,13 @@ import datetime
 import importlib.metadata
 import io
 import json
+import os
 import re
+import signal
+import subprocess
 import sys
+import tempfile
+import time
 import tomllib
 import typing
 import unittest
@@ -198,12 +203,129 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("alpha, open issues by label (count): pre-existing 0", text)
         self.assertIn("- Billing line", text)
 
-    def test_html_is_one_table_and_escapes(self) -> None:
-        text = bm.render_html(self.START, self.END, [metrics(name="a<b")], ["x & y"])
-        self.assertEqual(text.count("<table"), 1)
-        self.assertNotIn("<style", text)
-        self.assertIn("a&lt;b", text)
-        self.assertIn("x &amp; y", text)
+    def test_markdown_links_each_repository_and_each_issue_and_pr_count(self) -> None:
+        linked = metrics(url="https://github.com/o/alpha")
+        text = bm.render_markdown(self.START, self.END, [linked], [])
+        row = next(line for line in text.splitlines() if line.startswith("| [alpha]"))
+        cells = [cell.strip() for cell in row.strip("|").split("|")]
+        self.assertEqual(cells[0], "[alpha](https://github.com/o/alpha)")
+        issues = "https://github.com/o/alpha/issues?q=is%3Aissue%20"
+        self.assertEqual(cells[1], f"[4]({issues}created%3A%3E%3D2026-01-01%20-label%3Ahandoff)")
+        self.assertEqual(
+            cells[2], f"[2]({issues}is%3Aclosed%20closed%3A%3E%3D2026-01-01%20-label%3Ahandoff)"
+        )
+        self.assertEqual(cells[3], f"[1]({issues}created%3A%3E%3D2026-01-01%20label%3Ahandoff)")
+        self.assertEqual(cells[4], f"[6]({issues}is%3Aopen%20-label%3Ahandoff)")
+        self.assertEqual(
+            cells[5],
+            "[2](https://github.com/o/alpha/pulls"
+            "?q=is%3Apr%20is%3Amerged%20merged%3A%3E%3D2026-01-01)",
+        )
+        self.assertEqual(cells[6:], ["2.0", "10", "3", "1.5"])
+        self.assertIn("| Total | 4 | 2 | 1 | 6 | 2 |", text)
+
+    def test_markdown_links_the_repository_in_each_review_table(self) -> None:
+        result = bm.ReviewMetrics(
+            name="alpha", url="https://github.com/o/alpha", bots={"copilot": bm.BotStats()}
+        )
+        text = bm.render_markdown(self.START, self.END, [metrics()], [], [result])
+        self.assertEqual(text.count("| [alpha](https://github.com/o/alpha) |"), 2)
+
+    def test_json_carries_the_figures_with_each_item_linked(self) -> None:
+        item = {"number": 7, "title": "A title", "url": "https://github.com/o/alpha/issues/7"}
+        repo = bm.compute_metrics(
+            "alpha",
+            [{**item, "labels": [{"name": "bug"}]}, {**issue(bm.HANDOFF_LABEL), "url": "h"}],
+            [],
+            [{**item, "labels": [{"name": "bug"}]}],
+            [{"number": 9, "title": "A change", "url": "https://github.com/o/alpha/pull/9"}],
+            [
+                {"databaseId": 11, "name": bm.REVIEW_WORKFLOW, "url": "r11"},
+                {"databaseId": 12, "name": "Build", "url": "r12"},
+            ],
+            "https://github.com/o/alpha",
+        )
+        figures = bm.billing_data("2026-01", ["alpha"], {"usageItems": []}, "")
+        result = bm.ReviewMetrics(name="alpha", bots={"copilot": bm.BotStats(rounds=[1, 3])})
+        doc = json.loads(
+            bm.render_json(self.START, self.END, [repo], ["Billing line"], [result], figures)
+        )
+        self.assertEqual(
+            list(doc),
+            ["schema", "start", "end", "totals", "billing", "notes", "repositories"],
+        )
+        self.assertEqual((doc["schema"], doc["start"], doc["end"]), (1, "2026-01-01", "2026-01-08"))
+        self.assertEqual(
+            doc["totals"],
+            {
+                "issues_opened": 1,
+                "issues_closed": 0,
+                "handoffs_created": 1,
+                "issues_open": 1,
+                "prs_merged": 1,
+                "issues_opened_per_merged_pr": 1.0,
+                "workflow_runs": 2,
+                "copilot_review_runs": 1,
+                "copilot_review_runs_per_merged_pr": 1.0,
+            },
+        )
+        self.assertEqual(
+            doc["billing"],
+            {
+                "month": "2026-01",
+                "error": None,
+                "actions_minutes": {"alpha": 0.0},
+                "copilot_gross_usd": 0.0,
+            },
+        )
+        self.assertEqual(doc["notes"], ["Billing line"])
+        [entry] = doc["repositories"]
+        self.assertEqual(entry["name"], "alpha")
+        self.assertEqual(entry["html_url"], "https://github.com/o/alpha")
+        self.assertEqual({k: entry[k] for k in doc["totals"]}, doc["totals"])
+        self.assertEqual(entry["open_issues_by_label"]["bug"], 1)
+        self.assertFalse(entry["truncated"])
+        linked = {"number": 7, "title": "A title", "html_url": item["url"], "labels": ["bug"]}
+        self.assertEqual(entry["items"]["issues_opened"], [linked])
+        self.assertEqual(entry["items"]["issues_open"], [linked])
+        self.assertEqual(entry["items"]["issues_closed"], [])
+        self.assertEqual(
+            entry["items"]["handoffs_created"],
+            [{"number": 1, "title": "", "html_url": "h", "labels": [bm.HANDOFF_LABEL]}],
+        )
+        self.assertEqual(
+            entry["items"]["prs_merged"],
+            [{"number": 9, "title": "A change", "html_url": "https://github.com/o/alpha/pull/9"}],
+        )
+        self.assertEqual(
+            [run["html_url"] for run in entry["items"]["workflow_runs"]], ["r11", "r12"]
+        )
+        self.assertEqual(
+            entry["items"]["copilot_review_runs"],
+            [{"id": 11, "name": bm.REVIEW_WORKFLOW, "html_url": "r11"}],
+        )
+        review = entry["review"]
+        self.assertEqual(review["merged_prs_read"], 0)
+        self.assertIsNone(review["commits_per_merged_pr"])
+        copilot = review["bots"]["copilot"]
+        self.assertEqual(
+            (copilot["rounds_per_reviewed_pr_mean"], copilot["rounds_per_reviewed_pr_max"]),
+            (2.0, 3),
+        )
+        self.assertIsNone(copilot["automatic_rounds"])
+        self.assertIsNone(copilot["policy_trigger"])
+
+    def test_json_billing_is_null_where_billing_failed(self) -> None:
+        figures = bm.billing_data("2026-01", ["alpha"], None, "denied")
+        self.assertEqual(
+            figures,
+            {
+                "month": "2026-01",
+                "error": "denied",
+                "actions_minutes": None,
+                "copilot_gross_usd": None,
+            },
+        )
 
     def test_truncation_note_names_the_repository(self) -> None:
         text = bm.render_markdown(self.START, self.END, [metrics(truncated=True)], [])
@@ -272,7 +394,13 @@ class CollectTests(unittest.TestCase):
         )
         self.assertTrue(any("--created >=2026-01-01" in text for text in joined))
         self.assertTrue(any("--state open" in text and "--search" not in text for text in joined))
-        self.assertTrue(any(text.endswith("--json name") for text in joined))
+        issue_fields = [t for t in joined if t.startswith("issue list")]
+        self.assertEqual(len(issue_fields), 3)
+        self.assertTrue(all(t.endswith("--json number,title,url,labels") for t in issue_fields))
+        self.assertTrue(
+            any(t.startswith("pr list") and t.endswith("--json number,title,url") for t in joined)
+        )
+        self.assertTrue(any(text.endswith("--json databaseId,name,url") for text in joined))
 
 
 COPILOT = bm.BOT_LOGINS["copilot"]
@@ -965,7 +1093,7 @@ class ReviewCollectTests(unittest.TestCase):
             code = bm.main(["--owner", "o", "--repo", "alpha"])
         self.assertEqual(code, 1)
         report = out.getvalue()
-        self.assertIn("| alpha |", report)
+        self.assertIn("| [alpha](https://github.com/o/alpha) |", report)
         self.assertIn("Actions minutes", report)
         self.assertIn("Review figures were unavailable: null node", report)
         self.assertNotIn("Review return on cost", report)
@@ -977,10 +1105,13 @@ class ReviewCollectTests(unittest.TestCase):
         result = bm.ReviewMetrics(name="alpha", bots={"copilot": bm.BotStats(rounds=[1, 3])})
         start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 8)
         md = bm.render_markdown(start, end, [metrics()], [], [result])
-        page_html = bm.render_html(start, end, [metrics()], [], [result])
+        figures = bm.billing_data("2026-01", [], None, "x")
+        doc = json.loads(bm.render_json(start, end, [metrics()], [], [result], figures))
         self.assertIn("| alpha | copilot | n/a | n/a | 0 | 0 | n/a | n/a | n/a | 2.0 | 3 |", md)
         self.assertIn("Threaded findings (count)", md)
-        self.assertEqual(page_html.count("<table"), 3)
+        bots = doc["repositories"][0]["review"]["bots"]
+        self.assertEqual(bots["copilot"]["rounds_per_reviewed_pr_mean"], 2.0)
+        self.assertEqual(bots["copilot"]["rounds_per_reviewed_pr_max"], 3)
 
     def test_a_side_reviewer_row_prints_each_round_class(self) -> None:
         stats = bm.BotStats(automatic_rounds=4, explicit_rounds=2, unclassified_rounds=1)
@@ -1018,9 +1149,51 @@ class MainTests(unittest.TestCase):
         ):
             code = bm.main(["--owner", "o", "--repo", "alpha", "--repo", "beta", "--days", "3"])
         self.assertEqual(code, 0)
-        self.assertIn("| alpha |", out.getvalue())
-        self.assertIn("| beta |", out.getvalue())
+        self.assertIn("| [alpha](https://github.com/o/alpha) |", out.getvalue())
+        self.assertIn("| [beta](https://github.com/o/beta) |", out.getvalue())
         self.assertIn("| Total |", out.getvalue())
+
+    def test_main_writes_one_json_document_for_format_json(self) -> None:
+        def fake(args: list[str]) -> object:
+            if args[0] == "api" and "contents" in args[1]:
+                raise bm.GhError("gh api exited 1: gh: Not Found (HTTP 404)")
+            if args[0] == "api" and "commits" in args[1]:
+                return []
+            if args[0] == "api" and args[1].startswith("/users/"):
+                raise bm.GhError("billing denied")
+            if args[0] == "api":
+                return {}
+            if args[0] == "issue":
+                return [{**issue("bug"), "url": "https://github.com/o/alpha/issues/1"}]
+            if args[0] == "run":
+                return [{"databaseId": 5, "name": "Build", "url": "r5"}]
+            return [{"number": 2, "url": "https://github.com/o/alpha/pull/2"}]
+
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
+            contextlib.redirect_stdout(out),
+        ):
+            code = bm.main(["--owner", "o", "--repo", "alpha", "--format", "json"])
+        self.assertEqual(code, 0)
+        doc = json.loads(out.getvalue())
+        self.assertEqual(doc["totals"]["prs_merged"], 1)
+        self.assertEqual(doc["billing"]["error"], "billing denied")
+        self.assertIn("Billing was unavailable", doc["notes"][0])
+        [repo] = doc["repositories"]
+        self.assertEqual(repo["html_url"], "https://github.com/o/alpha")
+        self.assertEqual(
+            repo["items"]["prs_merged"][0]["html_url"], "https://github.com/o/alpha/pull/2"
+        )
+        self.assertEqual(repo["review"]["policy_branch"], "develop")
+
+    def test_html_is_no_longer_a_format(self) -> None:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as raised:
+            bm.main(["--format", "html"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("invalid choice", err.getvalue())
 
     def test_a_failed_count_exits_one_without_a_report(self) -> None:
         out, err = io.StringIO(), io.StringIO()
@@ -1058,62 +1231,183 @@ class MainTests(unittest.TestCase):
         )
 
 
+def ended(pid: int) -> bool:
+    """Whether `pid` is gone, or a zombie its new reaper has yet to collect after its parent died.
+
+    The script kills its `gh` and need not reap it, since it ends by the signal straight after.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    stat = Path(f"/proc/{pid}/stat")
+    with contextlib.suppress(OSError):
+        return stat.read_text(encoding="utf-8").rsplit(")", 1)[1].split()[0] == "Z"
+    return False
+
+
+HELD_GH = '#!/bin/sh\necho $$ > "$GH_PID_FILE"\nexec sleep 60\n'
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows cannot deliver either signal for a script")
+class InterruptTests(unittest.TestCase):
+    """A signal mid-run stops the `gh` call, prints one line, and ends the script by the signal.
+
+    The script runs under this interpreter directly, since `uv run` would exit with a status
+    rather than die by the signal. The `gh` it starts is `HELD_GH`, a stub ahead of the real one on
+    PATH. The stub records its pid and then holds the run open, so the signal lands mid-call.
+    """
+
+    def test_a_signal_mid_run_stops_gh_and_ends_the_script_by_it(self) -> None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=sig.name):
+                bin_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+                gh = bin_dir / "gh"
+                gh.write_text(HELD_GH, encoding="utf-8")
+                gh.chmod(0o755)
+                pid_file = bin_dir / "gh.pid"
+                env = {
+                    **os.environ,
+                    "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+                    "GH_PID_FILE": str(pid_file),
+                }
+                script = subprocess.Popen(
+                    [sys.executable, str(SCRIPTS / "backlog_metrics.py"), "--owner", "o"]
+                    + ["--repo", "alpha"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    env=env,
+                )
+                try:
+                    deadline = time.monotonic() + 60
+                    while not pid_file.exists() or not pid_file.read_text().strip():
+                        if script.poll() is not None or time.monotonic() > deadline:
+                            raise AssertionError("the script never reached gh")
+                        time.sleep(0.05)
+                    gh_pid = int(pid_file.read_text())
+                    script.send_signal(sig)
+                    _, stderr = script.communicate(timeout=60)
+                finally:
+                    if script.poll() is None:
+                        script.kill()
+                        script.communicate(timeout=60)
+                self.assertEqual(-sig, script.returncode, stderr)
+                self.assertEqual(f"backlog_metrics.py: interrupted by {sig.name}.\n", stderr)
+                deadline = time.monotonic() + 10
+                while not ended(gh_pid):
+                    if time.monotonic() > deadline:
+                        os.kill(gh_pid, signal.SIGKILL)
+                        raise AssertionError(f"gh {gh_pid} outlived the script")
+                    time.sleep(0.05)
+
+
+METADATA_BLOCK = re.compile(
+    r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$"
+)
+EXACT_PIN = re.compile(r"^(?P<name>[A-Za-z0-9._-]+)==(?P<version>[0-9][0-9A-Za-z.]*)$")
+
+
+def normalized(name: str) -> str:
+    """A distribution name in PEP 503's normalized form, so `ruamel.yaml` meets `ruamel-yaml`."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 class PinTests(unittest.TestCase):
-    """The exact markdown-it-py pin a token-holding run resolves, kept equal where it is stated."""
+    """Every library a script resolves is pinned exactly, alike wherever it is stated.
 
-    @staticmethod
-    def inline_dependencies(script: Path) -> list[str]:
-        block = re.search(
-            r"^# /// script\n(.*?)^# ///$",
-            script.read_text(encoding="utf-8"),
-            re.MULTILINE | re.DOTALL,
-        )
-        assert block, f"{script} has no inline script metadata"
-        toml = "".join(
-            line.removeprefix("#").removeprefix(" ") for line in block[1].splitlines(True)
-        )
-        return tomllib.loads(toml)["dependencies"]
+    An open bound let an upstream release change the prose gate with no change here. So each
+    dependency in a tracked script's inline block names one exact version. `METADATA_BLOCK` is
+    PEP 723's own pattern for that block. Each line of `tests/requirements.txt` does the same. A
+    package takes one version everywhere. Each package a pinned one requires is pinned beside it.
+    So a bump that brings in a new package fails here until that package is pinned too.
+    The suite runs with `tests/requirements.txt` installed, which is what lets the last case read
+    each pinned version's own requirements.
+    """
 
-    def test_markdown_it_py_is_pinned_exactly_and_alike_everywhere(self) -> None:
-        repo = SCRIPTS.parent
-        stated = {
-            "backlog_metrics.py": self.inline_dependencies(SCRIPTS / "backlog_metrics.py"),
-            "prose_lint.py": self.inline_dependencies(
-                repo / ".github" / "actions" / "prose-gate" / "prose_lint.py"
-            ),
-            "tests/requirements.txt": (repo / "tests" / "requirements.txt")
-            .read_text(encoding="utf-8")
-            .splitlines(),
-        }
-        pins = {
-            name: [dep for dep in deps if re.match(r"markdown-it-py\b", dep)]
-            for name, deps in stated.items()
-        }
-        for name, found in pins.items():
-            with self.subTest(name=name):
-                self.assertEqual(1, len(found), found)
-                self.assertRegex(found[0], r"^markdown-it-py==\d")
-        self.assertEqual(1, len({found[0] for found in pins.values()}), pins)
+    REPO = SCRIPTS.parent
+    REQUIREMENTS = REPO / "tests" / "requirements.txt"
 
-    def test_every_package_the_token_holding_run_resolves_is_pinned_exactly(self) -> None:
-        """Each declared dependency is exact, and so is each one the pinned markdown-it-py requires.
-
-        The suite installs the pinned markdown-it-py, so a bump requiring a new package fails here.
-        """
-        declared = self.inline_dependencies(SCRIPTS / "backlog_metrics.py")
-        for dep in declared:
-            with self.subTest(dep=dep):
-                self.assertRegex(dep, r"^[A-Za-z0-9._-]+==[0-9][0-9A-Za-z.]*$")
-        pinned = {re.sub(r"[-_.]+", "-", dep.split("==")[0]).lower() for dep in declared}
-        needed = [
-            re.sub(r"[-_.]+", "-", re.split(r"[^A-Za-z0-9._-]", req, maxsplit=1)[0]).lower()
-            for req in importlib.metadata.requires("markdown-it-py") or []
-            if "extra ==" not in req
+    @classmethod
+    def stated(cls) -> dict[str, list[str]]:
+        """Each tracked script's inline dependencies, and the requirements file's lines, by path."""
+        listed = subprocess.run(
+            ["git", "-C", str(cls.REPO), "ls-files", "-z", "*.py"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+        ).stdout.split("\0")
+        found: dict[str, list[str]] = {}
+        for path in filter(None, listed):
+            text = (cls.REPO / path).read_text(encoding="utf-8")
+            for block in METADATA_BLOCK.finditer(text):
+                if block["type"] != "script":
+                    continue
+                toml = "".join(
+                    line.removeprefix("#").removeprefix(" ")
+                    for line in block["content"].splitlines(True)
+                )
+                found[path] = tomllib.loads(toml).get("dependencies", [])
+        found["tests/requirements.txt"] = [
+            line.strip()
+            for line in cls.REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
         ]
-        self.assertTrue(needed)
-        for name in needed:
-            with self.subTest(requires=name):
-                self.assertIn(name, pinned)
+        return found
+
+    def test_the_scan_reaches_the_scripts_it_guards(self) -> None:
+        stated = self.stated()
+        for path in (
+            "scripts/backlog_metrics.py",
+            ".github/actions/prose-gate/prose_lint.py",
+            "scripts/agent_policy.py",
+            "spec/audit.py",
+        ):
+            self.assertIn(path, stated)
+        self.assertGreaterEqual(len(stated), 10, sorted(stated))
+
+    def test_every_dependency_is_pinned_exactly(self) -> None:
+        for path, deps in self.stated().items():
+            for dep in deps:
+                with self.subTest(path=path, dep=dep):
+                    self.assertRegex(dep, EXACT_PIN)
+
+    def test_a_package_takes_one_version_everywhere_the_suite_included(self) -> None:
+        versions: dict[str, dict[str, list[str]]] = {}
+        for path, deps in self.stated().items():
+            for dep in deps:
+                pin = EXACT_PIN.match(dep)
+                if pin:
+                    name = normalized(pin["name"])
+                    versions.setdefault(name, {}).setdefault(pin["version"], []).append(path)
+        self.assertIn("markdown-it-py", versions)
+        for name, where in versions.items():
+            with self.subTest(package=name):
+                self.assertEqual(1, len(where), where)
+                self.assertIn("tests/requirements.txt", next(iter(where.values())))
+
+    def test_each_package_a_pinned_one_requires_is_pinned_beside_it(self) -> None:
+        """Read from the installed version, which the suite's requirements make the pinned one."""
+        reached = 0
+        for path, deps in self.stated().items():
+            pinned = {
+                normalized(pin["name"]): pin["version"]
+                for pin in (EXACT_PIN.match(dep) for dep in deps)
+                if pin
+            }
+            for name, version in pinned.items():
+                with self.subTest(path=path, installed=name):
+                    self.assertEqual(version, importlib.metadata.version(name))
+                for req in importlib.metadata.requires(name) or []:
+                    if re.search(r"\bextra\s*==", req):
+                        continue
+                    needed = normalized(re.split(r"[^A-Za-z0-9._-]", req, maxsplit=1)[0])
+                    reached += 1
+                    with self.subTest(path=path, package=name, requires=needed):
+                        self.assertIn(needed, pinned)
+        self.assertGreater(reached, 0)
 
 
 if __name__ == "__main__":

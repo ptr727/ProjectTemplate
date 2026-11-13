@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2"]
 # ///
 """Consolidated Copilot-review status for a PR - one command, one compact digest.
 

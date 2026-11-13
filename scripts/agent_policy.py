@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["editorconfig>=0.17", "ruamel.yaml>=0.18", "tomlkit>=0.13"]
+# dependencies = ["editorconfig==0.17.1", "ruamel.yaml==0.19.1", "tomlkit==0.15.2"]
 # ///
 """Render a repository's agent policy from the registry, derive the bot-side settings, write and check them.
 

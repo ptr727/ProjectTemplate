@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py==4.3.0", "pygments>=2.21.0"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2", "pygments==2.21.0"]
 # ///
 """Enforce the GOVERNANCE.md "Documentation Style Conventions" rules no other linter checks.
 
