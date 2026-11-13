@@ -756,9 +756,7 @@ def create_vault(op: Op, bucket: str) -> Vault:
 
 def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
     """Read the item back and compare its id, its mode tag, and its bytes with what the plan read."""
-    item = members(op, vault).get(plan.title)
-    if item is None:
-        raise Execution(f"{plan.title} is not listed after the write")
+    item = listed(op, vault, plan.title, "the write")
     if expected_id is not None and item.id != expected_id:
         raise Execution(f"{plan.title} is listed as a different item after an in-place edit")
     assert plan.mode is not None
@@ -994,7 +992,7 @@ SELFTEST_CONTENT = {
 def listed(op: Op, vault: Vault, title: str, after: str) -> Item:
     item = members(op, vault).get(title)
     if item is None:
-        raise Execution(f"{title} is not listed after op {after}")
+        raise Execution(f"{title} is not listed after {after}")
     return item
 
 
@@ -1034,7 +1032,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         )
         if not created:
             measure_fields(op, vault, results)
-        item = listed(op, vault, title, "document create")
+        item = listed(op, vault, title, "op document create")
         created[label] = item
         back = download(op, vault, item)
         detail = "byte-exact" if back == content else f"{len(content)} bytes became {len(back)}"
@@ -1052,7 +1050,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         write=True,
         detail=first.title,
     )
-    retagged = listed(op, vault, first.title, "item edit")
+    retagged = listed(op, vault, first.title, "op item edit")
     results.append(
         Measured(
             "item edit --tags replaces",
@@ -1068,7 +1066,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         write=True,
         detail=first.title,
     )
-    after = listed(op, vault, first.title, "document edit")
+    after = listed(op, vault, first.title, "op document edit")
     results.append(
         Measured(
             "document edit keeps the item id",

@@ -1493,6 +1493,7 @@ def alive(pid: int) -> bool:
 
 
 @unittest.skipIf(sys.platform == "win32", "Windows cannot deliver SIGINT or SIGTERM to a script")
+@unittest.skipUnless(Path("/proc").is_dir(), "the survivor check reads /proc")
 class TestInterrupt(unittest.TestCase):
     """A signal mid-call stops the `op` child, signs out, removes temporary files, and ends the run by that signal."""
 
