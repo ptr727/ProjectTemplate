@@ -3126,6 +3126,14 @@ class HubRefFreshnessCases:
         self.git("push", "--quiet", "origin", "develop")
         self.assert_check("develop", "refetched")
 
+    def test_a_tree_holding_an_untracked_file_is_stale_whatever_the_status_setting(self) -> None:
+        """A bare status read under status.showUntrackedFiles=no prints nothing for the file."""
+        self.fetch("main")
+        hub = self.dir / "hub"
+        self.git("config", "status.showUntrackedFiles", "no", cwd=hub)
+        (hub / "stray.md").write_text("not committed\n", encoding="utf-8")
+        self.assert_check("main", "refetched")
+
 
 class TestMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):
     """`menu.sh`'s `ensure_hub_root`, with `flock` stubbed, since its lock is covered on Linux alone."""
