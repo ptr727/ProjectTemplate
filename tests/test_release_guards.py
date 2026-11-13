@@ -103,7 +103,7 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
                 raise AssertionError(
                     f"line {opened_at + 1 + offset} is indented less than the block's opener"
                 )
-        words = opener.group("info").split()  # any-whitespace: no matched label holds whitespace
+        words = opener.group("info").split()  # any-whitespace: can add a match, never split one
         blocks.append(
             FencedBlock(
                 opened_at,
