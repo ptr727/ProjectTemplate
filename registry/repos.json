@@ -200,7 +200,7 @@
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
-            "pythonDirectories": ["CloudInit", "Cloudflare", "MutationSweep", "Notify", "Trackers", "USBDev", "VPS", "scripts"],
+            "pythonDirectories": ["CloudInit", "Cloudflare", "MutationSweep", "Notify", "SourceReader", "Trackers", "USBDev", "VPS", "scripts"],
             "agentPolicy": {
                 "review": {
                     "bots": {

@@ -12,20 +12,26 @@ So the report prints them beside the window's counts rather than dividing them b
 
 The report goes to stdout only, so a server timer can mail it. Nothing here runs from a workflow.
 Counting and rendering are pure functions over parsed `gh` output. Only `run_gh` and `graphql`
-start a process.
+start a process. `--format markdown` links each repository and each issue or pull request count to
+its GitHub page. `--format json` carries the same figures, with each counted repository, issue,
+pull request, and workflow run beside its `html_url`, for a consumer rendering its own report.
+`scripts/README.md` documents the JSON shape.
 
 Usage
   uv run --no-project --script scripts/backlog_metrics.py [--owner OWNER] [--repo NAME ...]
-                                                           [--days N] [--format markdown|html]
+                                                           [--days N] [--format markdown|json]
 
 It is a uv script because it imports the review gate's own readers, which parse Markdown. A copy
 of those readers here would drift from the gate and report figures the gate would not.
 
 markdown-it-py is pinned exactly, and so is mdurl, the one package it imports. So every run
 imports only versions this repository reviewed, a run holding a `gh` token included. Run it as
-above, with `--script`, so uv reads those pins. A markdown-it-py bump is then a reviewed change. It
-moves the prose gate's pin and `tests/requirements.txt`'s with it, and pins exactly each package the
-new version requires. A test holds all of that.
+above, with `--script`, so uv reads those pins. A bump is then a reviewed change. It moves every
+script's pin and `tests/requirements.txt`'s with it, and pins exactly each package the new version
+requires. A test holds all of that.
+
+On SIGINT or SIGTERM it stops the `gh` call in flight, prints one line naming the signal, and ends
+by that signal.
 
 Exit codes
   0  the report was written.
@@ -39,9 +45,11 @@ Exit codes
 """
 
 import argparse
+import contextlib
 import datetime
-import html
 import json
+import os
+import signal
 import sys
 import urllib.parse
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -58,6 +66,8 @@ from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
+GITHUB = "https://github.com"
+JSON_SCHEMA = 1
 LIST_LIMIT = 1000
 HANDOFF_LABEL = "handoff"
 REVIEW_WORKFLOW = "Running Copilot Code Review"
@@ -103,6 +113,8 @@ class RepoMetrics:
     runs: int
     review_runs: int
     truncated: bool = False
+    url: str = ""
+    items: Mapping[str, Items] = field(default_factory=dict)
 
 
 def run_gh(args: Sequence[str]) -> Any:
@@ -145,10 +157,33 @@ def count_named(runs: Items, workflow: str) -> int:
     return sum(1 for run in runs if run.get("name") == workflow)
 
 
-def per_merged(count: int, merged: int) -> str:
-    if merged == 0:
-        return "n/a"
-    return f"{count / merged:.1f}"
+def ratio(count: int, merged: int) -> float | None:
+    """`count / merged` to one decimal, or None without a merge."""
+    return None if merged == 0 else round(count / merged, 1)
+
+
+def ratio_text(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.1f}"
+
+
+def pr_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "number": item.get("number"),
+        "title": str(item.get("title") or ""),
+        "html_url": str(item.get("url") or ""),
+    }
+
+
+def issue_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {**pr_item(item), "labels": sorted(label_names(item))}
+
+
+def run_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": item.get("databaseId"),
+        "name": str(item.get("name") or ""),
+        "html_url": str(item.get("url") or ""),
+    }
 
 
 def compute_metrics(
@@ -158,22 +193,38 @@ def compute_metrics(
     open_items: Items,
     merged_prs: Items,
     runs: Items,
+    url: str = "",
 ) -> RepoMetrics:
-    """Reduce one repository's parsed lists to the report's counts."""
+    """Reduce one repository's parsed lists to the report's counts and the items behind each."""
     lists = (opened_items, closed_items, open_items, merged_prs, runs)
+
+    def issues(items: Items, handoff: bool) -> list[dict[str, Any]]:
+        return [issue_item(i) for i in items if (HANDOFF_LABEL in label_names(i)) == handoff]
+
+    open_issues = [item for item in open_items if HANDOFF_LABEL not in label_names(item)]
     return RepoMetrics(
         name=name,
         opened=count_without_label(opened_items, HANDOFF_LABEL),
         closed=count_without_label(closed_items, HANDOFF_LABEL),
         handoffs_created=count_with_label(opened_items, HANDOFF_LABEL),
-        open_now=count_without_label(open_items, HANDOFF_LABEL),
-        open_by_label=count_by_label(
-            [item for item in open_items if HANDOFF_LABEL not in label_names(item)], LABELS
-        ),
+        open_now=len(open_issues),
+        open_by_label=count_by_label(open_issues, LABELS),
         merged=len(merged_prs),
         runs=len(runs),
         review_runs=count_named(runs, REVIEW_WORKFLOW),
         truncated=any(len(items) >= LIST_LIMIT for items in lists),
+        url=url,
+        items={
+            "issues_opened": issues(opened_items, False),
+            "issues_closed": issues(closed_items, False),
+            "handoffs_created": issues(opened_items, True),
+            "issues_open": issues(open_items, False),
+            "prs_merged": [pr_item(pr) for pr in merged_prs],
+            "workflow_runs": [run_item(run) for run in runs],
+            "copilot_review_runs": [
+                run_item(run) for run in runs if run.get("name") == REVIEW_WORKFLOW
+            ],
+        },
     )
 
 
@@ -220,6 +271,7 @@ class ReviewMetrics:
     failing_after_clean_local: int = 0
     bots: dict[str, BotStats] = field(default_factory=dict)
     policy: dict[str, str] = field(default_factory=dict)
+    policy_from_default: bool = False
     policy_error: str = ""
     policy_read: str = "policy file"
     policy_branch: str = ""
@@ -397,37 +449,50 @@ HEADERS = (
 
 
 def table_rows(metrics: Sequence[RepoMetrics]) -> list[list[str]]:
-    rows = [
-        [
-            m.name,
-            str(m.opened),
-            str(m.closed),
-            str(m.handoffs_created),
-            str(m.open_now),
-            str(m.merged),
-            per_merged(m.opened, m.merged),
-            str(m.runs),
-            str(m.review_runs),
-            per_merged(m.review_runs, m.merged),
+    """A row per repository and a totals row, each the `counts` the JSON output carries."""
+
+    def cells(figures: Mapping[str, Any]) -> list[str]:
+        return [
+            ratio_text(value) if key.endswith("_per_merged_pr") else str(value)
+            for key, value in figures.items()
         ]
-        for m in metrics
-    ]
-    opened = sum(m.opened for m in metrics)
-    merged = sum(m.merged for m in metrics)
-    rows.append(
-        [
-            "Total",
-            str(opened),
-            str(sum(m.closed for m in metrics)),
-            str(sum(m.handoffs_created for m in metrics)),
-            str(sum(m.open_now for m in metrics)),
-            str(merged),
-            per_merged(opened, merged),
-            str(sum(m.runs for m in metrics)),
-            str(sum(m.review_runs for m in metrics)),
-            per_merged(sum(m.review_runs for m in metrics), merged),
-        ]
-    )
+
+    return [[m.name, *cells(counts([m]))] for m in metrics] + [["Total", *cells(counts(metrics))]]
+
+
+def link(text: str, url: str) -> str:
+    """`text` as a Markdown link to `url`, or plain where no URL is known."""
+    return f"[{text}]({url})" if url else text
+
+
+SEARCHES = {
+    "Issues opened (count)": ("issues", f"is:issue created:{{window}} -label:{HANDOFF_LABEL}"),
+    "Issues closed (count)": (
+        "issues",
+        f"is:issue is:closed closed:{{window}} -label:{HANDOFF_LABEL}",
+    ),
+    "Handoffs created (count)": ("issues", f"is:issue created:{{window}} label:{HANDOFF_LABEL}"),
+    "Issues open now (count)": ("issues", f"is:issue is:open -label:{HANDOFF_LABEL}"),
+    "PRs merged (count)": ("pulls", "is:pr is:merged merged:{window}"),
+}
+
+
+def markdown_rows(
+    metrics: Sequence[RepoMetrics], start: datetime.date, end: datetime.date
+) -> list[list[str]]:
+    """The backlog table's rows, each repository and each count `SEARCHES` names linked.
+
+    `SEARCHES` maps a column's header to the page and search listing what it counts. The workflow
+    run counts come from `gh run list` rather than from a search, so they print plain. Each dated
+    search runs through the report's own date rather than staying open.
+    """
+    rows = table_rows(metrics)
+    for m, row in zip(metrics, rows):
+        row[0] = link(m.name, m.url)
+        for header, (page, query) in SEARCHES.items():
+            search = urllib.parse.quote(query.format(window=f"{start}..{end}"))
+            column = HEADERS.index(header)
+            row[column] = link(row[column], f"{m.url}/{page}?q={search}" if m.url else "")
     return rows
 
 
@@ -439,14 +504,32 @@ def label_line(m: RepoMetrics) -> str:
 def billing_lines(
     month: str, repos: Sequence[str], usage: Mapping[str, Any] | None, error: str
 ) -> list[str]:
+    """The billing lines, printed from the `billing_data` the JSON output carries."""
     if usage is None:
         return [f"Billing was unavailable for {month}: {error}"]
-    minutes = sum_actions_minutes(usage)
-    per_repo = ", ".join(f"{repo} {minutes.get(repo, 0.0):.1f}" for repo in repos)
+    data = billing_data(month, repos, usage, error)
+    per_repo = ", ".join(
+        f"{repo} {minutes:.1f}" for repo, minutes in data["actions_minutes"].items()
+    )
     return [
         f"Actions minutes, {month} (minutes): {per_repo}",
-        f"Copilot gross, {month} (USD): {sum_copilot_gross(usage):.2f}",
+        f"Copilot gross, {month} (USD): {data['copilot_gross_usd']:.2f}",
     ]
+
+
+def billing_data(
+    month: str, repos: Sequence[str], usage: Mapping[str, Any] | None, error: str
+) -> dict[str, Any]:
+    """The billing figures `billing_lines` prints, as data, each null where billing failed."""
+    if usage is None:
+        return {"month": month, "error": error, "actions_minutes": None, "copilot_gross_usd": None}
+    minutes = sum_actions_minutes(usage)
+    return {
+        "month": month,
+        "error": None,
+        "actions_minutes": {repo: round(minutes.get(repo, 0.0), 1) for repo in repos},
+        "copilot_gross_usd": round(sum_copilot_gross(usage), 2),
+    }
 
 
 def notes(metrics: Sequence[RepoMetrics]) -> list[str]:
@@ -485,43 +568,38 @@ REVIEW_REPO_HEADERS = (
 )
 
 
+def cell(value: Any) -> str:
+    """One JSON figure as the Markdown prints it, `n/a` for a null and one decimal for a ratio."""
+    return ratio_text(value) if value is None or isinstance(value, float) else str(value)
+
+
+def shown_trigger(r: ReviewMetrics, figures: Mapping[str, Any]) -> str:
+    if r.policy_error:
+        return "error"
+    if figures["policy_trigger"] is None:
+        return "n/a"
+    return figures["policy_trigger"] + (" (default)" if figures["policy_from_default"] else "")
+
+
 def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
-    return [
-        [
-            r.name,
-            bot,
-            "error" if r.policy_error else r.policy.get(bot, "n/a"),
-            r.policy_branch or "n/a",
-            str(stats.requests_by_automation),
-            str(stats.requests_by_user),
-            str(stats.automatic_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
-            str(stats.explicit_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
-            str(stats.unclassified_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
-            per_merged(sum(stats.rounds), len(stats.rounds)),
-            str(max(stats.rounds, default=0)) if stats.rounds else "n/a",
-            str(stats.findings),
-            str(stats.missed_by_local),
-            str(stats.findings_on_green_heads),
-        ]
-        for r in reviews
-        for bot, stats in r.bots.items()
-    ]
+    """The per-bot table, printed from the `review_data` the JSON output carries."""
+    rows = []
+    for r in reviews:
+        data = review_data(r)
+        for bot, figures in data["bots"].items():
+            counted = [v for k, v in figures.items() if not k.startswith("policy_")]
+            branch = data["policy_branch"] or "n/a"
+            rows.append([r.name, bot, shown_trigger(r, figures), branch, *map(cell, counted)])
+    return rows
 
 
 def review_repo_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
-    return [
-        [
-            r.name,
-            str(r.prs),
-            str(r.promotions_skipped),
-            per_merged(r.commits, r.prs),
-            str(r.local_findings),
-            str(r.local_unknown),
-            str(r.failing_heads),
-            str(r.failing_after_clean_local),
-        ]
-        for r in reviews
-    ]
+    """The per-repository table, printed from the `review_data` the JSON output carries."""
+    rows = []
+    for r in reviews:
+        figures = list(review_data(r).values())[: len(REVIEW_REPO_HEADERS) - 1]
+        rows.append([r.name, *map(cell, figures)])
+    return rows
 
 
 def review_notes(reviews: Sequence[ReviewMetrics]) -> list[str]:
@@ -557,7 +635,7 @@ def render_markdown(
     billing: Sequence[str],
     reviews: Sequence[ReviewMetrics] = (),
 ) -> str:
-    rows = table_rows(metrics)
+    rows = markdown_rows(metrics, start, end)
     out = [f"# Backlog report, {start} to {end}", ""]
     out.append("| " + " | ".join(HEADERS) + " |")
     out.append("|" + "|".join(" --- " for _ in HEADERS) + "|")
@@ -567,6 +645,7 @@ def render_markdown(
     out.append("")
     out.extend(f"- {line}" for line in [*billing, *notes(metrics), *review_notes(reviews)])
     if reviews:
+        urls = {m.name: m.url for m in metrics}
         for title, headers, body in (
             ("Review return on cost, per bot", REVIEW_BOT_HEADERS, review_bot_rows(reviews)),
             (
@@ -577,53 +656,104 @@ def render_markdown(
         ):
             out.extend(["", f"## {title}", "", "| " + " | ".join(headers) + " |"])
             out.append("|" + "|".join(" --- " for _ in headers) + "|")
-            out.extend("| " + " | ".join(row) + " |" for row in body)
+            out.extend(
+                "| " + " | ".join([link(row[0], urls.get(row[0], "")), *row[1:]]) + " |"
+                for row in body
+            )
     return "\n".join(out) + "\n"
 
 
-def render_html(
+def counts(m: Sequence[RepoMetrics]) -> dict[str, Any]:
+    """The backlog table's figures for the repositories in `m`, summed, as JSON fields."""
+    opened, merged = sum(r.opened for r in m), sum(r.merged for r in m)
+    review_runs = sum(r.review_runs for r in m)
+    return {
+        "issues_opened": opened,
+        "issues_closed": sum(r.closed for r in m),
+        "handoffs_created": sum(r.handoffs_created for r in m),
+        "issues_open": sum(r.open_now for r in m),
+        "prs_merged": merged,
+        "issues_opened_per_merged_pr": ratio(opened, merged),
+        "workflow_runs": sum(r.runs for r in m),
+        "copilot_review_runs": review_runs,
+        "copilot_review_runs_per_merged_pr": ratio(review_runs, merged),
+    }
+
+
+def review_data(r: ReviewMetrics) -> dict[str, Any]:
+    """One repository's review figures, the two review tables' cells as JSON fields."""
+    automatic = set(AUTOMATIC_ROUND_BOTS)
+    return {
+        "merged_prs_read": r.prs,
+        "promotion_prs_excluded": r.promotions_skipped,
+        "commits_per_merged_pr": ratio(r.commits, r.prs),
+        "local_findings": r.local_findings,
+        "local_attestations_unknown": r.local_unknown,
+        "failing_heads": r.failing_heads,
+        "failing_heads_after_clean_local_review": r.failing_after_clean_local,
+        "policy_branch": r.policy_branch or None,
+        "policy_error": r.policy_error or None,
+        "policy_history_error": r.history_error or None,
+        "policy_changes": list(r.policy_changes),
+        "truncated": list(r.truncated),
+        "bots": {
+            bot: {
+                "policy_trigger": None if r.policy_error else r.policy.get(bot),
+                "policy_from_default": None
+                if r.policy_error or bot not in r.policy
+                else r.policy_from_default,
+                "requests_by_automation": stats.requests_by_automation,
+                "requests_by_user": stats.requests_by_user,
+                "automatic_rounds": stats.automatic_rounds if bot in automatic else None,
+                "explicit_rounds": stats.explicit_rounds if bot in automatic else None,
+                "unclassified_rounds": stats.unclassified_rounds if bot in automatic else None,
+                "rounds_per_reviewed_pr_mean": ratio(sum(stats.rounds), len(stats.rounds)),
+                "rounds_per_reviewed_pr_max": max(stats.rounds, default=None),
+                "threaded_findings": stats.findings,
+                "findings_missed_by_local_review": stats.missed_by_local,
+                "findings_on_green_heads": stats.findings_on_green_heads,
+            }
+            for bot, stats in r.bots.items()
+        },
+    }
+
+
+def render_json(
     start: datetime.date,
     end: datetime.date,
     metrics: Sequence[RepoMetrics],
     billing: Sequence[str],
-    reviews: Sequence[ReviewMetrics] = (),
+    reviews: Sequence[ReviewMetrics],
+    billing_figures: Mapping[str, Any],
 ) -> str:
-    esc = html.escape
-    out = [
-        "<!doctype html>",
-        '<html><head><meta charset="utf-8"><title>Backlog report</title></head><body>',
-        f"<h1>Backlog report, {start} to {end}</h1>",
-        '<table border="1">',
-        "<tr>" + "".join(f"<th>{esc(h)}</th>" for h in HEADERS) + "</tr>",
-    ]
-    out.extend(
-        "<tr>" + "".join(f"<td>{esc(cell)}</td>" for cell in row) + "</tr>"
-        for row in table_rows(metrics)
-    )
-    out.append("</table>")
-    out.append("<ul>")
-    out.extend(f"<li>{esc(label_line(m))}</li>" for m in metrics)
-    out.extend(
-        f"<li>{esc(line)}</li>" for line in [*billing, *notes(metrics), *review_notes(reviews)]
-    )
-    out.append("</ul>")
-    if reviews:
-        for title, headers, body in (
-            ("Review return on cost, per bot", REVIEW_BOT_HEADERS, review_bot_rows(reviews)),
-            (
-                "Review return on cost, per repository",
-                REVIEW_REPO_HEADERS,
-                review_repo_rows(reviews),
-            ),
-        ):
-            out.extend([f"<h2>{esc(title)}</h2>", '<table border="1">'])
-            out.append("<tr>" + "".join(f"<th>{esc(h)}</th>" for h in headers) + "</tr>")
-            out.extend(
-                "<tr>" + "".join(f"<td>{esc(cell)}</td>" for cell in row) + "</tr>" for row in body
-            )
-            out.append("</table>")
-    out.append("</body></html>")
-    return "\n".join(out) + "\n"
+    """The report as one JSON document, the headline totals at its top level.
+
+    `notes` holds the billing lines and the notes the Markdown report lists after its label lines.
+    A consumer can then print what this run noted without re-deriving it. `scripts/README.md`
+    documents each field.
+    """
+    by_name = {r.name: r for r in reviews}
+    document = {
+        "schema": JSON_SCHEMA,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "totals": counts(metrics),
+        "billing": dict(billing_figures),
+        "notes": [*billing, *notes(metrics), *review_notes(reviews)],
+        "repositories": [
+            {
+                "name": m.name,
+                "html_url": m.url,
+                **counts([m]),
+                "open_issues_by_label": dict(m.open_by_label),
+                "truncated": m.truncated,
+                "items": {key: list(value) for key, value in m.items.items()},
+                "review": review_data(by_name[m.name]) if m.name in by_name else None,
+            }
+            for m in metrics
+        ],
+    }
+    return json.dumps(document, indent=2) + "\n"
 
 
 def collect(owner: str, name: str, since: datetime.date) -> RepoMetrics:
@@ -636,18 +766,19 @@ def collect(owner: str, name: str, since: datetime.date) -> RepoMetrics:
             args += ["--search", search]
         return run_gh([*args, "--json", fields])
 
-    opened = issues("all", f"created:>={date}", "number,labels")
-    closed = issues("closed", f"closed:>={date}", "number,labels")
-    open_now = issues("open", None, "number,labels")
+    fields = "number,title,url,labels"
+    opened = issues("all", f"created:>={date}", fields)
+    closed = issues("closed", f"closed:>={date}", fields)
+    open_now = issues("open", None, fields)
     merged = run_gh(
         ["pr", "list", "--repo", repo, "--state", "merged", "--search", f"merged:>={date}"]
-        + ["--limit", str(LIST_LIMIT), "--json", "number"]
+        + ["--limit", str(LIST_LIMIT), "--json", "number,title,url"]
     )
     runs = run_gh(
         ["run", "list", "--repo", repo, "--created", f">={date}", "--limit", str(LIST_LIMIT)]
-        + ["--json", "name"]
+        + ["--json", "databaseId,name,url"]
     )
-    return compute_metrics(name, opened, closed, open_now, merged, runs)
+    return compute_metrics(name, opened, closed, open_now, merged, runs, f"{GITHUB}/{repo}")
 
 
 REVIEW_QUERY = """
@@ -733,12 +864,11 @@ def policy_branch(owner: str, name: str, default: str) -> tuple[str, str]:
     return INTEGRATION_BRANCH, ""
 
 
-def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
-    """Each bot's trigger in the policy file at `ref`, read the way the review gate reads it.
+def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], bool, str]:
+    """Each bot's trigger in the policy file at `ref`, whether it is the hub default, and an error.
 
     The gate's own `fetch` does the read, so a file it would refuse reads as an error here too. A
-    file it would take as absent, or one stating no review section, reads as the hub default, each
-    trigger marked `(default)`.
+    file it would take as absent, or one stating no review section, reads as the hub default.
     """
 
     def read(owner: str, repo: str, path: str, ref: str) -> str | None:
@@ -757,11 +887,10 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
     try:
         policy = fetch(owner, name, ref, read)
     except GhError as error:
-        return {}, str(error)
+        return {}, False, str(error)
     except PolicyError as error:
-        return {}, f"unreadable policy file: {error}"
-    mark = " (default)" if policy.from_default else ""
-    return {bot: policy.bot(bot).trigger + mark for bot in BOTS}, ""
+        return {}, False, f"unreadable policy file: {error}"
+    return {bot: policy.bot(bot).trigger for bot in BOTS}, policy.from_default, ""
 
 
 def fetch_policy_changes(
@@ -831,7 +960,9 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
     if branch_error:
         result.policy_read, result.policy_error = f"{INTEGRATION_BRANCH} branch", branch_error
         return result
-    result.policy, result.policy_error = fetch_policy(owner, name, result.policy_branch)
+    result.policy, result.policy_from_default, result.policy_error = fetch_policy(
+        owner, name, result.policy_branch
+    )
     result.policy_changes, result.history_error = fetch_policy_changes(
         owner, name, result.policy_branch, since
     )
@@ -872,7 +1003,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="repository name under the owner, repeatable, default every cataloged repository",
     )
     parser.add_argument("--days", type=positive_int, default=7, help="window length in days")
-    parser.add_argument("--format", choices=("markdown", "html"), default="markdown")
+    parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     return parser
 
 
@@ -896,11 +1027,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         review_error = str(error)
         print(f"backlog_metrics.py: reading the review figures failed: {error}", file=sys.stderr)
     usage, error_text = fetch_billing(owner, end)
-    billing = billing_lines(f"{end.year}-{end.month:02d}", names, usage, error_text)
+    month = f"{end.year}-{end.month:02d}"
+    billing = billing_lines(month, names, usage, error_text)
     if review_error:
         billing.append(f"Review figures were unavailable: {review_error}")
-    render = render_html if args.format == "html" else render_markdown
-    sys.stdout.write(render(start, end, metrics, billing, reviews))
+    if args.format == "json":
+        figures = billing_data(month, names, usage, error_text)
+        sys.stdout.write(render_json(start, end, metrics, billing, reviews, figures))
+    else:
+        sys.stdout.write(render_markdown(start, end, metrics, billing, reviews))
     failed = [
         f"backlog_metrics.py: {r.name}: reading the {what} failed"
         for r in reviews
@@ -912,5 +1047,52 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 1 if failed or review_error else 0
 
 
+received: list[int] = []
+
+
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal in `received` and raise KeyboardInterrupt, so both unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
+    `uv run` forwards to a process group the terminal's SIGINT already reached.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def run() -> int | signal.Signals:
+    """Run main, returning its status, or the signal that interrupted it once the unwind ran.
+
+    The unwind stops the `gh` call in flight, since `subprocess.run` kills its child on any
+    exception. A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    """
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
+    try:
+        return main()
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
+        print(f"backlog_metrics.py: interrupted by {signum.name}.", file=sys.stderr)
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    status = run()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)
