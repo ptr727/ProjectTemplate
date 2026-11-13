@@ -3083,9 +3083,7 @@ class IntentAdvisoryCase(unittest.TestCase):
         trails = {"global.json": ("snip/global.json", dates, ["sdk.rollForward"])}
         [(level, text)] = audit.intent_findings({}, "main", trails)
         self.assertEqual(level, "DRIFT")
-        self.assertIn(
-            "holds sdk.rollForward other than the intent canonical snip/global.json", text
-        )
+        self.assertIn("differs from the intent canonical snip/global.json at sdk.rollForward", text)
         self.assertNotIn("changed later", text)
         acked = audit.intent_findings(
             {"driftNotes": ["`global.json@abc1234` (files.intent)"]}, "main", trails
@@ -3128,13 +3126,13 @@ class IntentAdvisoryCase(unittest.TestCase):
             self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x"))
 
     def test_the_finding_names_the_intent_canonical(self) -> None:
-        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)}
         findings = audit.intent_findings({}, "main", trails)
         self.assertEqual(len(findings), 1)
         self.assertIn("the intent canonical DOC.md changed later at 2020-01-01", findings[0][1])
 
     def test_an_acknowledgement_clears_the_change_it_names_and_no_other(self) -> None:
-        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)}
         cases = [
             ("the cited sha", "Verified `w.json@abc1234`, nothing to adopt (files.intent).", 0, 0),
             ("a full sha", "Verified `w.json@abc1234" + "0" * 33 + "` (files.intent).", 0, 0),

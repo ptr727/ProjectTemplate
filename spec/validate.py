@@ -1053,6 +1053,8 @@ def repo_owned_errors(path, fid, ref, owned):
     """What is wrong with a files.json unit's repoOwnedKeys, which only a JSON intent reference can carry."""
     if not (isinstance(owned, list) and owned and all(isinstance(k, str) and k for k in owned)):
         return [f"files.json: {path} repoOwnedKeys must be a non-empty array of dotted key paths"]
+    if len(set(owned)) != len(owned):
+        return [f"files.json: {path} repoOwnedKeys names a key more than once"]
     if fid != "intent" or not isinstance(ref, str) or not canonical_file_in_root(ref):
         return [f"files.json: {path} repoOwnedKeys needs fidelity 'intent' and a reference file"]
     try:

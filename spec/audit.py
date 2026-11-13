@@ -1850,7 +1850,7 @@ INTENT_ACK = re.compile(r"`([^`@]+)@([0-9a-f]{7,40})`")
 
 
 def intent_findings(entry, ground, trails):
-    """The intent advisory over `trails`, `{path: (canonical, (repo_date, hub_date, hub_sha))}`.
+    """The intent advisory over `trails`, `{path: (canonical, (repo_date, hub_date, hub_sha), differences)}`.
 
     A driftNote naming (files.intent) acknowledges a copy verified against the canonical change the
     advisory cites, as `` `<path>@<sha>` ``. It clears that copy until the canonical changes again.
@@ -1861,16 +1861,17 @@ def intent_findings(entry, ground, trails):
         for path, sha in pairs:
             acks.setdefault(path, set()).add(sha)
     used = set()
-    for path, (canonical_rel, (repo_date, hub_date, hub_sha), *rest) in sorted(trails.items()):
-        differences = rest[0] if rest else None
+    for path, (canonical_rel, (repo_date, hub_date, hub_sha), differences) in sorted(
+        trails.items()
+    ):
         hit = next((sha for sha in acks.get(path, ()) if sha[:7] == hub_sha), None)
         if hit:
             used.add((path, hit))
             continue
         if differences:
             text = (
-                f"intent: {path} on {ground} holds {', '.join(differences)} other than the intent canonical "
-                f"{canonical_rel} does, which last changed at {hub_date} ({hub_sha}), "
+                f"intent: {path} on {ground} differs from the intent canonical {canonical_rel} at "
+                f"{', '.join(differences)}, which last changed at {hub_date} ({hub_sha}), "
                 f"verify intent per AUDIT.md section 7"
             )
         else:

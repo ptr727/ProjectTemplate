@@ -463,6 +463,7 @@ class RepoOwnedKeysCase(unittest.TestCase):
         cases = [
             ("an empty list", "intent", self.SNIPPET, [], "must be a non-empty array"),
             ("a non-string key", "intent", self.SNIPPET, [1], "must be a non-empty array"),
+            ("a key twice", "intent", self.SNIPPET, ["sdk.version"] * 2, "more than once"),
             (
                 "a verbatim unit",
                 "verbatim",
