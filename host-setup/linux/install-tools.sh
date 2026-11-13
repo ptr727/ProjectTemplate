@@ -472,8 +472,9 @@ install_keyring() {
         return 1
     fi
 
-    run_root install -d -m 0755 "$KEYRING_DIR"
-    run_root install -m 0644 "$staged" "$path"
+    # A caller runs this inside an if, where errexit is off, and removes the old source once it reports a change.
+    run_root install -d -m 0755 "$KEYRING_DIR" || die "Cannot create $KEYRING_DIR"
+    run_root install -m 0644 "$staged" "$path" || die "Cannot install the keyring at $path"
     return 0
 }
 
@@ -495,7 +496,8 @@ write_sources() {
         return 0
     fi
 
-    printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null
+    # A caller runs this inside an if, where errexit is off, and removes the old source once it reports a change.
+    printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null || die "Cannot write $path"
     return 0
 }
 

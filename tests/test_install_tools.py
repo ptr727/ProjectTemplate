@@ -461,6 +461,18 @@ op_install"""
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual("REMOVE" in result.stdout.splitlines(), removed, result.stdout)
 
+    def test_a_failed_source_write_stops_before_the_old_source_goes(self) -> None:
+        body = """SUDO=()
+tee() { return 1; }
+ARCH=amd64
+if write_sources op-test-absent https://example.invalid/debian stable main /nonexistent.gpg; then
+    printf 'CHANGED\\n'
+fi"""
+        result = self.run_bash(body)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("CHANGED", result.stdout)
+        self.assertIn("Cannot write", result.stderr)
+
     def test_an_architecture_without_a_build_is_skipped_and_changes_nothing(self) -> None:
         result = self.run_bash(f"{self.RECORDING}\nARCH=i386\nop_install")
         self.assertEqual(result.returncode, 0, result.stderr)

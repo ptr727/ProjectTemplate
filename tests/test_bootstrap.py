@@ -469,12 +469,8 @@ class TestSpecCoverage(unittest.TestCase):
         """Each floored tool names a runnable remedy on every platform, or carries a recorded exception.
 
         The gate prints the remedy under a below-floor failure. A missing platform key is therefore a
-        failure that tells the operator to upgrade and not how. A remedy that hands back into an
-        installer here is also checked to name a tool that installer manages. The check makes sure
-        the command the remedy prints can actually run.
+        failure that tells the operator to upgrade and not how.
         """
-        linux_managed = self.declared_tools()
-        windows_managed = self.declared_windows_tools()
         for tool in self.spec_tools():
             name = tool["name"]
             if tool.get("minimum") is None:
@@ -498,28 +494,12 @@ class TestSpecCoverage(unittest.TestCase):
                         isinstance(command, str) and bool(command),
                         f"{name} declares a floor and no {platform} remedy, so a below-floor host there is told to upgrade and not how",
                     )
-                installer_cases = (
-                    ("linux", LINUX_INSTALLER_REMEDY, linux_managed, "install-tools.sh"),
-                    ("windows", WINDOWS_INSTALLER_REMEDY, windows_managed, "install-tools.ps1"),
-                )
-                for platform, pattern, managed, installer in installer_cases:
-                    command = remedy.get(platform)
-                    if not isinstance(command, str):
-                        continue
-                    match = pattern.match(command)
-                    if match and managed:
-                        self.assertIn(
-                            match.group(1),
-                            managed,
-                            f"{name} remedy.{platform} names {match.group(1)}, which {installer} does not manage, so the printed command fails",
-                        )
 
     def test_every_installer_remedy_names_a_managed_tool(self) -> None:
         """A remedy handing back into an installer names a tool it manages, floor or no floor.
 
-        The floor test above reads only floored entries. An entry with no floor can still carry a
-        remedy for a reader to run. A command naming a tool the installer does not know fails there
-        just the same.
+        The check makes sure the command the remedy prints can actually run. An entry with no
+        floor is read too, since it can still carry a remedy for a reader to run.
         """
         installer_cases = (
             ("linux", LINUX_INSTALLER_REMEDY, self.declared_tools(), "install-tools.sh"),
