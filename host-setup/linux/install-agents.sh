@@ -512,7 +512,7 @@ PLAN_CMD=()
 PLAN_WHY=""
 
 manager_plan() {
-    local tool="$1" path="$2" manager="$3" real name
+    local tool="$1" path="$2" manager="$3" real
     PLAN_CMD=()
     PLAN_WHY=""
     if ! real=$(tool_real_path "$path"); then
