@@ -205,7 +205,7 @@ class CarriedRelativeLinkCase(unittest.TestCase):
             validate.carried_link_errors(self.root, baseline),
             [
                 (
-                    "files.json: AUDIT.md whole file links to relative target "
+                    "files.json: snippets/AUDIT.md whole file links to relative target "
                     "'./docs/hub-only.md', which is not universally carried"
                 )
             ],
