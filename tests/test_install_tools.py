@@ -386,7 +386,11 @@ class TestLinuxDotnetSets(LinuxFunctionsCase):
         self.newer = f"dotnet-sdk-{major + 1}.0"
 
     def install(
-        self, feed: list[str], optional: bool = False, apt_install: str = 'echo "INSTALL $*"'
+        self,
+        feed: list[str],
+        optional: bool = False,
+        apt_install: str = 'echo "INSTALL $*"',
+        source: str = "distro",
     ) -> subprocess.CompletedProcess[str]:
         """Run `dotnet_install` with `feed` as the packages apt sees and `apt_install` as its body.
 
@@ -396,6 +400,7 @@ class TestLinuxDotnetSets(LinuxFunctionsCase):
         return self.run_bash(f"""
 apt_refresh() {{ :; }}
 dotnet_feed() {{ return 0; }}
+dotnet_source() {{ printf '%s' "{source}"; }}
 apt_install() {{ {apt_install}; }}
 dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
 WITH_OPTIONAL={"true" if optional else "false"}
@@ -508,11 +513,18 @@ printf '%s\\n' "${{CHANGED[@]}}"
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet}"])
 
-    def test_a_feed_without_the_fleet_line_installs_the_newest_and_carries_on(self) -> None:
+    def test_a_distro_feed_without_the_fleet_line_installs_the_newest_and_carries_on(self) -> None:
         result = self.install([self.newer])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.newer}"])
-        self.assertIn(f"carries no {self.fleet}", result.stderr)
+        self.assertIn(f"The distro feed carries no {self.fleet}", result.stderr)
+        self.assertIn("is the mixing that breaks a host", result.stderr)
+
+    def test_microsoft_s_feed_without_the_fleet_line_is_named_as_such(self) -> None:
+        result = self.install([self.newer], source="packages.microsoft.com")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"Microsoft's feed carries no {self.fleet} for debian 13", result.stderr)
+        self.assertNotIn("mixing", result.stderr)
 
     def report(self, feed: list[str], pending: str = "") -> list[str]:
         """The dotnet row's installed and target versions, then each note `tool_note` files for it.
