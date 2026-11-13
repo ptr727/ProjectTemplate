@@ -231,8 +231,9 @@ in the new tree.
   the maintainer when". The question names the
   repository's documented install command and whether the hooks pass on this platform. An install
   that fails every commit is a cost it must name. On the maintainer's yes, the agent runs that
-  command against the base clone by absolute path. One install there covers every linked worktree
-  where `core.hooksPath` is unset.
+  command against the base clone by absolute path. On a no, the task continues without the hook,
+  since that answer settles the setup the paragraph below says to fix. One install there covers
+  every linked worktree where `core.hooksPath` is unset.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The exception is that none of them may change a shared hook or setting
   from a linked worktree, per the bullet above. Do not infer a replacement command from
   the language alone.
