@@ -34,9 +34,11 @@ from __future__ import annotations
 import argparse
 import contextlib
 import functools
+import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import unicodedata
@@ -459,6 +461,30 @@ def tree_env() -> dict[str, str]:
     return git_env() | ({"GIT_INDEX_FILE": index} if index is not None else {})
 
 
+def commit_base(root: Path) -> str:
+    """What the commit in progress adds to: MERGE_HEAD in a merge, HEAD, or the empty tree.
+
+    Against HEAD, a merge reads every line its merged-in parent brought as added. So the run also
+    keeps a merge to the lines HEAD's diff names, which leaves the lines new against both parents.
+    A first commit has no HEAD, and the empty tree, hashed in the repository's own object format,
+    has nothing.
+    The format is read from the config, since a git before 2.29 has no `--show-object-format`.
+    Such a git cannot open a SHA-256 repository, so an unset format is SHA-1. Where git cannot read
+    the repository at all this returns HEAD, so the refusal names the base a commit would use.
+    """
+    env = tree_env()
+    if git_text("-C", str(root), "rev-parse", "--git-dir", env=env) is None:
+        return "HEAD"
+    for ref in ("MERGE_HEAD", "HEAD"):
+        if git_text("-C", str(root), "rev-parse", "-q", "--verify", f"{ref}^{{commit}}", env=env):
+            return ref
+    found = git_text("-C", str(root), "config", "--get", "extensions.objectFormat", env=env)
+    try:
+        return hashlib.new((found or "sha1").strip(), b"tree 0\0").hexdigest()
+    except ValueError:
+        return "HEAD"
+
+
 def checkout_provenance(script: Path) -> str:
     """The commit describing this file, `-dirty` where edited, unknown where git tracks it not."""
     env = git_env()
@@ -620,9 +646,11 @@ class Unit(NamedTuple):
     `source` is every line, and `prose` and `code` the unfenced ones. `spanless` is the unfenced
     Markdown lines with each code span's content blanked, front matter and an HTML block read
     whole. `codeless` blanks a span there too, paired one line at a time since no inline token
-    holds those lines. `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup`
-    are runs of adjacent comment lines, `doc` a documentation comment and `markup` a Markdown
-    HTML one. `docstring` opens at `column`.
+    holds those lines. `masked` is `codeless` with the content spaced rather than dropped. Each of
+    its lines keeps the line as written in `raw`, so a column in one is one character in both.
+    `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup` are runs of adjacent
+    comment lines, `doc` a documentation comment and `markup` a Markdown HTML one. `docstring`
+    opens at `column`.
     """
 
     kind: str
@@ -959,14 +987,16 @@ def blocks(kind: str, found: list[Line]) -> list[Unit]:
     return [Unit(kind, tuple(group)) for group in out]
 
 
-def line_units(kind: str, lines: list[str], skip: frozenset[int]) -> list[Unit]:
-    """The lines outside `skip`, one unit per run between skipped lines."""
+def line_units(
+    kind: str, lines: list[str], skip: frozenset[int], raws: list[str] | None = None
+) -> list[Unit]:
+    """The lines outside `skip`, one unit per run between skipped lines, `raws` naming each `raw`."""
     runs: list[list[Line]] = [[]]
     for n, text in enumerate(lines, 1):
         if n in skip:
             runs.append([])
         else:
-            runs[-1].append(Line(n, text))
+            runs[-1].append(Line(n, text, raw=raws[n - 1] if raws else ""))
     return [Unit(kind, tuple(run)) for run in runs if run]
 
 
@@ -1019,6 +1049,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
     ]
     markup: list[Line] = []
     spanless: dict[int, str] = {}
+    spaced: dict[int, str] = {}
     parents: list[str] = []
     for tok in MARKDOWN.parse("\n".join([""] * matter + lines[matter:])):
         if tok.nesting:
@@ -1041,13 +1072,9 @@ def extract_markdown(lines: list[str]) -> Extracted:
             if first not in spanless:
                 numbers = range(first, last + 1)
                 texts = [lines[n - 1] for n in numbers]
-                if parents[-1:] in (["th_open"], ["td_open"]):
-                    texts = [by_cell(text, strip_inline_code) for text in texts]
-                else:
-                    heads = [m.group() if (m := QUOTE_PREFIX.match(t)) else "" for t in texts]
-                    body = "\n".join(t[len(h) :] for t, h in zip(texts, heads, strict=True))
-                    texts = [h + t for h, t in zip(heads, strip_inline_code(body).split("\n"))]
-                spanless.update(zip(numbers, texts, strict=True))
+                cell = parents[-1:] in (["th_open"], ["td_open"])
+                for into, blank in ((spanless, strip_inline_code), (spaced, blank_code_spans)):
+                    into.update(zip(numbers, blank_inline(texts, cell, blank), strict=True))
             if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
                 paragraphs.append(
@@ -1063,10 +1090,28 @@ def extract_markdown(lines: list[str]) -> Extracted:
             [spanless.get(n, by_cell(t, strip_inline_code)) for n, t in enumerate(lines, 1)],
             skip,
         ),
+        *line_units(
+            "masked",
+            [spaced.get(n, by_cell(t, blank_code_spans)) for n, t in enumerate(lines, 1)],
+            skip,
+            lines,
+        ),
         *paragraphs,
         *blocks("markup", sorted(markup, key=lambda m: m.number)),
     ]
     return units, skip, False
+
+
+def blank_inline(texts: list[str], cell: bool, blank: Callable[[str], str]) -> list[str]:
+    """One inline token's lines blanked, a table row a cell at a time and a span across lines.
+
+    A blockquote's markers are kept out of a span wrapped across its lines.
+    """
+    if cell:
+        return [by_cell(text, blank) for text in texts]
+    heads = [m.group() if (m := QUOTE_PREFIX.match(t)) else "" for t in texts]
+    body = "\n".join(t[len(h) :] for t, h in zip(texts, heads, strict=True))
+    return [h + t for h, t in zip(heads, blank(body).split("\n"), strict=True)]
 
 
 def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
@@ -1192,7 +1237,7 @@ INDENT_BLOCK = 4
 
 def strip_inline_code(s: str) -> str:
     """The text with each code span emptied, so a span reads as one token of backticks alone."""
-    return blank_code_spans(s, keep_width=False)
+    return blank_code_spans(s, fill="")
 
 
 def strip_quoted(s: str) -> str:
@@ -1464,7 +1509,6 @@ def rule_home_path(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 # A backtick span, an inline link target, and a reference definition each assert a path.
-INLINE_SPAN = re.compile(r"`([^`\n]+)`")
 LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
 REF_DEF = re.compile(r"^\s*\[[^\]]+\]:\s+(\S+)")
 # A placeholder, a glob, an expansion, or a scheme, the colon covering URLs and drive letters.
@@ -1504,6 +1548,25 @@ def once_tracked(root: str, rel_path: str) -> bool:
     return bool((found or "").strip())
 
 
+def span_contents(raw: str, masked: str) -> list[str]:
+    """The content of each code span a line holds whole, read from `raw` where `masked` spaces it.
+
+    The two differ at every content character but a space, and a path holds none. So a differing
+    run with a backtick on either side is one span's content in full. A span wrapped across a line
+    break has no backtick on one side.
+    """
+    out: list[str] = []
+    start = -1
+    for i, (was, now) in enumerate(zip(raw + "\n", masked + "\n", strict=True)):
+        if was != now:
+            start = i if start < 0 else start
+            continue
+        if start > 0 and masked[start - 1] == "`" and now == "`":
+            out.append(raw[start:i])
+        start = -1
+    return out
+
+
 def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
     """A Markdown path git once tracked and the tree no longer holds, unless it lives elsewhere."""
     root = ctx.root or (Path(found) if (found := repo_root(ctx.path)) else None)
@@ -1513,17 +1576,15 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
     exempt = carried_paths(str(root)) | ctx.config.exempt["hub_hosted"]
     out: list[Finding] = []
     for line in unit.lines:
-        m = REF_DEF.match(line.text)
+        m = REF_DEF.match(line.raw)
         tokens = (
             [(m.group(1), False)]
             if m
-            else [(s.group(1), True) for c in row_cells(line.text) for s in INLINE_SPAN.finditer(c)]
-        )
-        if not m:
-            tokens += [
-                (t.group(1), False)
-                for t in LINK_TARGET.finditer(by_cell(line.text, strip_inline_code))
+            else [
+                *((s, True) for s in span_contents(line.raw, line.text)),
+                *((t.group(1), False) for t in LINK_TARGET.finditer(line.text)),
             ]
+        )
         for token, in_span in tokens:
             rel_path = path_candidate(token, in_span)
             if rel_path is None or (root / rel_path).exists() or (base / rel_path).exists():
@@ -1751,26 +1812,26 @@ def markdown_span(html_tag: str) -> re.Pattern[str]:
 MARKDOWN_SPAN = markdown_span(HTML_TAG_RE.pattern)
 
 
-def blank_code_spans(text: str, keep_width: bool = True) -> str:
+def blank_code_spans(text: str, fill: str = " ") -> str:
     """The text with each code span's content blanked, its backticks and line breaks kept.
 
     A span may wrap lines or open on a run of backticks, and an escaped backtick opens none.
-    Without `keep_width` the content is dropped rather than spaced, so a rule counting words reads
-    the span as one.
+    `fill` replaces each character of the content. An empty one drops the content, so a rule
+    counting words reads the span as one.
     """
 
     def blank(m: re.Match[str]) -> str:
         if not m[1]:
             return m.group()
         inner = m.group()[len(m[1]) : -len(m[1])]
-        return m[1] + re.sub(r"[^\n]", " " if keep_width else "", inner) + m[1]
+        return m[1] + re.sub(r"[^\n]", fill, inner) + m[1]
 
     return MARKDOWN_SPAN.sub(blank, text)
 
 
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
     """The text with code spans and each line's quotations blanked, a closing terminator kept."""
-    text = re.sub(CODE_SPAN, lambda m: "`" * len(m.group()), text)
+    text = blank_code_spans(text, fill="`")
     out = list(text)
     for start, length in zip(starts, lengths, strict=True):
         out[start : start + length] = re.sub(
@@ -2030,7 +2091,7 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "home-path": (rule_home_path, frozenset({"source"})),
     "charset": (rule_charset, frozenset({"spanless", "code"})),
     "charset-unknown": (rule_charset, frozenset({"spanless", "code"})),
-    "dead-path": (rule_dead_path, frozenset({"prose"})),
+    "dead-path": (rule_dead_path, frozenset({"masked"})),
     "semicolon": (rule_semicolon, frozenset({"codeless"})),
     "dash": (rule_dash, frozenset({"codeless"})),
     "dupword": (rule_dupword, frozenset({"codeless", "comment"})),
@@ -2038,6 +2099,8 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "sentence-split": (rule_sentence_split, frozenset({"codeless"})),
 }
 LINE_ORDERED = frozenset(list(RULE_TABLE)[list(RULE_TABLE).index("home-path") :])
+# The kinds a Markdown file yields a line at a time, which, like a file's own lines, need no lexer.
+MARKDOWN_LINES = frozenset({"prose", "spanless", "codeless", "masked"})
 
 
 def check_file(
@@ -2062,7 +2125,7 @@ def check_file(
         return []
     text = decoded.removeprefix(BOM)
     out = [f for f in charset_findings(1, BOM) if f[1] in rules] if text != decoded else []
-    lex = any(RULE_TABLE[r][1] - {"source", "prose", "spanless", "codeless", "code"} for r in rules)
+    lex = any(RULE_TABLE[r][1] - MARKDOWN_LINES - {"source", "code"} for r in rules)
     judged, first = at or (path, text.split("\n", 1)[0].rstrip("\r"))
     units, fenced, read_plain = extract(judged, text, lex, first)
     if read_plain and plain is not None:
@@ -2125,6 +2188,8 @@ def main(argv: list[str] | None = None) -> int:
         if callable(reconfigure := getattr(stream, "reconfigure", None)):
             reconfigure(errors="backslashreplace")
     a = argument_parser(BASE).parse_args(argv)
+    if a.diff is not None and a.diff_commit:
+        return refuse("error-diff-twice")
     rules = set(a.checks or DEFAULT_RULES)
     # Every input to a verdict is read from the repository scanned, never from the working directory.
     # TestScanRootDecidesTheRuleSet carries the cases.
@@ -2145,6 +2210,8 @@ def main(argv: list[str] | None = None) -> int:
         config_for(str(scan_root))
     except OverrideError as exc:
         return refuse("error-override", path=scan_root / OVERRIDE_NAME, why=exc)
+    if a.diff_commit:
+        a.diff = commit_base(scan_root)
     stand_downs(rules, a, scan_root, in_git)
 
     files = discover(scan_paths, tuple(a.exclude), scan_root, a.skip_generated)
@@ -2156,6 +2223,8 @@ def main(argv: list[str] | None = None) -> int:
     discovered = len(files)
     # Presence rather than truthiness, since an empty value is a base that failed to compute.
     moves: dict[str, tuple[str, str]] = {}
+    # Each moved path's sources, two where both of a merge's parents record a move to it.
+    sources: dict[str, list[tuple[str, str]]] = {}
     scope = (
         changed_lines(a.diff, scan_root, tuple(a.exclude), scan_paths, moves)
         if a.diff is not None
@@ -2163,6 +2232,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     if a.diff is not None and scope is None:
         return refuse("error-no-diff", base=a.diff)
+    if scope is not None and a.diff_commit and a.diff == "MERGE_HEAD":
+        # A merge commit adds only what differs from both parents, so the branch's own lines stay out.
+        # A move counts only where the other parent lacks the new path too, since one side may have made it.
+        our_moves: dict[str, tuple[str, str]] = {}
+        ours = changed_lines("HEAD", scan_root, tuple(a.exclude), scan_paths, our_moves)
+        if ours is None:
+            return refuse("error-no-diff", base="HEAD")
+        scope = {k: v & ours[k] for k, v in scope.items() if k in ours}
+        held = git_env()
+
+        def lacks(ref: str, key: str) -> bool:
+            return (
+                git_text("-C", str(scan_root), "cat-file", "-e", f"{ref}:{key}", env=held) is None
+            )
+
+        # Only a path left in scope is probed, since a merge brings in moves that stay out of it.
+        for recorded, other in ((moves, "HEAD"), (our_moves, "MERGE_HEAD")):
+            for k, m in recorded.items():
+                if k in scope and lacks(other, k):
+                    sources.setdefault(k, []).append(m)
+        moves = {}
+        a.diff = "MERGE_HEAD and HEAD"
+    for k, m in moves.items():
+        sources.setdefault(k, []).append(m)
     if scope is not None:
         matched = [f for f in files if keys[f] in scope]
         # A non-empty diff whose readable files the scan matched none of failed to scope.
@@ -2182,14 +2275,12 @@ def main(argv: list[str] | None = None) -> int:
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
         findings = check_file(f, rules, scan_root, allowed, plain, undecoded)
-        # A moved file reports what its new path finds beyond what the old one did, not the backlog.
-        source, opener = moves.get(keys[f], ("", ""))
-        added = (
-            Counter(findings)
-            - Counter(check_file(f, rules, scan_root, allowed, at=(scan_root / source, opener)))
-            if keys[f] in moves
-            else Counter()
-        )
+        # A moved file reports what its new path finds beyond what each old one did, not the backlog.
+        added = Counter(findings) if keys[f] in sources else Counter()
+        for source, opener in sources.get(keys[f], []):
+            added -= Counter(
+                check_file(f, rules, scan_root, allowed, at=(scan_root / source, opener))
+            )
         for found in findings:
             ln, kind, msg = found
             if allowed is not None and ln not in allowed:
@@ -2215,5 +2306,50 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if total else 0
 
 
+# The first signal the handler took, where one interrupted the run.
+received: list[int] = []
+
+
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
+    `uv run` forwards to a process group the terminal's SIGINT already reached.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def run() -> int | signal.Signals:
+    """Run main, returning its status, or the signal that interrupted it once its cleanup ran."""
+    signal.signal(signal.SIGTERM, on_signal)
+    # A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
+    try:
+        return main()
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[-1] if received else signal.SIGINT)
+        print(f"prose_lint.py: interrupted by {signum.name}.", file=sys.stderr)
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    status = run()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)

@@ -33,7 +33,7 @@ repos:
         pass_filenames: false
       - id: prose-gate
         name: prose/comment-style gate (diff-scoped, fetched fresh from ProjectTemplate@main)
-        entry: uv run --no-project python hub_fetch_run.py .github/actions/prose-gate/prose_lint.py --skip-generated --diff HEAD --
+        entry: uv run --no-project python hub_fetch_run.py .github/actions/prose-gate/prose_lint.py --skip-generated --diff-commit --
         language: system
         require_serial: true
       - id: eol-gate

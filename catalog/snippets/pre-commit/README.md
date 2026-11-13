@@ -12,8 +12,10 @@ invocation for the lint-only profile (`CODESTYLE.md` "Two profiles"). A repo on 
 profile with a `uv.lock` may swap in `uv run <tool>` per entry to pin the project's own
 version instead. The config also runs the same two shared doc gates the Husky.Net snippet
 carries: the diff-scoped prose/comment-style gate and the whole-tree line-ending check. Those two
-are what every repo owes regardless of language. The prose gate's `--diff HEAD` sees the staged
-state under this runner rather than the working tree.
+are what every repo owes regardless of language. The prose gate's `--diff-commit` diffs against
+`HEAD`, or against both parents on a merge commit, so no line either parent brought reads as
+added. The gate itself chooses that base, so the hook's `entry` stays one command line on every
+host. It sees the staged state under this runner rather than the working tree.
 This is because `pre-commit` sets unstaged changes aside before it runs a hook.
 So a partially staged file is judged on its staged edits alone here, where
 the Husky.Net shape judges all of them. That set-aside covers tracked files only. So the gate

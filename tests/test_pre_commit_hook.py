@@ -9,7 +9,9 @@ runs the local prose gate rather than fetching one, so a case measures the hook 
 Every case runs against both hooks, the snippet's classes subclassing the hub's.
 
 A hook holds a temporary file for the path list. So its cases also check that the file is gone
-after a normal end, a failed list, and an interrupt.
+after a normal end, a failed list, and an interrupt. An interrupt also has to stop the tool the
+hook is running and end the hook by the signal itself. The hub's `.husky/pre-push` holds a child
+too, the review engine, so its interrupt cases are here beside them.
 
 The fixture isolates git's global and system configuration. So a host with commit signing on or a
 hooks path of its own cannot change what a case measures.
@@ -31,6 +33,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 HUB_HOOK = REPO / ".husky" / "pre-commit"
+PRE_PUSH_HOOK = REPO / ".husky" / "pre-push"
 SNIPPET_HOOK = REPO / "catalog" / "snippets" / "husky" / "pre-commit"
 GATE = REPO / ".github" / "actions" / "prose-gate" / "prose_lint.py"
 
@@ -41,6 +44,36 @@ WAIT_SECONDS = 120
 def write_executable(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
     path.chmod(0o755)
+
+
+def wait_until_started(proc: subprocess.Popen[str], ready: Path) -> None:
+    """Wait for a stub to mark itself started, failing if the hook ends first or never gets there."""
+    deadline = time.monotonic() + WAIT_SECONDS
+    while not ready.exists():
+        if proc.poll() is not None or time.monotonic() > deadline:
+            raise AssertionError("the blocking stub never started")
+        time.sleep(0.05)
+
+
+def assert_group_ended(pgid: int) -> None:
+    """Every process the hook started is gone, which a survivor would fail by holding the group."""
+    deadline = time.monotonic() + WAIT_SECONDS
+    while True:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return
+        if time.monotonic() > deadline:
+            os.killpg(pgid, signal.SIGKILL)
+            raise AssertionError("a process the hook started outlived it")
+        time.sleep(0.05)
+
+
+def end_group(proc: subprocess.Popen[str]) -> None:
+    """Kill what is left of a hook's process group, so a failed case leaves nothing running."""
+    if proc.poll() is None:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.communicate(timeout=WAIT_SECONDS)
 
 
 @unittest.skipUnless(sys.platform == "linux", "runs a POSIX shell hook with executable stubs")
@@ -148,7 +181,7 @@ class HookCase(unittest.TestCase):
         self.assertEqual([], sorted(p.name for p in self.tmp.glob("tmp.*")))
 
 
-class TestTheHookDiffsAMergeAgainstItsMergedInParent(HookCase):
+class TestTheHookDiffsAMergeAgainstBothParents(HookCase):
     """A merge of develop brings in lines the branch never wrote, and the hook must not read them.
 
     Measured against `HEAD`, every line develop gained since the fork reads as added. So a comment
@@ -329,11 +362,19 @@ class TestTheHookRefusesWhenItsPathListFails(HookCase):
 
 
 class TestTheHookCleansUpWhenInterrupted(HookCase):
-    """An interrupt while the gate runs removes the list file and ends with the signal's status.
+    """An interrupt while the gate runs removes the list file and ends the hook by the signal.
 
     The gate is a stub that marks itself started and then sleeps, so the signal lands while the
     hook holds the file. The whole process group takes the signal, as a terminal's Ctrl-C sends it.
+    A hook that exits 130 or 143 instead has not died by the signal, so a calling loop runs on.
     """
+
+    def block_last_step(self, ready: Path) -> None:
+        """Make the eol step, the one the hook starts in the background, mark itself and sleep."""
+        (self.root / "scripts" / "repo_gate.py").write_text(
+            f"import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep({WAIT_SECONDS})\n",
+            encoding="utf-8",
+        )
 
     def interrupt(self, sig: signal.Signals) -> tuple[int, str]:
         ready = self.outside / "gate-started"
@@ -360,49 +401,66 @@ class TestTheHookCleansUpWhenInterrupted(HookCase):
             start_new_session=True,
         )
         try:
-            deadline = time.monotonic() + WAIT_SECONDS
-            while not ready.exists():
-                if hook.poll() is not None or time.monotonic() > deadline:
-                    raise AssertionError("the gate stub never started")
-                time.sleep(0.05)
+            wait_until_started(hook, ready)
             self.assertNotEqual([], list(self.tmp.glob("tmp.*")), "the hook holds no list file")
             os.killpg(hook.pid, sig)
             _, stderr = hook.communicate(timeout=WAIT_SECONDS)
-            self.assert_group_ended(hook.pid)
+            assert_group_ended(hook.pid)
         finally:
-            if hook.poll() is None:
-                os.killpg(hook.pid, signal.SIGKILL)
-                hook.communicate(timeout=WAIT_SECONDS)
+            end_group(hook)
         return hook.returncode, stderr
 
-    def assert_group_ended(self, pgid: int) -> None:
-        deadline = time.monotonic() + WAIT_SECONDS
-        while True:
-            try:
-                os.killpg(pgid, 0)
-            except ProcessLookupError:
-                return
-            if time.monotonic() > deadline:
-                os.killpg(pgid, signal.SIGKILL)
-                raise AssertionError("a process the hook started outlived it")
-            time.sleep(0.05)
+    def interrupt_the_hook_alone(self, sig: signal.Signals) -> tuple[int, str]:
+        """Signal the hook's own process while its background step runs, as a `kill` of one PID does.
 
-    def test_sigint_removes_the_list_file_and_exits_130(self) -> None:
+        The step takes no signal of its own here, so only the hook's trap can stop it. Under
+        Husky.Net the hook runs as the inner shell its generated `husky.sh` starts, which is the
+        shell this case signals.
+        """
+        ready = self.outside / "step-started"
+        ready.unlink(missing_ok=True)
+        self.block_last_step(ready)
+        hook = subprocess.Popen(
+            ["sh", ".husky/pre-commit"],
+            cwd=str(self.root),
+            env=self.env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            start_new_session=True,
+        )
+        try:
+            wait_until_started(hook, ready)
+            os.kill(hook.pid, sig)
+            _, stderr = hook.communicate(timeout=WAIT_SECONDS)
+            assert_group_ended(hook.pid)
+        finally:
+            end_group(hook)
+        return hook.returncode, stderr
+
+    def test_sigint_removes_the_list_file_and_dies_by_the_signal(self) -> None:
         status, stderr = self.interrupt(signal.SIGINT)
-        self.assertEqual(130, status, stderr)
+        self.assertEqual(-signal.SIGINT, status, stderr)
         self.assertIn("pre-commit: interrupted by SIGINT.", stderr)
         self.assertEqual([], list(self.tmp.iterdir()))
 
-    def test_sigterm_removes_the_list_file_and_exits_143(self) -> None:
+    def test_sigterm_removes_the_list_file_and_dies_by_the_signal(self) -> None:
         status, stderr = self.interrupt(signal.SIGTERM)
-        self.assertEqual(143, status, stderr)
+        self.assertEqual(-signal.SIGTERM, status, stderr)
         self.assertIn("pre-commit: interrupted by SIGTERM.", stderr)
         self.assertEqual([], list(self.tmp.iterdir()))
 
+    def test_a_signal_to_the_hook_alone_stops_the_step_it_runs(self) -> None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=sig.name):
+                status, stderr = self.interrupt_the_hook_alone(sig)
+                self.assertEqual(-sig, status, stderr)
+                self.assertIn(f"pre-commit: interrupted by {sig.name}.", stderr)
+                self.assertEqual([], list(self.tmp.iterdir()))
 
-class TestTheSnippetDiffsAMergeAgainstItsMergedInParent(
-    TestTheHookDiffsAMergeAgainstItsMergedInParent
-):
+
+class TestTheSnippetDiffsAMergeAgainstBothParents(TestTheHookDiffsAMergeAgainstBothParents):
     hook = SNIPPET_HOOK
 
 
@@ -416,6 +474,101 @@ class TestTheSnippetRefusesWhenItsPathListFails(TestTheHookRefusesWhenItsPathLis
 
 class TestTheSnippetCleansUpWhenInterrupted(TestTheHookCleansUpWhenInterrupted):
     hook = SNIPPET_HOOK
+
+    def block_last_step(self, ready: Path) -> None:
+        """Make the helper block on the eol step, the one the snippet starts in the background."""
+        (self.root / "hub_fetch_run.py").write_text(
+            f"import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep({WAIT_SECONDS})\n",
+            encoding="utf-8",
+        )
+
+
+@unittest.skipUnless(sys.platform == "linux", "runs a bash hook with executable stubs")
+class TestThePrePushHookStopsTheEngineWhenInterrupted(unittest.TestCase):
+    """An interrupt while the review engine runs stops it and ends the push hook by the signal.
+
+    The engine is a stub that marks itself started and then sleeps. The hook starts it in the
+    background, which leaves it ignoring SIGINT, so only the hook's trap can stop it.
+    """
+
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.ready = self.outside / "engine-started"
+        empty = self.outside / "empty-gitconfig"
+        empty.write_text("", encoding="utf-8")
+        self.env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+        self.env["GIT_CONFIG_GLOBAL"] = str(empty)
+        self.env["GIT_CONFIG_SYSTEM"] = str(empty)
+        files = {
+            "spec/host-tools.json": '{"tools": [{"name": "python3", "minimum": "3.0"}]}\n',
+            "scripts/local_review.py": (
+                f"import pathlib, time\npathlib.Path({str(self.ready)!r}).touch()\n"
+                f"time.sleep({WAIT_SECONDS})\n"
+            ),
+        }
+        for name, text in files.items():
+            (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / name).write_text(text, encoding="utf-8")
+        (self.root / ".husky").mkdir()
+        shutil.copy2(PRE_PUSH_HOOK, self.root / ".husky" / "pre-push")
+        identity = ("-c", "user.email=test@example.invalid", "-c", "user.name=Test")
+        self.git("init", "-q", "--initial-branch=develop", ".")
+        self.git("add", "-A")
+        self.git(*identity, "-c", "commit.gpgsign=false", "commit", "-q", "--no-verify", "-m", "a")
+        self.head = self.git("rev-parse", "HEAD").strip()
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(self.root),
+            env=self.env,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=WAIT_SECONDS,
+        ).stdout
+
+    def interrupt(self, sig: signal.Signals, group: bool) -> tuple[int, str]:
+        """Push one branch at HEAD, which the hook passes on to the engine, then signal it."""
+        updates = self.outside / "updates"
+        updates.write_text(
+            f"refs/heads/develop {self.head} refs/heads/develop {'0' * len(self.head)}\n",
+            encoding="utf-8",
+        )
+        with updates.open(encoding="utf-8") as stdin:
+            hook = subprocess.Popen(
+                ["bash", ".husky/pre-push", "origin", "https://example.invalid/repo.git"],
+                cwd=str(self.root),
+                env=self.env,
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                start_new_session=True,
+            )
+        try:
+            wait_until_started(hook, self.ready)
+            if group:
+                os.killpg(hook.pid, sig)
+            else:
+                os.kill(hook.pid, sig)
+            _, stderr = hook.communicate(timeout=WAIT_SECONDS)
+            assert_group_ended(hook.pid)
+        finally:
+            end_group(hook)
+        return hook.returncode, stderr
+
+    def test_a_signal_stops_the_engine_and_ends_the_hook_by_it(self) -> None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            for group in (True, False):
+                with self.subTest(signal=sig.name, group=group):
+                    self.ready.unlink(missing_ok=True)
+                    status, stderr = self.interrupt(sig, group)
+                    self.assertEqual(-sig, status, stderr)
+                    self.assertIn(f"pre-push: interrupted by {sig.name}.", stderr)
 
 
 if __name__ == "__main__":
