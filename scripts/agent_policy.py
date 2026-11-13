@@ -16,10 +16,9 @@ The libraries behind `write` and `check` are imported inside those subcommands.
 So `render`, `facts` and `rulesets` run, and spec/validate.py imports `render`, with the standard library alone.
 
 Trusted inputs, all maintainer-controlled: the registry, `spec/agent-policy.default.json`, the `--checkout` tree and its `origin`, and the target repository's default-branch files that `check` reads.
-So the script adds no guard for these cases.
-Out of scope are a symlinked write target and an origin on another host.
-So are an inherited `GIT_DIR` or `GIT_CONFIG*`, and a bot file whose sections are not a mapping or table.
-A malformed trusted file fails loudly with a nonzero exit, and the script does not repair it or work around it.
+A trusted file that does not parse fails loudly with a nonzero exit, and the script does not repair it or work around it.
+The script adds no guard for a symlinked write target or an origin on another host.
+It adds none for an inherited `GIT_DIR` or `GIT_CONFIG*`, or for a wrong-shaped bot file read by `check`.
 GOVERNANCE.md "Trust Boundaries and Hardening Effort" and OPERATIONS.md "Configuration Layout" state the boundary.
 
 Exit codes: 0 ok, 1 a refusal, drift or a missing file, 2 the command could not run.
