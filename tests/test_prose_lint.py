@@ -8399,6 +8399,16 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         self.assertIn("diff against '4b825dc642cb6eb9a060e54bf8d69288fbee4904'", said)
         self.assertIn("tool.py:1: comment-added", said)
 
+    def test_a_first_commit_in_a_sha256_repository_hashes_its_own_empty_tree(self) -> None:
+        self.git("init", "-q", "--object-format=sha256", "-b", "develop", str(self.root / "wide"))
+        self.root = self.root / "wide"
+        self.write("tool.py", self.COMMENT + "value = 1\n")
+        self.git("add", "-A")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(1, status, said)
+        empty = "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"
+        self.assertIn(f"diff against '{empty}'", said)
+
     def test_a_base_named_beside_it_is_refused(self) -> None:
         self.write("tool.py", "value = 1\n")
         status, said = self.gate("--diff-commit", "--diff", "HEAD")

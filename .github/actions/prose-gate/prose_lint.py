@@ -466,15 +466,16 @@ def commit_base(root: Path) -> str:
 
     Against HEAD, a merge reads every line its merged-in parent brought as added. A first commit
     has no HEAD, and the empty tree, hashed in the repository's own object format, has nothing.
-    Where git cannot read the repository this returns HEAD, so the diff refuses rather than guess.
+    The format is read from the config, since a git before 2.29 has no `--show-object-format`.
+    Such a git cannot open a SHA-256 repository, so an unset format is SHA-1.
     """
     env = tree_env()
     for ref in ("MERGE_HEAD", "HEAD"):
         if git_text("-C", str(root), "rev-parse", "-q", "--verify", f"{ref}^{{commit}}", env=env):
             return ref
-    found = git_text("-C", str(root), "rev-parse", "--show-object-format", env=env)
+    found = git_text("-C", str(root), "config", "--get", "extensions.objectFormat", env=env)
     try:
-        return hashlib.new((found or "").strip(), b"tree 0\0").hexdigest()
+        return hashlib.new((found or "sha1").strip(), b"tree 0\0").hexdigest()
     except ValueError:
         return "HEAD"
 
