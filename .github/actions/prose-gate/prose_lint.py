@@ -1036,9 +1036,9 @@ def extract_markdown(lines: list[str]) -> Extracted:
             numbers = range(first, last + 1)
             texts = [spanless.get(n, lines[n - 1]) for n in numbers]
             if parents[-1:] in (["th_open"], ["td_open"]):
-                texts = [by_cell(text, blank_code_spans) for text in texts]
+                texts = [by_cell(text, strip_inline_code) for text in texts]
             else:
-                texts = blank_code_spans("\n".join(texts)).split("\n")
+                texts = strip_inline_code("\n".join(texts)).split("\n")
             spanless.update(zip(numbers, texts, strict=True))
             if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
@@ -1183,7 +1183,8 @@ INDENT_BLOCK = 4
 
 
 def strip_inline_code(s: str) -> str:
-    return re.sub(r"`[^`]*`", "``", s)
+    """The text with each code span emptied, so a span reads as one token of backticks alone."""
+    return blank_code_spans(s, keep_width=False)
 
 
 def strip_quoted(s: str) -> str:
@@ -1742,17 +1743,19 @@ def markdown_span(html_tag: str) -> re.Pattern[str]:
 MARKDOWN_SPAN = markdown_span(HTML_TAG_RE.pattern)
 
 
-def blank_code_spans(text: str) -> str:
+def blank_code_spans(text: str, keep_width: bool = True) -> str:
     """The text with each code span's content blanked, its backticks and line breaks kept.
 
     A span may wrap lines or open on a run of backticks, and an escaped backtick opens none.
+    Without `keep_width` the content is dropped rather than spaced, so a rule counting words reads
+    the span as one.
     """
 
     def blank(m: re.Match[str]) -> str:
         if not m[1]:
             return m.group()
         inner = m.group()[len(m[1]) : -len(m[1])]
-        return m[1] + re.sub(r"[^\n]", " ", inner) + m[1]
+        return m[1] + re.sub(r"[^\n]", " " if keep_width else "", inner) + m[1]
 
     return MARKDOWN_SPAN.sub(blank, text)
 

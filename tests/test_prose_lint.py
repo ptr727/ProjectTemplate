@@ -683,6 +683,20 @@ class TestSemicolonRule(BaitCase):
         text = "See `git remote\nget-url` then - it runs, then `x`.\n"
         self.assertEqual(["dash"], self.kinds(text, {"dash"}))
 
+    def test_a_code_span_in_a_label_reads_as_one_word(self) -> None:
+        """A blanked span counts as one label word, so a three-word label keeps its exemption."""
+        for text in (
+            "Inputs: a, b, and c; `out` read paths: d and e.\n",
+            "Inputs: a, b, and c; ``out`` read paths: d and e.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_a_double_backtick_span_outside_an_inline_token_hides_its_code(self) -> None:
+        """Front matter pairs a span line by line with the same pattern, a backtick run included."""
+        text = "---\ndescription: Run ``a;b c`` or ``a; b`` first.\n---\n\nBody.\n"
+        self.assertEqual([], self.kinds(text, {"semicolon"}))
+
     def test_a_code_span_outside_an_inline_token_still_hides_its_code(self) -> None:
         """Front matter and an HTML block hold code the prose rules skip, paired line by line."""
         for text in (
