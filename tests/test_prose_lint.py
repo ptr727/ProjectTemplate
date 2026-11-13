@@ -8362,7 +8362,7 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         self.merge_in_progress()
         status, said = self.gate("--diff-commit")
         self.assertEqual(0, status, said)
-        self.assertIn("diff against 'MERGE_HEAD'", said)
+        self.assertIn("diff against 'MERGE_HEAD and HEAD'", said)
 
     def test_head_would_read_the_merged_in_comment_as_added(self) -> None:
         """The defect itself, so the case above is known to stand on a base that would bite."""

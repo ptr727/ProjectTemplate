@@ -2229,10 +2229,14 @@ def main(argv: list[str] | None = None) -> int:
         return refuse("error-no-diff", base=a.diff)
     if scope is not None and a.diff_commit and a.diff == "MERGE_HEAD":
         # A merge commit adds only what differs from both parents, so the branch's own lines stay out.
-        ours = changed_lines("HEAD", scan_root, tuple(a.exclude), scan_paths, {})
+        # A move counts only where both diffs record it, since the branch alone may have made it.
+        our_moves: dict[str, tuple[str, str]] = {}
+        ours = changed_lines("HEAD", scan_root, tuple(a.exclude), scan_paths, our_moves)
         if ours is None:
             return refuse("error-no-diff", base="HEAD")
-        scope = {k: v & ours[k] for k, v in scope.items() if k in ours and v & ours[k]}
+        scope = {k: v & ours[k] for k, v in scope.items() if k in ours}
+        moves = {k: m for k, m in moves.items() if k in our_moves}
+        a.diff = "MERGE_HEAD and HEAD"
     if scope is not None:
         matched = [f for f in files if keys[f] in scope]
         # A non-empty diff whose readable files the scan matched none of failed to scope.
