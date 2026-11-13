@@ -55,10 +55,13 @@ RESERVED = frozenset(
         "PRN",
         "AUX",
         "NUL",
+        "CONIN$",
+        "CONOUT$",
         *(f"COM{n}" for n in range(1, 10)),
         *(f"LPT{n}" for n in range(1, 10)),
     }
 )
+WINDOWS_FORBIDDEN = frozenset('\\:<>"|?*')
 SECRETS_DIR = ".secrets"
 TEMP_PREFIX = ".secrets-sync-"
 HASH_SHOWN = 8
@@ -204,17 +207,20 @@ def refuse_root() -> None:
         )
 
 
-def parse_session(out: bytes) -> tuple[str, str]:
+def parse_session(out: bytes) -> tuple[str, str] | None:
     """The one variable assignment `op signin` prints, in its POSIX or its PowerShell form.
 
     The variable's name is read rather than assumed, since `op` derives it from the account.
+    None means no assignment, the output of a sign-in the desktop app holds instead.
     """
     try:
         text = out.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise Execution("op signin printed output that is not UTF-8") from exc
     found = [m for line in text.splitlines() if (m := SESSION_LINE.fullmatch(line))]
-    if len(found) != 1:
+    if not found:
+        return None
+    if len(found) > 1:
         raise Execution(
             f"op signin printed {len(found)} session assignment(s) where one was expected"
         )
@@ -249,20 +255,34 @@ def session(op: Op) -> Iterator[None]:
     signin = run_op(op.argv(["signin"]), op.env(), attached=True)
     if signin.returncode != 0:
         raise Execution(f"op signin failed rc={signin.returncode}")
+    try:
+        parsed = parse_session(signin.stdout)
+    except Execution:
+        signout(op)
+        raise
+    if parsed is None:
+        if op.probe(["whoami"]).returncode != 0:
+            raise Execution("op signin printed no session assignment, and op whoami still refuses")
+        yield
+        return
+    op.session = {parsed[0]: parsed[1]}
     op.created = True
     try:
-        name, value = parse_session(signin.stdout)
-        op.session = {name: value}
         if op.probe(["whoami"]).returncode != 0:
             raise Execution("op whoami does not accept the session op signin printed")
         yield
     finally:
-        signout = run_op(op.argv(["signout"]), op.env(), attached=False)
-        if signout.returncode != 0:
-            report_stderr(signout.stderr)
-            sys.stderr.write(
-                f"warning: op signout failed rc={signout.returncode}, so the session stays valid until it idles out\n"
-            )
+        signout(op)
+
+
+def signout(op: Op) -> None:
+    """Sign out a session this run created, reporting a failure rather than hiding it."""
+    result = run_op(op.argv(["signout"]), op.env(), attached=False)
+    if result.returncode != 0:
+        report_stderr(result.stderr)
+        sys.stderr.write(
+            f"warning: op signout failed rc={result.returncode}, so the session stays valid until it idles out\n"
+        )
 
 
 def recheck(op: Op) -> None:
@@ -296,8 +316,8 @@ def validate_title(title: str) -> str:
         raise Refusal(f"item title {title!r} carries a control character")
     if title.startswith("/"):
         raise Refusal(f"item title {title!r} is an absolute path")
-    if "\\" in title or ":" in title:
-        raise Refusal(f"item title {title!r} carries a backslash or a colon")
+    if any(c in WINDOWS_FORBIDDEN for c in title):
+        raise Refusal(f"item title {title!r} carries a character Windows forbids in a name")
     for part in title.split("/"):
         if part in {"", ".", ".."}:
             raise Refusal(f"item title {title!r} has an empty, '.', or '..' component")
@@ -313,11 +333,23 @@ def local_path(home: Path, title: str) -> Path:
 
 
 def title_for(home: Path, raw: str) -> str:
+    """The title for a path under the home directory, spelled as the directory spells it.
+
+    A case-insensitive file system finds a file under a miscased path, so the title would carry
+    that case. A case-sensitive host then writes it where no consumer reads.
+    """
     absolute = Path(os.path.abspath(raw))
     try:
         relative = absolute.relative_to(home)
     except ValueError as exc:
         raise Refusal(f"{raw} is not under the home directory {home}") from exc
+    current = home
+    for part in relative.parts:
+        if current.is_dir():
+            names = os.listdir(current)
+            if part not in names and any(n.casefold() == part.casefold() for n in names):
+                raise Refusal(f"{raw} differs in case from the name under {current}")
+        current = current / part
     return validate_title(relative.as_posix())
 
 
@@ -466,12 +498,15 @@ def download(op: Op, vault: Vault, item: Item) -> bytes:
 def read_local(path: Path) -> Local:
     try:
         st = os.lstat(path)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refusal(f"{path} is not a regular file")
+        data = path.read_bytes()
     except FileNotFoundError:
         return Local(None, None, None)
-    if not stat.S_ISREG(st.st_mode):
-        raise Refusal(f"{path} is not a regular file")
+    except OSError as exc:
+        raise Refusal(f"{path} cannot be read: {exc.strerror or type(exc).__name__}") from exc
     moment = datetime.datetime.fromtimestamp(st.st_mtime, tz=datetime.UTC)
-    return Local(path.read_bytes(), stat.S_IMODE(st.st_mode), moment)
+    return Local(data, stat.S_IMODE(st.st_mode), moment)
 
 
 def selected(
@@ -518,6 +553,17 @@ def compare(local: Local, remote: bytes, mode: int | None) -> str:
     return "same"
 
 
+def inspect(
+    op: Op, home: Path, vault: Vault, title: str, item: Item
+) -> tuple[Local, bytes, int | None, str]:
+    """One item's local and remote copies and their state, as `status` and `pull` both judge it."""
+    mode = None if IS_WINDOWS else mode_of(item)
+    refuse_symlinks(home, title)
+    local = read_local(local_path(home, title))
+    remote = download(op, vault, item)
+    return local, remote, mode, compare(local, remote, mode)
+
+
 def cmd_status(a: argparse.Namespace, op: Op) -> int:
     home = home_dir()
     vaults = list_vaults(op)
@@ -525,28 +571,18 @@ def cmd_status(a: argparse.Namespace, op: Op) -> int:
         for vault, items in selected(op, vaults, a.bucket):
             print(f"{vault.name}:")
             for title, item in sorted(items.items()):
-                mode = None if IS_WINDOWS else mode_of(item)
-                refuse_symlinks(home, title)
-                local = read_local(local_path(home, title))
-                remote = download(op, vault, item)
-                state = compare(local, remote, mode)
+                local, remote, _, state = inspect(op, home, vault, title, item)
                 print(f"  {state:<12} {title}  remote {short(remote)}  local {short(local.data)}")
         return 0
-    names = [v.name for v in vaults if v.name.startswith(VAULT_PREFIX)]
-    for name in sorted(set(names)):
-        if names.count(name) > 1:
-            raise Refusal(
-                f"{names.count(name)} vaults are named {name!r}, so which one holds the bucket is ambiguous"
-            )
     held: set[str] = set()
-    for vault in sorted(
-        (v for v in vaults if v.name.startswith(VAULT_PREFIX)), key=lambda v: v.name
-    ):
-        if not BUCKET.fullmatch(vault.name[len(VAULT_PREFIX) :]):
-            print(f"{vault.name}: not a bucket name, skipped")
+    for name in sorted({v.name for v in vaults if v.name.startswith(VAULT_PREFIX)}):
+        bucket = name[len(VAULT_PREFIX) :]
+        found = find_vault(vaults, bucket) if BUCKET.fullmatch(bucket) else None
+        if found is None:
+            print(f"{name}: not a bucket name, skipped")
             continue
-        items = members(op, vault)
-        print(f"{vault.name}:")
+        items = members(op, found)
+        print(f"{found.name}:")
         for title in sorted(items):
             there = "present" if os.path.lexists(local_path(home, title)) else "absent"
             print(f"  {there:<8} {title}")
@@ -701,10 +737,6 @@ def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
 
 def push_one(op: Op, vault: Vault, plan: Plan) -> None:
     assert plan.mode is not None
-    if not op.dry_run and plan.path.read_bytes() != plan.local.data:
-        raise Refusal(
-            f"{plan.title} changed after the plan was printed, so nothing more was pushed"
-        )
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
@@ -769,7 +801,7 @@ def cmd_push(a: argparse.Namespace, op: Op) -> int:
 
 
 def check_restore_home(home: Path) -> None:
-    """Refuse a restore root that is absent, a link, not a directory, or readable by others."""
+    """Refuse a restore root that is absent, a link, not a directory, or not exactly mode 0700."""
     try:
         st = os.lstat(home)
     except FileNotFoundError as exc:
@@ -789,8 +821,6 @@ def ensure_parents(home: Path, title: str) -> None:
         current = current / part
         if not current.exists():
             os.mkdir(current, 0o700)
-        elif not current.is_dir():
-            raise Refusal(f"{title}: {current} is not a directory")
 
 
 def write_secret(path: Path, data: bytes, mode: int | None) -> None:
@@ -823,12 +853,8 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
     plans: list[Plan] = []
     for vault, items in selected(op, list_vaults(op), a.bucket):
         for title, item in sorted(items.items()):
-            mode = None if IS_WINDOWS else mode_of(item)
-            refuse_symlinks(home, title)
+            local, remote, mode, state = inspect(op, home, vault, title, item)
             path = local_path(home, title)
-            local = read_local(path)
-            remote = download(op, vault, item)
-            state = compare(local, remote, mode)
             if state == "same":
                 print(f"  same      {title}")
                 continue
@@ -853,7 +879,6 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         )
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
-        refuse_symlinks(home, plan.title)
         if read_local(plan.path) != plan.local:
             raise Refusal(
                 f"{plan.title} changed locally after the plan was printed, so it was not written"
@@ -1051,7 +1076,6 @@ def cmd_selftest(a: argparse.Namespace, op: Op) -> int:
             raise Execution(f"{name} is not listed after op vault create")
         selftest_cases(op, vault, scratch, results)
     finally:
-        shutil.rmtree(scratch)
         if vault is not None:
             deleted = op.probe(["vault", "delete", vault.id])
             if deleted.returncode != 0:
@@ -1059,6 +1083,7 @@ def cmd_selftest(a: argparse.Namespace, op: Op) -> int:
                 sys.stderr.write(
                     f"warning: op vault delete failed rc={deleted.returncode}, so delete {name} by hand\n"
                 )
+        shutil.rmtree(scratch)
         for result in results:
             verdict = {True: "holds", False: "FAILS", None: "measured"}[result.holds]
             print(f"  {verdict:<9} {result.name}: {result.detail}")

@@ -83,6 +83,9 @@ class FakeOp:
         self.merge_tags = False
         self.archive_noop = False
         self.omit_updated = False
+        self.signin_ambient = False
+        self.drop_create = False
+        self.raw: dict[tuple[str, ...], bytes] = {}
 
     def add_vault(self, name: str) -> str:
         vid = f"v{next(self.ids)}"
@@ -128,6 +131,8 @@ class FakeOp:
             raise self.raise_on[key]
         if key in self.fail_before:
             return FAILED
+        if key in self.raw:
+            return ss.Outcome(0, self.raw[key], b"")
         result = self.dispatch(key, argv, env)
         return FAILED if key in self.fail_after else result
 
@@ -142,6 +147,7 @@ class FakeOp:
             return ok(b"constructed-user") if self.ambient or signed_in else FAILED
         if key == ("signin",):
             self.token = self.signin_token
+            self.ambient = self.ambient or self.signin_ambient
             return ok(self.signin_output)
         if key == ("signout",):
             self.token = None
@@ -171,6 +177,8 @@ class FakeOp:
                     row["tags"] = list(tags) if isinstance(tags, tuple) else tags
                 rows.append(row)
             return ok(json.dumps(rows).encode())
+        if key == ("document", "create") and self.drop_create:
+            return ok()
         if key == ("document", "create"):
             tags = opt(argv, "--tags").split(",") if "--tags" in argv else []
             self.add_item(
@@ -303,7 +311,10 @@ class TestSession(Case):
         ):
             with self.subTest(text=text):
                 self.assertEqual(ss.parse_session(text), expected)
-        for text in (b"", b"no assignment here\n", b'export A="1"\nexport B="2"\n', b"\xff\xfe"):
+        for text in (b"", b"no assignment here\n"):
+            with self.subTest(text=text):
+                self.assertIsNone(ss.parse_session(text))
+        for text in (b'export A="1"\nexport B="2"\n', b"\xff\xfe"):
             with self.subTest(text=text), self.assertRaises(ss.Execution):
                 ss.parse_session(text)
 
@@ -379,11 +390,27 @@ class TestSession(Case):
 
     def test_signin_output_that_does_not_parse_is_still_signed_out(self) -> None:
         self.fake.ambient = False
-        self.fake.signin_output = b"constructed output with no assignment\n"
+        self.fake.signin_output = b'export A="constructed-1"\nexport B="constructed-2"\n'
         code, _, err = self.run_main("status")
         self.assertEqual(code, 2)
         self.assertIn("session assignment", err)
         self.assertEqual(self.fake.keys()[-1], ("signout",))
+
+    def test_a_signin_the_desktop_app_holds_is_used_and_not_signed_out(self) -> None:
+        self.fake.ambient = False
+        self.fake.signin_output = b""
+        self.fake.signin_ambient = True
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn(("signout",), self.fake.keys())
+
+    def test_a_signin_printing_nothing_that_whoami_still_refuses_fails(self) -> None:
+        self.fake.ambient = False
+        self.fake.signin_output = b""
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 2)
+        self.assertIn("no session assignment", err)
+        self.assertNotIn(("signout",), self.fake.keys())
 
     def test_a_failed_signin_leaves_nothing_to_sign_out(self) -> None:
         self.fake.ambient = False
@@ -417,6 +444,9 @@ class TestTitles(Case):
             "alpha\x7f",
             "alpha\n",
         ):
+            with self.subTest(title=title), self.assertRaises(ss.Refusal):
+                ss.validate_title(title)
+        for title in ("a<b", "a>b", 'a"b', "a|b", "a?b", "a*b", "CONIN$", "conout$.txt"):
             with self.subTest(title=title), self.assertRaises(ss.Refusal):
                 ss.validate_title(title)
         for title in (".secrets/alpha_api_token", "a/b/c.d", "console", "com10", ".hidden"):
@@ -487,6 +517,30 @@ class TestTitles(Case):
         self.assertEqual(code, 1)
         self.assertIn("link", err)
         self.assertEqual(list((self.home / ".secrets").iterdir()), [])
+
+    def test_a_path_spelled_in_another_case_than_on_disk_is_refused(self) -> None:
+        (self.home / ".secrets").mkdir()
+        (self.home / ".secrets" / "token").write_bytes(SECRET)
+        with self.assertRaises(ss.Refusal) as raised:
+            ss.title_for(self.home, str(self.home / ".Secrets" / "token"))
+        self.assertIn("differs in case", str(raised.exception))
+        self.assertEqual(
+            ss.title_for(self.home, str(self.home / ".secrets" / "token")), ".secrets/token"
+        )
+
+    def test_one_title_in_two_buckets_differing_only_in_case_is_refused(self) -> None:
+        self.fake.add_item(self.vault("alpha"), ".secrets/Shared", SECRET)
+        self.fake.add_item(self.vault("beta"), ".secrets/shared", SECRET)
+        code, _, err = self.run_main("pull", "--bucket", "alpha", "--bucket", "beta")
+        self.assertEqual(code, 1)
+        self.assertIn("both", err)
+
+    def test_duplicate_vaults_that_are_not_buckets_are_skipped_not_refused(self) -> None:
+        self.fake.add_vault("Secrets Not_A_Bucket")
+        self.fake.add_vault("Secrets Not_A_Bucket")
+        code, out, err = self.run_main("status")
+        self.assertEqual(code, 0, err)
+        self.assertIn("not a bucket name", out)
 
 
 @POSIX_ONLY
@@ -642,9 +696,8 @@ class TestPush(Case):
 
         with unittest.mock.patch.object(ss, "ask", change):
             code, _, err = self.push(str(path))
-        self.assertEqual(code, 1)
-        self.assertIn("changed after the plan", err)
-        self.assertEqual([key_of(a) for a in self.fake.writes()], [("vault", "create")])
+        self.assertEqual(code, 2)
+        self.assertIn("reads back", err)
 
     def test_an_edit_that_moves_the_item_to_another_id_fails(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n")
@@ -690,6 +743,36 @@ class TestPush(Case):
         code, _, err = self.push(str(self.home / ".secrets/alpha"))
         self.assertEqual(code, 1)
         self.assertIn("not a regular file", err)
+
+    def test_a_named_path_that_does_not_exist_is_refused(self) -> None:
+        code, _, err = self.push(str(self.home / ".secrets/absent"))
+        self.assertEqual(code, 1)
+        self.assertIn("does not exist", err)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_no_paths_and_no_vault_is_refused(self) -> None:
+        code, _, err = self.push()
+        self.assertEqual(code, 1)
+        self.assertIn("name the files to push", err)
+
+    def test_a_binary_file_with_a_carriage_return_does_not_warn(self) -> None:
+        path = self.write(".secrets/binary", b"alpha\r\n\x00")
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("carriage return", err)
+
+    def test_an_item_missing_after_the_write_fails(self) -> None:
+        path = self.write(".secrets/alpha")
+        self.fake.drop_create = True
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 2)
+        self.assertIn("not listed after the write", err)
+
+    def test_a_parent_that_is_a_file_is_refused_by_name(self) -> None:
+        self.write(".secrets")
+        code, _, err = self.push(str(self.home / ".secrets/alpha"))
+        self.assertEqual(code, 1)
+        self.assertIn("cannot be read", err)
 
 
 class TestWindowsModes(Case):
@@ -848,6 +931,17 @@ class TestPull(Case):
         self.assertEqual(code, 1)
         self.assertIn("not a regular file", err)
 
+    def test_a_read_back_that_differs_from_what_was_written_fails(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+
+        def short_write(path: Path, data: bytes, mode: int | None) -> None:
+            path.write_bytes(data[:-1])
+
+        with unittest.mock.patch.object(ss, "write_secret", short_write):
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 2)
+        self.assertIn("reads back differently", err)
+
 
 @POSIX_ONLY
 class TestStatus(Case):
@@ -891,6 +985,20 @@ class TestStatus(Case):
             self.assertRegex(out, rf"{state}\s+\.secrets/{title}\b")
         self.assertEqual(self.fake.writes(), [])
         self.assert_quiet(out, err)
+
+    def test_status_never_reads_through_a_linked_parent(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        elsewhere = self.scratch / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "alpha").write_bytes(SECRET)
+        (elsewhere / "unheld").write_bytes(SECRET)
+        (self.home / ".secrets").symlink_to(elsewhere)
+        code, _, err = self.run_main("status", "--bucket", "alpha")
+        self.assertEqual(code, 1)
+        self.assertIn("symbolic link", err)
+        code, out, _ = self.run_main("status")
+        self.assertEqual(code, 0)
+        self.assertNotIn("no bucket holds", out)
 
 
 class TestArchive(Case):
@@ -976,6 +1084,18 @@ class TestSelftest(Case):
         self.assertRegex(out, r"FAILS\s+item list carries 'updated_at'")
         self.assertEqual(self.fake.vaults, {})
 
+    def test_the_vault_is_deleted_even_when_the_scratch_removal_fails(self) -> None:
+        def broken(_path: object) -> None:
+            raise OSError("constructed removal failure")
+
+        with (
+            unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)),
+            unittest.mock.patch.object(ss.shutil, "rmtree", broken),
+        ):
+            code, _, _ = self.run_main("selftest")
+        self.assertEqual(code, 2)
+        self.assertEqual(self.fake.vaults, {})
+
 
 class TestOutput(Case):
     def test_an_unmodeled_error_prints_its_type_only(self) -> None:
@@ -1031,6 +1151,22 @@ class TestOutput(Case):
             with self.subTest(mode=mode):
                 self.assertEqual(raised.exception.code, 1)
         self.assertEqual(self.fake.calls, [])
+
+    def test_each_op_output_shape_the_tool_assumes_fails_by_name(self) -> None:
+        for key, raw, message in (
+            (("account", "list"), b"{}", "not an array"),
+            (("vault", "list"), b"{}", "not an array"),
+            (("vault", "list"), b'[{"id": 1, "name": "Secrets alpha"}]', "without string fields"),
+            (("item", "list"), b"not json", "not JSON"),
+        ):
+            with self.subTest(key=key, raw=raw):
+                fake = FakeOp()
+                fake.add_vault("Secrets alpha")
+                fake.raw[key] = raw
+                with unittest.mock.patch.object(ss, "run_op", fake):
+                    code, _, err = self.run_main("status")
+                self.assertEqual(code, 2, err)
+                self.assertIn(message, err)
 
 
 STUB = """#!/bin/sh
