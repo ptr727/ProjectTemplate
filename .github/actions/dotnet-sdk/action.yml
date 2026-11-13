@@ -30,7 +30,8 @@ runs:
         if path.is_file():
             text = path.read_text(encoding="utf-8-sig")
             comments = re.compile(r'("(?:\\.|[^"\\])*")|//[^\n]*|/\*.*?\*/', re.S)
-            text = comments.sub(lambda match: match.group(1) or "", text)
+            # A comment becomes blanks that keep its newlines, so a parse error names the line in the caller's file.
+            text = comments.sub(lambda match: match.group(1) or re.sub(r"[^\n]", " ", match.group(0)), text)
             try:
                 document = json.loads(text)
             except ValueError as error:

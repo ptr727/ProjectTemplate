@@ -2418,6 +2418,9 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertIn(f"so this installs the {fallback} fallback.", self.last_stdout)
         trailing_comma = '{"sdk": {"version": "11.0.100",}}'
         self.assertEqual(self.select(trailing_comma), [f"dotnet-version={fallback}"])
+        headed = '/* the fleet\n   SDK line\n*/\n{"sdk":\n {"version": "11.0.100",}}'
+        self.assertEqual(self.select(headed), [f"dotnet-version={fallback}"])
+        self.assertIn(": line 5 column", self.last_stdout)
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.
