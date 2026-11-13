@@ -545,6 +545,14 @@ class TestSideCounts(SideCase):
         post.assert_not_called()
         self.assertEqual(["note: the head's push could not be read, so qodo was not asked"], lines)
 
+    def test_a_head_whose_push_is_unread_and_never_asked_is_asked(self) -> None:
+        """With no ask on record there is none an unread push could hide, so the first is sent."""
+        bare = with_policy(fixtures.payload([]), parsed(qodo=EXPLICIT_QODO))
+        made = ({"url": "https://example.test/c/1", "body": "/review"}, True)
+        post = mock.MagicMock(return_value=made)
+        side.request_side_reviews(lambda: bare, mock.MagicMock(), post, "on-open")
+        self.assertEqual([mock.call("/review")], post.call_args_list)
+
 
 class TestUngatedSideReviewers(SideCase):
     def test_only_copilot_can_gate_the_merge(self) -> None:

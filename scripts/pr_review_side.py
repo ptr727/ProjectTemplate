@@ -138,7 +138,7 @@ def side_asked_on_head(pr: dict, body: str) -> bool:
 
 def unasked(pr: dict, name: str, body: str, lines: list[str]) -> bool:
     """Whether `name` is still to be asked, never where an unread push hides an ask on the head."""
-    placed = utc_instant(pr.get(PUSHED_KEY) or "") is not None
+    placed = utc_instant(pr.get(PUSHED_KEY) or "") is not None or not side_asks(pr, body)
     if not placed and not side_answered(pr, name):
         lines.append(f"note: the head's push could not be read, so {name} was not asked")
     return placed and not side_answered(pr, name) and not side_asked_on_head(pr, body)
@@ -209,12 +209,12 @@ def request_side_reviews(
     `phase` is the `when` value this call serves, so an on-open ask never waits behind a check wait.
     A reviewer that answered or was asked since the push is skipped before any wait, and judged
     again on a fresh read after one. So a request that a concurrent session sent during the wait is
-    seen. Nothing is sent where its cap is spent or the push unread. Nor where a cap applies and the
-    comment window is cut, since the rounds spent cannot then be counted. The merge never waits on
-    these reviewers, so a held ask is a note rather than an exit. `post` sends one comment and
-    returns `post_comment`'s answer, and an unconfirmed one ends the run, since it may have landed.
-    A pull request no longer open is asked nothing, since a peer can merge or close it while `wait`
-    polls.
+    seen. Nothing is sent where its cap is spent, or where an ask is on record and the push unread.
+    Nor where a cap applies and the comment window is cut, since the rounds spent cannot then be
+    counted. The merge never waits on these reviewers, so a held ask is a note rather than an exit.
+    `post` sends one comment and returns `post_comment`'s answer, and an unconfirmed one ends the
+    run, since it may have landed. A pull request no longer open is asked nothing, since a peer can
+    merge or close it while `wait` polls.
     """
     lines: list[str] = []
     held: str | None = None
