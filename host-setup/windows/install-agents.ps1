@@ -732,7 +732,7 @@ function Get-Tool {
 
 # --- Consolidation ---
 
-# A tool recording a Managed copy keeps only that one, as install-tools.sh does on Linux for a copy that shadows its own.
+# A tool recording a Managed copy keeps only that one.
 # Any other copy PATH resolves to ahead of it is removed through whatever owns it, so the managed copy is what PATH reaches.
 
 # The tool's Managed record, or nothing for a tool recording none, read by key since strict mode refuses a missing one.
@@ -842,6 +842,15 @@ function Invoke-Consolidate {
     return 1
 }
 
+# Why a stray copy stays, given why the managed copy cannot be installed, or nothing where it can.
+# A refused install names the stray's removal too, since an npm copy in the same prefix holds the shim the managed package needs.
+function Get-StrayStayReason {
+    param([string]$ToolName, [string]$Refusal, $Stray)
+    if (-not $Refusal) { return $Stray.Why }
+    $removal = if ($Stray.Command) { "$($Stray.Command) $($Stray.Arguments -join ' ')" } else { $Stray.Why }
+    return "$(Get-ManagedLabel $ToolName) cannot be installed: $Refusal. It needs this copy removed first: $removal"
+}
+
 # Why the managed copy cannot be installed on this host, or nothing where it can.
 function Get-ManagedInstallRefusal {
     param([string]$ToolName)
@@ -859,7 +868,9 @@ function Invoke-ConsolidateAndInstall {
         # Read before any copy is removed, so a consolidation never leaves a host with no copy at all.
         $refusal = Get-ManagedInstallRefusal $ToolName
         if ($refusal) {
-            log "${ToolName}: the copy PATH reaches stays, since $(Get-ManagedLabel $ToolName) cannot be installed: $refusal"
+            $path = Get-ToolPath $ToolName
+            $stray = Get-StrayPlan -ToolName $ToolName -Path $path -Manager (Get-ToolManager $path)
+            log "${ToolName}: $(Hide-Home -Path $path) stays, since $(Get-StrayStayReason -ToolName $ToolName -Refusal $refusal -Stray $stray)"
             return 2
         }
     }
@@ -922,11 +933,10 @@ function Show-Report {
                 $refusal = if ($present) { '' } else { Get-ManagedInstallRefusal $tool }
                 if ($stray.Command -and -not $refusal) {
                     $next = if ($present) { 'upgrades' } else { 'installs' }
-                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, -Upgrade removes it with $($stray.Command) $($stray.Arguments -join ' ') and $next $label"
+                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, -Upgrade removes it with $($stray.Command) $($stray.Arguments -join ' '), then $next $label unless another copy PATH reaches stays"
                     $removes = $true
                 } else {
-                    $why = if ($refusal) { $refusal } else { $stray.Why }
-                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays: $why"
+                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays: $(Get-StrayStayReason -ToolName $tool -Refusal $refusal -Stray $stray)"
                 }
             }
             if (-not $removes -and $manager -ne 'self') {

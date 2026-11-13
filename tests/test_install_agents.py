@@ -61,8 +61,19 @@ exit 0
 # The script fetches each installer to a file before running it, so the target must exist.
 CURL = """#!/bin/bash
 printf 'curl %s\n' "${@: -3:1}" >>"$CALLS"
-printf '#!/bin/bash\nexit 0\n' >"${@: -1}"
+if [[ -f $STUB_DIR/installer.sh ]]; then
+    cp "$STUB_DIR/installer.sh" "${@: -1}"
+else
+    printf '#!/bin/bash\nexit 0\n' >"${@: -1}"
+fi
 exit 0
+"""
+
+# An installer that lays the managed opencode down, so the check that it landed has something to find.
+MANAGED_INSTALLER = """#!/bin/bash
+mkdir -p "$HOME/.opencode/bin"
+printf '#!/bin/bash\\nprintf "2.0.0\\\\n"\\n' >"$HOME/.opencode/bin/opencode"
+chmod +x "$HOME/.opencode/bin/opencode"
 """
 
 
@@ -176,7 +187,7 @@ class TestInstallAgents(unittest.TestCase):
         self.curl()
         notes = " ".join(self.report()["opencode"]["notes"])
         self.assertIn(
-            "--upgrade removes it with npm uninstall -g opencode-ai and installs the managed one",
+            "--upgrade removes it with npm uninstall -g opencode-ai, then installs the managed one",
             notes,
         )
 
@@ -212,6 +223,24 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("[dry run] npm uninstall -g opencode-ai", result.stdout)
         self.assertIn("https://opencode.ai/v2/install", result.stdout)
         self.assertEqual(self.called(), [])
+
+    def test_upgrade_replaces_a_stray_opencode_with_a_managed_copy_that_lands(self) -> None:
+        link = self.stray_npm_opencode()
+        self.curl()
+        (self.dir / "installer.sh").write_text(MANAGED_INSTALLER, encoding="utf-8")
+        result = self.run_script("--upgrade", "--yes", "opencode", extra_env={"REMOVES": str(link)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.called(), ["npm uninstall -g opencode-ai", "curl https://opencode.ai/v2/install"]
+        )
+        self.assertIn("opencode 1.0.0 -> 2.0.0", result.stdout)
+
+    def test_an_installer_that_leaves_no_managed_copy_fails_the_tool(self) -> None:
+        link = self.stray_npm_opencode()
+        self.curl()
+        result = self.run_script("--install", "--yes", "opencode", extra_env={"REMOVES": str(link)})
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("its installer finished, but no managed copy is at", result.stderr)
 
     def test_install_replaces_a_stray_opencode_when_no_managed_copy_is_in_place(self) -> None:
         self.stray_npm_opencode()
@@ -899,7 +928,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         result = self.run_script("-Report", "-Json", "opencode", extra_path=npm_bin)
         notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])
         self.assertIn(
-            "-Upgrade removes it with npm uninstall -g opencode-ai and installs the npm package @opencode/cli",
+            "-Upgrade removes it with npm uninstall -g opencode-ai, then installs the npm package @opencode/cli",
             notes,
         )
 
@@ -968,6 +997,8 @@ class TestInstallAgentsWindows(unittest.TestCase):
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("npm install -g opencode-ai@latest", result.stdout)
+        self.assertIn("It needs this copy removed first", result.stdout)
+        self.assertIn("npm uninstall -g opencode-ai", result.stdout)
         self.assertNotIn("npm uninstall", " ".join(self.recorded()))
 
     def test_a_managed_package_path_does_not_reach_fails_the_upgrade(self) -> None:

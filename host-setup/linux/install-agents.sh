@@ -809,7 +809,7 @@ report() {
                 stray_plan "$tool" "$path" "$manager"
                 [[ -x $(tool_managed "$tool") ]] || refusal=$(managed_install_refusal "$tool")
                 if ((${#STRAY_CMD[@]} > 0)) && [[ -z $refusal ]]; then
-                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), --upgrade removes it with ${STRAY_CMD[*]} and $([[ -x $(tool_managed "$tool") ]] && printf upgrades || printf installs) the managed one"
+                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), --upgrade removes it with ${STRAY_CMD[*]}, then $([[ -x $(tool_managed "$tool") ]] && printf upgrades || printf installs) the managed one unless another copy PATH reaches stays"
                     removes=true
                 else
                     note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), and it stays: ${refusal:-$STRAY_WHY}"
