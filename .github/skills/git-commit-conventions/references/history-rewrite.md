@@ -8,7 +8,7 @@
 
 These gates keep committer and signature aligned:
 
-1. **State the reach before rewriting anything.** Rewrite only when a commit must change, since no scoping limits how far the new hashes reach. A `git filter-repo` run reaches every commit on every ref it processes. A run limited to a range, such as `git filter-repo --refs <base>..<branch>`, reaches every commit in that range. That range can start before the earliest commit that must change. `git rev-list --count --ancestry-path <base>..<branch>` counts that reach. Also list what is anchored to the old hashes, from "Collateral" below.
+1. **State the reach before rewriting anything.** Rewrite only when a commit must change, since no scoping limits how far the new hashes reach. A `git filter-repo` run reaches every commit on every ref it processes. A run limited to a range, such as `git filter-repo --refs <base>..<branch>`, reaches every commit in that range. That range can start before the earliest commit that must change. `git rev-list --count <base>..<branch>` counts that reach. Also list what is anchored to the old hashes, from "Collateral" below.
 2. **Re-sign every rewritten commit in a signing pass that also sets the committer.** A tool that creates each commit through `git commit-tree -S` signs it. The command below re-signs every commit on every local branch and moves each tag with it, which fits a default `git filter-repo` run. After a run limited to a range, pass that same range in place of `--branches --tags`, so the pass leaves every other commit alone. It keeps merge commits, authors, and both dates. Before running it, record each branch's `git rev-list --count <branch>` and `git log --format=%T <branch>` output. Replace the placeholders with the rewriter's own signing identity:
 
    ```sh
@@ -28,6 +28,6 @@ Never leave a signature over a commit committed by another identity, and never l
 
 Everything anchored to an old hash goes stale when the rewrite lands:
 
-- **Tags** point at the re-signed commits only where the signing pass moves them, as `--tag-name-filter cat` above does. A signed tag's signature no longer verifies after the rewrite, so re-create each one with `git tag -f -s` on its new commit.
+- **Tags** move to the re-signed commits only in a whole-history pass, through `--tag-name-filter cat` above. After a range-limited run, re-point each tag in the range to its rewritten commit with `git tag -f`. A signed tag's signature no longer verifies after the rewrite, so re-create each one with `git tag -f -s` on its new commit.
 - **Other clones** diverge from the rewritten branch, so each one is re-cloned rather than pulled.
 - **Published artifacts** that record a commit hash keep naming a hash the branch no longer holds, and no rewrite reaches them.
