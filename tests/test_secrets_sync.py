@@ -364,6 +364,19 @@ class TestSession(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.fake.writes(), [])
 
+    def test_every_writing_subcommand_needs_a_terminal(self) -> None:
+        self.tty = False
+        for argv in (
+            ("pull", "--bucket", "alpha", "--yes"),
+            ("archive", "--bucket", "alpha", "--yes", str(self.home / ".secrets/alpha")),
+            ("selftest",),
+        ):
+            with self.subTest(argv=argv):
+                code, _, err = self.run_main(*argv)
+                self.assertEqual(code, 1)
+                self.assertIn("terminal", err)
+        self.assertEqual(self.fake.calls, [])
+
     def test_an_expired_session_after_the_prompt_writes_nothing(self) -> None:
         self.write(".secrets/alpha_api_token")
 
@@ -759,6 +772,15 @@ class TestPush(Case):
         code, _, _ = self.push(str(path))
         self.assertEqual(code, 2)
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("vault", "create")])
+
+    def test_a_path_under_an_unlistable_directory_is_refused_by_name(self) -> None:
+        locked = self.home / ".secrets"
+        locked.mkdir()
+        os.chmod(locked, 0o000)
+        self.addCleanup(os.chmod, locked, 0o700)
+        code, _, err = self.push(str(locked / "alpha"))
+        self.assertEqual(code, 1)
+        self.assertIn("cannot be listed", err)
 
     def test_two_paths_differing_only_in_case_are_refused(self) -> None:
         upper = self.write(".secrets/Token")
@@ -1333,6 +1355,7 @@ class TestOutput(Case):
             ["push", "--bucket", "", "alpha"],
             ["archive", "--bucket", "", "alpha"],
             ["push", "--bucket", "alpha", "--mode", "", "alpha"],
+            ["status", "--account", ""],
         ):
             with (
                 self.subTest(argv=argv),

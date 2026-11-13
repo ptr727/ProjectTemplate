@@ -152,7 +152,9 @@ class Op:
         return [*args, "--account", self.account]
 
     def probe(self, args: Sequence[str]) -> Outcome:
-        """One read whose failure is an answer rather than an error, such as `whoami`."""
+        """One call whose failure is an answer rather than an error, such as `whoami`."""
+        sys.stderr.write(f"op {' '.join(args[:2])}\n")
+        sys.stderr.flush()
         return run_op(self.argv(args), self.env(), attached=False)
 
     def call(self, args: Sequence[str], *, write: bool = False, detail: str = "") -> bytes:
@@ -271,6 +273,7 @@ def session(op: Op) -> Iterator[None]:
 
 def signout(op: Op) -> None:
     """Sign out a session this run created, reporting a failure rather than hiding it."""
+    sys.stderr.write("op signout\n")
     result = run_op(op.argv(["signout"]), op.env(), attached=False)
     if result.returncode != 0:
         report_stderr(result.stderr)
@@ -339,10 +342,14 @@ def title_for(home: Path, raw: str) -> str:
         raise Refusal(f"{raw} is not under the home directory {home}") from exc
     current = home
     for part in relative.parts:
-        if current.is_dir():
-            names = os.listdir(current)
-            if part not in names and any(n.casefold() == part.casefold() for n in names):
-                raise Refusal(f"{raw} differs in case from the name under {current}")
+        try:
+            names = os.listdir(current) if current.is_dir() else []
+        except OSError as exc:
+            raise Refusal(
+                f"{current} cannot be listed: {exc.strerror or type(exc).__name__}"
+            ) from exc
+        if part not in names and any(n.casefold() == part.casefold() for n in names):
+            raise Refusal(f"{raw} differs in case from the name under {current}")
         current = current / part
     return validate_title(relative.as_posix())
 
@@ -1222,6 +1229,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     for bucket in named if isinstance(named, list) else [] if named is None else [named]:
         if not BUCKET.fullmatch(bucket):
             ap.error(f"--bucket takes lowercase letters, digits, and hyphens, not {bucket!r}")
+    if a.account == "":
+        ap.error("--account takes an account, not an empty string")
     if getattr(a, "home", None) == "":
         ap.error("--home takes a directory, not an empty string")
     if getattr(a, "mode", None) is not None and (
