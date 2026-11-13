@@ -635,6 +635,16 @@ class TestCharsetRule(BaitCase):
         self.assertEqual([], self.kinds("See `git remote\nget-\u00ab` here.\n", rules))
         self.assertEqual([], self.kinds("See ``a ` \u00ab`` here.\n", rules))
 
+    def test_a_table_row_is_emptied_once_so_text_between_two_spans_is_read(self) -> None:
+        """Each cell's token maps the whole row, and emptying twice ate the text between spans."""
+        head = "| a | b |\n| --- | --- |\n"
+        self.assertEqual(
+            ["charset-unknown"],
+            self.kinds(f"{head}| `x` \u00ab `y` | z |\n", {"charset", "charset-unknown"}),
+        )
+        self.assertEqual(["semicolon"], self.kinds(f"{head}| `x`; then `y` | z |\n", {"semicolon"}))
+        self.assertEqual(["dash"], self.kinds(f"{head}| `x` - `y` | z |\n", {"dash"}))
+
     def test_a_backtick_outside_an_inline_token_quotes_nothing(self) -> None:
         """Front matter and an HTML block hold no code span, so each line there is read whole."""
         rules = {"charset", "charset-unknown"}
@@ -1179,6 +1189,17 @@ class TestDupwordRule(BaitCase):
             if kind == "dupword"
         ]
         self.assertEqual([], found)
+
+
+class TestSpanPairingInWordRules(BaitCase):
+    """The `dupword` and `spelling` rules read a code span paired as Markdown pairs it."""
+
+    def test_text_after_a_wrapped_double_or_escaped_span_is_read(self) -> None:
+        for rule, word in (("dupword", "word word"), ("spelling", "colour")):
+            for opener in ("See `a\nb`", "See ``a ` b``", "See \\`"):
+                text = f"{opener} {word} then `c`.\n"
+                with self.subTest(rule=rule, text=text):
+                    self.assertEqual([rule], self.kinds(text, {rule}))
 
 
 class TestSpellingRule(BaitCase):
@@ -2842,6 +2863,13 @@ class TestSentenceSplitRule(BaitCase):
             ["sentence-split"],
             self.kinds("A sentence that keeps\ngoing onto the next line.\n", {"sentence-split"}),
         )
+
+    def test_a_wrapped_code_span_continues_no_prose_line(self) -> None:
+        """A span's second line is code, so only the prose line after it reads as a split."""
+        path = self.tmp / "bait.md"
+        path.write_text("See `git remote\nget-url` now and\nthen it ends.\n", encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-split"})
+        self.assertEqual([(2, "sentence-split")], [(n, kind) for n, kind, _ in found])
 
     def test_a_finished_sentence_does_not_continue(self) -> None:
         for text in (

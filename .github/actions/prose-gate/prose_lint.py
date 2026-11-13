@@ -1004,7 +1004,11 @@ BLOCK_PARENTS = (["paragraph_open"], ["th_open"], ["td_open"])
 
 
 def extract_markdown(lines: list[str]) -> Extracted:
-    """Markdown units from markdown-it-py's block line maps, front matter lines read alone."""
+    """Markdown units from markdown-it-py's block line maps, front matter lines read alone.
+
+    Each table cell's inline token maps its whole row. Emptying a span twice is not idempotent, so
+    a row has its code spans emptied once, a cell at a time.
+    """
     matter = front_matter_end(lines)
     code: set[int] = set()
     paragraphs = [
@@ -1033,13 +1037,14 @@ def extract_markdown(lines: list[str]) -> Extracted:
                     paragraphs.append(Unit("paragraph", (Line(n, span),)))
         elif tok.type == "inline":
             markup += inline_comments(tok, lines)
-            numbers = range(first, last + 1)
-            texts = [spanless.get(n, lines[n - 1]) for n in numbers]
-            if parents[-1:] in (["th_open"], ["td_open"]):
-                texts = [by_cell(text, strip_inline_code) for text in texts]
-            else:
-                texts = strip_inline_code("\n".join(texts)).split("\n")
-            spanless.update(zip(numbers, texts, strict=True))
+            if first not in spanless:
+                numbers = range(first, last + 1)
+                texts = [lines[n - 1] for n in numbers]
+                if parents[-1:] in (["th_open"], ["td_open"]):
+                    texts = [by_cell(text, strip_inline_code) for text in texts]
+                else:
+                    texts = strip_inline_code("\n".join(texts)).split("\n")
+                spanless.update(zip(numbers, texts, strict=True))
             if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
                 paragraphs.append(
