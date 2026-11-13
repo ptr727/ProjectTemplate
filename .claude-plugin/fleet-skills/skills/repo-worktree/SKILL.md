@@ -165,9 +165,9 @@ no separate branch setup. Git refuses to attach a branch that is already checked
 tree is the hazard the continuation rule exists for. `git worktree list` names the checkout
 holding it and prints the base clone first, and what to do there depends on which checkout that is.
 
-The base clone holding it is the case "The Base Branch" excepts. Return it to its own working
-branch when its tree is clean, `git -C ~/repos/<Repo> checkout develop`, and then create the
-worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
+The base clone holding it is the case "The Base Branch" excepts. Judge its tree by the
+hand-removal read in "Listing and Cleanup". When it is clean, return it to its own working
+branch, `git -C ~/repos/<Repo> checkout develop`, and then create the worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
 task may be live there.
 
 A previous session's own worktree holding it is retired rather than switched. It normally sits at
@@ -269,8 +269,8 @@ since git then runs whatever that directory holds, and nothing where it holds no
   is on `develop` or on the merged branch with no tracked changes. A base clone on the merged
   branch that it cannot switch is one of its refusals. One on another branch, or on `develop` with
   tracked changes or no fast-forward, exits `0` with `base=kept` on its `status=CLEANED` line.
-  That line, and every hand removal, leaves this step to run. The step is to fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when
-  needed, and fast-forward it with `git merge --ff-only origin/develop`. A completed promotion or
+  That line, and every hand removal, leaves this step to run. The step fetches and prunes `origin` and confirms the base clone is clean by the hand-removal read above.
+  It then switches the base clone to `develop` when needed, and fast-forwards it with `git merge --ff-only origin/develop`. A completed promotion or
   release does not leave the base clone on `main`. Stop and report a dirty base clone or a
   non-fast-forward instead of switching or reconciling it.
 - **What an interrupted or abandoned session left behind is swept.** Run
@@ -281,5 +281,5 @@ since git then runs whatever that directory holds, and nothing where it holds no
   work as well as this task's, so `--apply` runs on the maintainer's go-ahead.
 - **Prove the cleanup.** Finish with `git status --short --branch --untracked-files=normal` in the base clone and `git worktree list`. The expected result is a clean base clone at `origin/develop` and no worktree belonging only to the completed task.
 - A worktree that refuses removal is dirty, and force is not the fix. Look at what is
-  uncommitted in it first, since discarding uncommitted work runs only on explicit instruction,
+  uncommitted in it first, by the hand-removal read above. Discarding uncommitted work runs only on explicit instruction,
   per the `git-commit-conventions` skill.
