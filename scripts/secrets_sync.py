@@ -15,8 +15,8 @@ any of `op`'s JSON. A digest is shown as eight hex characters of an HMAC keyed p
 
 No official page states the `op` behaviors this relies on, so `selftest` measures them in a
 scratch vault. On `op` 2.42.0 it measured the byte-exact document round-trip, the item list's
-`updated_at` and `tags` fields, and `--tags` replacing rather than adding. It also measured the POSIX
-signin form. The PowerShell form, a desktop-app sign-in, several accounts, and Windows stay
+`updated_at` and `tags` fields, and `--tags` replacing rather than adding. Sign-in is outside
+`selftest`. The PowerShell signin form, a desktop-app sign-in, several accounts, and Windows stay
 unmeasured. Each shape is read strictly, so a different one fails loudly rather than being guessed.
 """
 
