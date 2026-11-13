@@ -442,7 +442,8 @@ A group told to abandon its branch keeps a registered worktree until something r
 That worktree holds a live claim that would collide with the very group the next round re-forms for the same issue.
 For a merged group the procedure is deferred rather than changed: `repo-worktree`'s verify-before-removing and prove-the-cleanup steps run unchanged, just later and in one seat.
 A merged group that worked in a standalone clone is checked before anything is deleted, since `cleanup` sees only the base clone's registered worktrees.
-The orchestrator confirms the clone the worker reported or recorded is clean and its branch tip is at the pull request's `headRefOid` or behind it.
+The orchestrator confirms the clone the worker reported or recorded is clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
+It also confirms the clone's branch tip is at the pull request's `headRefOid` or behind it.
 `repo-worktree` "Listing and Cleanup" accepts both, since a GitHub "Update branch" merge leaves a tip behind it that holds nothing the merge lacks.
 After `git -C <clone> fetch origin <headRefOid>`, `git -C <clone> merge-base --is-ancestor refs/heads/<exact-branch> <headRefOid>` exits `0` in both cases.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
@@ -511,7 +512,7 @@ The orchestrator finds it under the temporary root the brief named, by the recor
 run that named another root cannot find it, so its group goes to the maintainer. The
 abandoned-worker discard above does not run there, so a dirty abandoned clone goes to the
 maintainer.
-The clone must be clean, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
+The clone must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
 A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
 live with `git -C <clone> ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
 only copy of the branch. A clone removed with its branch and no merged pull request instead needs

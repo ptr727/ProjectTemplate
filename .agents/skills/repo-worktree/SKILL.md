@@ -166,7 +166,8 @@ tree is the hazard the continuation rule exists for. `git worktree list` names t
 holding it and prints the base clone first, and what to do there depends on which checkout that is.
 
 The base clone holding it is the case "The Base Branch" excepts. Return it to its own working
-branch when its tree is clean, `git -C ~/repos/<Repo> checkout develop`, and then create the
+branch when its tree is clean by the hand-removal read in "Listing and Cleanup",
+`git -C ~/repos/<Repo> checkout develop`, and then create the
 worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
 task may be live there.
 
@@ -269,8 +270,8 @@ since git then runs whatever that directory holds, and nothing where it holds no
   is on `develop` or on the merged branch with no tracked changes. A base clone on the merged
   branch that it cannot switch is one of its refusals. One on another branch, or on `develop` with
   tracked changes or no fast-forward, exits `0` with `base=kept` on its `status=CLEANED` line.
-  That line, and every hand removal, leaves this step to run. The step is to fetch and prune `origin`, confirm the base clone is clean, switch it to `develop` when
-  needed, and fast-forward it with `git merge --ff-only origin/develop`. A completed promotion or
+  That line, and every hand removal, leaves this step to run. The step fetches and prunes `origin` and confirms the base clone is clean by the hand-removal read above.
+  It then switches the base clone to `develop` when needed, and fast-forwards it with `git merge --ff-only origin/develop`. A completed promotion or
   release does not leave the base clone on `main`. Stop and report a dirty base clone or a
   non-fast-forward instead of switching or reconciling it.
 - **What an interrupted or abandoned session left behind is swept.** Run
