@@ -2420,7 +2420,7 @@ class DotnetSdkLineCase(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
                 self.assertNotIn("actions/setup-dotnet@", text, path.relative_to(REPO))
         # The action reads global.json from the workspace, so it must come after the checkout.
-        # Run before it, it finds no global.json and installs the fallback line.
+        # An action step placed ahead of the checkout finds no global.json and installs the fallback line.
         users = []
         for path in (REPO / ".github/workflows").glob("*.yml"):
             for job, body in job_texts(path.read_text(encoding="utf-8")).items():
