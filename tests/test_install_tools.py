@@ -1236,6 +1236,10 @@ class TestWindowsOptionalDotnetLine(unittest.TestCase):
         cases = {
             "not carried": ({"Microsoft.DotNet.SDK.11": -1978335212}, "FAILED "),
             "unknown": ({"unknown": "Microsoft.DotNet.SDK.7"}, "FAILED dotnet"),
+            "unknown then failed": (
+                {"unknown": "Microsoft.DotNet.SDK.9", "Microsoft.DotNet.SDK.7": 1},
+                "FAILED dotnet",
+            ),
             "failed": ({"Microsoft.DotNet.SDK.11": 1}, "FAILED dotnet"),
         }
         for label, (codes, failed) in cases.items():

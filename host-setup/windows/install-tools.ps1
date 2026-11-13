@@ -301,8 +301,8 @@ function Get-WingetInstalled {
 
 # Whether winget lists a package: installed, absent, or unknown where winget did not answer.
 function Get-WingetPresence {
-    param([Parameter(Mandatory)][string]$Id)
-    $rows = Get-WingetInstalled -Id $Id
+    param([Parameter(Mandatory)][string]$Id, [string]$InScope)
+    $rows = Get-WingetInstalled -Id $Id -InScope $InScope
     if ($null -eq $rows) { return 'unknown' }
     if ($rows.Count -gt 0) { return 'installed' }
     return 'absent'
@@ -358,8 +358,7 @@ function Get-WingetScope {
     param([Parameter(Mandatory)][string]$Id)
     $found = @()
     foreach ($candidate in 'user', 'machine') {
-        $rows = Get-WingetInstalled -Id $Id -InScope $candidate
-        if ($null -ne $rows -and $rows.Count -gt 0) { $found += $candidate }
+        if ((Get-WingetPresence -Id $Id -InScope $candidate) -eq 'installed') { $found += $candidate }
     }
     return , $found
 }
@@ -1674,7 +1673,7 @@ function Invoke-ToolApply {
         }
         if ($presence -eq 'unknown') {
             warn "${ToolName}: winget did not answer whether $package is installed, so it is skipped"
-            $script:FAILED += $ToolName
+            if ($script:FAILED -notcontains $ToolName) { $script:FAILED += $ToolName }
             continue
         }
         $started = Get-Date
@@ -1694,7 +1693,7 @@ function Invoke-ToolApply {
                 if ($line) { $executable = Get-PythonLineInterpreter -Line $line }
             }
             Write-InstallFailure -ToolName $ToolName -Package $package -Code $code -Since $started -Probe $record.Probe -Executable $executable
-            $script:FAILED += $ToolName
+            if ($script:FAILED -notcontains $ToolName) { $script:FAILED += $ToolName }
             # Owed regardless of how this returns: Enter-DockerMaintenance stopped Docker Desktop for this attempt, and a failed install is not a reason to leave it down.
             if ($dockerMaintenance) { Exit-DockerMaintenance -Stopped $dockerMaintenance.Stopped }
             return
