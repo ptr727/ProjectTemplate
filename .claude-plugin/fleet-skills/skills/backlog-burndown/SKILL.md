@@ -736,8 +736,8 @@ Then read the body again, and repeat the amendment where it lacks a `Fixes` line
 range calls for. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
 
-After opening the body and after each amendment, run the mechanical closing-set check that
-`branching-and-release-model` states in its negated-keyword bullet. A body naming a deferral issue
+Run the mechanical closing-set check that `branching-and-release-model` states in its
+negated-keyword bullet, at each point that bullet names. A body naming a deferral issue
 in a sentence that negates a keyword still closes that issue, and reading the body misses it.
 
 ## Away Mode

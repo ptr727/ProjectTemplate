@@ -97,7 +97,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    standing grant this comparison is skipped, even where the worker holds a ready report. Content
    another session merged meanwhile rides along, as `backlog-burndown` "Away Mode" accepts.
    Where no report named a head, a promotion made ready by hand, the go-ahead covers the head
-   this step recorded.
+   this step recorded. Then run the closing-set check `branching-and-release-model` states in its
+   negated-keyword bullet, over the range ending at that head. Stop and report any closure it
+   prints that the promotion body does not state, rather than merging.
 3. `gh pr merge [number] --merge --match-head-commit <sha> --repo owner/repo`, where `<sha>` is
    the head the go-ahead covers. Attended, that is the head `drive-pr`'s ready report named, or
    the moved head the maintainer approved after step 2's re-ask. Under an away-mode grant, or
