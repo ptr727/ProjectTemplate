@@ -8370,6 +8370,36 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
         self.assertEqual(0, status, said)
 
+    def test_a_merge_leaves_out_a_move_only_the_merged_in_parent_made(self) -> None:
+        """Against HEAD the merged-in parent's move reads as one, and it is that parent's own."""
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd, feature.\n")
+        self.git("commit", "-qam", "feature edits the doc")
+        self.git("checkout", "-q", "develop")
+        self.git("mv", "docs/a.md", "a.md")
+        self.git("commit", "-qm", "develop moves the doc")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(0, status, said)
+
+    def test_a_merge_moving_a_parent_s_moved_file_reports_neither_parent_s_backlog(self) -> None:
+        """Both diffs record a move to the new path, and a finding either source held is no one's new."""
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("tool.py", "value = 2\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "feature edits another file")
+        self.git("checkout", "-q", "develop")
+        self.git("mv", "docs/a.md", "a.md")
+        self.git("commit", "-qm", "develop moves the doc, its link already dead there")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        self.git("mv", "a.md", "c.md")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(0, status, said)
+
     def test_a_merge_reads_a_move_its_resolution_makes(self) -> None:
         """A file only the merged-in parent added, moved by the resolution, is the merge's own move.
 

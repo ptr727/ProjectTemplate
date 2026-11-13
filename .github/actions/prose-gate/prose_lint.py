@@ -2223,6 +2223,8 @@ def main(argv: list[str] | None = None) -> int:
     discovered = len(files)
     # Presence rather than truthiness, since an empty value is a base that failed to compute.
     moves: dict[str, tuple[str, str]] = {}
+    # Each moved path's sources, two where both of a merge's parents record a move to it.
+    sources: dict[str, list[tuple[str, str]]] = {}
     scope = (
         changed_lines(a.diff, scan_root, tuple(a.exclude), scan_paths, moves)
         if a.diff is not None
@@ -2245,10 +2247,14 @@ def main(argv: list[str] | None = None) -> int:
                 git_text("-C", str(scan_root), "cat-file", "-e", f"{ref}:{key}", env=held) is None
             )
 
-        moves = {k: m for k, m in moves.items() if lacks("HEAD", k)} | {
-            k: m for k, m in our_moves.items() if lacks("MERGE_HEAD", k)
-        }
+        for recorded, other in ((moves, "HEAD"), (our_moves, "MERGE_HEAD")):
+            for k, m in recorded.items():
+                if lacks(other, k):
+                    sources.setdefault(k, []).append(m)
+        moves = {}
         a.diff = "MERGE_HEAD and HEAD"
+    for k, m in moves.items():
+        sources.setdefault(k, []).append(m)
     if scope is not None:
         matched = [f for f in files if keys[f] in scope]
         # A non-empty diff whose readable files the scan matched none of failed to scope.
@@ -2268,14 +2274,12 @@ def main(argv: list[str] | None = None) -> int:
     for f in files:
         allowed = scope.get(keys[f]) if scope is not None else None
         findings = check_file(f, rules, scan_root, allowed, plain, undecoded)
-        # A moved file reports what its new path finds beyond what the old one did, not the backlog.
-        source, opener = moves.get(keys[f], ("", ""))
-        added = (
-            Counter(findings)
-            - Counter(check_file(f, rules, scan_root, allowed, at=(scan_root / source, opener)))
-            if keys[f] in moves
-            else Counter()
-        )
+        # A moved file reports what its new path finds beyond what each old one did, not the backlog.
+        added = Counter(findings) if keys[f] in sources else Counter()
+        for source, opener in sources.get(keys[f], []):
+            added -= Counter(
+                check_file(f, rules, scan_root, allowed, at=(scan_root / source, opener))
+            )
         for found in findings:
             ln, kind, msg = found
             if allowed is not None and ln not in allowed:
