@@ -15,6 +15,7 @@ Run as `python3 tests/test_secrets_sync.py`, or under
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import itertools
 import json
@@ -469,7 +470,19 @@ class TestTitles(Case):
         ):
             with self.subTest(title=title), self.assertRaises(ss.Refusal):
                 ss.validate_title(title)
-        for title in ("a<b", "a>b", 'a"b', "a|b", "a?b", "a*b", "CONIN$", "conout$.txt"):
+        for title in (
+            "a<b",
+            "a>b",
+            'a"b',
+            "a|b",
+            "a?b",
+            "a*b",
+            "CONIN$",
+            "conout$.txt",
+            "nul .txt",
+            "COM\u00b9",
+            "lpt\u00b3.log",
+        ):
             with self.subTest(title=title), self.assertRaises(ss.Refusal):
                 ss.validate_title(title)
         for title in (".secrets/alpha_api_token", "a/b/c.d", "console", "com10", ".hidden"):
@@ -1363,6 +1376,11 @@ class TestOutput(Case):
             with self.subTest(argv=argv):
                 self.assertEqual(raised.exception.code, expected)
         self.assertEqual(self.fake.calls, [])
+
+    def test_a_digest_prefix_is_keyed_so_it_does_not_reveal_a_short_secret(self) -> None:
+        self.assertEqual(ss.short(b"1234"), ss.short(b"1234"))
+        self.assertNotEqual(ss.short(b"1234"), hashlib.sha256(b"1234").hexdigest()[:8])
+        self.assertEqual(len(ss.short(b"1234")), 8)
 
     def test_a_failed_call_prints_its_stderr_capped(self) -> None:
         err = io.StringIO()

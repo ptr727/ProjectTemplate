@@ -11,7 +11,7 @@ nothing but this tool reads `op`.
 
 Every `op` call goes through `run_op`, one at a time. The session reaches a child through its
 environment and never through its argument list. Output never carries a secret, a full digest, or
-any of `op`'s JSON. A digest is shown as its first eight hex characters at most.
+any of `op`'s JSON. A digest is shown as eight hex characters of an HMAC keyed per run.
 
 Several `op` behaviors are assumptions no official page states. They are the byte-exact document
 round-trip, the item list's `updated_at` and `tags` fields, and `--tags` replacing rather than
@@ -26,6 +26,7 @@ import contextlib
 import dataclasses
 import datetime
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -57,14 +58,14 @@ RESERVED = frozenset(
         "NUL",
         "CONIN$",
         "CONOUT$",
-        *(f"COM{n}" for n in range(1, 10)),
-        *(f"LPT{n}" for n in range(1, 10)),
+        *(f"{d}{n}" for d in ("COM", "LPT") for n in (*"123456789", "\u00b9", "\u00b2", "\u00b3")),
     }
 )
 WINDOWS_FORBIDDEN = frozenset('\\:<>"|?*')
 SECRETS_DIR = ".secrets"
 TEMP_PREFIX = ".secrets-sync-"
 HASH_SHOWN = 8
+RUN_KEY = os.urandom(32)
 STDERR_CAP = 2000
 IS_WINDOWS = sys.platform == "win32"
 WRITERS = frozenset({"push", "pull", "archive", "selftest"})
@@ -179,7 +180,10 @@ class Op:
 
 
 def short(data: bytes | None) -> str:
-    return "-" if data is None else hashlib.sha256(data).hexdigest()[:HASH_SHOWN]
+    """A keyed digest prefix, comparable within one run and useless for guessing a short secret."""
+    if data is None:
+        return "-"
+    return hmac.new(RUN_KEY, data, hashlib.sha256).hexdigest()[:HASH_SHOWN]
 
 
 def stamp(moment: datetime.datetime | None) -> str:
@@ -320,7 +324,7 @@ def validate_title(title: str) -> str:
             raise Refusal(f"item title {title!r} has an empty, '.', or '..' component")
         if part.endswith((".", " ")):
             raise Refusal(f"item title {title!r} has a component ending in a dot or a space")
-        if part.split(".")[0].upper() in RESERVED:
+        if part.split(".")[0].rstrip(" ").upper() in RESERVED:
             raise Refusal(f"item title {title!r} has a component Windows reserves")
     return title
 
