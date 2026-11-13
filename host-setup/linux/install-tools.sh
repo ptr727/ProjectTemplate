@@ -207,10 +207,10 @@ Removing the file it names undoes it, and "update-alternatives --auto sudo" undo
 implementation switch it asks for on a host whose sudo parses no timestamp_type.
 
 Examples:
-  install-tools.sh                       Report on every tool
-  install-tools.sh --json                Report on every tool, as JSON
+  install-tools.sh                       Report on every tool but the optional ones
+  install-tools.sh --json                Report on the same tools, as JSON
   install-tools.sh --install             Install what is missing
-  install-tools.sh --upgrade --yes       Bring every tool current, no prompt
+  install-tools.sh --upgrade --yes       Bring the same tools current, no prompt
   install-tools.sh --upgrade node jq     Bring two tools current
   install-tools.sh --install --optional python dotnet
   install-tools.sh --upgrade --dry-run   Show what an upgrade would run
@@ -472,7 +472,7 @@ install_keyring() {
         return 1
     fi
 
-    # A caller runs this inside an if, where errexit is off, and removes the old source once it reports a change.
+    # Callers run this with errexit off and go on to remove the old source, so a failed write ends the run here.
     run_root install -d -m 0755 "$KEYRING_DIR" || die "Cannot create $KEYRING_DIR"
     run_root install -m 0644 "$staged" "$path" || die "Cannot install the keyring at $path"
     return 0
@@ -496,7 +496,7 @@ write_sources() {
         return 0
     fi
 
-    # A caller runs this inside an if, where errexit is off, and removes the old source once it reports a change.
+    # Callers run this with errexit off and go on to remove the old source, so a failed write ends the run here.
     printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null || die "Cannot write $path"
     return 0
 }
@@ -955,7 +955,8 @@ microsoft_feed() {
     local deb="$TMP_DIR/packages-microsoft-prod.deb"
     fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb" ||
         die "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION"
-    run_root dpkg -i "$deb"
+    # The caller runs with errexit off and goes on to remove a working copy, so a failed install ends the run here.
+    run_root dpkg -i "$deb" || die "Cannot install Microsoft's feed from $deb"
     APT_DIRTY=true
     apt_refresh
 }

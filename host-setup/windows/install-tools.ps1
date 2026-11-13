@@ -149,10 +149,10 @@ otherwise need a restart to recover from an engine bump. wsl --update raises its
 prompt, which this refuses to start unattended where nothing could answer it, rather than hang.
 
 Examples:
-  install-tools.ps1                       Report on every tool
-  install-tools.ps1 -Json                 Report on every tool, as JSON
+  install-tools.ps1                       Report on every tool but the optional ones
+  install-tools.ps1 -Json                 Report on the same tools, as JSON
   install-tools.ps1 -Install              Install what is missing
-  install-tools.ps1 -Upgrade -Yes         Bring every tool current, no prompt
+  install-tools.ps1 -Upgrade -Yes         Bring the same tools current, no prompt
   install-tools.ps1 -Upgrade uv jq        Bring two tools current
   install-tools.ps1 -Install -Optional dotnet
   install-tools.ps1 -Upgrade -DryRun      Show what an upgrade would run
