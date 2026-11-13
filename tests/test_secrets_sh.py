@@ -319,6 +319,56 @@ class ReadEnvValue(Tree):
         )
         self.assertEqual((result.returncode, result.stdout), (0, ""))
 
+    def guarded_include(self, content: str, mode: int = 0o600) -> Path:
+        write(self.root / "extra.env", content, mode)
+        return write(
+            self.root / "app.env",
+            "APP_NAME=example\n"
+            "if declare -F require_secret >/dev/null; then\n"
+            '    require_secret "${BASH_SOURCE%/*}/extra.env"\n'
+            "fi\n"
+            '. "${BASH_SOURCE%/*}/extra.env"\n',
+        )
+
+    def test_a_guarded_include_is_read_where_it_passes(self) -> None:
+        env = self.guarded_include("APP_HOST=two\n")
+        self.assertEqual(answer("read_env_value", str(env), "APP_HOST"), "two")
+
+    def test_a_guarded_include_with_a_loose_mode_is_refused(self) -> None:
+        env = self.guarded_include("APP_HOST=two\n", 0o666)
+        result = run('read_env_value "$1" APP_HOST', str(env))
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr),
+            (
+                1,
+                "",
+                f"ERROR: {self.root}/extra.env is mode 666, and must give group and other no access\n",
+            ),
+        )
+
+    def test_a_guarded_include_with_crlf_endings_is_refused(self) -> None:
+        env = self.guarded_include("APP_HOST=two\r\n")
+        result = run('read_env_value "$1" APP_HOST', str(env))
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr),
+            (
+                1,
+                "",
+                (
+                    f"ERROR: {self.root}/extra.env holds a carriage return, most often from CRLF "
+                    "line endings, and must use LF line endings only\n"
+                ),
+            ),
+        )
+
+    def test_a_missing_check_function_fails_the_read_before_the_file_runs(self) -> None:
+        marker = self.root / "ran"
+        env = write(self.root / "app.env", f"touch {marker}\nAPP_HOST=two\n")
+        result = run('unset -f secret_state; read_env_value "$1" APP_HOST', str(env))
+        self.assertEqual((result.returncode, result.stdout), (1, ""))
+        self.assertIn("ERROR: ", result.stderr)
+        self.assertFalse(marker.exists())
+
 
 class CarriedShfmtSettings(unittest.TestCase):
     def test_the_tree_pins_every_shfmt_setting_a_carrier_cannot_reformat_for(self) -> None:
