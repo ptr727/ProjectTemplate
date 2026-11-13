@@ -14,21 +14,34 @@ runs:
       run: |
         set -Eeuo pipefail
         fallback=10.x
-        status=1
-        if [[ -f global.json ]]; then
-          status=0
-          jq -e '.sdk.version' global.json >/dev/null || status=$?
-        fi
-        if [[ $status -eq 0 ]]; then
-          echo "global-json-file=global.json" >> "$GITHUB_OUTPUT"
-        else
-          # The dotnet host accepts a global.json jq cannot read, such as one holding a comment, so this warns rather than fails.
-          # A wrong line then fails the first dotnet command loudly, and this warning names the cause.
-          if [[ $status -gt 1 ]]; then
-            echo "::warning::jq could not read global.json (exit $status), so this installs the $fallback fallback rather than the line it selects."
-          fi
-          echo "dotnet-version=$fallback" >> "$GITHUB_OUTPUT"
-        fi
+        # A file passed on has to parse for both the dotnet host and setup-dotnet's JSON5 read.
+        # Comments are the one extension both accept, so they are dropped outside strings and the rest is read with json.loads.
+        # So a commented file still selects its line, and one with no sdk.version still gets the fallback.
+        python3 - "$fallback" <<'PY'
+        import json
+        import os
+        import re
+        import sys
+        from pathlib import Path
+
+        fallback = sys.argv[1]
+        path = Path("global.json")
+        selected = False
+        if path.is_file():
+            # A byte that is not UTF-8 is replaced, as setup-dotnet's own UTF-8 read does, and the dotnet host does not validate it.
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
+            comments = re.compile(r'("(?:\\.|[^"\\])*")|//[^\n]*|/\*.*?\*/', re.S)
+            # A comment becomes blanks that keep its newlines, so a parse error names the line in the caller's file.
+            text = comments.sub(lambda match: match.group(1) or re.sub(r"[^\n]", " ", match.group(0)), text)
+            try:
+                document = json.loads(text)
+            except ValueError as error:
+                print(f"::warning::global.json could not be read ({error}), so this installs the {fallback} fallback.")
+            else:
+                selected = isinstance(document.get("sdk", {}).get("version"), str)
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write("global-json-file=global.json\n" if selected else f"dotnet-version={fallback}\n")
+        PY
 
     - name: Setup .NET SDK step
       uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0

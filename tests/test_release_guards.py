@@ -2356,22 +2356,32 @@ class DotnetSdkLineCase(unittest.TestCase):
     SELECT = "Select .NET SDK line step"
     last_stdout = ""
 
-    def select(self, global_json: str | None) -> list[str]:
+    def select(self, global_json: str | bytes | None) -> list[str]:
         """The outputs the selection step writes in a workspace holding `global_json`, or none.
 
         The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
         """
-        if shutil.which("jq") is None:
-            self.skipTest("the selection step reads global.json with jq, which this host lacks")
+        bash = bash_or_skip()
+        # Asked of bash, since the step finds python3 the way bash does, and a found alias may not run.
+        probe = run([bash, "-c", "python3 -c pass"], capture_output=True, check=False, timeout=30)
+        if probe.returncode != 0:
+            self.skipTest(
+                "the selection step reads global.json with python3, which bash here cannot run"
+            )
         script = step_script(self.ACTION, self.SELECT)
         with tempfile.TemporaryDirectory() as directory:
             workspace = Path(directory)
-            if global_json is not None:
+            if isinstance(global_json, bytes):
+                (workspace / "global.json").write_bytes(global_json)
+            elif global_json is not None:
                 (workspace / "global.json").write_text(global_json, encoding="utf-8")
             output = workspace / "github-output"
             output.write_text("", encoding="utf-8")
+            # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
+            step = Path(directory) / "select.sh"
+            step.write_text(script, encoding="utf-8", newline="\n")
             result = run(
-                [bash_or_skip(), "-c", script],
+                [bash, str(step)],
                 cwd=workspace,
                 env={**os.environ, "GITHUB_OUTPUT": str(output)},
                 capture_output=True,
@@ -2394,15 +2404,39 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
 
-    def test_a_global_json_jq_cannot_read_falls_back_with_a_warning(self) -> None:
-        """A comment is valid to the dotnet host and not to jq, so the fallback names the cause rather than failing."""
-        commented = '// the fleet line\n{"sdk": {"version": "11.0.100"}}'
-        self.assertEqual(self.select(commented), [f"dotnet-version={baseline_line()[0]}.x"])
-        self.assertIn(
-            f"::warning::jq could not read global.json (exit 5), so this installs the"
-            f" {baseline_line()[0]}.x fallback",
-            self.last_stdout,
+    def test_comments_are_read_as_the_dotnet_host_reads_them(self) -> None:
+        """The dotnet host accepts comments, so a file holding them still selects its line or the fallback."""
+        fallback = [f"dotnet-version={baseline_line()[0]}.x"]
+        commented = (
+            '// the fleet line\n{"sdk": {"version": "11.0.100", // the TFM major\n'
+            '"rollForward": /* floats */ "latestFeature"}}'
         )
+        self.assertEqual(self.select(commented), ["global-json-file=global.json"])
+        runner_only = '// MTP\n{"test": {"runner": "Microsoft.Testing.Platform"}}'
+        self.assertEqual(self.select(runner_only), fallback)
+        latin_1_comment = b'// caf\xe9\n{"sdk": {"version": "11.0.100"}}'
+        self.assertEqual(self.select(latin_1_comment), ["global-json-file=global.json"])
+        byte_order_mark = '\ufeff{"sdk": {"version": "11.0.100"}}'
+        self.assertEqual(self.select(byte_order_mark), ["global-json-file=global.json"])
+        slashes_in_a_string = (
+            '{"sdk": {"version": "11.0.100"}, "note": "see https://example.test/a,}"}'
+        )
+        self.assertEqual(self.select(slashes_in_a_string), ["global-json-file=global.json"])
+
+    def test_a_global_json_both_parsers_do_not_accept_falls_back_with_a_warning(self) -> None:
+        """A passed file has to parse for the dotnet host and for setup-dotnet's JSON5 read alike.
+
+        So a trailing comma, which JSON5 accepts and the host rejects, falls back too.
+        """
+        fallback = f"{baseline_line()[0]}.x"
+        self.assertEqual(self.select("{not json"), [f"dotnet-version={fallback}"])
+        self.assertIn("::warning::global.json could not be read", self.last_stdout)
+        self.assertIn(f"so this installs the {fallback} fallback.", self.last_stdout)
+        trailing_comma = '{"sdk": {"version": "11.0.100",}}'
+        self.assertEqual(self.select(trailing_comma), [f"dotnet-version={fallback}"])
+        headed = '/* the fleet\n   SDK line\n*/\n{"sdk":\n {"version": "11.0.100",}}'
+        self.assertEqual(self.select(headed), [f"dotnet-version={fallback}"])
+        self.assertIn(": line 5 column", self.last_stdout)
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.
