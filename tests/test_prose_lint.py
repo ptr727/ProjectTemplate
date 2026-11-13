@@ -593,9 +593,60 @@ class TestCharsetRule(BaitCase):
         self.assertEqual(set(), t2 & t3)
         self.assertEqual(set(), t4 & (t1 | t2 | t3))
 
+    def test_a_markdown_code_span_is_read_as_quoted_data_like_a_fence(self) -> None:
+        """A string quoted verbatim keeps its bytes inside a code span, and the same text outside flags.
+
+        The tier-2 case has no figure beside it, so only the span admits it.
+        """
+        rules = {"charset", "charset-unknown"}
+        for quoted, kinds in (
+            ("\u00abr0\u00bb", ["charset-unknown", "charset-unknown"]),
+            ("Issued by Example \u00b7 Jan", ["charset"]),
+            ("left \u2014 right", ["charset"]),
+        ):
+            with self.subTest(quoted=quoted):
+                self.assertEqual([], self.kinds(f"The page printed `{quoted}`.\n", rules))
+                self.assertEqual([], self.kinds(f"```text\n{quoted}\n```\n", rules))
+                self.assertEqual(kinds, self.kinds(f"The page printed {quoted}.\n", rules))
+                self.assertEqual(kinds, self.kinds(f"`ok` then {quoted} then `ok`.\n", rules))
+
+    def test_a_code_span_in_a_table_cell_is_read_as_quoted_data(self) -> None:
+        """A cell's span is blanked within the cell, so the next cell is still read."""
+        rules = {"charset", "charset-unknown"}
+        head = "| a | b |\n| - | - |\n"
+        self.assertEqual([], self.kinds(f"{head}| `\u00ab` | plain |\n", rules))
+        self.assertEqual(["charset-unknown"], self.kinds(f"{head}| `x` | \u00ab |\n", rules))
+
+    def test_a_backtick_outside_markdown_quotes_nothing(self) -> None:
+        """Outside Markdown a backtick is structural, so a code line is read whole."""
+        rules = {"charset", "charset-unknown"}
+        self.assertEqual(
+            ["charset-unknown"], self.kinds("#!/bin/sh\n# ids like `\u00ab`\n", rules, "a.sh")
+        )
+
 
 class TestSemicolonRule(BaitCase):
     """The `semicolon` rule on Markdown prose units."""
+
+    def test_a_semicolon_inside_one_token_joins_no_clause(self) -> None:
+        """`TL;DR` holds its semicolon between word characters, so neither fix applies to it."""
+        for text in (
+            "> **TL;DR**: Short summary here.\n",
+            "A plain sentence with TL;DR inside it.\n",
+            "TL;DR, it runs on push, always.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_a_semicolon_with_a_space_beside_it_is_still_a_splice(self) -> None:
+        """Only a word character on both sides makes one token, so a spaced splice still flags."""
+        for text in (
+            "TL;DR it runs; it stops.\n",
+            "It runs ;it stops.\n",
+            "It runs;\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
 
     def test_a_splice_is_flagged(self) -> None:
         self.assertEqual(["semicolon"], self.kinds(f"{SPLICE_BAIT}.\n", {"semicolon"}))

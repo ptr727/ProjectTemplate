@@ -1145,6 +1145,7 @@ LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inn
 LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
 LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+JOINED_SEMICOLON = re.compile(r"(?<=\w);(?=\w)")
 CELL_BREAK = re.compile(r"(?<!\\)\|")
 TABLE_ROW = re.compile(r"^\s*(?:>\s*)*\|")
 # A word-joining character before the repeat keeps "either/or or" from reading as a doubled word.
@@ -1261,17 +1262,33 @@ def charset_findings(lineno: int, line: str) -> list[Finding]:
 
 
 def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
-    return [f for line in unit.lines for f in charset_findings(line.number, line.text)]
+    """Each line's non-ASCII judged by tier, a Markdown code span read as quoted data like a fence.
+
+    Outside Markdown a backtick is structural, such as a shell command substitution, so a code
+    line is read whole.
+    """
+    return [
+        f
+        for line in unit.lines
+        for f in charset_findings(
+            line.number,
+            by_cell(line.text, strip_inline_code) if unit.kind == "prose" else line.text,
+        )
+    ]
 
 
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
     """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
 
+    A semicolon with a word character on both sides sits inside one token, as in `TL;DR`, and
+    joins no clause, so it is no finding.
+
     A table row opening with a pipe is read a cell at a time, split where `row_cells` splits it.
     `prose_lines` blanks each cell on its own and leaves every pipe ending one where it was.
     """
     out: list[Finding] = []
-    for n, _txt, line in prose_lines(unit):
+    for n, _txt, prose in prose_lines(unit):
+        line = JOINED_SEMICOLON.sub("_", prose)
         pieces = (
             s for cell in row_cells(line) for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell))
         )

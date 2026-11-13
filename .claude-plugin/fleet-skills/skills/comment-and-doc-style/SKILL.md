@@ -291,7 +291,7 @@ It is also because reading those would report a fixture rather than a claim abou
 Agent-authored text is ASCII by default: documentation, code, comments, commit messages, and PR
 descriptions. A non-ASCII character is read against the tiers below, because whether one is
 typography or meaning depends on where it sits. A character in no tier is a finding rather than a
-silent pass, a letter of a recorded name excepted per the bullet below.
+silent pass. A letter of a recorded name and quoted data are excepted, per the bullets below.
 
 - **Tier 1, never legitimate.** Typography carrying no meaning its ASCII form loses. Remove on
   sight:
@@ -324,12 +324,17 @@ silent pass, a letter of a recorded name excepted per the bullet below.
   document records as data is written with its own letters and the marks they carry.
   The reason is that folding such a name to ASCII records a different name. Anywhere else a letter the agent writes that no
   tier covers takes its ASCII form.
+- **A Markdown code span is quoted data, as a fenced block is.** A string quoted verbatim from
+  another source, such as a third party's output, keeps its bytes inside an inline code span. No
+  tier judges it there. Outside Markdown a backtick is structural, so a code line is read whole.
 - **An unrecognized non-ASCII character is reported, not allowed.** Classify it into a tier above
-  before using it. A letter of a recorded name is the one exception, per the bullet above.
+  before using it. A letter of a recorded name and quoted data are the exceptions, per the bullets
+  above.
 - **No semicolon in agent-authored prose.** Recast a mid-sentence semicolon as a comma or as two
   sentences. A semicolon separating items in a list that already contains commas, or a statement
   terminator in code, is unaffected. A single semicolon separates such a list only between two
   labeled items, as in `Inputs: a, b; outputs: c`, and a list item's bold opening label is not one.
+  A semicolon inside one token, such as `TL;DR`, joins no clause and is unaffected too.
 - **No spaced hyphen joining or interrupting a sentence** (` - `, or the paired aside ` - x - `).
   Recast as a comma, two sentences, or parentheses. A hyphen inside a compound word, a leading
   list marker, a range, and the `- **Label** - explanation` bullet separator are unaffected.
