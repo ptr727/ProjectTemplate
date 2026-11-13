@@ -254,15 +254,16 @@ since git then runs whatever that directory holds, and nothing where it holds no
   other than `0` stops and is reported as it stands rather than finished by hand. The raw
   `git worktree remove`, `git branch -D`, and remote delete it replaces are not on the host-safety
   permission allowlist, and the command is. It forwards to `scripts/pr_cleanup.py`, and
-  `scripts/README.md` "`pr_cleanup.py`" in the hub holds the full contract.
-- **What no merged pull request into `develop` covers is removed by hand.** That is a promotion's
-  worktree, a detached helper worktree, and a temporary standalone clone. Read
+  `scripts/README.md` "`pr_cleanup.py`" in the hub holds the full contract. A conflicted
+  promotion's branch, cut from `main` and merging `develop`, takes the same command, run on its
+  pull request into `main`.
+- **What no pull request `cleanup` takes covers is removed by hand.** That is a `develop`-headed
+  promotion's worktree, a detached helper worktree, and a temporary standalone clone. Read
   `git -C <exact-path> status --porcelain --ignored --untracked-files=normal`. Any line not starting `!!` means the tree is not clean, so stop. Each `!!` line names an ignored file the removal deletes. Then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
-  `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held, a promotion
-  branch merged into `main` by a merge commit for one, is left for the sweep below. The sweep reads it as finished once `origin/main` or `origin/develop` contains it. `git branch -d` is no substitute, since it judges a branch with no upstream against `HEAD`. So it refuses one merged only into
+  `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held is left for the
+  sweep below. The sweep reads it as finished once `origin/main` or `origin/develop` contains it. `git branch -d` is no substitute, since it judges a branch with no upstream against `HEAD`. So it refuses one merged only into
   `main` while the base clone is on `develop`. Where that branch was pushed, its remote branch is
-  reported to the maintainer for deletion, since `cleanup` reads only a pull request merged into
-  `develop`. Never delete `develop` after a promotion, since it is the permanent integration
+  reported to the maintainer for deletion, since no pull request `cleanup` takes covers it. Never delete `develop` after a promotion, since it is the permanent integration
   branch.
 - **Return the base clone to current `develop`.** `cleanup` does this itself where the base clone
   is on `develop` or on the merged branch with no tracked changes. A base clone on the merged
