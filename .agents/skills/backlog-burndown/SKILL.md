@@ -288,7 +288,8 @@ for, and it binds harder than any throughput target.
   reading only the comments records them as holding nothing. That is the collision this section
   exists to prevent rather than the absence of one. Read the branch itself instead:
   `git diff --name-only origin/<base>...<branch>` for what it has committed, and, for a
-  registered worktree, `git -C <worktree> status --porcelain` for what it holds uncommitted.
+  registered worktree, `git -C <worktree> status --porcelain --untracked-files=normal` for what it
+  holds uncommitted.
   `<base>` is the `baseRefName` of the branch's pull request where it has one, and `develop`
   otherwise. That is because `repo-worktree` "The Base Branch" lets a task branch from `main`. Read against
   `develop`, a `main`-based branch can list files it never touched, which errs toward a collision
