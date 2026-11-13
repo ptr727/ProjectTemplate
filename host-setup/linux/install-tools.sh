@@ -1117,7 +1117,7 @@ op_remove_download() {
 }
 
 # The vendor's optional debsig step is skipped, since apt already checks the package against the signed InRelease.
-# The 1Password desktop app's package writes this same sources file naming its own keyring, and a later run here writes it back.
+# The 1Password desktop app's package writes this same sources file naming its own keyring, and a later install or upgrade of op writes it back.
 op_install() {
     if ! op_arch_supported; then
         warn "1Password's repository carries amd64, arm64 and armhf only, skipping op on $ARCH"
@@ -1556,7 +1556,7 @@ apply_tool() {
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is the distro's until the upstream repository is read, so quoting it here would name the wrong upstream.
-        log "$tool: installed without its upstream repository, moving it to $("$(tool_function "$tool" source)")"
+        log "$tool: installed without the sources file this script manages, moving it to $("$(tool_function "$tool" source)")"
     else
         log "$tool: ${status}${target:+, upstream carries $target}"
     fi
