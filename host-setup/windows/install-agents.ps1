@@ -539,6 +539,8 @@ function Get-PackageStep {
     $shown = "$Manager $($arguments -join ' ')"
     if (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
         $plan.Why = "$Manager is not on PATH, so run: $shown"
+    } elseif ($Step -eq 'remove' -and $Manager -eq 'npm' -and -not (Get-NpmPrefix)) {
+        $plan.Why = "the npm on PATH did not report its prefix, so run: $shown"
     } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
         $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, $action it where it was installed"
     } elseif ($Manager -eq 'npm' -and -not $pkg) {
@@ -720,7 +722,7 @@ $TOOLS = @(
         Name    = 'opencode'
         Source  = 'npm install -g @opencode/cli'
         # The managed copy is the npm package Get-NpmPackage records, upgraded through npm's plan, so no Upgrade of its own runs.
-        Managed = @{ Manager = 'npm' }
+        Managed = $true
         Install = {
             if (-not $script:DRY_RUN -and -not (Get-ToolPath 'npm')) {
                 warn 'opencode installs on Windows as the npm package @opencode/cli, and npm is not installed (https://opencode.ai/docs/)'
@@ -761,27 +763,24 @@ function Get-Tool {
 # A tool can record a Managed copy, the one this script installs and upgrades.
 # Another copy PATH reaches first is reported with the commands that fix it, and never removed here, since the fix is a one-off.
 
-# The tool's Managed record, or nothing for a tool recording none, read by key since strict mode refuses a missing one.
-function Get-ManagedRecord {
+# Whether a tool records a managed copy, read by key since strict mode refuses a missing one.
+function Test-ManagedTool {
     param([string]$ToolName)
     $tool = Get-Tool $ToolName
-    if ($tool -and $tool.ContainsKey('Managed')) { return $tool.Managed }
-    return $null
+    return [bool]($tool -and $tool.ContainsKey('Managed') -and $tool.Managed)
 }
 
 # How the managed copy reads in a message.
 function Get-ManagedLabel {
     param([string]$ToolName)
-    $managed = Get-ManagedRecord $ToolName
-    return "the $($managed.Manager) package $(Get-NpmPackage -Tool $ToolName)"
+    return "the npm package $(Get-NpmPackage -Tool $ToolName)"
 }
 
 # Whether a copy PATH resolves to is another copy than the tool's managed one.
 function Test-StrayCopy {
     param([string]$ToolName, [string]$Path)
-    $managed = Get-ManagedRecord $ToolName
-    if (-not $managed) { return $false }
-    if ((Get-ToolManager $Path) -ne $managed.Manager) { return $true }
+    if (-not (Test-ManagedTool $ToolName)) { return $false }
+    if ((Get-ToolManager $Path) -ne 'npm') { return $true }
     # Where npm cannot say where it installs, only a shim naming another of the tool's packages is told from the managed one.
     if (-not (Get-NpmPrefix)) {
         $named = Get-NamedNpmPackage -Tool $ToolName -Path $Path

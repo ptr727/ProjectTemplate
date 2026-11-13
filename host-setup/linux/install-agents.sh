@@ -434,6 +434,8 @@ package_step() {
         PKG_WHY="$manager is not on PATH, so run: ${command[*]}"
     elif [[ $manager == "bun" && -z $pkg ]]; then
         PKG_WHY="its files at $(hide_home "$real") are not under bun's global package $recorded, so that package does not own it, $action it where it was installed"
+    elif [[ -z $dir && $step == "remove" ]]; then
+        PKG_WHY="the $manager on PATH did not report where it installs, so run: ${command[*]}"
     elif [[ -z $dir || $real != "$dir"/* ]]; then
         PKG_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, $action it where it was installed"
     elif [[ -z $pkg ]]; then
@@ -482,7 +484,7 @@ PLAN_CMD=()
 PLAN_WHY=""
 
 manager_plan() {
-    local tool="$1" path="$2" manager="$3" real pkg dir name
+    local tool="$1" path="$2" manager="$3" real name
     PLAN_CMD=()
     PLAN_WHY=""
     if ! real=$(tool_real_path "$path"); then
@@ -583,9 +585,6 @@ stray_removal() {
         ;;
     self)
         printf 'rm %s' "$(hide_home "$path")"
-        ;;
-    *)
-        printf 'remove it with %s' "$manager"
         ;;
     esac
 }

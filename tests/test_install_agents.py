@@ -927,9 +927,6 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("not under the prefix of the npm on PATH", result.stderr)
         self.assertNotIn("npm uninstall -g opencode-ai", result.stderr)
 
-    @unittest.skipIf(
-        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
-    )
     def test_a_copy_no_manager_owns_is_still_a_stray_where_npm_cannot_say(self) -> None:
         # An npm that reports no prefix, so only an npm copy goes untold, and this one is no npm copy.
         self.stub("opencode", "1.0.0")
@@ -952,11 +949,21 @@ class TestInstallAgentsWindows(unittest.TestCase):
         notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])
         self.assertIn("npm uninstall -g opencode-ai", notes)
 
+    def test_a_removal_names_its_package_where_npm_reports_no_prefix(self) -> None:
+        # An npm stub with no prefix file answers, so only the shim's own text names its package.
+        shims = self.dir / "npm"
+        self.own_npm(self.stub("opencode", "1.0.0", shims), self.dir, "opencode-ai")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Report", "-Json", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])
+        self.assertIn("did not report its prefix, so run: npm uninstall -g opencode-ai", notes)
+
     @unittest.skipIf(
         shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
     )
     def test_a_managed_shim_is_not_called_a_stray_where_npm_cannot_say(self) -> None:
-        # No npm on the test PATH, so nothing can tell the managed shim from another copy.
+        # No npm on the test PATH, and the shim names the recorded package, so it is not told apart as a stray.
         shims = self.dir / "npm"
         self.own_npm(self.stub("opencode", "2.0.0", shims), self.dir, "@opencode/cli")
         result = self.run_script("-Report", "-Json", "opencode", extra_path=shims)
