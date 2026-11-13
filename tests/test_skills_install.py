@@ -40,7 +40,8 @@ class AgentsHomeCase(unittest.TestCase):
 class SourceRefCase(unittest.TestCase):
     """source_ref()'s dirty check must watch every path this installer actually reads from,
     not only .agents/skills/. Otherwise a modified marketplace.json/generated plugin would report
-    dirty=False over bytes that were never installed."""
+    dirty=False over bytes that were never installed. It names its untracked mode too, since
+    copytree installs an untracked skill that status.showUntrackedFiles=no would hide."""
 
     def test_git_status_is_scoped_to_both_watched_paths(self) -> None:
         calls = []
@@ -63,22 +64,6 @@ class SourceRefCase(unittest.TestCase):
             str(skills_install.CLAUDE_PLUGIN_DIR.relative_to(skills_install.ROOT).as_posix()),
             status_call,
         )
-
-    def test_git_status_names_its_untracked_mode(self) -> None:
-        """copytree installs an untracked skill, which status.showUntrackedFiles=no would hide."""
-        calls = []
-
-        def fake_run(args, **kwargs):
-            calls.append(args)
-            result = mock.Mock()
-            result.returncode = 0
-            result.stdout = "deadbeef\n" if "rev-parse" in args else ""
-            return result
-
-        with mock.patch("skills_install.run_with_deadline", side_effect=fake_run):
-            skills_install.source_ref()
-
-        status_call = next(c for c in calls if "status" in c)
         self.assertIn("--untracked-files=all", status_call)
         self.assertLess(status_call.index("--untracked-files=all"), status_call.index("--"))
 

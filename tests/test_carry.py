@@ -583,7 +583,6 @@ class CarryHubTests(unittest.TestCase):
         subprocess.run(
             ["git", "-C", self.hub, "config", "status.showUntrackedFiles", "no"], check=True
         )
-        subprocess.run(["git", "-C", self.hub, "switch", "main"], check=True, capture_output=True)
         (self.hub / "stray.md").write_text("not committed\n", encoding="utf-8")
         with self.assertRaisesRegex(carry.CarryError, "hub checkout has local changes"):
             self.verify("main", "Promoted")
