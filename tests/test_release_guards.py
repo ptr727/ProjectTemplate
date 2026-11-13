@@ -66,10 +66,6 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
     Only a space or a tab may follow a closing fence, and only a space carries a body's indent.
     Each whitespace comparison here names its characters or is marked as an exception. A test
     holds that rule over this function's source.
-
-    The label is the info string's first word under Python's whitespace class. Where a narrower
-    class's first word holds none of that class, the two agree, and every label a caller matches
-    is such a word.
     """
     blocks: list[FencedBlock] = []
     # A renderer ends a line on a newline, and on a carriage return alone or paired.
@@ -107,7 +103,7 @@ def fenced_blocks(markdown: str) -> list[FencedBlock]:
                 raise AssertionError(
                     f"line {opened_at + 1 + offset} is indented less than the block's opener"
                 )
-        words = opener.group("info").split()  # any-whitespace: see the docstring
+        words = opener.group("info").split()  # any-whitespace: no matched label holds whitespace
         blocks.append(
             FencedBlock(
                 opened_at,
