@@ -162,7 +162,7 @@ class TestInstallAgents(unittest.TestCase):
         return {row["tool"]: row for row in json.loads(result.stdout)["tools"]}
 
     def managed_opencode(self) -> Path:
-        # Written without a link into self.bin, so only the managed path holds it and PATH does not reach it.
+        # Written without a link into self.bin, so a stray linked there comes first on PATH.
         path = self.home / ".opencode" / "bin" / "opencode"
         path.parent.mkdir(parents=True)
         path.write_text(STUB.replace("$BANNER", "2.0.0"), encoding="utf-8")
@@ -232,16 +232,17 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("opencode - -> 2.0.0", result.stdout)
 
     def test_a_removal_npm_cannot_resolve_names_the_package_in_the_path(self) -> None:
-        # No npm on the test PATH, so only the node_modules segment names the package.
-        if shutil.which("npm", path="/usr/bin:/bin"):
-            self.skipTest("a host npm in /usr/bin or /bin is reachable")
+        # An npm stub with no root file answers, so only the node_modules segment names the package.
         self.stub(
             "opencode", "1.0.0", where=self.dir / "lib" / "node_modules" / "opencode-ai" / "bin"
         )
+        self.stub("npm", "npm 10.0.0")
         self.curl()
         result = self.run_script("--report")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("npm uninstall -g opencode-ai", result.stdout)
+        self.assertIn(
+            "did not report where it installs, so run: npm uninstall -g opencode-ai", result.stdout
+        )
         self.assertNotIn("npm uninstall -g @opencode/cli", result.stdout)
 
     def test_a_managed_opencode_alone_is_upgraded_by_its_installer(self) -> None:

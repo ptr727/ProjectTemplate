@@ -246,7 +246,7 @@ function Invoke-Installer {
 function Update-SessionPath {
     $separator = [IO.Path]::PathSeparator
     $present = @($env:PATH -split [regex]::Escape($separator))
-    $wanted = @(Join-Path $HOME '.local/bin'; Join-Path $HOME '.opencode/bin')
+    $wanted = @(Join-Path $HOME '.local/bin')
     if ($IsWindows) { $wanted += @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') }
     foreach ($dir in $wanted) {
         if ($dir -and (Test-Path -LiteralPath $dir -PathType Container) -and ($present -notcontains $dir)) {
