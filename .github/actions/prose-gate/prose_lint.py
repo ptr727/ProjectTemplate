@@ -2247,11 +2247,10 @@ def main(argv: list[str] | None = None) -> int:
                 git_text("-C", str(scan_root), "cat-file", "-e", f"{ref}:{key}", env=held) is None
             )
 
-        # Only a path this run reads is probed, since a merge can bring in many moves it does not.
-        scanned = set(keys.values())
+        # Only a path left in scope is probed, since a merge brings in moves that stay out of it.
         for recorded, other in ((moves, "HEAD"), (our_moves, "MERGE_HEAD")):
             for k, m in recorded.items():
-                if k in scanned and lacks(other, k):
+                if k in scope and lacks(other, k):
                     sources.setdefault(k, []).append(m)
         moves = {}
         a.diff = "MERGE_HEAD and HEAD"
