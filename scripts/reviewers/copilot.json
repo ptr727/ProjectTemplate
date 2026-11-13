@@ -10,7 +10,7 @@
     "job was not started"
   ],
   "refusal_kinds": {
-    "quota": ["reached (?:their|its|his|her|your|my) quota limit", "spending limit"],
+    "quota": ["reached (?:their|its|his|her|your|my) quota limit"],
     "error": ["encountered an error"],
     "file_count": ["maximum number of files"],
     "excluded": ["review any files in this pull request"]

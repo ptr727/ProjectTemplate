@@ -135,13 +135,13 @@ class TestRefusal(unittest.TestCase):
                 self.assertEqual("none", found.coverage)
                 self.assertEqual((), found.notes)
 
-    def test_a_job_that_never_started_over_billing_is_a_quota_refusal(self) -> None:
-        """The notice reviews nothing, so it is read as the account state it names."""
+    def test_a_job_that_never_started_over_billing_is_a_refusal(self) -> None:
+        """The notice reviews nothing, and names no cause a kind routes, so its kind is unknown."""
         found = adapter.read(
             "The job was not started because a payment on this account failed or its spending "
             "limit is too low."
         )
-        self.assertEqual("quota", found.refusal)
+        self.assertEqual("unknown", found.refusal)
         self.assertEqual("none", found.coverage)
         self.assertEqual((), found.notes)
 
