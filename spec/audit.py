@@ -610,6 +610,12 @@ def secret_path_target(tree, directories, holding, root, written, rest):
     return within, resolved
 
 
+def editor_text(text):
+    """An editor config file's text with its // comments dropped and each path separator form read as /."""
+    live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
+    return live.replace("${/}", "/").replace("${pathSeparator}", "/")
+
+
 def compose_project_bases(tree, read_text):
     """The directory each compose file a devcontainer lists resolves its paths against, the first listed file's.
 
@@ -620,7 +626,7 @@ def compose_project_bases(tree, read_text):
     for path in sorted(tree):
         if not EDITOR_CONFIG.fullmatch(path) or not path.endswith("devcontainer.json"):
             continue
-        listing = DOCKER_COMPOSE_FILES.search(EDITOR_COMMENT.sub("", read_text(path) or ""))
+        listing = DOCKER_COMPOSE_FILES.search(editor_text(read_text(path) or ""))
         named = re.findall(r'"([^"]*)"', listing[1]) if listing else []
         listed = [posixpath.normpath(posixpath.join(posixpath.dirname(path), n)) for n in named]
         for file in listed:
@@ -692,8 +698,7 @@ def named_secret_signals(tree, read_text, directories, holding):
                     for value, file in compose_host_paths(document)
                 ]
             else:
-                live = EDITOR_COMMENT.sub("", text).replace("\\\\", "/")
-                live = live.replace("${/}", "/").replace("${pathSeparator}", "/")
+                live = editor_text(text)
                 root = editor.group(1)
                 listing = (
                     WORKSPACE_FOLDER.search(live) if path.endswith(".code-workspace") else None

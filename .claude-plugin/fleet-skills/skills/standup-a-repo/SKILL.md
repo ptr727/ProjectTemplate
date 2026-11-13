@@ -63,8 +63,9 @@ maintainer can supply what section 0A lists.
    than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
    `cspell.json`. A downstream `AUDIT.md` is the short, repository-scoped form that says how the
    repository reaches the hub for its audit and configuration check. Write it from
-   `catalog/snippets/configs/AUDIT.md`, filling each placeholder `spec/files.json` declares for it
-   from the repository's registry entry. `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
+   `catalog/snippets/configs/AUDIT.md`, filling each placeholder `spec/files.json` declares for it.
+   `<required-secrets>` takes the secret findings of `spec/audit.py` for the repository, and the
+   rest come from its registry entry. `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
    `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from
    `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured.
    Read `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules before writing any repo

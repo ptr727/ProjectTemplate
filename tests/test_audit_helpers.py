@@ -4225,7 +4225,7 @@ class SecretStemCase(unittest.TestCase):
         """Compose resolves every file of a set against the first one's directory, the project directory."""
         texts = {
             ".devcontainer/devcontainer.json": (
-                '{\n  // the set\n  "dockerComposeFile": ["../docker-compose.yml", "docker-compose.extend.yml"]\n}\n'
+                '{\n  // the set\n  "dockerComposeFile": ["..\\\\docker-compose.yml", "docker-compose.extend.yml"]\n}\n'
             ),
             ".devcontainer/docker-compose.extend.yml": (
                 "services:\n  app:\n    env_file: ./.secrets/App.env\n"
