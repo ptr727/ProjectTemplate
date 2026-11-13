@@ -163,8 +163,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    It decides its local refusals before the remote delete. `repo-worktree` "Listing and
    Cleanup" says what a refusal after the remote delete and a `base=kept` line each leave to do.
    It takes the pull request rather than a branch name and does the verify-then-delete in
-   code. It refuses unless the pull request merged into `develop` from a head in that same
-   repository. It also refuses a permanent branch or one any ruleset or branch protection covers. It
+   code. It refuses unless the pull request merged into `develop`, or is a conflicted promotion
+   merged into `main`, from a head in that same repository. It also refuses a permanent branch or one any ruleset or branch protection covers. It
    checks the tip is still at the pull request's `headRefOid` before deleting, and reads the ref
    back to confirm.
    These exits are `cleanup`'s, read once a `status=MERGED` line printed or a standalone `cleanup`

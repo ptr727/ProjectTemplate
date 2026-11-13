@@ -7115,7 +7115,7 @@ class TestContract(unittest.TestCase):
         """
         source = "".join(
             (REPO / "scripts" / name).read_text(encoding="utf-8")
-            for name in (*WRITE_SCANNED, "pr_cleanup.py")
+            for name in (*WRITE_SCANNED, "pr_cleanup.py", "pr_cleanup_rest.py")
         )
         for verb in (
             "-X POST",
