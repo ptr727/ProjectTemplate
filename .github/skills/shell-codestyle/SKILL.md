@@ -2,7 +2,7 @@
 name: shell-codestyle
 description: >-
   Governs Bash/shell script style for ptr727/ProjectTemplate fleet repos: when a bootstrap or
-  host-tool script may be shell instead of Python, the mandatory set -Eeuo pipefail header, the
+  host-tool script may be shell instead of Python, the mandatory set -Eeuo pipefail line, the
   pipefail-versus-early-reader pitfall, self-recursive command shims, self-locating scripts, the
   shellcheck-plus-shfmt clean-compile, the --help and unknown-argument rule, the SIGINT/SIGTERM
   rule, and the why-not-what comment rule. Use this whenever writing, reviewing, or editing a shell
@@ -38,14 +38,18 @@ Python. Everything else is Python, with a test under its own scripts tree's
   section, and the hub's `scripts/docker_lint.py` runs the same pair headless. Neither is scoped
   to the `*.sh` glob alone. A tracked, extension-less script whose shebang names bash or sh joins
   the target list too. That is the shape a script meant to run as a bare command takes.
-- **`set -Eeuo pipefail`, before the first command the script runs.** A header comment sits above
-  it, as the hub's own `repo-config/configure.sh` and `host-setup/` scripts do. That works because
-  what matters is that nothing executes unguarded rather than which line number it lands on.
+- **`set -Eeuo pipefail`, before the first command the script runs.** No header comment is
+  required, so the `set` line may follow the shebang directly. A comment above it is allowed
+  where it carries a specific non-obvious point. The no-summary rule in
+  `comment-and-doc-style` still forbids one restating what the script contains. What matters is
+  that nothing executes unguarded rather than which line number the `set` lands on.
   Without `-e` a failed command in the middle of a sequence lets the rest run against a state
   nobody checked. Without `pipefail` a pipeline reports the exit of its last stage. So a fetch that
   failed reads as an answer when a parser downstream succeeds on an empty input. `-E` carries an
   `ERR` trap into functions and command substitutions. So a script that later adds one is not
-  surprised by where it does not fire.
+  surprised by where it does not fire. A deliberately POSIX `#!/bin/sh` script, in practice a git
+  hook that must run before any toolchain exists, takes `set -eu` instead. `sh` carries neither
+  `-E` nor `pipefail`, so the bash form aborts it under dash.
 - **A reader that stops early needs its producer read first.** Under `pipefail`, a producer
   writing to a closed pipe exits non-zero. So `curl ... | grep -q` reports a successful fetch as a
   failure whenever the match is found early enough. Capture the output, then search it.
@@ -89,7 +93,7 @@ Python. Everything else is Python, with a test under its own scripts tree's
 A command-line script is one a person or an agent runs by name. A hook its host runs, taking its input from that host rather than from a command line, is not one.
 
 - **Every command-line script answers `--help` and `-h`** with the same text on stdout, then exits 0, changing nothing. That text opens on a usage line naming the script. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted. A PowerShell script declaring its own parameters answers `-Help` and `-h` instead, from a `-Help` switch carrying an `h` alias. That form follows PowerShell's own parameter convention, so such a script owes no answer to a literal `--help`. A wrapper that forwards its arguments to another script answers whatever that script answers.
-- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. So a PowerShell script declaring its own parameters refuses a literal `--help` like any other unrecognized argument. Where no parameter takes the remaining arguments, the binder's refusal does that. A script with such a parameter refuses a dash-prefixed leftover itself. An unrecognized first argument is never taken as a default mode or as a target.
+- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. So a PowerShell script declaring its own parameters refuses a literal `--help` like any other unrecognized argument. Where no parameter takes the remaining arguments, the binder's refusal does that. A script with such a parameter refuses a dash-prefixed leftover itself. The binder refuses only in a script carrying `[CmdletBinding()]`. Without it, a plain `param()` block binds an unknown parameter into `$args` and runs on. Such a script refuses a non-empty `$args` itself, before any work. An unrecognized first argument is never taken as a default mode or as a target.
 
 <!-- /include -->
 
