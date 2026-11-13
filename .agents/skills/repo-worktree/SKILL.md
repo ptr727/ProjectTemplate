@@ -257,7 +257,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   `scripts/README.md` "`pr_cleanup.py`" in the hub holds the full contract.
 - **What no merged pull request into `develop` covers is removed by hand.** That is a promotion's
   worktree, a detached helper worktree, and a temporary standalone clone. Read
-  `git status --porcelain --ignored --untracked-files=normal`. Any line not starting `!!` means the tree is not clean, so stop. Each `!!` line names an ignored file the removal deletes. Then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
+  `git -C <exact-path> status --porcelain --ignored --untracked-files=normal`. Any line not starting `!!` means the tree is not clean, so stop. Each `!!` line names an ignored file the removal deletes. Then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
   `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held, a promotion
   branch merged into `main` by a merge commit for one, is left for the sweep below. The sweep reads it as finished once `origin/main` or `origin/develop` contains it. `git branch -d` is no substitute, since it judges a branch with no upstream against `HEAD`. So it refuses one merged only into
   `main` while the base clone is on `develop`. Where that branch was pushed, its remote branch is

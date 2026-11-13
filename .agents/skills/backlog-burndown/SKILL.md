@@ -479,7 +479,7 @@ An abandoned group, and a dead worker's clean tree, have no merged pull request 
 `repo-worktree`'s verify-before-removing step to read. So that step gives way here to a check of
 what it exists to establish, that nothing unmerged is being thrown away.
 The orchestrator records the local tip with `git rev-parse refs/heads/<exact-branch>`.
-After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` must exit `0`, and the worktree must be clean.
+After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` must exit `0`, and the worktree must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
 Where both hold, the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read.
 The removal is `git worktree remove <exact-path>`, then `git update-ref -d refs/heads/<exact-branch> <tip>`.
 That delete refuses only where the branch has moved off the tip the is-ancestor check judged, so it discards nothing that check did not clear.
@@ -618,7 +618,7 @@ rather than a decision.
 - **Resuming retires that worktree first, then dispatches a fresh worker.** Git refuses to attach a
   branch already checked out somewhere, per `repo-worktree`. So a fresh worker cannot take the
   branch while the stopped tree holds it. Once the answer is in, remove that worktree if it is
-  clean. Otherwise apply what the answer said about its uncommitted work, then remove it. A
+  clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
   one branch. It is retired per "Cleanup Is the Orchestrator's", once its tip equals the remote
   tip. Only then dispatch. This is the
@@ -847,8 +847,8 @@ subagents and holds only what they return.
    issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
-   refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a clean tree with
-   `git worktree remove <exact-path>`, leaving its branch standing. That command errors on a
+   refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a tree clean by
+   `repo-worktree` "Listing and Cleanup"'s hand-removal read with `git worktree remove <exact-path>`, leaving its branch standing. That command errors on a
    standalone clone, which takes the retire-alone checks of "Cleanup Is the Orchestrator's"
    instead. Leave a dirty tree, or a clone failing those checks, exactly as it stands. Keep its
    group parked, and name it in the report. Only the
