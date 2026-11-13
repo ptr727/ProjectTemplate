@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Exercise backlog_metrics.py's counting, rendering, and refusals on constructed fixtures.
 
-No case starts `gh`. The counting and rendering functions take parsed lists, and the cases that
-reach `run_gh` replace the subprocess call. The fixtures are invented names and counts.
+No case starts the real `gh`. The counting and rendering functions take parsed lists, and the
+cases that reach `run_gh` replace the subprocess call. The one exception, `InterruptTests`, runs
+the script as a process with a `gh` stub ahead on PATH. The fixtures are invented names and counts.
 
 Run as `uv run --no-project --with-requirements tests/requirements.txt python
 tests/test_backlog_metrics.py`, or under the same command with `-m unittest discover -s tests`.
@@ -210,16 +211,21 @@ class RenderingTests(unittest.TestCase):
         cells = [cell.strip() for cell in row.strip("|").split("|")]
         self.assertEqual(cells[0], "[alpha](https://github.com/o/alpha)")
         issues = "https://github.com/o/alpha/issues?q=is%3Aissue%20"
-        self.assertEqual(cells[1], f"[4]({issues}created%3A%3E%3D2026-01-01%20-label%3Ahandoff)")
         self.assertEqual(
-            cells[2], f"[2]({issues}is%3Aclosed%20closed%3A%3E%3D2026-01-01%20-label%3Ahandoff)"
+            cells[1], f"[4]({issues}created%3A2026-01-01..2026-01-08%20-label%3Ahandoff)"
         )
-        self.assertEqual(cells[3], f"[1]({issues}created%3A%3E%3D2026-01-01%20label%3Ahandoff)")
+        self.assertEqual(
+            cells[2],
+            f"[2]({issues}is%3Aclosed%20closed%3A2026-01-01..2026-01-08%20-label%3Ahandoff)",
+        )
+        self.assertEqual(
+            cells[3], f"[1]({issues}created%3A2026-01-01..2026-01-08%20label%3Ahandoff)"
+        )
         self.assertEqual(cells[4], f"[6]({issues}is%3Aopen%20-label%3Ahandoff)")
         self.assertEqual(
             cells[5],
             "[2](https://github.com/o/alpha/pulls"
-            "?q=is%3Apr%20is%3Amerged%20merged%3A%3E%3D2026-01-01)",
+            "?q=is%3Apr%20is%3Amerged%20merged%3A2026-01-01..2026-01-08)",
         )
         self.assertEqual(cells[6:], ["2.0", "10", "3", "1.5"])
         self.assertIn("| Total | 4 | 2 | 1 | 6 | 2 |", text)
@@ -332,6 +338,7 @@ class RenderingTests(unittest.TestCase):
             list(review["bots"]["copilot"]),
             [
                 "policy_trigger",
+                "policy_from_default",
                 "requests_by_automation",
                 "requests_by_user",
                 "automatic_rounds",
@@ -353,6 +360,19 @@ class RenderingTests(unittest.TestCase):
         )
         self.assertIsNone(copilot["automatic_rounds"])
         self.assertIsNone(copilot["policy_trigger"])
+
+    def test_json_states_a_default_trigger_bare_with_a_flag(self) -> None:
+        policy = {"copilot": "auto (default)", "qodo": "manual"}
+        bots = {"copilot": bm.BotStats(), "qodo": bm.BotStats(), "coderabbit": bm.BotStats()}
+        data = bm.review_data(bm.ReviewMetrics(name="alpha", policy=policy, bots=bots))["bots"]
+        self.assertEqual(
+            [(b["policy_trigger"], b["policy_from_default"]) for b in data.values()],
+            [("auto", True), ("manual", False), (None, None)],
+        )
+        failed = bm.ReviewMetrics(name="alpha", policy=policy, policy_error="x", bots=bots)
+        self.assertEqual(
+            {b["policy_from_default"] for b in bm.review_data(failed)["bots"].values()}, {None}
+        )
 
     def test_json_billing_is_null_where_billing_failed(self) -> None:
         figures = bm.billing_data("2026-01", ["alpha"], None, "denied")
@@ -1298,7 +1318,7 @@ class InterruptTests(unittest.TestCase):
     """
 
     def test_a_signal_mid_run_stops_gh_and_ends_the_script_by_it(self) -> None:
-        """A SIGTERM straight after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
+        """A SIGTERM right after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
         for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
             sig = sigs[0]
             with self.subTest(signals=[s.name for s in sigs]):

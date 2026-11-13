@@ -67,6 +67,7 @@ from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
 GITHUB = "https://github.com"
+DEFAULT_MARK = " (default)"
 JSON_SCHEMA = 1
 LIST_LIMIT = 1000
 HANDOFF_LABEL = "handoff"
@@ -162,9 +163,12 @@ def ratio(count: int, merged: int) -> float | None:
     return None if merged == 0 else round(count / merged, 1)
 
 
-def per_merged(count: int, merged: int) -> str:
-    value = ratio(count, merged)
+def ratio_text(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.1f}"
+
+
+def per_merged(count: int, merged: int) -> str:
+    return ratio_text(ratio(count, merged))
 
 
 def pr_item(item: Mapping[str, Any]) -> dict[str, Any]:
@@ -450,38 +454,15 @@ HEADERS = (
 
 
 def table_rows(metrics: Sequence[RepoMetrics]) -> list[list[str]]:
-    rows = [
-        [
-            m.name,
-            str(m.opened),
-            str(m.closed),
-            str(m.handoffs_created),
-            str(m.open_now),
-            str(m.merged),
-            per_merged(m.opened, m.merged),
-            str(m.runs),
-            str(m.review_runs),
-            per_merged(m.review_runs, m.merged),
+    """A row per repository and a totals row, each the `counts` the JSON output carries."""
+
+    def cells(figures: Mapping[str, Any]) -> list[str]:
+        return [
+            ratio_text(value) if key.endswith("_per_merged_pr") else str(value)
+            for key, value in figures.items()
         ]
-        for m in metrics
-    ]
-    opened = sum(m.opened for m in metrics)
-    merged = sum(m.merged for m in metrics)
-    rows.append(
-        [
-            "Total",
-            str(opened),
-            str(sum(m.closed for m in metrics)),
-            str(sum(m.handoffs_created for m in metrics)),
-            str(sum(m.open_now for m in metrics)),
-            str(merged),
-            per_merged(opened, merged),
-            str(sum(m.runs for m in metrics)),
-            str(sum(m.review_runs for m in metrics)),
-            per_merged(sum(m.review_runs for m in metrics), merged),
-        ]
-    )
-    return rows
+
+    return [[m.name, *cells(counts([m]))] for m in metrics] + [["Total", *cells(counts(metrics))]]
 
 
 def link(text: str, url: str) -> str:
@@ -490,28 +471,31 @@ def link(text: str, url: str) -> str:
 
 
 SEARCHES = {
-    "Issues opened (count)": ("issues", f"is:issue created:>={{date}} -label:{HANDOFF_LABEL}"),
+    "Issues opened (count)": ("issues", f"is:issue created:{{window}} -label:{HANDOFF_LABEL}"),
     "Issues closed (count)": (
         "issues",
-        f"is:issue is:closed closed:>={{date}} -label:{HANDOFF_LABEL}",
+        f"is:issue is:closed closed:{{window}} -label:{HANDOFF_LABEL}",
     ),
-    "Handoffs created (count)": ("issues", f"is:issue created:>={{date}} label:{HANDOFF_LABEL}"),
+    "Handoffs created (count)": ("issues", f"is:issue created:{{window}} label:{HANDOFF_LABEL}"),
     "Issues open now (count)": ("issues", f"is:issue is:open -label:{HANDOFF_LABEL}"),
-    "PRs merged (count)": ("pulls", "is:pr is:merged merged:>={date}"),
+    "PRs merged (count)": ("pulls", "is:pr is:merged merged:{window}"),
 }
 
 
-def markdown_rows(metrics: Sequence[RepoMetrics], start: datetime.date) -> list[list[str]]:
+def markdown_rows(
+    metrics: Sequence[RepoMetrics], start: datetime.date, end: datetime.date
+) -> list[list[str]]:
     """The backlog table's rows, each repository and each count `SEARCHES` names linked.
 
     `SEARCHES` maps a column's header to the page and search listing what it counts. The workflow
-    run counts come from `gh run list` rather than from a search, so they print plain.
+    run counts come from `gh run list` rather than from a search, so they print plain. Each search
+    ends at the report's own date, so a report read a week later still lists what it counted.
     """
     rows = table_rows(metrics)
     for m, row in zip(metrics, rows):
         row[0] = link(m.name, m.url)
         for header, (page, query) in SEARCHES.items():
-            search = urllib.parse.quote(query.format(date=start.isoformat()))
+            search = urllib.parse.quote(query.format(window=f"{start}..{end}"))
             column = HEADERS.index(header)
             row[column] = link(row[column], f"{m.url}/{page}?q={search}" if m.url else "")
     return rows
@@ -658,7 +642,7 @@ def render_markdown(
     billing: Sequence[str],
     reviews: Sequence[ReviewMetrics] = (),
 ) -> str:
-    rows = markdown_rows(metrics, start)
+    rows = markdown_rows(metrics, start, end)
     out = [f"# Backlog report, {start} to {end}", ""]
     out.append("| " + " | ".join(HEADERS) + " |")
     out.append("|" + "|".join(" --- " for _ in HEADERS) + "|")
@@ -703,6 +687,11 @@ def counts(m: Sequence[RepoMetrics]) -> dict[str, Any]:
     }
 
 
+def trigger(shown: str | None) -> str | None:
+    """A policy trigger as the policy states it, without the mark the report shows a default by."""
+    return None if shown is None else shown.removesuffix(DEFAULT_MARK)
+
+
 def review_data(r: ReviewMetrics) -> dict[str, Any]:
     """One repository's review figures, the two review tables' cells as JSON fields."""
     automatic = set(AUTOMATIC_ROUND_BOTS)
@@ -721,7 +710,10 @@ def review_data(r: ReviewMetrics) -> dict[str, Any]:
         "truncated": list(r.truncated),
         "bots": {
             bot: {
-                "policy_trigger": None if r.policy_error else r.policy.get(bot),
+                "policy_trigger": None if r.policy_error else trigger(r.policy.get(bot)),
+                "policy_from_default": None
+                if r.policy_error or bot not in r.policy
+                else r.policy[bot].endswith(DEFAULT_MARK),
                 "requests_by_automation": stats.requests_by_automation,
                 "requests_by_user": stats.requests_by_user,
                 "automatic_rounds": stats.automatic_rounds if bot in automatic else None,
@@ -911,7 +903,7 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
         return {}, str(error)
     except PolicyError as error:
         return {}, f"unreadable policy file: {error}"
-    mark = " (default)" if policy.from_default else ""
+    mark = DEFAULT_MARK if policy.from_default else ""
     return {bot: policy.bot(bot).trigger + mark for bot in BOTS}, ""
 
 
