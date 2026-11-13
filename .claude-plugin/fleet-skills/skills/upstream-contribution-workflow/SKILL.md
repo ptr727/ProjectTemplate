@@ -84,8 +84,8 @@ from `work/x` into the mirror branch green. Upstream advances to `B`. The fork s
 branch to `B`, merges `B` into `work/x`, and fixes the breakage in the iteration PR. Had `work/x`
 been merged into the mirror branch at `A`, the mirror branch could not have fast-forwarded to `B`.
 
-The contribution ends when upstream merges or declines the upstream PR. Only then close the
-iteration PR, unmerged, and delete the dirty and clean branches. A merged change then reaches the
+The contribution ends once the PR of every clean branch the dirty branch feeds is merged or
+closed, with no slice left to cut. Only then close the iteration PR, unmerged, and delete the dirty and clean branches. A merged change then reaches the
 mirror branch through the next sync from upstream, the same way anyone else's change does.
 
 ## Use the upstream repo's own conventions, not the fleet's
