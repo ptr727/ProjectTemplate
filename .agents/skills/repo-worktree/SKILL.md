@@ -228,9 +228,10 @@ in the new tree.
   the maintainer per `GOVERNANCE.md` "Communicating with the User", through the interface's prompt
   where there is one. A line in a handoff does not discharge that. A seat that cannot reach the
   maintainer directly, such as a dispatched one, escalates it per `pr-review-conduct` "Escalate to
-  the maintainer when". For a missing pre-commit framework hook, the
-  question names the repository's documented install command and whether the hooks pass on this
-  platform. An install that fails every commit is a cost it must name. On the maintainer's yes,
+  the maintainer when". Every such question names what each answer costs, such as an install that
+  fails every commit or one that changes other checkouts. Where nothing executable sits at the
+  pre-commit framework's hook path, the question also names the repository's documented install
+  command. It also says whether the hooks pass on this platform. On the maintainer's yes,
   the agent runs that command against the base clone by absolute path. One install there covers
   every linked worktree where `core.hooksPath` is unset. On a no, the task continues without the hook, since that answer
   settles the setup the paragraph below says to fix. Any other case is the maintainer's to settle,

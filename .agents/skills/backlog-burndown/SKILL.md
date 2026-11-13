@@ -683,8 +683,8 @@ the issues it fixes in a `Closes on promotion:` line in its own commit message, 
    next round's worker's job rather than the orchestrator's, which opens no branch and edits
    nothing. The orchestrator retires that group's worktree, the branch and its pull request left
    standing. That is the worktree-only disposition "Cleanup Is the Orchestrator's" separates out,
-   and the retire-then-dispatch shape "Raising a Blocked Question" uses. Once the freeze lifts, the
-   orchestrator dispatches a fresh worker on that same branch. That worker is briefed either to merge develop in
+   and the retire-then-dispatch shape "Raising a Blocked Question" uses. Once the freeze lifts, or in an
+   away run once the promotion fix lands, the orchestrator dispatches a fresh worker on that same branch. That worker is briefed either to merge develop in
    to pick the fix up, or to narrow the change to drop the file. Never rebase it, since its branch
    is already pushed and a rebase there needs what `GOVERNANCE.md` "Git and Commit Rules" forbids.
 6. **Nothing else pushes, and nothing else is dispatched.** The promotion fix of step 4 is the one
