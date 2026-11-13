@@ -132,10 +132,10 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    line's route here. The hub's `scripts/README.md` "`pr_merge.py`" gives each route in full.
 
    - `next=done` is merged and cleaned up.
-   - `next=cleanup` is a merge that landed with its cleanup still owed. Run the `cleanup` command
-     below. Report a pull request another hand merged as a merge this run cannot vouch for. The
-     head that merged may be one the gate never read. Its open findings keep the outcome step 3
-     owes after a peer merge.
+   - `next=cleanup` is a merge that landed with its cleanup still owed. Give its open findings the
+     outcome step 3 owes after a peer merge, then run the `cleanup` command below. Report a pull
+     request another hand merged as a merge this run cannot vouch for. The head that merged may be
+     one the gate never read.
    - `next=readback` is a merge that may have landed. Read it back with `gh pr view <number> --repo
      <owner>/<repo> --json state`. `MERGED` means run `cleanup`, and `OPEN` means treat it as
      `redrive`. Only a read that still cannot answer is reported, saying the merge may have landed.

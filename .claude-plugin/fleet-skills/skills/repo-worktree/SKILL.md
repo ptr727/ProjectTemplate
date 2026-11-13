@@ -228,13 +228,13 @@ in the new tree.
   the maintainer per `GOVERNANCE.md` "Communicating with the User", through the interface's prompt
   where there is one. A line in a handoff does not discharge that. A seat that cannot reach the
   maintainer directly, such as a dispatched one, escalates it per `pr-review-conduct` "Escalate to
-  the maintainer when". A wrong hook is the maintainer's to repair. For a missing one, the
+  the maintainer when". For a missing pre-commit framework hook, the
   question names the repository's documented install command and whether the hooks pass on this
   platform. An install that fails every commit is a cost it must name. On the maintainer's yes,
-  the agent runs that command against the base clone by absolute path. It then prepares the
-  worktree's hooks again by the bullets above. One install there covers every linked worktree
-  where `core.hooksPath` is unset. On a no, the task continues without the hook, since that answer
-  settles the setup the paragraph below says to fix.
+  the agent runs that command against the base clone by absolute path. One install there covers
+  every linked worktree where `core.hooksPath` is unset. On a no, the task continues without the hook, since that answer
+  settles the setup the paragraph below says to fix. Any other case is the maintainer's to settle,
+  and the task follows the answer.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The exception is that none of them may change a shared hook or setting
   from a linked worktree, per the bullet above. Do not infer a replacement command from
   the language alone.
