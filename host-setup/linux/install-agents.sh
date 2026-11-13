@@ -180,9 +180,9 @@ since it ships from several sources and opencode 2 replaced opencode 1's npm pac
 copy PATH reaches first, an npm opencode-ai among them, is consolidated: --upgrade removes it
 through npm, bun, or Homebrew after a prompt and installs the managed copy, and --install does the
 same where no managed copy is in place yet. Nothing is removed while the managed copy cannot be
-installed. A copy only its owner can remove, or one whose removal is declined, stays and is
-handled as a tool without a managed copy is, and the report says what owns it. Running the
-installer again is how the managed copy is upgraded.
+installed, or while any copy ahead of it is one only its owner can remove. Such a copy, or one
+whose removal is declined, stays and is handled as a tool without a managed copy is, and the
+report says what owns it. Running the installer again is how the managed copy is upgraded.
 
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -600,6 +600,31 @@ stray_plan() {
     esac
 }
 
+# Every copy of a tool PATH holds ahead of its managed copy, nearest first, one per line.
+stray_copies() {
+    local tool="$1" path
+    while IFS= read -r path; do
+        [[ -n $path ]] || continue
+        is_managed_copy "$tool" "$path" && return 0
+        printf '%s\n' "$path"
+    done < <(type -ap "$tool" 2>/dev/null)
+    return 0
+}
+
+# Why a copy ahead of the managed one cannot be removed, or nothing where every one can.
+# Read before any copy is removed, so a removal never leaves an older copy this script cannot touch answering instead.
+stray_blocker() {
+    local tool="$1" path
+    while IFS= read -r path; do
+        stray_plan "$tool" "$path" "$(tool_manager "$path")"
+        if ((${#STRAY_CMD[@]} == 0)); then
+            printf '%s stays, since %s' "$(hide_home "$path")" "$STRAY_WHY"
+            return 0
+        fi
+    done < <(stray_copies "$tool")
+    return 0
+}
+
 # Why the managed copy cannot be installed on this host, or nothing where it can.
 # Read before any copy is removed, so consolidation never leaves a host with no copy at all.
 managed_install_refusal() {
@@ -646,7 +671,7 @@ consolidate() {
 # Returns 0 where a managed copy is in place for the caller to upgrade, and 1 where this call finished the tool.
 # Returns 2 where a stray copy stays, so the caller handles that copy as it would any tool without a managed copy.
 consolidate_and_install() {
-    local tool="$1" installed="$2" managed refusal rc=0
+    local tool="$1" installed="$2" managed refusal blocker rc=0
     managed=$(tool_managed "$tool")
     if [[ ! -x $managed ]]; then
         refusal=$(managed_install_refusal "$tool")
@@ -654,6 +679,11 @@ consolidate_and_install() {
             log "$tool: the copy PATH reaches stays, since the managed copy cannot be installed: $refusal"
             return 2
         fi
+    fi
+    blocker=$(stray_blocker "$tool")
+    if [[ -n $blocker ]]; then
+        log "$tool: nothing is removed, since $blocker"
+        return 2
     fi
     consolidate "$tool" || rc=$?
     if ((rc == 1)); then
@@ -815,12 +845,15 @@ report() {
             installed=$(tool_version "$path")
             manager=$(tool_manager "$path")
             status="present"
-            local upgrades=true removes=false refusal=""
+            local upgrades=true removes=false refusal="" blocker=""
             if is_stray_copy "$tool" "$path"; then
-                stray_plan "$tool" "$path" "$manager"
                 [[ -x $(tool_managed "$tool") ]] || refusal=$(managed_install_refusal "$tool")
-                if ((${#STRAY_CMD[@]} > 0)) && [[ -z $refusal ]]; then
-                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), --upgrade removes it with ${STRAY_CMD[*]}, then $([[ -x $(tool_managed "$tool") ]] && printf upgrades || printf installs) the managed one unless another copy PATH reaches stays"
+                blocker=$(stray_blocker "$tool")
+                stray_plan "$tool" "$path" "$manager"
+                if ((${#STRAY_CMD[@]} > 0)) && [[ -n $blocker ]]; then
+                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), and it stays, since $blocker"
+                elif ((${#STRAY_CMD[@]} > 0)) && [[ -z $refusal ]]; then
+                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), --upgrade removes it with ${STRAY_CMD[*]}, then $([[ -x $(tool_managed "$tool") ]] && printf upgrades || printf installs) the managed one"
                     removes=true
                 else
                     note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), and it stays: ${refusal:-$STRAY_WHY}"

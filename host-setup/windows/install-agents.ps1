@@ -133,9 +133,9 @@ several sources, opencode 2 replaced opencode 1's npm package, and its installer
 only. Any other copy PATH reaches first, an npm opencode-ai among them, is consolidated: -Upgrade
 removes it through npm, bun, or scoop after a prompt and installs the managed copy, and -Install
 does the same where no managed copy is in place yet. Nothing is removed while the managed copy
-cannot be installed. A copy only an elevated shell or its owner can remove, or one whose removal
-is declined, stays and is handled as a tool without a managed copy is, and the report says what
-owns it.
+cannot be installed, or while any copy ahead of it is one only an elevated shell or its owner
+can remove. Such a copy, or one whose removal is declined, stays and is handled as a tool without
+a managed copy is, and the report says what owns it.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -865,6 +865,43 @@ function Get-StrayStayReason {
     return "$reason. It needs this copy removed first: $($Stray.Why)"
 }
 
+# Every copy of a tool PATH holds ahead of its managed copy, nearest first, one per directory.
+function Get-StrayCopy {
+    param([string]$ToolName)
+    $seen = @{}
+    $copies = @()
+    foreach ($command in @(Get-Command -Name $ToolName -CommandType Application -All -ErrorAction SilentlyContinue)) {
+        $directory = Split-Path -Parent $command.Source
+        if ($seen.ContainsKey($directory)) { continue }
+        $seen[$directory] = $true
+        if (-not (Test-StrayCopy -ToolName $ToolName -Path $command.Source)) { break }
+        $copies += $command.Source
+    }
+    return , $copies
+}
+
+# Why a copy ahead of the managed one cannot be removed, or nothing where every one can.
+# Read before any copy is removed, so a removal never leaves an older copy this script cannot touch answering instead.
+function Get-StrayBlocker {
+    param([string]$ToolName)
+    foreach ($copy in (Get-StrayCopy $ToolName)) {
+        $plan = Get-StrayPlan -ToolName $ToolName -Path $copy -Manager (Get-ToolManager $copy)
+        if (-not $plan.Command) { return "$(Hide-Home -Path $copy) stays, since $($plan.Why)" }
+    }
+    return ''
+}
+
+# Why PATH reaches no managed copy that is installed, naming the fix for the case that holds.
+function Get-UnreachedReason {
+    param([string]$ToolName)
+    $label = Get-ManagedLabel $ToolName
+    $prefix = Get-NpmPrefix
+    $separator = [IO.Path]::PathSeparator
+    $onPath = $prefix -and (@($env:PATH -split [regex]::Escape($separator)) | Where-Object { $_.TrimEnd('\', '/') -ieq $prefix.TrimEnd('\', '/') })
+    if (-not $onPath) { return "$label is installed, but PATH does not reach it, so add the npm prefix $(Hide-Home -Path $prefix) to PATH" }
+    return "$label is installed, but its shim is missing from the npm prefix, so reinstall it with: $((Get-Tool $ToolName).Source)"
+}
+
 # Why the managed copy cannot be installed on this host, or nothing where it can.
 function Get-ManagedInstallRefusal {
     param([string]$ToolName)
@@ -889,6 +926,11 @@ function Invoke-ConsolidateAndInstall {
             return 2
         }
     }
+    $blocker = Get-StrayBlocker $ToolName
+    if ($blocker) {
+        log "${ToolName}: nothing is removed, since $blocker"
+        return 2
+    }
     $rc = Invoke-Consolidate $ToolName
     if ($rc -eq 1) {
         $script:FAILED.Add($ToolName)
@@ -912,7 +954,7 @@ function Invoke-ConsolidateAndInstall {
     Update-SessionPath
     $reached = Get-ToolPath $ToolName
     if (-not $reached -or (Test-StrayCopy -ToolName $ToolName -Path $reached)) {
-        warn "${ToolName}: $(Get-ManagedLabel $ToolName) is installed, but PATH does not reach it, so add the npm prefix to PATH"
+        warn "${ToolName}: $(Get-UnreachedReason $ToolName)"
         $script:FAILED.Add($ToolName)
         return 1
     }
@@ -952,9 +994,12 @@ function Show-Report {
                 $label = Get-ManagedLabel $tool
                 $present = Test-ManagedPresent $tool
                 $refusal = if ($present) { '' } else { Get-ManagedInstallRefusal $tool }
-                if ($stray.Command -and -not $refusal) {
+                $blocker = Get-StrayBlocker $tool
+                if ($stray.Command -and -not $refusal -and $blocker) {
+                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays, since $blocker"
+                } elseif ($stray.Command -and -not $refusal) {
                     $next = if ($present) { 'upgrades' } else { 'installs' }
-                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, -Upgrade removes it with $($stray.Command) $($stray.Arguments -join ' '), then $next $label unless another copy PATH reaches stays"
+                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, -Upgrade removes it with $($stray.Command) $($stray.Arguments -join ' '), then $next $label"
                     $removes = $true
                 } else {
                     note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays: $(Get-StrayStayReason -ToolName $tool -Refusal $refusal -Stray $stray -Manager $manager -Path $path)"
@@ -1063,7 +1108,7 @@ function Invoke-ToolUpgrade {
             }
             $path = Get-ToolPath $ToolName
             if (-not $path -or (Test-StrayCopy -ToolName $ToolName -Path $path)) {
-                warn "${ToolName}: $(Get-ManagedLabel $ToolName) is installed, but PATH does not reach it, reinstall it with: $((Get-Tool $ToolName).Source)"
+                warn "${ToolName}: $(Get-UnreachedReason $ToolName)"
                 $script:FAILED.Add($ToolName)
                 return
             }

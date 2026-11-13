@@ -251,7 +251,7 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("https://opencode.ai/v2/install", result.stdout)
         self.assertNotIn("already installed", result.stdout)
 
-    def test_a_copy_that_stays_behind_a_removed_one_is_upgraded_where_it_is(self) -> None:
+    def test_nothing_is_removed_while_a_copy_behind_it_cannot_be(self) -> None:
         # A removable npm copy sits first on PATH, and a copy no manager owns sits behind it.
         node_modules = self.dir / "lib" / "node_modules"
         package = node_modules / "opencode-ai" / "bin"
@@ -269,7 +269,9 @@ class TestInstallAgents(unittest.TestCase):
             "--upgrade", "--yes", "opencode", extra_env={"REMOVES": str(front / "opencode")}
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["npm uninstall -g opencode-ai", "opencode upgrade"])
+        self.assertIn("nothing is removed, since", result.stdout)
+        # The nearer copy keeps answering, so it is upgraded under the package name that owns it.
+        self.assertEqual(self.called(), ["npm install -g opencode-ai@latest"])
 
     def test_install_leaves_a_stray_opencode_ahead_of_the_managed_copy(self) -> None:
         self.managed_opencode()
@@ -1062,6 +1064,22 @@ class TestInstallAgentsWindows(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 3)
         self.assertIn("is installed, but PATH does not reach it", result.stderr)
+
+    def test_nothing_is_removed_while_a_copy_behind_the_stray_cannot_be(self) -> None:
+        # A removable npm copy sits first on PATH, and a copy no manager owns sits behind it.
+        npm_bin = self.stray_npm_opencode("opencode-ai")
+        self.stub("opencode", "1.0.0")
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "opencode",
+            extra_path=npm_bin,
+            extra_env={"REMOVES": str(npm_bin / "opencode")},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("nothing is removed, since", result.stdout)
+        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
+        self.assertIn("npm install -g opencode-ai@latest", self.recorded())
 
     def test_install_replaces_a_stray_opencode_when_no_managed_package_is_in_place(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
