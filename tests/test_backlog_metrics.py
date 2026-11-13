@@ -362,13 +362,22 @@ class RenderingTests(unittest.TestCase):
         self.assertIsNone(copilot["policy_trigger"])
 
     def test_json_states_a_default_trigger_bare_with_a_flag(self) -> None:
-        policy = {"copilot": "auto (default)", "qodo": "manual"}
+        policy = {"copilot": "auto", "qodo": "manual"}
         bots = {"copilot": bm.BotStats(), "qodo": bm.BotStats(), "coderabbit": bm.BotStats()}
-        data = bm.review_data(bm.ReviewMetrics(name="alpha", policy=policy, bots=bots))["bots"]
-        self.assertEqual(
-            [(b["policy_trigger"], b["policy_from_default"]) for b in data.values()],
-            [("auto", True), ("manual", False), (None, None)],
-        )
+        for from_default in (True, False):
+            result = bm.ReviewMetrics(
+                name="alpha", policy=policy, policy_from_default=from_default, bots=bots
+            )
+            self.assertEqual(
+                [
+                    (b["policy_trigger"], b["policy_from_default"])
+                    for b in bm.review_data(result)["bots"].values()
+                ],
+                [("auto", from_default), ("manual", from_default), (None, None)],
+            )
+            shown = [row[2] for row in bm.review_bot_rows([result])]
+            mark = " (default)" if from_default else ""
+            self.assertEqual(shown, [f"auto{mark}", f"manual{mark}", "n/a"])
         failed = bm.ReviewMetrics(name="alpha", policy=policy, policy_error="x", bots=bots)
         self.assertEqual(
             {b["policy_from_default"] for b in bm.review_data(failed)["bots"].values()}, {None}
@@ -810,7 +819,7 @@ class PolicyTests(unittest.TestCase):
 
     def fetch(
         self, *, side_effect: Exception | None = None, return_value: object = None
-    ) -> tuple[dict[str, str], str]:
+    ) -> tuple[dict[str, str], bool, str]:
         patch = unittest.mock.patch.object(
             bm, "run_gh", side_effect=side_effect, return_value=return_value
         )
@@ -818,58 +827,59 @@ class PolicyTests(unittest.TestCase):
             return bm.fetch_policy("o", "alpha", "develop")
 
     def test_a_404_reads_the_hub_default_marked_as_such(self) -> None:
-        triggers, error = self.fetch(side_effect=bm.GhError("gh: Not Found (HTTP 404)"))
+        triggers, default, error = self.fetch(side_effect=bm.GhError("gh: Not Found (HTTP 404)"))
         self.assertEqual(error, "")
-        default = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))["review"]["bots"]
-        self.assertEqual(
-            triggers, {bot: f"{default[bot]['trigger']} (default)" for bot in bm.BOT_LOGINS}
-        )
+        hub = json.loads(DEFAULT_POLICY.read_text(encoding="utf-8"))["review"]["bots"]
+        self.assertTrue(default)
+        self.assertEqual(triggers, {bot: hub[bot]["trigger"] for bot in bm.BOT_LOGINS})
 
     def test_a_422_is_absent_as_the_gate_reads_it(self) -> None:
-        triggers, error = self.fetch(side_effect=bm.GhError("gh: No commit found (HTTP 422)"))
+        _triggers, default, error = self.fetch(
+            side_effect=bm.GhError("gh: No commit found (HTTP 422)")
+        )
         self.assertEqual(error, "")
-        self.assertTrue(all(t.endswith(" (default)") for t in triggers.values()))
+        self.assertTrue(default)
 
     def test_a_read_carrying_no_content_is_an_error(self) -> None:
         payloads: list[object] = [{"content": None}, {"content": ""}, []]
         for payload in payloads:
-            triggers, error = self.fetch(return_value=payload)
+            triggers, _default, error = self.fetch(return_value=payload)
             self.assertEqual(triggers, {})
             self.assertIn("carried no content", error)
 
     def test_any_other_error_is_an_error_not_absent(self) -> None:
-        triggers, error = self.fetch(side_effect=bm.GhError("gh: Forbidden (HTTP 403)"))
+        triggers, _default, error = self.fetch(side_effect=bm.GhError("gh: Forbidden (HTTP 403)"))
         self.assertEqual(triggers, {})
         self.assertIn("403", error)
 
     def test_a_file_stating_no_review_section_reads_the_default_marked(self) -> None:
         text = json.dumps({"version": 1, "guard": {}})
-        triggers, error = self.fetch(return_value=self.payload(text))
+        _triggers, default, error = self.fetch(return_value=self.payload(text))
         self.assertEqual(error, "")
-        self.assertTrue(all(t.endswith(" (default)") for t in triggers.values()))
+        self.assertTrue(default)
 
     def test_triggers_are_read_per_bot(self) -> None:
         text = policy_text(qodo="explicit", coderabbit="off")
-        triggers, error = self.fetch(return_value=self.payload(text))
+        triggers, _default, error = self.fetch(return_value=self.payload(text))
         self.assertEqual(error, "")
         self.assertEqual(triggers, {"copilot": "auto", "coderabbit": "off", "qodo": "explicit"})
 
     def test_a_policy_the_gate_refuses_is_an_error(self) -> None:
         data = json.loads(policy_text(copilot="explicit"))
         data["review"]["bots"]["copilot"]["gate"] = False
-        triggers, error = self.fetch(return_value=self.payload(json.dumps(data)))
+        triggers, _default, error = self.fetch(return_value=self.payload(json.dumps(data)))
         self.assertEqual(triggers, {})
         self.assertIn("gate false", error)
 
     def test_a_policy_omitting_a_bot_is_an_error(self) -> None:
         data = json.loads(policy_text())
         del data["review"]["bots"]["qodo"]
-        triggers, error = self.fetch(return_value=self.payload(json.dumps(data)))
+        triggers, _default, error = self.fetch(return_value=self.payload(json.dumps(data)))
         self.assertEqual(triggers, {})
         self.assertIn("missing qodo", error)
 
     def test_invalid_json_is_an_error(self) -> None:
-        _triggers, error = self.fetch(return_value=self.payload("{nope"))
+        _triggers, _default, error = self.fetch(return_value=self.payload("{nope"))
         self.assertIn("unreadable", error)
 
 

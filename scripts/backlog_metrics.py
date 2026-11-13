@@ -67,7 +67,6 @@ from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 REGISTRY = Path(__file__).resolve().parent.parent / "registry" / "repos.json"
 
 GITHUB = "https://github.com"
-DEFAULT_MARK = " (default)"
 JSON_SCHEMA = 1
 LIST_LIMIT = 1000
 HANDOFF_LABEL = "handoff"
@@ -272,6 +271,7 @@ class ReviewMetrics:
     failing_after_clean_local: int = 0
     bots: dict[str, BotStats] = field(default_factory=dict)
     policy: dict[str, str] = field(default_factory=dict)
+    policy_from_default: bool = False
     policy_error: str = ""
     policy_read: str = "policy file"
     policy_branch: str = ""
@@ -578,7 +578,7 @@ def shown_trigger(r: ReviewMetrics, figures: Mapping[str, Any]) -> str:
         return "error"
     if figures["policy_trigger"] is None:
         return "n/a"
-    return figures["policy_trigger"] + (DEFAULT_MARK if figures["policy_from_default"] else "")
+    return figures["policy_trigger"] + (" (default)" if figures["policy_from_default"] else "")
 
 
 def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
@@ -680,11 +680,6 @@ def counts(m: Sequence[RepoMetrics]) -> dict[str, Any]:
     }
 
 
-def trigger(shown: str | None) -> str | None:
-    """A policy trigger as the policy states it, without the mark the report shows a default by."""
-    return None if shown is None else shown.removesuffix(DEFAULT_MARK)
-
-
 def review_data(r: ReviewMetrics) -> dict[str, Any]:
     """One repository's review figures, the two review tables' cells as JSON fields."""
     automatic = set(AUTOMATIC_ROUND_BOTS)
@@ -703,10 +698,10 @@ def review_data(r: ReviewMetrics) -> dict[str, Any]:
         "truncated": list(r.truncated),
         "bots": {
             bot: {
-                "policy_trigger": None if r.policy_error else trigger(r.policy.get(bot)),
+                "policy_trigger": None if r.policy_error else r.policy.get(bot),
                 "policy_from_default": None
                 if r.policy_error or bot not in r.policy
-                else r.policy[bot].endswith(DEFAULT_MARK),
+                else r.policy_from_default,
                 "requests_by_automation": stats.requests_by_automation,
                 "requests_by_user": stats.requests_by_user,
                 "automatic_rounds": stats.automatic_rounds if bot in automatic else None,
@@ -869,12 +864,11 @@ def policy_branch(owner: str, name: str, default: str) -> tuple[str, str]:
     return INTEGRATION_BRANCH, ""
 
 
-def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
-    """Each bot's trigger in the policy file at `ref`, read the way the review gate reads it.
+def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], bool, str]:
+    """Each bot's trigger in the policy file at `ref`, whether it is the hub default, and an error.
 
     The gate's own `fetch` does the read, so a file it would refuse reads as an error here too. A
-    file it would take as absent, or one stating no review section, reads as the hub default, each
-    trigger marked `(default)`.
+    file it would take as absent, or one stating no review section, reads as the hub default.
     """
 
     def read(owner: str, repo: str, path: str, ref: str) -> str | None:
@@ -893,11 +887,10 @@ def fetch_policy(owner: str, name: str, ref: str) -> tuple[dict[str, str], str]:
     try:
         policy = fetch(owner, name, ref, read)
     except GhError as error:
-        return {}, str(error)
+        return {}, False, str(error)
     except PolicyError as error:
-        return {}, f"unreadable policy file: {error}"
-    mark = DEFAULT_MARK if policy.from_default else ""
-    return {bot: policy.bot(bot).trigger + mark for bot in BOTS}, ""
+        return {}, False, f"unreadable policy file: {error}"
+    return {bot: policy.bot(bot).trigger for bot in BOTS}, policy.from_default, ""
 
 
 def fetch_policy_changes(
@@ -967,7 +960,9 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
     if branch_error:
         result.policy_read, result.policy_error = f"{INTEGRATION_BRANCH} branch", branch_error
         return result
-    result.policy, result.policy_error = fetch_policy(owner, name, result.policy_branch)
+    result.policy, result.policy_from_default, result.policy_error = fetch_policy(
+        owner, name, result.policy_branch
+    )
     result.policy_changes, result.history_error = fetch_policy_changes(
         owner, name, result.policy_branch, since
     )
