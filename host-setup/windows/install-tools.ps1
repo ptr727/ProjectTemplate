@@ -299,6 +299,15 @@ function Get-WingetInstalled {
     return , (Read-WingetTable -Text $text -Id $Id)
 }
 
+# Whether winget lists a package as installed, as installed, absent, or unknown where winget did not answer.
+function Get-WingetPresence {
+    param([Parameter(Mandatory)][string]$Id)
+    $rows = Get-WingetInstalled -Id $Id
+    if ($null -eq $rows) { return 'unknown' }
+    if (@($rows | Where-Object { $_ }).Count -gt 0) { return 'installed' }
+    return 'absent'
+}
+
 # Whether a Version column token is a version, rather than the Unknown winget prints for an entry recording none.
 # A bare < or > left by winget's range forms is likewise not a version.
 function Test-WingetVersion {
@@ -874,7 +883,7 @@ function Add-ToolNote {
                     $major = ($_ -split '\.')[-1]
                     [int]$major -gt $installedMajor -and
                     @($listed | Where-Object { ($_ -split '\.')[0] -eq $major }).Count -gt 0 -and
-                    @(Get-WingetInstalled -Id $_ | Where-Object { $_ }).Count -gt 0
+                    (Get-WingetPresence -Id $_) -eq 'installed'
                 } | ForEach-Object { ($_ -split '\.')[-1] })
         }
         $sdk = @($listed | Where-Object { $managed -notcontains ($_ -split '\.')[0] })
@@ -1658,8 +1667,13 @@ function Invoke-ToolApply {
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
-        if ($package -ne $target -and @(Get-WingetInstalled -Id $package | Where-Object { $_ }).Count -gt 0) {
+        $presence = if ($package -ne $target) { Get-WingetPresence -Id $package } else { $null }
+        if ($presence -eq 'installed') {
             info "${ToolName}: $package is already installed, so it is left as it is"
+            continue
+        }
+        if ($presence -eq 'unknown') {
+            warn "${ToolName}: winget did not answer whether $package is installed, so it is skipped"
             continue
         }
         $started = Get-Date
