@@ -278,7 +278,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   finished. Adding `--apply` removes what the report lists through the same checks, the remote
   branch of a merged `develop` pull request included. The report reaches other sessions' finished
   work as well as this task's, so `--apply` runs on the maintainer's go-ahead.
-- **Prove the cleanup.** Finish with `git status --short --branch` in the base clone and `git worktree list`. The expected result is a clean base clone at `origin/develop` and no worktree belonging only to the completed task.
+- **Prove the cleanup.** Finish with `git status --short --branch --untracked-files=normal` in the base clone and `git worktree list`. The expected result is a clean base clone at `origin/develop` and no worktree belonging only to the completed task.
 - A worktree that refuses removal is dirty, and force is not the fix. Look at what is
   uncommitted in it first, since discarding uncommitted work runs only on explicit instruction,
   per the `git-commit-conventions` skill.
