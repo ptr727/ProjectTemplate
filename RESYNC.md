@@ -9,7 +9,7 @@ flowchart TD
   route["0: which state? none / partial / full instruction set"]
   route -->|"no repo, no remote"| toStandup["STANDUP.md section 0"]
   route -->|"partial instruction set"| toStandup2["STANDUP.md sections 1A, 2"]
-  route -->|"full instruction set, current or stale"| reach["1: fetch hub main, verify host"]
+  route -->|"full instruction set, current or stale"| reach["1: fetch hub main (develop if the registry entry is not yet promoted), verify host"]
   reach --> measure["2: audit.py, --issue, fidelity_honesty.py --report"]
   subgraph apply["3: apply, in this order"]
     instr["instruction set"] --> del["deletions"] --> revendor["verbatim re-vendors"] --> iface["interface workflows"] --> settings["settings, rulesets, secrets"] --> intent["intent files, by hand (see 5: what this cannot detect)"]
@@ -116,6 +116,8 @@ The advisory is a hint rather than proof, since a copy touched after the hub cha
 
 The other half is section 4 of [`AUDIT.md`][audit]: no check belonging to a project type in [`spec/project-types.json`][project-types] is mechanized at all. A clean tool run is evidence for the deterministic subset, no evidence for a type's checks, and partial evidence across the cross-cutting dimensions.
 
+Two further gaps are checked by hand, because `spec/audit.py` reports neither. First, compare each caller workflow's pin on `ptr727/ProjectTemplate/.github/workflows/*-task.yml` with the newest hub release. A pin behind it reads clean, since `spec/audit.py` does not compare the two. A pin found behind is bumped as an interface workflow under step 4 of section 3, in that class's pull request. Section 4 can move it into the deletions pull request instead. Second, confirm that `hub_fetch_run.py` (or its former name `hub-fetch-run.py`) is present and that `.husky/pre-commit` or `.pre-commit-config.yaml` calls it for the prose and EOL gates. `spec/audit.py` does not report its absence, because `parity.hooks` is an `intent` check that `spec/audit.py` never evaluates, per [GOVERNANCE.md "Running the Linters Locally"][governance-linters-locally]. Only the hand pass of [`AUDIT.md`][audit] section 4 finds it. Compare against `catalog/snippets/` when in doubt.
+
 ## 6. Ship It
 
 - **One focused pull request per drift class**, branched from the target's `develop`, cross-referencing the finding it closes. A sprawling all-drifts pull request draws many review rounds and never feels done. The bullets below state the one grouping and the merge order.
@@ -138,6 +140,7 @@ The other half is section 4 of [`AUDIT.md`][audit]: no check belonging to a proj
 [files]: ./spec/files.json
 [governance-documentation-style]: ./GOVERNANCE.md#documentation-style-conventions
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
+[governance-linters-locally]: ./GOVERNANCE.md#running-the-linters-locally-known-working-invocations
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [host-setup]: ./docs/host-setup.md
 [project-types]: ./spec/project-types.json
