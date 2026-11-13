@@ -14,23 +14,33 @@ runs:
       run: |
         set -Eeuo pipefail
         fallback=10.x
-        status=1
-        if [[ -f global.json ]]; then
-          status=0
-          jq -e '.sdk.version' global.json >/dev/null || status=$?
-        fi
-        # Exit 1 is a global.json jq read that carries no sdk.version, the one case the fallback serves.
-        # A file jq cannot parse, such as one holding a comment, is still valid to the dotnet host.
-        # It is valid to setup-dotnet too, which reads it as JSON5.
-        # So that file goes to setup-dotnet, which installs the line it selects.
-        if [[ $status -eq 1 ]]; then
-          echo "dotnet-version=$fallback" >> "$GITHUB_OUTPUT"
-        else
-          if [[ $status -gt 1 ]]; then
-            echo "::notice::jq could not read global.json (exit $status), so setup-dotnet reads the SDK line from it as JSON5."
-          fi
-          echo "global-json-file=global.json" >> "$GITHUB_OUTPUT"
-        fi
+        # The dotnet host accepts comments and trailing commas in global.json, so this reads it the same way.
+        # They are dropped outside strings, then the rest is parsed as strict JSON.
+        # So a commented file still selects its line, and one with no sdk.version still gets the fallback.
+        python3 - "$fallback" <<'PY'
+        import json
+        import os
+        import re
+        import sys
+        from pathlib import Path
+
+        fallback = sys.argv[1]
+        path = Path("global.json")
+        selected = False
+        if path.is_file():
+            text = path.read_text(encoding="utf-8-sig")
+            tolerated = re.compile(r'("(?:\\.|[^"\\])*")|//[^\n]*|/\*.*?\*/|,(?=\s*[}\]])', re.S)
+            text = tolerated.sub(lambda match: match.group(1) or "", text)
+            try:
+                document = json.loads(text)
+            except ValueError as error:
+                print(f"::warning::global.json could not be read ({error}), so this installs the {fallback} fallback.")
+            else:
+                sdk = document.get("sdk") if isinstance(document, dict) else None
+                selected = isinstance(sdk, dict) and isinstance(sdk.get("version"), str)
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write("global-json-file=global.json\n" if selected else f"dotnet-version={fallback}\n")
+        PY
 
     - name: Setup .NET SDK step
       uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
