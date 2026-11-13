@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -612,11 +611,6 @@ class TestInstallersNameTheBaselineLine(unittest.TestCase):
         text = WINDOWS_INSTALLER.read_text(encoding="utf-8")
         self.assertRegex(text, rf"(?m)^\$DOTNET_MAJOR = {major}$")
 
-    def test_the_windows_optional_set_reaches_the_next_major(self) -> None:
-        text = WINDOWS_INSTALLER.read_text(encoding="utf-8")
-        [record] = re.findall(r"(?m)^\s*@\{ Name = 'dotnet';.*$", text)
-        self.assertIn('"Microsoft.DotNet.SDK.$($DOTNET_MAJOR + 1)"', record)
-
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
 class TestLinuxDotnetSets(LinuxFunctionsCase):
@@ -1190,75 +1184,6 @@ class TestWindowsOptionalTools(unittest.TestCase):
         self.assertNotIn("(optional tool)", rows["gh"])
 
 
-OPTIONAL_APPLY_HARNESS = r"""
-param([string]$Installer, [string]$Cases)
-$ErrorActionPreference = 'Stop'
-Set-StrictMode -Version Latest
-$tokens = $null
-$errors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
-foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and @('Invoke-ToolApply', 'Get-WingetPresence') -contains $node.Name }, $true)) {
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
-function log { param([string]$Message = '') Write-Host "LOG $Message" }
-function info { param([string]$Message) Write-Host "INFO $Message" }
-function warn { param([string]$Message) Write-Host "WARN $Message" }
-function die { param([string]$Message) throw $Message }
-function Get-Tool { param([string]$Name) @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.11', 'Microsoft.DotNet.SDK.9', 'Microsoft.DotNet.SDK.8', 'Microsoft.DotNet.SDK.7') } }
-function Get-ToolState { param([hashtable]$Tool) @{ Package = 'Microsoft.DotNet.SDK.10'; Installed = $null; Rows = @(); Available = '10.0.300'; Scope = @(); Status = 'missing' } }
-function Get-WingetInstalled { param([string]$Id) if ($Id -eq 'Microsoft.DotNet.SDK.8') { return , @(@{ Version = '8.0.1' }) } if ($codes.PSObject.Properties['unknown'] -and $Id -eq $codes.unknown) { return $null } return , @() }
-function Resolve-InstalledVersion { param($Version) return $null }
-function Write-InstallFailure { param($ToolName, $Package, $Code, $Since, $Probe, $Executable) Write-Host "FAILURE $Package $Code" }
-$NOT_FOUND = -1978335212
-$codes = Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json
-function Invoke-WingetInstall {
-    param([string]$Id)
-    Write-Host "INSTALL $Id"
-    if ($codes.PSObject.Properties[$Id]) { return [int]$codes.$Id }
-    return 0
-}
-$FAILED = @()
-$WANT_SCOPE = $null
-$WITH_OPTIONAL = $true
-$MODE = 'install'
-Invoke-ToolApply -ToolName 'dotnet'
-Write-Host "FAILED $($FAILED -join ',')"
-"""
-
-
-@unittest.skipUnless(
-    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
-)
-class TestWindowsOptionalDotnetLine(unittest.TestCase):
-    """An optional SDK line winget does not carry is skipped, and any other failure still fails the tool."""
-
-    def test_only_winget_not_found_skips_an_optional_line(self) -> None:
-        cases = {
-            "not carried": ({"Microsoft.DotNet.SDK.11": -1978335212}, "FAILED "),
-            "unknown": ({"unknown": "Microsoft.DotNet.SDK.7"}, "FAILED dotnet"),
-            "unknown then failed": (
-                {"unknown": "Microsoft.DotNet.SDK.9", "Microsoft.DotNet.SDK.7": 1},
-                "FAILED dotnet,dotnet",
-            ),
-            "failed": ({"Microsoft.DotNet.SDK.11": 1}, "FAILED dotnet"),
-        }
-        for label, (codes, failed) in cases.items():
-            with self.subTest(label):
-                result = run_pwsh_harness(OPTIONAL_APPLY_HARNESS, codes)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                lines = result.stdout.splitlines()
-                self.assertIn("INSTALL Microsoft.DotNet.SDK.11", lines)
-                self.assertEqual(lines[-1].rstrip(), failed.rstrip(), result.stdout)
-        skipped = run_pwsh_harness(OPTIONAL_APPLY_HARNESS, cases["not carried"][0]).stdout
-        self.assertIn("winget carries no Microsoft.DotNet.SDK.11 yet", skipped)
-        self.assertIn("INSTALL Microsoft.DotNet.SDK.9", skipped)
-        self.assertNotIn("INSTALL Microsoft.DotNet.SDK.8", skipped)
-        self.assertIn("Microsoft.DotNet.SDK.8 is already installed", skipped)
-        unknown = run_pwsh_harness(OPTIONAL_APPLY_HARNESS, cases["unknown"][0]).stdout
-        self.assertNotIn("INSTALL Microsoft.DotNet.SDK.7", unknown)
-        self.assertIn("WARN dotnet: winget did not answer whether Microsoft.DotNet.SDK.7", unknown)
-
-
 DOTNET_SDK_HARNESS = r"""
 param([string]$Installer, [string]$Cases)
 $ErrorActionPreference = 'Stop'
@@ -1361,21 +1286,15 @@ $PSNativeCommandUseErrorActionPreference = $false
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
-$wanted = @('Add-ToolNote', 'note', 'Get-DotnetSdk', 'Read-DotnetSdkList', 'Get-UntrackedDotnetSdk', 'Get-VersionKey', 'Compare-HostVersion', 'Get-WingetPresence')
+$wanted = @('Add-ToolNote', 'note', 'Get-DotnetSdk', 'Read-DotnetSdkList', 'Get-UntrackedDotnetSdk', 'Get-VersionKey', 'Compare-HostVersion')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
-function Get-WingetInstalled {
-    param([string]$Id)
-    if (@($env:WINGET_HOLDS -split ',') -contains $Id) { return , @(@{ Version = 'held' }) }
-    return , @()
-}
 $WITH_OPTIONAL = $true
-$tool = @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @('Microsoft.DotNet.SDK.11') }
+$tool = @{ Name = 'dotnet'; Package = 'Microsoft.DotNet.SDK.10'; Probe = 'dotnet'; Optional = @() }
 $results = [ordered]@{}
 foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
     $env:PATH = $case.Value.path
-    $env:WINGET_HOLDS = $case.Value.holds
     $NOTES = @()
     $NOTE_TEXTS = @()
     $state = @{ Package = 'Microsoft.DotNet.SDK.10'; Installed = $case.Value.installed; Rows = @(); Scope = @(); Status = 'current' }
@@ -1419,25 +1338,16 @@ class TestWindowsUntrackedDotnetNote(unittest.TestCase):
 
     def test_the_note_follows_what_dotnet_lists(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            paths = {
-                name: Path(directory, name) for name in ("newer", "failing", "absent", "optional")
-            }
+            paths = {name: Path(directory, name) for name in ("newer", "failing", "absent")}
             for path in paths.values():
                 path.mkdir()
             write_dotnet_stub(paths["newer"], 0, "10.0.303", "10.0.400-preview.0.1", "10.0.400")
             write_dotnet_stub(paths["failing"], 3, "10.0.400")
-            write_dotnet_stub(paths["optional"], 0, "10.0.303", "11.0.100")
             cases = {
-                "newer": {"path": str(paths["newer"]), "installed": "10.0.303", "holds": ""},
-                "failing": {"path": str(paths["failing"]), "installed": "10.0.303", "holds": ""},
-                "absent": {"path": str(paths["absent"]), "installed": "10.0.303", "holds": ""},
-                "unread": {"path": str(paths["newer"]), "installed": "", "holds": ""},
-                "optional": {
-                    "path": str(paths["optional"]),
-                    "installed": "10.0.303",
-                    "holds": "Microsoft.DotNet.SDK.11",
-                },
-                "foreign": {"path": str(paths["optional"]), "installed": "10.0.303", "holds": ""},
+                "newer": {"path": str(paths["newer"]), "installed": "10.0.303"},
+                "failing": {"path": str(paths["failing"]), "installed": "10.0.303"},
+                "absent": {"path": str(paths["absent"]), "installed": "10.0.303"},
+                "unread": {"path": str(paths["newer"]), "installed": ""},
             }
             result = run_pwsh_harness(DOTNET_NOTE_HARNESS, cases)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1446,13 +1356,9 @@ class TestWindowsUntrackedDotnetNote(unittest.TestCase):
         self.assertTrue(notes["newer"][0].startswith("dotnet: dotnet --list-sdks holds 10.0.400,"))
         self.assertIn("newer than the 10.0.303 winget installed", notes["newer"][0])
         self.assertIn("other than Microsoft.DotNet.SDK.10", notes["newer"][0])
-        self.assertEqual(len(notes["foreign"]), 1, notes)
-        self.assertTrue(
-            notes["foreign"][0].startswith("dotnet: dotnet --list-sdks holds 11.0.100,")
-        )
         self.assertEqual(
-            {name: notes[name] for name in ("failing", "absent", "unread", "optional")},
-            {"failing": [], "absent": [], "unread": [], "optional": []},
+            {name: notes[name] for name in ("failing", "absent", "unread")},
+            {"failing": [], "absent": [], "unread": []},
         )
 
 

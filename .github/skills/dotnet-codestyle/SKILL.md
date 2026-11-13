@@ -116,8 +116,7 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   baseline. The hub's host installers install the line the `catalog/snippets/configs/global.json`
   baseline selects, named in each installer and held equal to the baseline by the hub's tests.
   The Linux one adds the newest line the feed carries, and every other line under `--optional`.
-  The Windows one adds the next major and the two below it under `-Optional`, beside an install
-  or upgrade of the baseline's SDK. A fleet-wide move is a hub change to that
+  The Windows one adds the two majors below it under `-Optional`. A fleet-wide move is a hub change to that
   baseline, the installers, that fallback, and the devcontainer snippet's image tag. A repository
   not yet moved keeps building on its own line.
 
@@ -125,8 +124,8 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   today. A host holding only another major, or only a 10.0 preview, fails with a clear error. It
   reads "A compatible .NET SDK was not found" rather than silently drifting. The hub's host
   installers install the fleet default line's SDK by default. A host building a repository on
-  another line adds it, through the Linux `--optional` set or the Windows `-Optional` set, or
-  directly. On Linux, a package feed carrying no package for the default line is named in a
+  another line adds that line's SDK. The Linux `--optional` set, the Windows `-Optional` set for
+  an older major, or a direct install provides it. On Linux, a package feed carrying no package for the default line is named in a
   warning and in the report.
 
 **`LangVersion` is left unset** in every `.props` or `.targets` file the repo holds and every

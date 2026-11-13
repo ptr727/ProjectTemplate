@@ -299,15 +299,6 @@ function Get-WingetInstalled {
     return , (Read-WingetTable -Text $text -Id $Id)
 }
 
-# Whether winget lists a package: installed, absent, or unknown where winget did not answer.
-function Get-WingetPresence {
-    param([Parameter(Mandatory)][string]$Id, [string]$InScope)
-    $rows = Get-WingetInstalled -Id $Id -InScope $InScope
-    if ($null -eq $rows) { return 'unknown' }
-    if ($rows.Count -gt 0) { return 'installed' }
-    return 'absent'
-}
-
 # Whether a Version column token is a version, rather than the Unknown winget prints for an entry recording none.
 # A bare < or > left by winget's range forms is likewise not a version.
 function Test-WingetVersion {
@@ -358,7 +349,8 @@ function Get-WingetScope {
     param([Parameter(Mandatory)][string]$Id)
     $found = @()
     foreach ($candidate in 'user', 'machine') {
-        if ((Get-WingetPresence -Id $Id -InScope $candidate) -eq 'installed') { $found += $candidate }
+        $rows = Get-WingetInstalled -Id $Id -InScope $candidate
+        if ($null -ne $rows -and $rows.Count -gt 0) { $found += $candidate }
     }
     return , $found
 }
@@ -668,7 +660,7 @@ $TOOLS = @(
     @{ Name = 'uv'; Package = 'astral-sh.uv'; Probe = 'uv'; Optional = @(); Family = '' }
     @{ Name = 'docker'; Package = 'Docker.DockerDesktop'; Probe = 'docker'; Optional = @(); Family = '' }
     @{ Name = 'node'; Package = 'OpenJS.NodeJS.LTS'; Probe = 'node'; Optional = @(); Family = 'OpenJS.NodeJS' }
-    @{ Name = 'dotnet'; Package = "Microsoft.DotNet.SDK.$DOTNET_MAJOR"; Probe = 'dotnet'; Optional = @("Microsoft.DotNet.SDK.$($DOTNET_MAJOR + 1)", "Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 1)", "Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 2)"); Family = '' }
+    @{ Name = 'dotnet'; Package = "Microsoft.DotNet.SDK.$DOTNET_MAJOR"; Probe = 'dotnet'; Optional = @("Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 1)", "Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 2)"); Family = '' }
     @{ Name = 'op'; Package = 'AgileBits.1Password.CLI'; Probe = 'op'; Optional = @(); Family = '' }
 )
 
@@ -874,19 +866,7 @@ function Add-ToolNote {
         note 'dotnet' "optional set not selected: $($Tool.Optional -join ', ')"
     }
     if ($Tool.Name -eq 'dotnet') {
-        $listed = Get-DotnetSdk
-        $managed = @()
-        if ($State.Installed) {
-            $installedMajor = (Get-VersionKey $State.Installed)[0]
-            $managed = @($Tool.Optional | Where-Object {
-                    $major = ($_ -split '\.')[-1]
-                    [int]$major -gt $installedMajor -and
-                    @($listed | Where-Object { ($_ -split '\.')[0] -eq $major }).Count -gt 0 -and
-                    (Get-WingetPresence -Id $_) -eq 'installed'
-                } | ForEach-Object { ($_ -split '\.')[-1] })
-        }
-        $sdk = @($listed | Where-Object { $managed -notcontains ($_ -split '\.')[0] })
-        $untracked = Get-UntrackedDotnetSdk -Installed $State.Installed -Sdk $sdk
+        $untracked = Get-UntrackedDotnetSdk -Installed $State.Installed -Sdk (Get-DotnetSdk)
         if ($untracked) {
             note 'dotnet' "dotnet --list-sdks holds $untracked, newer than the $($State.Installed) winget installed, so something other than $($State.Package), such as Visual Studio, put it there. dotnet runs it wherever no global.json pins another, and the status compares $($State.Package) alone"
         }
@@ -1666,25 +1646,11 @@ function Invoke-ToolApply {
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
-        $presence = if ($package -ne $target) { Get-WingetPresence -Id $package } else { $null }
-        if ($presence -eq 'installed') {
-            info "${ToolName}: $package is already installed, so it is left as it is"
-            continue
-        }
-        if ($presence -eq 'unknown') {
-            warn "${ToolName}: winget did not answer whether $package is installed, so it is skipped"
-            $script:FAILED += $ToolName
-            continue
-        }
         $started = Get-Date
         $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $target) {
             Invoke-WingetUpgrade -Id $package
         } else {
             Invoke-WingetInstall -Id $package
-        }
-        if ($code -eq $script:NOT_FOUND -and $package -ne $target) {
-            info "${ToolName}: winget carries no $package yet, so it is skipped"
-            continue
         }
         if ($code -ne 0) {
             $executable = $null
@@ -1757,7 +1723,7 @@ function Invoke-Apply {
     }
 
     if ($script:FAILED.Count -gt 0) {
-        warn "Failed: $(@($script:FAILED | Select-Object -Unique) -join ' ')"
+        warn "Failed: $($script:FAILED -join ' ')"
         return 1
     }
     return 0
