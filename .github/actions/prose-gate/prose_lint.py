@@ -618,8 +618,10 @@ class Unit(NamedTuple):
     """A run of text one kind of rule reads.
 
     `source` is every line, and `prose` and `code` the unfenced ones. `spanless` is the unfenced
-    Markdown lines with each code span's content blanked. `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
-    documentation comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
+    Markdown lines with each code span's content blanked, for a rule that reads no code span.
+    `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup` are runs of adjacent
+    comment lines, `doc` a documentation comment and `markup` a Markdown HTML one. `docstring`
+    opens at `column`.
     """
 
     kind: str
@@ -1153,7 +1155,7 @@ LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inn
 LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
 LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
-JOINED_SEMICOLON = re.compile(r"(?<=\w);(?=\w)")
+JOINED_SEMICOLON = re.compile(r"(?<![&#])\b(\w+);(?=\w)")
 CELL_BREAK = re.compile(r"(?<!\\)\|")
 TABLE_ROW = re.compile(r"^\s*(?:>\s*)*\|")
 # A word-joining character before the repeat keeps "either/or or" from reading as a doubled word.
@@ -1216,9 +1218,12 @@ def by_cell(text: str, blank: Callable[[str], str]) -> str:
 
 
 def prose_lines(unit: Unit) -> Iterable[tuple[int, str, str]]:
-    """Each line's number, its text without code spans, and that text without quotations either."""
+    """Each `spanless` line's number, its text, and that text without quotations either.
+
+    The unit has each code span blanked already, paired across a line break as Markdown pairs it.
+    """
     for line in unit.lines:
-        txt = by_cell(line.text, strip_inline_code)
+        txt = line.text
         prose = by_cell(txt, strip_quoted)
         yield line.number, txt, QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
 
@@ -1282,15 +1287,15 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
     """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
 
-    A semicolon with a word character on both sides sits inside one token, as in `TL;DR`, and
-    joins no clause, so it is no finding.
+    A semicolon with a word character on both sides is read as inside one token, as in `TL;DR`,
+    so it is no finding. An HTML entity's closing semicolon is still one.
 
     A table row opening with a pipe is read a cell at a time, split where `row_cells` splits it.
     `prose_lines` blanks each cell on its own and leaves every pipe ending one where it was.
     """
     out: list[Finding] = []
     for n, _txt, prose in prose_lines(unit):
-        line = JOINED_SEMICOLON.sub("_", prose)
+        line = JOINED_SEMICOLON.sub(r"\1_", prose)
         pieces = (
             s for cell in row_cells(line) for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell))
         )
@@ -1320,11 +1325,10 @@ def unit_texts(unit: Unit, ctx: Context) -> Iterable[tuple[int, str]]:
     for line in unit.lines:
         if line.number in ctx.fenced:
             continue
-        if unit.kind != "prose":
+        if unit.kind != "spanless":
             yield line.number, strip_inline_code(line.text)
             continue
-        text = by_cell(by_cell(line.text, strip_inline_code), strip_quoted)
-        yield line.number, by_cell(text, strip_inline_code)
+        yield line.number, by_cell(line.text, strip_quoted)
 
 
 def rule_dupword(unit: Unit, ctx: Context) -> list[Finding]:
@@ -2010,11 +2014,11 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "charset": (rule_charset, frozenset({"spanless", "code"})),
     "charset-unknown": (rule_charset, frozenset({"spanless", "code"})),
     "dead-path": (rule_dead_path, frozenset({"prose"})),
-    "semicolon": (rule_semicolon, frozenset({"prose"})),
-    "dash": (rule_dash, frozenset({"prose"})),
-    "dupword": (rule_dupword, frozenset({"prose", "comment"})),
-    "spelling": (rule_spelling, frozenset({"prose", "comment"})),
-    "sentence-split": (rule_sentence_split, frozenset({"prose"})),
+    "semicolon": (rule_semicolon, frozenset({"spanless"})),
+    "dash": (rule_dash, frozenset({"spanless"})),
+    "dupword": (rule_dupword, frozenset({"spanless", "comment"})),
+    "spelling": (rule_spelling, frozenset({"spanless", "comment"})),
+    "sentence-split": (rule_sentence_split, frozenset({"spanless"})),
 }
 LINE_ORDERED = frozenset(list(RULE_TABLE)[list(RULE_TABLE).index("home-path") :])
 

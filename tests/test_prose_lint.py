@@ -666,6 +666,23 @@ class TestSemicolonRule(BaitCase):
             with self.subTest(text=text.strip()):
                 self.assertEqual([], self.kinds(text, {"semicolon"}))
 
+    def test_an_unspaced_semicolon_is_read_as_one_token_but_an_entity_is_not(self) -> None:
+        """The gate reads the token shape, so an unspaced clause break passes as `TL;DR` does.
+
+        An HTML entity's closing semicolon sits between word characters too, and is still reported.
+        """
+        self.assertEqual([], self.kinds("It runs;it stops.\n", {"semicolon"}))
+        for text in ("A word&mdash;another.\n", "A word&#8212;another.\n", "A&#x2014;b.\n"):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
+    def test_a_wrapped_code_span_hides_no_splice_after_it(self) -> None:
+        """A span is paired as Markdown pairs it, so its closer opens nothing on the next line."""
+        text = "See `git remote\nget-url` then; it runs, then `x`.\n"
+        self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+        text = "See `git remote\nget-url` then - it runs, then `x`.\n"
+        self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
     def test_a_semicolon_with_a_space_beside_it_is_still_a_splice(self) -> None:
         """Only a word character on both sides makes one token, so a spaced splice still flags."""
         for text in (
