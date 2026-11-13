@@ -618,10 +618,11 @@ class Unit(NamedTuple):
     """A run of text one kind of rule reads.
 
     `source` is every line, and `prose` and `code` the unfenced ones. `spanless` is the unfenced
-    Markdown lines with each code span's content blanked, for a rule that reads no code span.
-    `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup` are runs of adjacent
-    comment lines, `doc` a documentation comment and `markup` a Markdown HTML one. `docstring`
-    opens at `column`.
+    Markdown lines with each code span's content blanked, front matter and an HTML block read
+    whole. `codeless` blanks a span there too, paired one line at a time since no inline token
+    holds those lines. `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup`
+    are runs of adjacent comment lines, `doc` a documentation comment and `markup` a Markdown
+    HTML one. `docstring` opens at `column`.
     """
 
     kind: str
@@ -1049,6 +1050,11 @@ def extract_markdown(lines: list[str]) -> Extracted:
         Unit("source", tuple(Line(n, t) for n, t in enumerate(lines, 1))),
         *line_units("prose", lines, skip),
         *line_units("spanless", [spanless.get(n, t) for n, t in enumerate(lines, 1)], skip),
+        *line_units(
+            "codeless",
+            [spanless.get(n, by_cell(t, strip_inline_code)) for n, t in enumerate(lines, 1)],
+            skip,
+        ),
         *paragraphs,
         *blocks("markup", sorted(markup, key=lambda m: m.number)),
     ]
@@ -1218,7 +1224,7 @@ def by_cell(text: str, blank: Callable[[str], str]) -> str:
 
 
 def prose_lines(unit: Unit) -> Iterable[tuple[int, str, str]]:
-    """Each `spanless` line's number, its text, and that text without quotations either.
+    """Each `codeless` line's number, its text, and that text without quotations either.
 
     The unit has each code span blanked already, paired across a line break as Markdown pairs it.
     """
@@ -1325,7 +1331,7 @@ def unit_texts(unit: Unit, ctx: Context) -> Iterable[tuple[int, str]]:
     for line in unit.lines:
         if line.number in ctx.fenced:
             continue
-        if unit.kind != "spanless":
+        if unit.kind != "codeless":
             yield line.number, strip_inline_code(line.text)
             continue
         yield line.number, by_cell(line.text, strip_quoted)
@@ -2014,11 +2020,11 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "charset": (rule_charset, frozenset({"spanless", "code"})),
     "charset-unknown": (rule_charset, frozenset({"spanless", "code"})),
     "dead-path": (rule_dead_path, frozenset({"prose"})),
-    "semicolon": (rule_semicolon, frozenset({"spanless"})),
-    "dash": (rule_dash, frozenset({"spanless"})),
-    "dupword": (rule_dupword, frozenset({"spanless", "comment"})),
-    "spelling": (rule_spelling, frozenset({"spanless", "comment"})),
-    "sentence-split": (rule_sentence_split, frozenset({"spanless"})),
+    "semicolon": (rule_semicolon, frozenset({"codeless"})),
+    "dash": (rule_dash, frozenset({"codeless"})),
+    "dupword": (rule_dupword, frozenset({"codeless", "comment"})),
+    "spelling": (rule_spelling, frozenset({"codeless", "comment"})),
+    "sentence-split": (rule_sentence_split, frozenset({"codeless"})),
 }
 LINE_ORDERED = frozenset(list(RULE_TABLE)[list(RULE_TABLE).index("home-path") :])
 
@@ -2045,7 +2051,7 @@ def check_file(
         return []
     text = decoded.removeprefix(BOM)
     out = [f for f in charset_findings(1, BOM) if f[1] in rules] if text != decoded else []
-    lex = any(RULE_TABLE[r][1] - {"source", "prose", "spanless", "code"} for r in rules)
+    lex = any(RULE_TABLE[r][1] - {"source", "prose", "spanless", "codeless", "code"} for r in rules)
     judged, first = at or (path, text.split("\n", 1)[0].rstrip("\r"))
     units, fenced, read_plain = extract(judged, text, lex, first)
     if read_plain and plain is not None:

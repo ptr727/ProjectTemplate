@@ -594,7 +594,7 @@ class TestCharsetRule(BaitCase):
         self.assertEqual(set(), t4 & (t1 | t2 | t3))
 
     def test_a_markdown_code_span_is_read_as_quoted_data_like_a_fence(self) -> None:
-        """A string quoted verbatim keeps its bytes inside a code span, and the same text outside flags.
+        """A string quoted verbatim keeps its bytes inside a code span, and outside one it flags.
 
         The tier-2 case has no figure beside it, so only the span admits it.
         """
@@ -682,6 +682,15 @@ class TestSemicolonRule(BaitCase):
         self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
         text = "See `git remote\nget-url` then - it runs, then `x`.\n"
         self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
+    def test_a_code_span_outside_an_inline_token_still_hides_its_code(self) -> None:
+        """Front matter and an HTML block hold code the prose rules skip, paired line by line."""
+        for text in (
+            "---\ndescription: Run `a; b` or `c - d` first.\n---\n\nBody.\n",
+            "<details>\n<summary>Run `a; b` or `c - d`</summary>\n</details>\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([], self.kinds(text, {"semicolon", "dash"}))
 
     def test_a_semicolon_with_a_space_beside_it_is_still_a_splice(self) -> None:
         """Only a word character on both sides makes one token, so a spaced splice still flags."""
