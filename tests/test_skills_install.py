@@ -64,6 +64,24 @@ class SourceRefCase(unittest.TestCase):
             status_call,
         )
 
+    def test_git_status_names_its_untracked_mode(self) -> None:
+        """copytree installs an untracked skill, which status.showUntrackedFiles=no would hide."""
+        calls = []
+
+        def fake_run(args, **kwargs):
+            calls.append(args)
+            result = mock.Mock()
+            result.returncode = 0
+            result.stdout = "deadbeef\n" if "rev-parse" in args else ""
+            return result
+
+        with mock.patch("skills_install.run_with_deadline", side_effect=fake_run):
+            skills_install.source_ref()
+
+        status_call = next(c for c in calls if "status" in c)
+        self.assertIn("--untracked-files=all", status_call)
+        self.assertLess(status_call.index("--untracked-files=all"), status_call.index("--"))
+
     def test_a_handed_in_commit_stands_in_where_git_cannot_answer(self) -> None:
         """A bootstrap runs the installer from a tarball tree with no .git, and hands in the commit
         it resolved before downloading. So the stamp stays checkable rather than permanently stale."""

@@ -288,7 +288,7 @@ detect_hub_root() {
 # So each one's own exit status is captured rather than only its output.
 hub_root_clean_on_default_ref() {
     local status branch
-    status=$(git -C "$HUB_ROOT" status --porcelain) || return 1
+    status=$(git -C "$HUB_ROOT" status --porcelain --untracked-files=all) || return 1
     [[ -z $status ]] || return 1
     branch=$(git -C "$HUB_ROOT" rev-parse --abbrev-ref HEAD) || return 1
     [[ $branch == "$DEFAULT_REF" ]]
@@ -324,7 +324,7 @@ ensure_hub_root() {
             # So the freshness check is as much a change as fetch_hub's own clone.
             local status head ref_head
             if ref_head=$(hub_ref_commit) &&
-                status=$(git -C "$HUB_ROOT" status --porcelain) && [[ -z $status ]] &&
+                status=$(git -C "$HUB_ROOT" status --porcelain --untracked-files=all) && [[ -z $status ]] &&
                 head=$(git -C "$HUB_ROOT" rev-parse HEAD) &&
                 [[ $head == "$ref_head" ]]; then
                 return 0

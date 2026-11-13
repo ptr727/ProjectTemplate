@@ -369,7 +369,7 @@ function Test-HubCheckout {
 # A failed git call must never read the same as its emptiest possible success.
 # So $LASTEXITCODE is checked after each one rather than only its output.
 function Test-HubCleanOnDefaultRef {
-    $status = & git -C $script:HUB_ROOT status --porcelain
+    $status = & git -C $script:HUB_ROOT status --porcelain --untracked-files=all
     if ($LASTEXITCODE -ne 0 -or $status) { return $false }
     $branch = & git -C $script:HUB_ROOT rev-parse --abbrev-ref HEAD
     if ($LASTEXITCODE -ne 0) { return $false }
@@ -403,7 +403,7 @@ function Confirm-HubRoot {
         } else {
             $refHead = Get-HubRefCommit
             if ($refHead) {
-                $status = & git -C $script:HUB_ROOT status --porcelain
+                $status = & git -C $script:HUB_ROOT status --porcelain --untracked-files=all
                 if ($LASTEXITCODE -eq 0 -and -not $status) {
                     $head = & git -C $script:HUB_ROOT rev-parse HEAD
                     if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq $refHead) { return $true }

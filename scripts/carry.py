@@ -335,7 +335,7 @@ def verify_hub(hub: pathlib.Path, registry: dict[str, Any], name: str) -> str:
         raise CarryError(
             "hub checkout is not at freshly fetched origin/main, or origin/develop for an unpromoted entry"
         )
-    if git(hub, "status", "--porcelain"):
+    if git(hub, "status", "--porcelain", "--untracked-files=all"):
         raise CarryError("hub checkout has local changes")
     return head
 

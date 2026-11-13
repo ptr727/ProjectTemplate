@@ -162,7 +162,13 @@ def source_ref():
     # With `git -C <repo>`, an absolute path can fail to match anything.
     # That silently and permanently reports dirty=False.
     watched = [SKILLS_SRC, CLAUDE_PLUGIN_DIR]
-    status = git("status", "--porcelain", "--", *(p.relative_to(ROOT).as_posix() for p in watched))
+    status = git(
+        "status",
+        "--porcelain",
+        "--untracked-files=all",
+        "--",
+        *(p.relative_to(ROOT).as_posix() for p in watched),
+    )
     ref["dirty"] = bool(status)
     return ref
 

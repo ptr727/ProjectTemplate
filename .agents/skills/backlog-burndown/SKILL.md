@@ -452,8 +452,8 @@ The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanu
 **Retiring a worktree and deleting its branch are two dispositions with two tests.** Citing one for
 the other is how a removal that discards nothing gets routed to the maintainer. It is also how a
 removal that discards commits gets waved through. Retiring a worktree alone, the branch left
-standing, risks only what is uncommitted in it. A clean tree is the whole test, and the branch's
-own contents do not enter it. A tree that is not clean is left exactly as it stands while the
+standing, risks only what is uncommitted in it. A tree clean by `repo-worktree` "Listing and
+Cleanup"'s hand-removal read is the whole test, and the branch's own contents do not enter it. A tree that is not clean is left exactly as it stands while the
 group is stopped for the maintainer per "Raising a Blocked Question". Deleting the branch as well
 risks what is committed, so it carries whichever branch check the group's state calls for. That is
 `repo-worktree`'s verify-before-removing for a group whose pull request merged. It is the no-merge
