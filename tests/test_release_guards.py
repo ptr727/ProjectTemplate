@@ -2411,7 +2411,11 @@ class DotnetSdkLineCase(unittest.TestCase):
         )
         self.assertEqual(self.select(slashes_in_a_string), ["global-json-file=global.json"])
 
-    def test_a_global_json_nothing_can_read_falls_back_with_a_warning(self) -> None:
+    def test_a_global_json_both_parsers_do_not_accept_falls_back_with_a_warning(self) -> None:
+        """A passed file has to parse for the dotnet host and for setup-dotnet's JSON5 read alike.
+
+        So a trailing comma, which JSON5 accepts and the host rejects, falls back too.
+        """
         fallback = f"{baseline_line()[0]}.x"
         self.assertEqual(self.select("{not json"), [f"dotnet-version={fallback}"])
         self.assertIn("::warning::global.json could not be read", self.last_stdout)
