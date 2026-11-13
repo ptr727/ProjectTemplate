@@ -526,16 +526,18 @@ printf '%s\\n' "${{CHANGED[@]}}"
         self.assertIn(f"Microsoft's feed carries no {self.fleet} for debian 13", result.stderr)
         self.assertNotIn("mixing", result.stderr)
 
-    def report(self, feed: list[str], pending: str = "") -> list[str]:
+    def report(self, feed: list[str], pending: str = "", versions: str = "1.0 1.1") -> list[str]:
         """The dotnet row's installed and target versions, then each note `tool_note` files for it.
 
         Each package's version is its own name, so a row shows which package it read. The `pending`
-        package alone has a newer candidate than the version installed.
+        package alone carries real versions instead, installed then candidate from `versions`, so
+        `tool_status` judges them by dpkg's ordering.
         """
+        have, want = versions.split()
         result = self.run_bash(f"""
 dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
-apt_installed_version() {{ printf '%s' "$1"; }}
-apt_candidate_version() {{ if [[ $1 == "{pending}" ]]; then printf '%s-next' "$1"; else printf '%s' "$1"; fi; }}
+apt_installed_version() {{ if [[ $1 == "{pending}" ]]; then printf '{have}'; else printf '%s' "$1"; fi; }}
+apt_candidate_version() {{ if [[ $1 == "{pending}" ]]; then printf '{want}'; else printf '%s' "$1"; fi; }}
 apt_missing() {{ :; }}
 NOTES=()
 NOTE_TEXTS=()
@@ -552,25 +554,31 @@ tool_note dotnet
     def test_the_row_reports_the_fleet_line_over_a_newer_one(self) -> None:
         self.assertEqual(self.report([self.fleet, self.newer]), [self.fleet, self.fleet])
 
+    @unittest.skipUnless(shutil.which("dpkg"), "tool_status orders versions with dpkg")
     def test_a_pending_newest_line_upgrade_is_noted(self) -> None:
         self.assertEqual(
             self.report([self.fleet, self.newer], pending=self.newer),
             [
                 self.fleet,
                 self.fleet,
-                (
-                    f"dotnet: {self.newer} is at {self.newer} and the feed carries"
-                    f" {self.newer}-next, --upgrade moves it"
-                ),
+                f"dotnet: {self.newer} is at 1.0 and the feed carries 1.1, --upgrade moves it",
             ],
+        )
+
+    @unittest.skipUnless(shutil.which("dpkg"), "tool_status orders versions with dpkg")
+    def test_a_newest_line_ahead_of_its_candidate_is_not_noted(self) -> None:
+        """apt never downgrades, so an installed version past the candidate has nothing to move."""
+        self.assertEqual(
+            self.report([self.fleet, self.newer], pending=self.newer, versions="1.2 1.1"),
+            [self.fleet, self.fleet],
         )
 
     def test_without_a_fleet_line_a_pending_upgrade_is_the_row_s_alone(self) -> None:
         self.assertEqual(
             self.report([self.newer], pending=self.newer),
             [
-                self.newer,
-                f"{self.newer}-next",
+                "1.0",
+                "1.1",
                 f"dotnet: the feed carries no {self.fleet}, the line fleet .NET repositories select",
             ],
         )
