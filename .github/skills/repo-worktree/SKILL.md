@@ -165,10 +165,9 @@ no separate branch setup. Git refuses to attach a branch that is already checked
 tree is the hazard the continuation rule exists for. `git worktree list` names the checkout
 holding it and prints the base clone first, and what to do there depends on which checkout that is.
 
-The base clone holding it is the case "The Base Branch" excepts. Return it to its own working
-branch when its tree is clean by the hand-removal read in "Listing and Cleanup",
-`git -C ~/repos/<Repo> checkout develop`, and then create the
-worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
+The base clone holding it is the case "The Base Branch" excepts. Judge its tree by the
+hand-removal read in "Listing and Cleanup". When it is clean, return it to its own working
+branch, `git -C ~/repos/<Repo> checkout develop`, and then create the worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
 task may be live there.
 
 A previous session's own worktree holding it is retired rather than switched. It normally sits at

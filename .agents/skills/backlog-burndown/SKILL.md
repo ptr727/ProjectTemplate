@@ -575,6 +575,7 @@ that is. Waiting costs a round's latency and guessing costs another task's uncom
 Once the worker is confirmed gone, its worktree decides what follows. A standalone clone recorded
 on the claim comment is that worktree, retired or removed per "Cleanup Is the Orchestrator's".
 Where that fails, the group stops there and no fresh worker is dispatched.
+A worktree is judged clean or dirty by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
 **A clean one** is cleaned up as an abandoned group's is, per "Cleanup Is the Orchestrator's".
 That procedure confirms the branch carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
@@ -612,7 +613,8 @@ rather than a decision.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
 - **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
-  prompt whether that worktree holds uncommitted work. For a standalone clone, say also whether its
+  prompt whether that worktree holds uncommitted work, by `repo-worktree` "Listing and Cleanup"'s
+  hand-removal read. For a standalone clone, say also whether its
   tip equals the remote tip, and that pushing the branch is the maintainer's. That is
   because what becomes of it is part of what is being asked, rather than something to settle while
   waiting.
