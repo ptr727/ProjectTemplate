@@ -100,7 +100,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md) un
 | --- | --- |
 | Why the rules are shaped this way | `Foundational Principles` |
 | Recording a durable lesson, updating governance, or work here waiting on a fix in another repository | `Durable Knowledge and Self-Improvement`, surfaced at its decision moments by the `agent-conduct` Skill, and the section keeps the full rules |
-| Any push, API mutation, comment, label, or merge, or which checkout the work happens in | `Repository Boundaries and Write Safety`, its task-isolation rule surfaced at the task-start moment by the `repo-worktree` Skill, and the section keeps the full rules |
+| Any push, API mutation, comment, label, or merge, or which checkout the work happens in | `Repository Boundaries and Write Safety`, its task-isolation rule surfaced at the task-start moment by the `repo-worktree` Skill, and the section keeps the full rules. Who takes a merge or another irreversible step is `Communicating with the User` |
 | Quoting data into a comment, commit, test, or doc | `Representative Data in Agent-Authored Text` |
 | Committing, signing, rebasing, force-pushing | `Git and Commit Rules`, packaged as the `git-commit-conventions` Skill |
 | Branch choice, promotion, keeping branches in sync | `Branching Model`, packaged as the `branching-and-release-model` Skill |
