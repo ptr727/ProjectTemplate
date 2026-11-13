@@ -62,7 +62,9 @@ maintainer can supply what section 0A lists.
    `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather
    than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
    `cspell.json`. A downstream `AUDIT.md` is the short, repository-scoped form that says how the
-   repository reaches the hub for its audit and configuration check. `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
+   repository reaches the hub for its audit and configuration check. Write it from
+   `catalog/snippets/configs/AUDIT.md`, filling each placeholder `spec/files.json` declares for it.
+   `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
    `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from
    `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured.
    Read `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules before writing any repo

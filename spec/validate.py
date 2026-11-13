@@ -722,7 +722,10 @@ def markdown_section(text, name):
 
 
 def carried_link_errors(root, baseline):
-    """Reject links that stop being truthful when their Markdown source is carried."""
+    """Reject links that stop being truthful when their Markdown source is carried.
+
+    The text read is the hub copy a carrier adapts, and its links resolve where the carried file lands.
+    """
     universal = {
         item["path"]
         for item in baseline
@@ -735,7 +738,8 @@ def carried_link_errors(root, baseline):
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
             continue
         source = item["path"]
-        path = root / source
+        read = hub_copy(item, source)
+        path = root / read
         if not source.endswith(".md") or not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -755,9 +759,9 @@ def carried_link_errors(root, baseline):
                     repository_target == TEMPLATE_REPOSITORY_URL
                     or repository_target.startswith(f"{TEMPLATE_REPOSITORY_URL}/")
                 )
-                if is_template_link and source != "AUDIT.md":
+                if is_template_link:
                     errors.append(
-                        f"files.json: {source} {region} links to the template repository "
+                        f"files.json: {read} {region} links to the template repository "
                         f"at '{target}'"
                     )
                     continue
@@ -773,7 +777,7 @@ def carried_link_errors(root, baseline):
                 )
                 if resolved not in universal:
                     errors.append(
-                        f"files.json: {source} {region} links to relative target "
+                        f"files.json: {read} {region} links to relative target "
                         f"'{relative_target}', which is not universally carried"
                     )
     return errors

@@ -3707,8 +3707,9 @@ class SecretStemCase(unittest.TestCase):
     def test_a_bare_secrets_directory_is_read_from_the_files_naming_it(self) -> None:
         """The directory is ignored by design, so a .gitignore line and a config path are the signals."""
         bare = (
-            "runtime-secrets: {} tracked file(s) name or sit in a bare secrets/ directory, which "
-            'GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ and update each: {}'
+            "runtime-secrets: {} tracked file(s) name or sit in a secrets directory not named "
+            '.secrets/, which GOVERNANCE.md "Repo-Scoped Secrets" rules out. Rename it .secrets/ '
+            "and update each: {}"
         )
         cases: list[tuple[str, dict[str, str], list[str], list[str]]] = [
             (
@@ -4178,6 +4179,40 @@ class SecretStemCase(unittest.TestCase):
                 ],
                 [".devcontainer/app/devcontainer.json"],
             ),
+            (
+                "a capitalized folder is read from a .gitignore line and a compose path",
+                {
+                    ".gitignore": "Secrets/\n",
+                    "compose.yml": "secrets:\n  s:\n    file: ./Secrets/Db_Password\n",
+                },
+                ["Secrets/Db_Password (named in compose.yml)"],
+                [".gitignore", "compose.yml"],
+            ),
+            (
+                "a floating line is not silenced by a code directory its case cannot match",
+                {
+                    ".gitignore": "secrets/\n",
+                    "src/App/Secrets/Store.cs": "",
+                },
+                [],
+                [".gitignore"],
+            ),
+            (
+                "a class matching a bare folder is a signal, and one able to name .secrets is not",
+                {
+                    ".gitignore": "[Ss]ecrets/\n",
+                    "deploy/.gitignore": ".[Ss]ecrets/\n",
+                    "ops/.gitignore": "/.Secrets/\n",
+                },
+                [],
+                [".gitignore", "ops/.gitignore"],
+            ),
+            (
+                "a .gitignore whose class names .secrets keeps its old guard line silent",
+                {".gitignore": ".[Ss]ecrets/\n[Ss]ecrets/\n"},
+                [],
+                [],
+            ),
         ]
         for label, texts, named, naming in cases:
             with self.subTest(label):
@@ -4190,7 +4225,64 @@ class SecretStemCase(unittest.TestCase):
                 if named:
                     self.assertTrue(stems[0].startswith(f"runtime-secrets: {len(named)} env"), got)
                 want = [bare.format(len(naming), ", ".join(naming))] if naming else []
-                self.assertEqual([t for _, t in got if "bare secrets/" in t], want)
+                self.assertEqual([t for _, t in got if "not named .secrets/" in t], want)
+
+    def test_a_dotted_folder_in_another_case_is_reported_and_its_files_judged(self) -> None:
+        got = audit.secret_stem_findings({".Secrets/README.md", ".Secrets/Db_Password"})
+
+        self.assertEqual(
+            [t.rsplit(": ", 1)[1] for _, t in got],
+            [".Secrets/Db_Password", ".Secrets/Db_Password, .Secrets/README.md"],
+            got,
+        )
+
+    def test_a_devcontainer_compose_set_resolves_against_its_first_file(self) -> None:
+        """Compose resolves every file of a set against the first one's directory, the project directory."""
+        texts = {
+            ".devcontainer/devcontainer.json": (
+                '{\n  // the set\n  "dockerComposeFile": ["..\\\\docker-compose.yml", "docker-compose.extend.yml"]\n}\n'
+            ),
+            ".devcontainer/docker-compose.extend.yml": (
+                "services:\n  app:\n    env_file: ./.secrets/App.env\n"
+                "    volumes:\n      - ../secrets:/run/secrets\n"
+            ),
+            ".devcontainer/other/compose.yml": "services:\n  app:\n    env_file: ./.secrets/Web.env\n",
+            "docker-compose.yml": "services: {}\n",
+        }
+
+        got = audit.secret_stem_findings(set(texts), texts.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(
+            got[0][1].endswith(
+                ": .devcontainer/other/.secrets/Web.env (named in .devcontainer/other/compose.yml), "
+                ".secrets/App.env (named in .devcontainer/docker-compose.extend.yml)"
+            ),
+            got,
+        )
+
+    def test_a_compose_file_two_sets_list_resolves_against_each_first_file(self) -> None:
+        """Each devcontainer's set has its own project directory, so a shared file is read against both."""
+        texts = {
+            ".devcontainer/a/devcontainer.json": (
+                '{"dockerComposeFile": ["../../docker-compose.yml", "../compose.shared.yml"]}\n'
+            ),
+            ".devcontainer/b/devcontainer.json": (
+                '{"dockerComposeFile": ["compose.yml", "../compose.shared.yml"]}\n'
+            ),
+            ".devcontainer/compose.shared.yml": "services:\n  app:\n    env_file: ./.secrets/App.env\n",
+        }
+
+        got = audit.secret_stem_findings(set(texts), texts.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(
+            got[0][1].endswith(
+                ": .devcontainer/b/.secrets/App.env (named in .devcontainer/compose.shared.yml), "
+                ".secrets/App.env (named in .devcontainer/compose.shared.yml)"
+            ),
+            got,
+        )
 
     def test_a_named_path_resolves_against_its_file_and_stays_inside_the_repo(self) -> None:
         """A compose path is relative to its own directory, an editor's to its workspace, and one leaving the repo is no signal."""
