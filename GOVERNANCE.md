@@ -97,7 +97,8 @@ They hold live-service config such as Home Assistant, ESPHome, Vantage, and home
 directly to `develop`, and CI runs on the push as advisory feedback only. The maintainer and an agent alike commit in place, in the live checkout the running service reads. A worktree or a pull request into `develop` stays available to an agent and is never required. The host write guard allows that in-place commit only once the repository's `.github/agent-policy.json` on `main` lists `develop` in its `guard` section. The maintainer's merge to `main` is therefore what grants it, and until then the guard denies it. A change reaching
 `develop` names the issues it fixes in one `Closes on promotion:` line, such as
 `Closes on promotion: #N, #M`. A direct push writes the line in its commit message. A pull request
-into `develop` writes it in its body, since a squash commit's message does not carry the body. The
+into `develop` writes it in its body. The promotion reads a merged pull request's line from its
+body, never from its commits. The
 promotion pull request carrying the change takes a closing keyword in its body for each issue the
 line names. Its body takes no closing keyword for a change without that line. A PR still exists for a
 change worth reviewing, and the `main` promotion gate is unchanged. Release happens only by manual

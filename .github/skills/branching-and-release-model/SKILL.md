@@ -60,7 +60,7 @@ rather than guessing from the repo's contents.
   into the **default branch** (`main`), so a feature -> `develop` PR merge never fires it.
   Reference the issue in the `develop` PR body if useful, but the actual closing keyword belongs on
   the promotion PR. In an operational repository that reference is required, as the
-  `Closes on promotion:` line "Operational repositories" below sets. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
+  `Closes on promotion:` line that "Operational repositories (the complete delta)" below sets. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
   promotion that already merged without it, or completed work with no promotion imminent. Closing by hand is
   not a repair for a botched promotion. Cite the squash SHA and re-read that commit before closing.
 - **Neither ruleset requires branches to be up to date before merging.** The reasons differ on
@@ -139,8 +139,8 @@ stays the same:
   merge to `main` therefore grants the exemption, and until then the guard denies it.
 - **A change reaching `develop` names the issues it fixes in one line**, such as
   `Closes on promotion: #N, #M`. A direct push writes the line in its commit message. A pull
-  request into `develop` writes it in its body, since a squash commit's message does not carry the
-  body. The words `on promotion:` keep GitHub from reading the line as a closing keyword. The promotion
+  request into `develop` writes it in its body. The promotion reads a merged pull request's line
+  from its body, never from its commits. The words `on promotion:` keep GitHub from reading the line as a closing keyword. The promotion
   PR carrying the change puts a closing keyword in its own body for each issue the line names, per the
   closing-keyword bullet above. Its body takes no closing keyword for a change without the line.
 - **A PR into `develop` stays available, and CI runs on it, reported but not required.** Dropping
