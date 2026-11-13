@@ -3037,9 +3037,9 @@ class IntentAdvisoryCase(unittest.TestCase):
             ),
             ("a fleet value dropped", '{"sdk": {"version": "11.0.100"}}', trailing),
             (
-                "a value the canonical dropped",
-                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature", "allowPrerelease": false}}',
-                trailing,
+                "a leaf of its own inside a block",
+                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature", "paths": ["x"]}}',
+                None,
             ),
             (
                 "a byte-order mark",
@@ -3053,6 +3053,35 @@ class IntentAdvisoryCase(unittest.TestCase):
             with self.subTest(label), self.patched({"snip/global.json": canon}):
                 got = audit.intent_trail("o/r", "main", "global.json", unit, down)
                 self.assertEqual(got, want)
+
+    def test_a_repo_owned_verdict_outranks_the_dates(self) -> None:
+        unit = {
+            "path": "global.json",
+            "fidelity": "intent",
+            "reference": "snip/global.json",
+            "repoOwnedKeys": ["sdk.version"],
+        }
+        canon = '{"sdk": {"version": "10.0.100", "rollForward": "latestFeature"}}'
+        newer = [{"commit": {"committer": {"date": "2021-01-01T00:00:00+00:00"}}}]
+        cases = [
+            (
+                "a fleet value trails",
+                '{"sdk": {"version": "11.0.100", "rollForward": "major"}}',
+                True,
+            ),
+            ("not JSON", "{", False),
+        ]
+        for label, down, reported in cases:
+            with self.subTest(label), self.patched({"snip/global.json": canon}, newer):
+                got = audit.intent_trail("o/r", "main", "global.json", unit, down)
+                self.assertEqual(got is not None, reported)
+
+    def test_a_copy_newer_than_the_change_it_trails_is_named_by_its_key(self) -> None:
+        trails = {"global.json": ("snip/global.json", ("2021-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        [(level, text)] = audit.intent_findings({}, "main", trails)
+        self.assertEqual(level, "DRIFT")
+        self.assertIn("differs from the intent canonical snip/global.json at a key", text)
+        self.assertNotIn("changed later", text)
 
     def test_a_unit_without_repo_owned_keys_compares_whole(self) -> None:
         unit = {"path": "global.json", "fidelity": "intent", "reference": "snip/global.json"}

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -372,6 +373,11 @@ class TestInstallersNameTheBaselineLine(unittest.TestCase):
         major, _ = baseline_line()
         text = WINDOWS_INSTALLER.read_text(encoding="utf-8")
         self.assertRegex(text, rf"(?m)^\$DOTNET_MAJOR = {major}$")
+
+    def test_the_windows_optional_set_reaches_the_next_major(self) -> None:
+        text = WINDOWS_INSTALLER.read_text(encoding="utf-8")
+        [record] = re.findall(r"(?m)^\s*@\{ Name = 'dotnet';.*$", text)
+        self.assertIn('"Microsoft.DotNet.SDK.$($DOTNET_MAJOR + 1)"', record)
 
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")

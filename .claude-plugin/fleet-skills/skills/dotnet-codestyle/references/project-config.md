@@ -1,6 +1,6 @@
 # .NET Project Configuration
 
-1. **Target framework and SDK line**: .NET 10.0 (`<TargetFramework>net10.0</TargetFramework>`).
+1. **Target framework and SDK line**: the repository's own line, .NET 10.0 for the fleet default (`<TargetFramework>net10.0</TargetFramework>`).
    The root `global.json` `sdk` block selects the same line (`"version": "10.0.100"`,
    `"rollForward": "latestFeature"`, `"allowPrerelease": false`). See `SKILL.md`'s "Central build
    and package configuration". `LangVersion` stays unset, so the C# version follows the TFM. A

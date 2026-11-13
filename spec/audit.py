@@ -1787,28 +1787,24 @@ def baseline_file_findings(slug, ground, path, item, ref=None):
     return content, contents_text(content), []
 
 
-def carries_fleet_owned_values(item, canon_text, down_text):
+def fleet_owned_verdict(item, canon_text, down_text):
     """Whether a copy of a unit declaring `repoOwnedKeys` holds every other leaf its JSON canonical holds.
 
-    A value at one of those keys is the repository's own choice, and so is a top-level block the canonical lacks.
-    A leaf the copy adds inside a block the canonical holds reads as one the canonical dropped.
-    A text either side that is not plain JSON, a byte-order mark aside, is dated as before.
+    True where it does, False where one differs or is absent, and None where the two cannot be compared.
+    A value at one of those keys is the repository's own choice, and so is a leaf the copy adds.
+    So a key the canonical drops goes unreported, and a text either side that is not plain JSON is dated as before.
     """
     owned = item.get("repoOwnedKeys")
     if not owned or canon_text is None:
-        return False
+        return None
     try:
         canon = json.loads(canon_text)
         down = json.loads(down_text.lstrip("\ufeff"))
     except ValueError:
-        return False
-    canon_leaves = dict(validate.json_leaves(canon))
+        return None
     held = dict(validate.json_leaves(down))
-    blocks = {key.split(".", 1)[0] for key in canon_leaves}
-    if any(k.split(".", 1)[0] in blocks and k not in canon_leaves and k not in owned for k in held):
-        return False
     missing = object()
-    return all(held.get(k, missing) == v for k, v in canon_leaves.items() if k not in owned)
+    return all(held.get(k, missing) == v for k, v in validate.json_leaves(canon) if k not in owned)
 
 
 def intent_trail(slug, ref, path, item, down_text):
@@ -1816,25 +1812,28 @@ def intent_trail(slug, ref, path, item, down_text):
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
+    A `repoOwnedKeys` unit's copy is judged by its fleet-owned values instead, whatever the dates read.
     `ref` is the branch or commit its last change is looked up from.
     """
     canonical_rel, anchor = intent_ref(item, path)
     hub_change = hub_last_change(canonical_rel, anchor)
     if hub_change is None:
         return None
+    verdict = None
     if down_text is not None:
         for rel in (canonical_rel, None if item.get("reference") else path):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
-        if carries_fleet_owned_values(item, canonical_current_text(canonical_rel), down_text):
+        verdict = fleet_owned_verdict(item, canonical_current_text(canonical_rel), down_text)
+        if verdict:
             return None
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ref}&per_page=1")
     if not commits:
         return None
     repo_date = commits[0]["commit"]["committer"]["date"]
     hub_date, hub_sha = hub_change
-    if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
+    if verdict is None and datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
         return None
     return canonical_rel, (repo_date, hub_date, hub_sha)
 
@@ -1860,16 +1859,19 @@ def intent_findings(entry, ground, trails):
         if hit:
             used.add((path, hit))
             continue
-        out.append(
-            (
-                "DRIFT",
-                (
-                    f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
-                    f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
-                    f"verify intent per AUDIT.md section 7"
-                ),
+        if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
+            text = (
+                f"intent: {path} on {ground} differs from the intent canonical {canonical_rel} at a key "
+                f"the repository does not own, as of its change at {hub_date} ({hub_sha}), "
+                f"verify intent per AUDIT.md section 7"
             )
-        )
+        else:
+            text = (
+                f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
+                f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
+                f"verify intent per AUDIT.md section 7"
+            )
+        out.append(("DRIFT", text))
     stale = sorted(f"{p}@{sha}" for p, shas in acks.items() for sha in shas if (p, sha) not in used)
     if stale:
         out.append(
