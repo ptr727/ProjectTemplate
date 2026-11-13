@@ -598,7 +598,7 @@ class TestInstallersNameTheBaselineLine(unittest.TestCase):
     """Each installer names the SDK line the global.json baseline selects.
 
     The installers name it rather than read the baseline, so each still runs fetched on its own.
-    This is what makes a TFM move edit all three together.
+    This is what makes a move of that baseline edit all three together.
     """
 
     def test_the_linux_line_is_the_baseline_line(self) -> None:
@@ -817,7 +817,7 @@ tool_note dotnet
             [
                 "1.0",
                 "1.1",
-                f"dotnet: the feed carries no {self.fleet}, the line fleet .NET repositories select",
+                f"dotnet: the feed carries no {self.fleet}, the fleet default line",
             ],
         )
 
@@ -827,7 +827,7 @@ tool_note dotnet
             [
                 self.newer,
                 self.newer,
-                f"dotnet: the feed carries no {self.fleet}, the line fleet .NET repositories select",
+                f"dotnet: the feed carries no {self.fleet}, the fleet default line",
             ],
         )
 

@@ -635,9 +635,9 @@ function Write-InstallFailure {
 
 # --- Tools ---
 
-# The SDK major a fleet .NET repository's global.json selects in its sdk block, the winget package's major.
+# The fleet's default SDK major, the one the hub's global.json baseline selects, and the winget package's major.
 # It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
-# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
+# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a move of that baseline edits both.
 $DOTNET_MAJOR = 10
 
 # Managed tools, in the order a report lists them.

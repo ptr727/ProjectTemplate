@@ -1787,30 +1787,63 @@ def baseline_file_findings(slug, ground, path, item, ref=None):
     return content, contents_text(content), []
 
 
+def fleet_owned_differences(item, canon_text, down_text):
+    """The leaves outside a unit's `repoOwnedKeys` that its copy holds differently from its JSON canonical, or lacks.
+
+    An empty list means the copy is current, and None means the two cannot be compared.
+    A value at one of those keys is the repository's own choice, and so is a leaf the copy adds.
+    So a key the canonical drops goes unreported, and a text either side that is not plain JSON is dated as before.
+    """
+    owned = item.get("repoOwnedKeys")
+    if not owned or canon_text is None:
+        return None
+    try:
+        canon = json.loads(canon_text)
+        down = json.loads(down_text.lstrip("\ufeff"))
+    except ValueError:
+        return None
+    held = {k: json.dumps(v, sort_keys=True) for k, v in validate.json_leaves(down)}
+    return [
+        k
+        for k, v in validate.json_leaves(canon)
+        if k not in owned and held.get(k) != json.dumps(v, sort_keys=True)
+    ]
+
+
 def intent_trail(slug, ref, path, item, down_text):
-    """`(canonical, (repo_date, hub_date, hub_sha))` where a copy possibly trails its intent canonical, else None.
+    """`(canonical, (repo_date, hub_date, hub_sha), differences)` where a copy possibly trails its intent canonical, else None.
 
     A last-modified comparison, since intent has no content check. A copy content-identical to the
     canonical, or to the hub's own file at `path` where the unit names no `reference`, is current.
+    A `repoOwnedKeys` unit's copy is judged by its fleet-owned values instead, whatever the dates read.
+    `differences` names each fleet-owned leaf that copy trails, and is None for a copy judged by date.
     `ref` is the branch or commit its last change is looked up from.
     """
     canonical_rel, anchor = intent_ref(item, path)
     hub_change = hub_last_change(canonical_rel, anchor)
     if hub_change is None:
         return None
+    differences = None
     if down_text is not None:
         for rel in (canonical_rel, None if item.get("reference") else path):
             canon_text = canonical_current_text(rel) if rel else None
             if canon_text is not None and content_hash(down_text) == content_hash(canon_text):
                 return None
+        differences = fleet_owned_differences(
+            item, canonical_current_text(canonical_rel), down_text
+        )
+        if differences == []:
+            return None
     commits = gh(f"repos/{slug}/commits?path={path}&sha={ref}&per_page=1")
     if not commits:
         return None
     repo_date = commits[0]["commit"]["committer"]["date"]
     hub_date, hub_sha = hub_change
-    if datetime.fromisoformat(hub_date) <= datetime.fromisoformat(repo_date):
+    if differences is None and datetime.fromisoformat(hub_date) <= datetime.fromisoformat(
+        repo_date
+    ):
         return None
-    return canonical_rel, (repo_date, hub_date, hub_sha)
+    return canonical_rel, (repo_date, hub_date, hub_sha), differences
 
 
 INTENT_ID = "files.intent"
@@ -1818,7 +1851,7 @@ INTENT_ACK = re.compile(r"`([^`@]+)@([0-9a-f]{7,40})`")
 
 
 def intent_findings(entry, ground, trails):
-    """The intent advisory over `trails`, `{path: (canonical, (repo_date, hub_date, hub_sha))}`.
+    """The intent advisory over `trails`, `{path: (canonical, (repo_date, hub_date, hub_sha), differences)}`.
 
     A driftNote naming (files.intent) acknowledges a copy verified against the canonical change the
     advisory cites, as `` `<path>@<sha>` ``. It clears that copy until the canonical changes again.
@@ -1829,21 +1862,26 @@ def intent_findings(entry, ground, trails):
         for path, sha in pairs:
             acks.setdefault(path, set()).add(sha)
     used = set()
-    for path, (canonical_rel, (repo_date, hub_date, hub_sha)) in sorted(trails.items()):
+    for path, (canonical_rel, (repo_date, hub_date, hub_sha), differences) in sorted(
+        trails.items()
+    ):
         hit = next((sha for sha in acks.get(path, ()) if sha[:7] == hub_sha), None)
         if hit:
             used.add((path, hit))
             continue
-        out.append(
-            (
-                "DRIFT",
-                (
-                    f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
-                    f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
-                    f"verify intent per AUDIT.md section 7"
-                ),
+        if differences:
+            text = (
+                f"intent: {path} on {ground} differs from the intent canonical {canonical_rel} at "
+                f"{', '.join(differences)}, which last changed at {hub_date} ({hub_sha}), "
+                f"verify intent per AUDIT.md section 7"
             )
-        )
+        else:
+            text = (
+                f"intent: {path} last changed {repo_date} on {ground}, and the intent canonical "
+                f"{canonical_rel} changed later at {hub_date} ({hub_sha}) - the copy possibly trails the hub, "
+                f"verify intent per AUDIT.md section 7"
+            )
+        out.append(("DRIFT", text))
     stale = sorted(f"{p}@{sha}" for p, shas in acks.items() for sha in shas if (p, sha) not in used)
     if stale:
         out.append(

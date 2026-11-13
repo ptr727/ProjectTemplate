@@ -3004,11 +3004,114 @@ class IntentAdvisoryCase(unittest.TestCase):
     def test_a_copy_matching_the_hub_file_at_path_is_current(self) -> None:
         unit = {"path": "widget.json", "fidelity": "intent", "intentRef": "DOC.md#widget"}
         texts = {"DOC.md": "the doc", "widget.json": "same"}
-        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))
+        trailing = ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)
         for down, want in (("same", None), ("x", trailing)):
             with self.subTest(down=down), self.patched(texts):
                 got = audit.intent_trail("o/r", "main", "widget.json", unit, down)
             self.assertEqual(got, want)
+
+    def test_a_repo_owned_key_never_reads_as_trailing(self) -> None:
+        unit = {
+            "path": "global.json",
+            "fidelity": "intent",
+            "reference": "snip/global.json",
+            "repoOwnedKeys": ["sdk.version"],
+        }
+        canon = '{"sdk": {"version": "10.0.100", "rollForward": "latestFeature"}}'
+        dates = ("2019-01-01T00:00:00+00:00", *HUB_CHANGE)
+        trailing = ("snip/global.json", dates, None)
+        rolled = ("snip/global.json", dates, ["sdk.rollForward"])
+        cases = [
+            (
+                "another line",
+                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}}',
+                None,
+            ),
+            (
+                "a key of its own",
+                '{"sdk": {"version": "9.0.100", "rollForward": "latestFeature"}, "test": {"runner": "x"}}',
+                None,
+            ),
+            (
+                "a fleet value changed",
+                '{"sdk": {"version": "11.0.100", "rollForward": "major"}}',
+                rolled,
+            ),
+            ("a fleet value dropped", '{"sdk": {"version": "11.0.100"}}', rolled),
+            (
+                "a leaf of its own inside a block",
+                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature", "paths": ["x"]}}',
+                None,
+            ),
+            (
+                "a byte-order mark",
+                '\ufeff{"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}}',
+                None,
+            ),
+            ("not JSON", "{", trailing),
+            ("not an object", "[]", rolled),
+        ]
+        for label, down, want in cases:
+            with self.subTest(label), self.patched({"snip/global.json": canon}):
+                got = audit.intent_trail("o/r", "main", "global.json", unit, down)
+                self.assertEqual(got, want)
+
+    def test_a_json_number_never_matches_a_json_boolean(self) -> None:
+        unit = {"repoOwnedKeys": ["sdk.version"]}
+        canon = '{"sdk": {"version": "10.0.100", "allowPrerelease": false, "paths": [true]}}'
+        cases = [
+            ('{"sdk": {"version": "11.0.100", "allowPrerelease": false, "paths": [true]}}', []),
+            (
+                '{"sdk": {"version": "11.0.100", "allowPrerelease": 0, "paths": [1]}}',
+                ["sdk.allowPrerelease", "sdk.paths"],
+            ),
+        ]
+        for down, want in cases:
+            with self.subTest(down=down):
+                self.assertEqual(audit.fleet_owned_differences(unit, canon, down), want)
+
+    def test_a_repo_owned_verdict_outranks_the_dates(self) -> None:
+        unit = {
+            "path": "global.json",
+            "fidelity": "intent",
+            "reference": "snip/global.json",
+            "repoOwnedKeys": ["sdk.version"],
+        }
+        canon = '{"sdk": {"version": "10.0.100", "rollForward": "latestFeature"}}'
+        newer = [{"commit": {"committer": {"date": "2021-01-01T00:00:00+00:00"}}}]
+        cases = [
+            (
+                "a fleet value trails",
+                '{"sdk": {"version": "11.0.100", "rollForward": "major"}}',
+                True,
+            ),
+            ("not JSON", "{", False),
+        ]
+        for label, down, reported in cases:
+            with self.subTest(label), self.patched({"snip/global.json": canon}, newer):
+                got = audit.intent_trail("o/r", "main", "global.json", unit, down)
+                self.assertEqual(got is not None, reported)
+
+    def test_a_trailing_fleet_owned_leaf_is_named(self) -> None:
+        dates = ("2021-01-01T00:00:00+00:00", *HUB_CHANGE)
+        trails = {"global.json": ("snip/global.json", dates, ["sdk.rollForward"])}
+        [(level, text)] = audit.intent_findings({}, "main", trails)
+        self.assertEqual(level, "DRIFT")
+        self.assertIn("differs from the intent canonical snip/global.json at sdk.rollForward", text)
+        self.assertNotIn("changed later", text)
+        acked = audit.intent_findings(
+            {"driftNotes": ["`global.json@abc1234` (files.intent)"]}, "main", trails
+        )
+        self.assertEqual(acked, [])
+
+    def test_a_unit_without_repo_owned_keys_compares_whole(self) -> None:
+        unit = {"path": "global.json", "fidelity": "intent", "reference": "snip/global.json"}
+        canon = '{"sdk": {"version": "10.0.100"}}'
+        with self.patched({"snip/global.json": canon}):
+            got = audit.intent_trail(
+                "o/r", "main", "global.json", unit, '{"sdk": {"version": "11.0.100"}}'
+            )
+        self.assertIsNotNone(got)
 
     def test_the_trail_dates_by_the_intent_ref_anchor(self) -> None:
         asked: list[tuple[str, str | None]] = []
@@ -3037,13 +3140,13 @@ class IntentAdvisoryCase(unittest.TestCase):
             self.assertIsNone(audit.intent_trail("o/r", "main", "w.json", unit, "x"))
 
     def test_the_finding_names_the_intent_canonical(self) -> None:
-        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)}
         findings = audit.intent_findings({}, "main", trails)
         self.assertEqual(len(findings), 1)
         self.assertIn("the intent canonical DOC.md changed later at 2020-01-01", findings[0][1])
 
     def test_an_acknowledgement_clears_the_change_it_names_and_no_other(self) -> None:
-        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE))}
+        trails = {"w.json": ("DOC.md", ("2019-01-01T00:00:00+00:00", *HUB_CHANGE), None)}
         cases = [
             ("the cited sha", "Verified `w.json@abc1234`, nothing to adopt (files.intent).", 0, 0),
             ("a full sha", "Verified `w.json@abc1234" + "0" * 33 + "` (files.intent).", 0, 0),
