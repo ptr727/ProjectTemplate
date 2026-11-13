@@ -307,6 +307,52 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("curl is not installed", result.stdout)
 
+    def test_a_refused_managed_install_removes_nothing(self) -> None:
+        # The refusal is stubbed rather than curl hidden, since a host curl in /usr/bin would answer.
+        self.stray_npm_opencode()
+        self.curl()
+        lines = SCRIPT.read_text(encoding="utf-8").rstrip("\n").split("\n")
+        functions = self.dir / "functions.sh"
+        functions.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+        script = (
+            f'source "{functions}"\n'
+            "managed_install_refusal() { printf 'refused for the test'; }\n"
+            "ASSUME_YES=true\n"
+            "upgrade_tool opencode\n"
+        )
+        result = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={
+                "PATH": f"{self.bin}:/usr/bin:/bin",
+                "HOME": str(self.home),
+                "CALLS": str(self.calls),
+                "STUB_DIR": str(self.dir),
+                "LC_ALL": "C.UTF-8",
+            },
+            stdin=subprocess.DEVNULL,
+            check=False,
+            timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cannot be installed: refused for the test", result.stdout)
+        self.assertNotIn("npm uninstall", " ".join(self.called()))
+
+    def test_a_removal_npm_cannot_resolve_names_the_package_in_the_path(self) -> None:
+        # No npm on the test PATH, so only the node_modules segment names the package.
+        if shutil.which("npm", path="/usr/bin:/bin"):
+            self.skipTest("a host npm in /usr/bin or /bin is reachable")
+        self.stub(
+            "opencode", "1.0.0", where=self.dir / "lib" / "node_modules" / "opencode-ai" / "bin"
+        )
+        self.curl()
+        result = self.run_script("--report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("npm uninstall -g opencode-ai", result.stdout)
+        self.assertNotIn("npm uninstall -g @opencode/cli", result.stdout)
+
     # The test PATH keeps /usr/bin and /bin for the script's own tools, so a host curl there would answer.
     @unittest.skipIf(
         shutil.which("curl", path="/usr/bin:/bin"), "a host curl in /usr/bin or /bin is reachable"
@@ -1013,6 +1059,20 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("npm uninstall", " ".join(self.recorded()))
 
+    @unittest.skipIf(
+        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
+    )
+    def test_a_refused_install_names_no_removal_for_a_stray_outside_the_npm_on_path(self) -> None:
+        # A shim left in an npm-shaped directory after Node was removed, with no npm to own it.
+        left = self.dir / "npm"
+        self.stub("opencode", "1.0.0", left)
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=left)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cannot be installed: npm is not installed", result.stdout)
+        self.assertNotIn("needs this copy removed first", result.stdout)
+
+    # Root writes any directory, so the unwritable prefix this test builds would not hold.
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write any prefix")
     def test_a_stray_opencode_that_stays_is_planned_by_its_own_package_name(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
         # A prefix this user cannot write leaves the managed package uninstallable, so the stray stays.

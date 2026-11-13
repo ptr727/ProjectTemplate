@@ -14,7 +14,7 @@
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
-# A tool recording a managed copy (opencode) is the exception.
+# A tool recording a managed copy (opencode) is upgraded through that copy rather than through whatever owns the copy PATH reaches.
 # An npm, bun, or Homebrew copy ahead of it is removed where that needs no root.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
@@ -395,7 +395,7 @@ PKG_CMD=()
 PKG_WHY=""
 
 package_step() {
-    local step="$1" tool="$2" real="$3" manager="$4" recorded pkg="" candidate dir action
+    local step="$1" tool="$2" real="$3" manager="$4" recorded pkg="" named candidate dir action
     local -a command=()
     PKG_CMD=()
     PKG_WHY=""
@@ -413,13 +413,23 @@ package_step() {
             break
         fi
     done < <(npm_packages "$tool")
+    # Where npm or bun cannot say which package owns the files, the command names the one the path itself shows.
+    named="$pkg"
+    if [[ -z $named ]]; then
+        while IFS= read -r candidate; do
+            if [[ -n $candidate && $real == */node_modules/"$candidate"/* ]]; then
+                named="$candidate"
+                break
+            fi
+        done < <(npm_packages "$tool")
+    fi
     if [[ $step == "upgrade" ]]; then
         # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-        command=("$manager" install -g "${pkg:-$recorded}@latest")
+        command=("$manager" install -g "${named:-$recorded}@latest")
     elif [[ $manager == "bun" ]]; then
-        command=(bun remove -g "${pkg:-$recorded}")
+        command=(bun remove -g "${named:-$recorded}")
     else
-        command=(npm uninstall -g "${pkg:-$recorded}")
+        command=(npm uninstall -g "${named:-$recorded}")
     fi
     if ! command -v "$manager" >/dev/null; then
         PKG_WHY="$manager is not on PATH, so run: ${command[*]}"

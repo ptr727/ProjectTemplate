@@ -15,7 +15,7 @@
 # The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
-# A tool recording a Managed copy (opencode) is the exception.
+# A tool recording a Managed copy (opencode) is upgraded through that copy rather than through whatever owns the copy PATH reaches.
 # An npm, bun, or scoop copy ahead of it is removed where that needs no elevation.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
@@ -451,6 +451,12 @@ function Test-NpmPackageOwnership {
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     if (Test-PathUnder -Path $resolved -Root $directory -Below) { return $true }
     # A shim is a script beside the package rather than a link into it, so its text must name the package's directory.
+    return (Test-NpmShimName -Path $Path -Package $Package)
+}
+
+# Whether a shim's text names an npm package's directory.
+function Test-NpmShimName {
+    param([string]$Path, [string]$Package)
     $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
     if (-not $text) { return $false }
     $needle = 'node_modules\' + ($Package -replace '/', '\') + '\'
@@ -496,6 +502,18 @@ function Get-OwningNpmPackage {
     return $null
 }
 
+# The recorded npm name a tool's path or its shim's text shows, read without asking npm, or nothing where neither shows one.
+function Get-NamedNpmPackage {
+    param([string]$Tool, [string]$Path)
+    $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
+    foreach ($pkg in (Get-KnownNpmPackage -Tool $Tool)) {
+        $needle = 'node_modules\' + ($pkg -replace '/', '\') + '\'
+        if ($resolved.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $pkg }
+        if (Test-NpmShimName -Path $Path -Package $pkg) { return $pkg }
+    }
+    return $null
+}
+
 # What an npm or bun step, upgrade or remove, runs for the package owning a tool's files, as Command and Arguments, or Why none runs.
 # An upgrade and a consolidation share it, so a copy under a name the tool shipped under earlier is upgraded or removed by that name.
 # One of the tool's recorded names must own the files, so a fork providing the same command is never replaced or removed.
@@ -509,7 +527,9 @@ function Get-PackageStep {
         return $plan
     }
     $pkg = Get-OwningNpmPackage -Tool $Tool -Path $Path -Manager $Manager
-    $name = if ($pkg) { $pkg } else { $recorded }
+    # Where npm or bun cannot say which package owns the files, the command names the one the path or its shim shows.
+    $name = if ($pkg) { $pkg } else { Get-NamedNpmPackage -Tool $Tool -Path $Path }
+    if (-not $name) { $name = $recorded }
     # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
     $arguments = if ($Step -eq 'upgrade') { @('install', '-g', "$name@latest") } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
     $shown = "$Manager $($arguments -join ' ')"
@@ -834,14 +854,14 @@ function Invoke-Consolidate {
 }
 
 # Why a stray copy stays, given why the managed copy cannot be installed, or nothing where it can.
-# A refused install names an npm stray's removal too, since an npm copy in the same prefix holds the shim the managed package needs.
+# A refused install also names the removal of a stray in the prefix of the npm on PATH.
+# That stray holds the shim the managed package needs.
 function Get-StrayStayReason {
-    param([string]$ToolName, [string]$Refusal, $Stray, [string]$Manager)
+    param([string]$ToolName, [string]$Refusal, $Stray, [string]$Manager, [string]$Path)
     if (-not $Refusal) { return $Stray.Why }
     $reason = "$(Get-ManagedLabel $ToolName) cannot be installed: $Refusal"
-    if ($Manager -ne 'npm') { return $reason }
-    $removal = if ($Stray.Command) { "$($Stray.Command) $($Stray.Arguments -join ' ')" } else { $Stray.Why }
-    return "$reason. It needs this copy removed first: $removal"
+    if ($Manager -ne 'npm' -or -not (Test-NpmOwnership -Path $Path)) { return $reason }
+    return "$reason. It needs this copy removed first: $($Stray.Why)"
 }
 
 # Why the managed copy cannot be installed on this host, or nothing where it can.
@@ -864,7 +884,7 @@ function Invoke-ConsolidateAndInstall {
             $path = Get-ToolPath $ToolName
             $manager = Get-ToolManager $path
             $stray = Get-StrayPlan -ToolName $ToolName -Path $path -Manager $manager
-            log "${ToolName}: $(Hide-Home -Path $path) stays, since $(Get-StrayStayReason -ToolName $ToolName -Refusal $refusal -Stray $stray -Manager $manager)"
+            log "${ToolName}: $(Hide-Home -Path $path) stays, since $(Get-StrayStayReason -ToolName $ToolName -Refusal $refusal -Stray $stray -Manager $manager -Path $path)"
             return 2
         }
     }
@@ -930,7 +950,7 @@ function Show-Report {
                     note $tool "$(Hide-Home $path) is the $manager copy rather than $label, -Upgrade removes it with $($stray.Command) $($stray.Arguments -join ' '), then $next $label unless another copy PATH reaches stays"
                     $removes = $true
                 } else {
-                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays: $(Get-StrayStayReason -ToolName $tool -Refusal $refusal -Stray $stray -Manager $manager)"
+                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays: $(Get-StrayStayReason -ToolName $tool -Refusal $refusal -Stray $stray -Manager $manager -Path $path)"
                 }
             }
             if (-not $removes -and $manager -ne 'self') {
