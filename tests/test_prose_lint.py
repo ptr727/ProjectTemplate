@@ -617,6 +617,34 @@ class TestCharsetRule(BaitCase):
         self.assertEqual([], self.kinds(f"{head}| `\u00ab` | plain |\n", rules))
         self.assertEqual(["charset-unknown"], self.kinds(f"{head}| `x` | \u00ab |\n", rules))
 
+    def test_a_wrapped_or_double_backtick_span_hides_only_its_own_text(self) -> None:
+        """A span is paired the way Markdown pairs it, so the text after it is still read.
+
+        Pairing backticks one line at a time took a wrapped span's closer for an opener, and hid
+        the prose between it and the next span.
+        """
+        rules = {"charset", "charset-unknown"}
+        dash = "\u2014"
+        for text in (
+            f"See `git remote\nget-url` {dash} then `x`.\n",
+            f"See ``a ` b`` {dash} then `x`.\n",
+            f"See \\` {dash} then `x`.\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset"], self.kinds(text, rules))
+        self.assertEqual([], self.kinds("See `git remote\nget-\u00ab` here.\n", rules))
+        self.assertEqual([], self.kinds("See ``a ` \u00ab`` here.\n", rules))
+
+    def test_a_backtick_outside_an_inline_token_quotes_nothing(self) -> None:
+        """Front matter and an HTML block hold no code span, so each line there is read whole."""
+        rules = {"charset", "charset-unknown"}
+        for text in (
+            "---\ndescription: ids like `\u00ab`\n---\n\nBody.\n",
+            "<div>\nids like `\u00ab`\n</div>\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset-unknown"], self.kinds(text, rules))
+
     def test_a_backtick_outside_markdown_quotes_nothing(self) -> None:
         """Outside Markdown a backtick is structural, so a code line is read whole."""
         rules = {"charset", "charset-unknown"}

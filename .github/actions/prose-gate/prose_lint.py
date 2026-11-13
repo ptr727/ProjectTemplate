@@ -617,8 +617,8 @@ class Line(NamedTuple):
 class Unit(NamedTuple):
     """A run of text one kind of rule reads.
 
-    `source` is every line, and `prose` and `code` the unfenced ones. `paragraph` is a Markdown
-    sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
+    `source` is every line, and `prose` and `code` the unfenced ones. `spanless` is the unfenced
+    Markdown lines with each code span's content blanked. `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
     documentation comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
     """
 
@@ -1010,6 +1010,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
         if line.strip() and not line.strip().startswith("#")
     ]
     markup: list[Line] = []
+    spanless: dict[int, str] = {}
     parents: list[str] = []
     for tok in MARKDOWN.parse("\n".join([""] * matter + lines[matter:])):
         if tok.nesting:
@@ -1029,6 +1030,13 @@ def extract_markdown(lines: list[str]) -> Extracted:
                     paragraphs.append(Unit("paragraph", (Line(n, span),)))
         elif tok.type == "inline":
             markup += inline_comments(tok, lines)
+            numbers = range(first, last + 1)
+            texts = [spanless.get(n, lines[n - 1]) for n in numbers]
+            if parents[-1:] in (["th_open"], ["td_open"]):
+                texts = [by_cell(text, blank_code_spans) for text in texts]
+            else:
+                texts = blank_code_spans("\n".join(texts)).split("\n")
+            spanless.update(zip(numbers, texts, strict=True))
             if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
                 paragraphs.append(
@@ -1038,6 +1046,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
     units = [
         Unit("source", tuple(Line(n, t) for n, t in enumerate(lines, 1))),
         *line_units("prose", lines, skip),
+        *line_units("spanless", [spanless.get(n, t) for n, t in enumerate(lines, 1)], skip),
         *paragraphs,
         *blocks("markup", sorted(markup, key=lambda m: m.number)),
     ]
@@ -1050,8 +1059,7 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     first, last = (tok.map or [0, 1])[0], (tok.map or [0, 1])[1]
     number, col = first + 1, 0
     # A code span can hold a comment's text, so it is blanked, lengths kept, before the search.
-    blank = lambda m: re.sub(r"[^\n]", " ", m.group()) if m[1] else m.group()
-    seen = re.sub(MARKDOWN_SPAN, blank, "\n".join(lines[first:last])).split("\n")
+    seen = blank_code_spans("\n".join(lines[first:last])).split("\n")
     for child in tok.children or ():
         if child.type == "html_inline" and child.content.startswith("<!--"):
             # The source line is found by the comment's own text, searched on from the last one.
@@ -1262,19 +1270,13 @@ def charset_findings(lineno: int, line: str) -> list[Finding]:
 
 
 def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
-    """Each line's non-ASCII judged by tier, a Markdown code span read as quoted data like a fence.
+    """Each line's non-ASCII judged by tier, read from a `spanless` or a `code` unit.
 
+    A Markdown code span is quoted data, as a fence is, so the `spanless` unit has it blanked.
     Outside Markdown a backtick is structural, such as a shell command substitution, so a code
-    line is read whole.
+    line is read whole. So is Markdown front matter and an HTML block.
     """
-    return [
-        f
-        for line in unit.lines
-        for f in charset_findings(
-            line.number,
-            by_cell(line.text, strip_inline_code) if unit.kind == "prose" else line.text,
-        )
-    ]
+    return [f for line in unit.lines for f in charset_findings(line.number, line.text)]
 
 
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
@@ -1730,6 +1732,21 @@ def markdown_span(html_tag: str) -> re.Pattern[str]:
 MARKDOWN_SPAN = markdown_span(HTML_TAG_RE.pattern)
 
 
+def blank_code_spans(text: str) -> str:
+    """The text with each code span's content blanked, its backticks and line breaks kept.
+
+    A span may wrap lines or open on a run of backticks, and an escaped backtick opens none.
+    """
+
+    def blank(m: re.Match[str]) -> str:
+        if not m[1]:
+            return m.group()
+        inner = m.group()[len(m[1]) : -len(m[1])]
+        return m[1] + re.sub(r"[^\n]", " ", inner) + m[1]
+
+    return MARKDOWN_SPAN.sub(blank, text)
+
+
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
     """The text with code spans and each line's quotations blanked, a closing terminator kept."""
     text = re.sub(CODE_SPAN, lambda m: "`" * len(m.group()), text)
@@ -1990,8 +2007,8 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "issue-ref": (rule_issue_ref, frozenset({"prose", "comment", "doc", "docstring"})),
     "sentence-length": (rule_sentence_length, frozenset({"paragraph", "comment", "docstring"})),
     "home-path": (rule_home_path, frozenset({"source"})),
-    "charset": (rule_charset, frozenset({"prose", "code"})),
-    "charset-unknown": (rule_charset, frozenset({"prose", "code"})),
+    "charset": (rule_charset, frozenset({"spanless", "code"})),
+    "charset-unknown": (rule_charset, frozenset({"spanless", "code"})),
     "dead-path": (rule_dead_path, frozenset({"prose"})),
     "semicolon": (rule_semicolon, frozenset({"prose"})),
     "dash": (rule_dash, frozenset({"prose"})),
@@ -2024,7 +2041,7 @@ def check_file(
         return []
     text = decoded.removeprefix(BOM)
     out = [f for f in charset_findings(1, BOM) if f[1] in rules] if text != decoded else []
-    lex = any(RULE_TABLE[r][1] - {"source", "prose", "code"} for r in rules)
+    lex = any(RULE_TABLE[r][1] - {"source", "prose", "spanless", "code"} for r in rules)
     judged, first = at or (path, text.split("\n", 1)[0].rstrip("\r"))
     units, fenced, read_plain = extract(judged, text, lex, first)
     if read_plain and plain is not None:
