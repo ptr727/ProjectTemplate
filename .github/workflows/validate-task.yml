@@ -28,7 +28,7 @@ on:
         type: string
         default: '["3.13"]'
       test-matrix:
-        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. Empty runs the python-versions legs with no hook.
+        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. The hook may also run a check needing that leg's environment, and a failure there fails the leg before its Python tests run. Empty runs the python-versions legs with no hook.
         required: false
         type: string
         default: ''
