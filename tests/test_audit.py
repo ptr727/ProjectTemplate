@@ -79,6 +79,9 @@ class FakeGh:
             if name in self.tree:
                 text = self.texts.get(name, "x\n").encode()
                 return {"encoding": "base64", "content": base64.b64encode(text).decode()}
+            listing = [{"path": p} for p in sorted(self.tree) if p.startswith(f"{name}/")]
+            if listing:
+                return listing
             if ok404:
                 return None
         raise AssertionError(f"unexpected gh read: {path}")
@@ -266,13 +269,13 @@ class AuditRepoHeadCommitCase(unittest.TestCase):
 
 
 class AuditRepoDevcontainerEcosystemCase(unittest.TestCase):
-    """audit_repo owes the devcontainers ecosystem for a root .devcontainer.json, not only the directory."""
+    """audit_repo owes the devcontainers ecosystem for a .devcontainer/ directory or a root .devcontainer.json."""
 
     DECLARED = ".github/dependabot.yml"
 
-    def ecosystem_findings(self, ecosystems: str) -> list[str]:
+    def ecosystem_findings(self, ecosystems: str, config: str = ".devcontainer.json") -> list[str]:
         texts = {self.DECLARED: f"updates:\n{ecosystems}"}
-        tree = CARRIED | {".codecov.yml", self.DECLARED, ".devcontainer.json"}
+        tree = CARRIED | {".codecov.yml", self.DECLARED, config}
         findings, _ = run_audit(tree, texts=texts)
         return [text for _, text in findings if text.startswith("dependabot:")]
 
@@ -281,6 +284,16 @@ class AuditRepoDevcontainerEcosystemCase(unittest.TestCase):
 
         self.assertEqual(len(got), 1, got)
         self.assertIn("devcontainers ecosystem not declared though .devcontainer.json", got[0])
+
+    def test_a_devcontainer_directory_without_the_ecosystem_is_reported(self) -> None:
+        got = self.ecosystem_findings(
+            "  - package-ecosystem: uv\n", ".devcontainer/devcontainer.json"
+        )
+
+        self.assertEqual(len(got), 1, got)
+        self.assertIn(
+            "devcontainers ecosystem not declared though .devcontainer is present", got[0]
+        )
 
     def test_a_root_devcontainer_file_with_the_ecosystem_is_clean(self) -> None:
         """The control, showing the file alone is what drew the finding above."""
