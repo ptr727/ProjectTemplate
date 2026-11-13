@@ -83,10 +83,11 @@ Tool configuration alone marks the lint-only one:
   adopted. A
   declared directory with no `tests/` fails that job.
 
-In either profile, a `[tool.mypy]` section names its target with `files`, `packages`, or
-`modules`. A project usually names `files = ["src"]`, and a lint-only directory `files = ["."]`.
-CI passes mypy no path where that config sits in the directory it checks. Without a target, mypy
-then exits 2 with "Missing target module, package, files, or command".
+In either profile, the mypy configuration names its target with `files`, `packages`, or
+`modules`. That holds for a `[tool.mypy]` section and for a `mypy.ini`, `.mypy.ini`, or `setup.cfg`
+`[mypy]` section alike. A project usually names `files = ["src"]`, and a lint-only directory
+`files = ["."]`. CI passes mypy no path where that config sits in the directory it checks.
+Without a target, mypy then exits 2 with "Missing target module, package, files, or command".
 
 A profile belongs to a declared directory, not to the repository. A repository declaring none has
 its root gated only where it tracks a root `pyproject.toml`, as `WORKFLOW.md` D1.2 states. Each
