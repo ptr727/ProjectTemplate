@@ -55,16 +55,16 @@ jobs:
 
     steps:
 
-      - name: Setup .NET SDK step
-        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-        with:
-          dotnet-version: 10.x
-
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
+
+      # The SDK step follows the checkout, since it reads the caller's global.json.
+      # The caller's global.json selects the SDK line, or the dotnet-sdk action's fallback line where it carries none yet.
+      - name: Setup .NET SDK step
+        uses: $/.github/actions/dotnet-sdk
 
       # The nbgv action is floated on @master, because its tag stream lags master.
       # Dependabot tag-tracking would otherwise propose a downgrade.

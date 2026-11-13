@@ -105,16 +105,21 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
 
   The major tracks the repo's .NET TFM (`net10.0`), never a `netstandard` target an analyzer or
   source-generator project carries beside it. It moves only with that TFM (`11.0.100` alongside
-  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows and composite actions install the SDK line through
-  `setup-dotnet`'s `dotnet-version`, and the hub's devcontainer snippet through its image tag. A
-  repo calling them therefore cannot move to a new major alone, since CI would then find no
-  compatible SDK. Such a move starts in the hub, as a fleet-wide change. The hub's steps and image
-  provide both lines until every repo has moved. A repo still on
-  `10.0.100` would otherwise find no compatible SDK once the hub installs only the new line.
+  `net11.0`), and such a project's fixed `LangVersion` moves with them. The hub's workflows
+  install the line the calling repo's own `global.json` selects, through `setup-dotnet`'s
+  `global-json-file`, so CI follows each repo's file. A repo carrying no `sdk` block yet gets
+  `10.x`, the baseline's major, which the hub's tests hold to the baseline. The hub's devcontainer
+  snippet still installs its line through its image tag. The hub's host installers install the line the
+  `catalog/snippets/configs/global.json` baseline selects, named in each installer and held
+  equal to the baseline by the hub's tests. The Linux one adds the newest line beside it. So a
+  major move still starts in the hub, as a fleet-wide change to that baseline, the installers,
+  that fallback, and the image tag. The image provides both lines until every repo has moved. A host building a
+  repo not yet moved takes the old line from the installers' optional set.
 
   A developer host now needs a release SDK on the line, 10.0.x today. A host holding only a newer
   major, or only a 10.0 preview, fails with a clear "A compatible .NET SDK was not found" error
-  rather than silently drifting. Install the line's SDK beside the newer one.
+  rather than silently drifting. The hub's host installers install the line's SDK by default. On
+  Linux, a package feed carrying no package for the line is named in a warning and in the report.
 
 **`LangVersion` is left unset** in every `.props` or `.targets` file the repo holds and every
 project targeting a .NET TFM. The SDK's own targets derive it, which is the point. The C# version then follows the TFM (`net10.0` gives C# 14 under any SDK). Never set it

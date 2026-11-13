@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from collections.abc import Callable
+from typing import Any
 from unittest import mock
 
 from host_capability import requires_symlink
@@ -493,6 +494,89 @@ A rule this repository wrote after a fault the fleet has never seen.
 
 The hub's current table.
 """
+
+
+class CarryHubTests(unittest.TestCase):
+    """Which hub commit a carry reads: `origin/main`, or `origin/develop` for an unpromoted entry."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = pathlib.Path(temp.name)
+        remote = root / "remote.git"
+        self.remote = remote
+        self.hub = root / "hub"
+        subprocess.run(["git", "init", "--bare", remote], check=True, capture_output=True)
+        subprocess.run(["git", "clone", remote, self.hub], check=True, capture_output=True)
+        for key, value in (
+            ("user.name", "Test"),
+            ("user.email", "test@example.invalid"),
+            ("commit.gpgsign", "false"),
+        ):
+            subprocess.run(["git", "-C", self.hub, "config", key, value], check=True)
+        self.hub_entry = {"name": carry.HUB_NAME, "url": str(remote)}
+        self.commit({"repos": [self.hub_entry, {"name": "Promoted"}]}, "main")
+        self.commit(
+            {"repos": [self.hub_entry, {"name": "Promoted"}, {"name": "Unpromoted"}]}, "develop"
+        )
+        subprocess.run(
+            ["git", "-C", self.hub, "push", "origin", "main", "develop"],
+            check=True,
+            capture_output=True,
+        )
+
+    def commit(self, registry: dict[str, Any], branch: str) -> None:
+        subprocess.run(
+            ["git", "-C", self.hub, "switch", "-C", branch], check=True, capture_output=True
+        )
+        (self.hub / "registry").mkdir(exist_ok=True)
+        (self.hub / "registry" / "repos.json").write_text(json.dumps(registry), encoding="utf-8")
+        subprocess.run(["git", "-C", self.hub, "add", "registry/repos.json"], check=True)
+        subprocess.run(
+            ["git", "-C", self.hub, "commit", "-m", branch], check=True, capture_output=True
+        )
+
+    def verify(self, branch: str, name: str) -> str:
+        subprocess.run(["git", "-C", self.hub, "switch", branch], check=True, capture_output=True)
+        return carry.verify_hub(self.hub, carry.load_json(self.hub / "registry/repos.json"), name)
+
+    def head(self, ref: str) -> str:
+        return carry.git(self.hub, "rev-parse", ref)
+
+    def test_a_promoted_entry_carries_from_main(self) -> None:
+        self.assertEqual(self.verify("main", "Promoted"), self.head("origin/main"))
+
+    def test_an_unpromoted_entry_carries_from_develop(self) -> None:
+        self.assertEqual(self.verify("develop", "Unpromoted"), self.head("origin/develop"))
+
+    def test_a_promoted_entry_refuses_a_develop_checkout(self) -> None:
+        with self.assertRaisesRegex(carry.CarryError, "registered on origin/main"):
+            self.verify("develop", "Promoted")
+
+    def test_an_unpromoted_entry_names_develop_from_a_main_checkout(self) -> None:
+        with self.assertRaisesRegex(carry.CarryError, "registered on origin/develop only"):
+            self.verify("main", "Unpromoted")
+
+    def test_an_unregistered_name_still_refuses_from_main_at_resolve(self) -> None:
+        self.assertEqual(self.verify("main", "Unknown"), self.head("origin/main"))
+        with self.assertRaisesRegex(carry.CarryError, "not uniquely registered"):
+            carry.resolve_repo("Unknown", carry.load_json(self.hub / "registry/repos.json"))
+
+    def test_a_single_branch_main_clone_still_names_develop(self) -> None:
+        """The menus clone main alone, so the fetch itself must create `origin/develop`."""
+        self.hub = self.hub.parent / "single"
+        subprocess.run(
+            ["git", "clone", "--single-branch", "--branch", "main", self.remote, self.hub],
+            check=True,
+            capture_output=True,
+        )
+        with self.assertRaisesRegex(carry.CarryError, "registered on origin/develop only"):
+            self.verify("main", "Unpromoted")
+
+    def test_a_checkout_at_neither_branch_refuses(self) -> None:
+        self.commit({"repos": [self.hub_entry, {"name": "Promoted"}]}, "feature/local")
+        with self.assertRaisesRegex(carry.CarryError, "not at freshly fetched origin/main"):
+            self.verify("feature/local", "Promoted")
 
 
 class CarrySectionTests(unittest.TestCase):

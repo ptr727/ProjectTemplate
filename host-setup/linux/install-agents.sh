@@ -176,6 +176,8 @@ as needing a restart, since stopping it would end every pane inside it.
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
 
+It exits 0 on success, 3 where a tool failed or was refused while the others still ran, and 1 where the run itself refused or stopped.
+
 Examples:
   install-agents.sh                        Report on every tool
   install-agents.sh --upgrade --yes        Upgrade every tool already installed, no prompt
@@ -640,8 +642,15 @@ report() {
 
 # --- Apply ---
 
+record_change() {
+    local tool="$1" installed="$2" path now=""
+    path=$(tool_path "$tool")
+    [[ -z $path ]] || now=$(tool_version "$path")
+    [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
+}
+
 upgrade_tool() {
-    local tool="$1" path installed manager now
+    local tool="$1" path installed manager
     path=$(tool_path "$tool")
     if [[ -z $path ]]; then
         log "$tool: not installed, leaving it absent"
@@ -666,13 +675,10 @@ upgrade_tool() {
     if ! "$(tool_function "$tool" upgrade)"; then
         warn "$tool: its updater failed"
         FAILED+=("$tool")
+        record_change "$tool" "$installed"
         return 0
     fi
-    # Resolved again, since an updater may put the new binary somewhere that now comes first on PATH.
-    path=$(tool_path "$tool")
-    now=""
-    [[ -z $path ]] || now=$(tool_version "$path")
-    [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
+    record_change "$tool" "$installed"
 
     [[ $tool != "herdr" ]] || herdr_after_upgrade
 }
@@ -694,7 +700,7 @@ herdr_after_upgrade() {
 # Upgrades a tool through the package manager that owns it, or says why nothing runs.
 # A failing manager is recorded and the other tools still run, as a failing updater is.
 manager_upgrade() {
-    local tool="$1" path="$2" manager="$3" installed="$4" now
+    local tool="$1" path="$2" manager="$3" installed="$4"
     manager_plan "$tool" "$path" "$manager"
     if ((${#PLAN_CMD[@]} == 0)); then
         log "$tool: installed through $manager, not run here: $PLAN_WHY"
@@ -704,12 +710,10 @@ manager_upgrade() {
     if ! run "${PLAN_CMD[@]}"; then
         warn "$tool: $manager failed to upgrade it"
         FAILED+=("$tool")
+        record_change "$tool" "$installed"
         return 0
     fi
-    path=$(tool_path "$tool")
-    now=""
-    [[ -z $path ]] || now=$(tool_version "$path")
-    [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
+    record_change "$tool" "$installed"
     [[ $tool != "herdr" ]] || herdr_after_upgrade
 }
 
@@ -769,7 +773,7 @@ apply() {
     if [[ ${#FAILED[@]} -gt 0 ]]; then
         log ""
         warn "Failed: ${FAILED[*]}"
-        return 1
+        return 3
     fi
 }
 

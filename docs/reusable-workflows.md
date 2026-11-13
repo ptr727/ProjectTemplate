@@ -633,6 +633,7 @@ jobs:
         with:
           name: nuget-build-${{ github.ref_name }}
           path: ./nuget
+      # This job checks out nothing, so no global.json selects the line, and dotnet nuget push runs the same on every SDK line.
       - name: Setup .NET SDK step
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:

@@ -11,7 +11,13 @@ paths:
   '.github/workflows/build-docker-task.yml':
     ignore:
       - 'specifying action "\$/\.github/actions/'
+  '.github/workflows/get-version-task.yml':
+    ignore:
+      - 'specifying action "\$/\.github/actions/'
   '.github/workflows/publish-docker-readme-task.yml':
+    ignore:
+      - 'specifying action "\$/\.github/actions/'
+  '.github/workflows/run-codegen-pull-request-task.yml':
     ignore:
       - 'specifying action "\$/\.github/actions/'
   '.github/workflows/validate-task.yml':

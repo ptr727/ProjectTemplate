@@ -28,6 +28,8 @@ import unittest
 from pathlib import Path
 from typing import NamedTuple
 
+from workflow_steps import job_texts
+
 REPO = Path(__file__).resolve().parents[1]
 WORKFLOW = REPO / ".github/workflows/build-docker-task.yml"
 
@@ -44,23 +46,6 @@ class Step(NamedTuple):
     with_keys: tuple[str, ...]
     text: str
     with_values: dict[str, str]
-
-
-def job_texts(workflow: str) -> dict[str, str]:
-    """Each job's text keyed by job id, read by indentation, since the suite runs on the standard library alone."""
-    lines = workflow.splitlines()
-    start = next(i for i, line in enumerate(lines) if re.fullmatch(r"jobs:\s*(#.*)?", line))
-    jobs: dict[str, list[str]] = {}
-    current: list[str] | None = None
-    for line in lines[start + 1 :]:
-        header = re.fullmatch(r"  ([A-Za-z0-9_-]+):\s*(#.*)?", line)
-        if header:
-            current = jobs.setdefault(header.group(1), [])
-        elif line.strip() and not line.startswith(" "):
-            break
-        if current is not None:
-            current.append(line)
-    return {job: "\n".join(body) for job, body in jobs.items()}
 
 
 def split_flow(body: str) -> list[str]:

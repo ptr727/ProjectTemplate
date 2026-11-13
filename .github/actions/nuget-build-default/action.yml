@@ -37,11 +37,6 @@ runs:
         echo "::error::project-file is required when the hub NuGet default runs."
         exit 1
 
-    - name: Setup .NET SDK step
-      uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
-      with:
-        dotnet-version: 10.x
-
     # Build output and packages land in the same publish/ folder so they archive together.
     - name: Build library step
       shell: bash

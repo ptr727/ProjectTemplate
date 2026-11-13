@@ -26,6 +26,8 @@ import unittest
 from pathlib import Path
 from typing import Any
 
+from sdk_baseline import baseline_line
+
 ROOT = Path(__file__).resolve().parent.parent
 LINUX_INSTALLER = ROOT / "host-setup" / "linux" / "install-tools.sh"
 WINDOWS_INSTALLER = ROOT / "host-setup" / "windows" / "install-tools.ps1"
@@ -42,9 +44,8 @@ def linux_functions() -> str:
     return "\n".join(lines[:-1]) + "\n"
 
 
-@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
-class TestLinuxJsonReport(unittest.TestCase):
-    """`install-tools.sh --json`, driven through the script's own functions."""
+class LinuxFunctionsCase(unittest.TestCase):
+    """A case that sources the Linux installer's functions into a fresh bash for each body it runs."""
 
     def setUp(self) -> None:
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -61,6 +62,11 @@ class TestLinuxJsonReport(unittest.TestCase):
             check=False,
             timeout=30,
         )
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxJsonReport(LinuxFunctionsCase):
+    """`install-tools.sh --json`, driven through the script's own functions."""
 
     def test_json_string_round_trips_every_escaped_character(self) -> None:
         result = self.run_bash('json_string "$1"', AWKWARD)
@@ -288,7 +294,7 @@ esac
 
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
-class TestLinuxHeldPackages(unittest.TestCase):
+class TestLinuxHeldPackages(LinuxFunctionsCase):
     """A held package reads as installed, and a held Docker conflict is reported rather than removed.
 
     The stub dpkg-query answers each status field a format names from a table of `package want status` lines.
@@ -296,9 +302,7 @@ class TestLinuxHeldPackages(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        self.functions = self.dir / "functions.sh"
-        self.functions.write_text(linux_functions(), encoding="utf-8")
+        super().setUp()
         self.bin = self.dir / "bin"
         self.bin.mkdir()
         stub = self.bin / "dpkg-query"
@@ -306,7 +310,7 @@ class TestLinuxHeldPackages(unittest.TestCase):
         stub.chmod(0o755)
         self.table = self.dir / "dpkg-table"
 
-    def run_bash(self, rows: str, body: str) -> subprocess.CompletedProcess[str]:
+    def run_with_table(self, rows: str, body: str) -> subprocess.CompletedProcess[str]:
         self.table.write_text(rows, encoding="ascii")
         script = f'source "{self.functions}"\nPATH="{self.bin}:$PATH"\n{body}\n'
         return subprocess.run(
@@ -326,11 +330,11 @@ CODENAME=trixie
 run_root() { printf 'ROOT %s\\n' "$*"; }
 ensure_prerequisites() { printf 'PAST REMOVAL\\n'; exit 0; }
 if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
-        return self.run_bash(rows, body)
+        return self.run_with_table(rows, body)
 
     def test_a_held_package_reads_as_installed_and_is_not_planned(self) -> None:
         rows = "less hold installed\njq install installed\ngone deinstall config-files\n"
-        result = self.run_bash(rows, "apt_missing less jq gone absent")
+        result = self.run_with_table(rows, "apt_missing less jq gone absent")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ["gone", "absent"])
 
@@ -348,6 +352,244 @@ if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
                 "  Removing 2 conflicting package(s): docker.io runc",
                 "ROOT apt-get remove -y docker.io runc",
                 "PAST REMOVAL",
+            ],
+        )
+
+
+class TestInstallersNameTheBaselineLine(unittest.TestCase):
+    """Each installer names the SDK line the global.json baseline selects.
+
+    The installers name it rather than read the baseline, so each still runs fetched on its own.
+    This is what makes a TFM move edit all three together.
+    """
+
+    def test_the_linux_line_is_the_baseline_line(self) -> None:
+        major, minor = baseline_line()
+        text = LINUX_INSTALLER.read_text(encoding="utf-8")
+        self.assertRegex(text, rf'(?m)^readonly DOTNET_FLEET_LINE="{major}\.{minor}"$')
+
+    def test_the_windows_major_is_the_baseline_major(self) -> None:
+        major, _ = baseline_line()
+        text = WINDOWS_INSTALLER.read_text(encoding="utf-8")
+        self.assertRegex(text, rf"(?m)^\$DOTNET_MAJOR = {major}$")
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxDotnetSets(LinuxFunctionsCase):
+    """The dotnet sets carry the fleet line beside the newest line, and the report reads the fleet line."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        major, minor = baseline_line()
+        self.fleet = f"dotnet-sdk-{major}.{minor}"
+        self.older = f"dotnet-sdk-{major - 1}.0"
+        self.newer = f"dotnet-sdk-{major + 1}.0"
+
+    def install(
+        self,
+        feed: list[str],
+        optional: bool = False,
+        apt_install: str = 'echo "INSTALL $*"',
+        source: str = "distro",
+    ) -> subprocess.CompletedProcess[str]:
+        """Run `dotnet_install` with `feed` as the packages apt sees and `apt_install` as its body.
+
+        It runs inside an `if`, as apply_tool runs it, where set -e is off.
+        So the run's exit status is the function's own return, not an errexit stop at a failed call.
+        """
+        return self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+dotnet_source() {{ printf '%s' "{source}"; }}
+apt_install() {{ {apt_install}; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
+WITH_OPTIONAL={"true" if optional else "false"}
+DISTRO_ID=debian
+DISTRO_VERSION=13
+if dotnet_install; then exit 0; else exit "$?"; fi
+""")
+
+    def test_a_newest_line_install_is_recorded_as_a_change(self) -> None:
+        """The row reads the fleet line, so the newest line's own move is what the summary needs."""
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+INSTALLED=""
+apt_install() {{ INSTALLED="$*"; }}
+apt_installed_version() {{ [[ " $INSTALLED " == *" $1 "* ]] && printf '1.0'; return 0; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.fleet} {self.newer}; }}
+WITH_OPTIONAL=false
+DISTRO_ID=debian
+DISTRO_VERSION=13
+CHANGED=()
+if dotnet_install; then printf '%s\\n' "${{CHANGED[@]}}"; else exit "$?"; fi
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"{self.newer} - -> 1.0"])
+
+    def test_without_a_fleet_line_the_newest_line_is_recorded_once(self) -> None:
+        """The row reads the newest line then, so apply_tool records it and dotnet_install does not."""
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+INSTALLED=""
+apt_install() {{ INSTALLED="$*"; }}
+apt_installed_version() {{ [[ " $INSTALLED " == *" $1 "* ]] && printf '1.0'; return 0; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.newer}; }}
+WITH_OPTIONAL=false
+DISTRO_ID=debian
+DISTRO_VERSION=13
+CHANGED=()
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+[[ ${{#CHANGED[@]}} -eq 0 ]] || printf '%s\\n' "${{CHANGED[@]}}"
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["STATUS 0"])
+
+    def test_a_failed_optional_install_still_records_the_default_move(self) -> None:
+        result = self.run_bash(f"""
+apt_refresh() {{ :; }}
+dotnet_feed() {{ return 0; }}
+INSTALLED=""
+apt_install() {{ [[ " $* " != *" {self.older} "* ]] || return 1; INSTALLED="$INSTALLED $*"; }}
+apt_installed_version() {{ [[ " $INSTALLED " == *" $1 "* ]] && printf '1.0'; return 0; }}
+dotnet_sdk_packages() {{ printf '%s\\n' {self.older} {self.fleet} {self.newer}; }}
+WITH_OPTIONAL=true
+DISTRO_ID=debian
+DISTRO_VERSION=13
+CHANGED=()
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+printf '%s\\n' "${{CHANGED[@]}}"
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["STATUS 1", f"{self.newer} - -> 1.0", "dotnet - -> 1.0"],
+        )
+
+    def test_an_empty_feed_fails_the_tool_and_lets_the_run_carry_on(self) -> None:
+        result = self.install([])
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("No .NET SDK package is available for debian 13", result.stderr)
+
+    def test_the_fleet_line_installs_beside_a_newer_one(self) -> None:
+        result = self.install([self.older, self.fleet, self.newer])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet} {self.newer}"])
+
+    def test_the_optional_set_skips_both_default_lines(self) -> None:
+        result = self.install([self.older, self.fleet, self.newer], optional=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [f"INSTALL {self.fleet} {self.newer}", f"INSTALL {self.older}"],
+        )
+
+    def test_a_failed_default_install_fails_the_tool(self) -> None:
+        """apply_tool runs the install with set -e off, so the status has to be the function's own."""
+        result = self.install(
+            [self.older, self.fleet, self.newer],
+            optional=True,
+            apt_install=f'echo "INSTALL $*"; [[ " $* " != *" {self.fleet} "* ]]',
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet} {self.newer}"])
+
+    def test_a_failed_optional_install_fails_the_tool(self) -> None:
+        result = self.install(
+            [self.older, self.fleet, self.newer],
+            optional=True,
+            apt_install=f'echo "INSTALL $*"; [[ " $* " != *" {self.older} "* ]]',
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [f"INSTALL {self.fleet} {self.newer}", f"INSTALL {self.older}"],
+        )
+
+    def test_a_fleet_line_that_is_the_newest_installs_once(self) -> None:
+        result = self.install([self.older, self.fleet])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.fleet}"])
+
+    def test_a_distro_feed_without_the_fleet_line_installs_the_newest_and_carries_on(self) -> None:
+        result = self.install([self.newer])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"INSTALL {self.newer}"])
+        self.assertIn(f"The distro feed carries no {self.fleet}", result.stderr)
+        self.assertIn("is the mixing that breaks a host", result.stderr)
+
+    def test_microsoft_s_feed_without_the_fleet_line_is_named_as_such(self) -> None:
+        result = self.install([self.newer], source="packages.microsoft.com")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"Microsoft's feed carries no {self.fleet} for debian 13", result.stderr)
+        self.assertNotIn("mixing", result.stderr)
+
+    def report(self, feed: list[str], pending: str = "", versions: str = "1.0 1.1") -> list[str]:
+        """The dotnet row's installed and target versions, then each note `tool_note` files for it.
+
+        Each package's version is its own name, so a row shows which package it read. The `pending`
+        package alone carries real versions instead, installed then candidate from `versions`, so
+        `tool_status` judges them by dpkg's ordering.
+        """
+        have, want = versions.split()
+        result = self.run_bash(f"""
+dotnet_sdk_packages() {{ printf '%s\\n' {" ".join(feed)}; }}
+apt_installed_version() {{ if [[ $1 == "{pending}" ]]; then printf '{have}'; else printf '%s' "$1"; fi; }}
+apt_candidate_version() {{ if [[ $1 == "{pending}" ]]; then printf '{want}'; else printf '%s' "$1"; fi; }}
+apt_missing() {{ :; }}
+NOTES=()
+NOTE_TEXTS=()
+dotnet_version
+echo
+dotnet_target
+echo
+tool_note dotnet
+[[ ${{#NOTES[@]}} -eq 0 ]] || printf '%s\\n' "${{NOTES[@]}}"
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.splitlines()
+
+    def test_the_row_reports_the_fleet_line_over_a_newer_one(self) -> None:
+        self.assertEqual(self.report([self.fleet, self.newer]), [self.fleet, self.fleet])
+
+    @unittest.skipUnless(shutil.which("dpkg"), "tool_status orders versions with dpkg")
+    def test_a_pending_newest_line_upgrade_is_noted(self) -> None:
+        self.assertEqual(
+            self.report([self.fleet, self.newer], pending=self.newer),
+            [
+                self.fleet,
+                self.fleet,
+                f"dotnet: {self.newer} is at 1.0 and the feed carries 1.1, --upgrade moves it",
+            ],
+        )
+
+    @unittest.skipUnless(shutil.which("dpkg"), "tool_status orders versions with dpkg")
+    def test_a_newest_line_ahead_of_its_candidate_is_not_noted(self) -> None:
+        """apt never downgrades, so an installed version past the candidate has nothing to move."""
+        self.assertEqual(
+            self.report([self.fleet, self.newer], pending=self.newer, versions="1.2 1.1"),
+            [self.fleet, self.fleet],
+        )
+
+    def test_without_a_fleet_line_a_pending_upgrade_is_the_row_s_alone(self) -> None:
+        self.assertEqual(
+            self.report([self.newer], pending=self.newer),
+            [
+                "1.0",
+                "1.1",
+                f"dotnet: the feed carries no {self.fleet}, the line fleet .NET repositories select",
+            ],
+        )
+
+    def test_a_feed_without_the_fleet_line_is_noted_and_the_newest_reported(self) -> None:
+        self.assertEqual(
+            self.report([self.newer]),
+            [
+                self.newer,
+                self.newer,
+                f"dotnet: the feed carries no {self.fleet}, the line fleet .NET repositories select",
             ],
         )
 
