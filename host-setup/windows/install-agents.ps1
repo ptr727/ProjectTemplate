@@ -15,7 +15,7 @@
 # The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
-# A tool recording a Managed copy (opencode) is upgraded through that copy rather than through whatever owns the copy PATH reaches.
+# A tool recording a Managed copy (opencode) has other copies consolidated into it before any of that applies.
 # An npm, bun, or scoop copy ahead of it is removed where that needs no elevation.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
@@ -134,7 +134,8 @@ only. Any other copy PATH reaches first, an npm opencode-ai among them, is conso
 removes it through npm, bun, or scoop after a prompt and installs the managed copy, and -Install
 does the same where no managed copy is in place yet. Nothing is removed while the managed copy
 cannot be installed. A copy only an elevated shell or its owner can remove, or one whose removal
-is declined, stays and is upgraded where it is, and the report says what owns it.
+is declined, stays and is handled as a tool without a managed copy is, and the report says what
+owns it.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -909,6 +910,12 @@ function Invoke-ConsolidateAndInstall {
         return 1
     }
     Update-SessionPath
+    $reached = Get-ToolPath $ToolName
+    if (-not $reached -or (Test-StrayCopy -ToolName $ToolName -Path $reached)) {
+        warn "${ToolName}: $(Get-ManagedLabel $ToolName) is installed, but PATH does not reach it, so add the npm prefix to PATH"
+        $script:FAILED.Add($ToolName)
+        return 1
+    }
     Add-VersionChange -ToolName $ToolName -Installed $Installed
     return 1
 }
@@ -1039,7 +1046,7 @@ function Invoke-ToolUpgrade {
     if (Test-StrayCopy -ToolName $ToolName -Path $path) {
         $rc = Invoke-ConsolidateAndInstall -ToolName $ToolName -Installed (Get-ToolVersion $path)
         if ($rc -eq 1) { return }
-        # A stray copy that stays, rc 2, is upgraded where it is, as it was before its tool recorded a managed copy.
+        # A stray copy that stays, rc 2, is handled as a tool without a managed copy is.
         # An earlier pass may have removed a copy, so the one that stays is read again.
         if ($rc -eq 2) {
             $path = Get-ToolPath $ToolName

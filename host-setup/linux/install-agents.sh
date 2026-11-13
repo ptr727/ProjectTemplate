@@ -14,7 +14,7 @@
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
-# A tool recording a managed copy (opencode) is upgraded through that copy rather than through whatever owns the copy PATH reaches.
+# A tool recording a managed copy (opencode) has other copies consolidated into it before any of that applies.
 # An npm, bun, or Homebrew copy ahead of it is removed where that needs no root.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
@@ -181,8 +181,8 @@ copy PATH reaches first, an npm opencode-ai among them, is consolidated: --upgra
 through npm, bun, or Homebrew after a prompt and installs the managed copy, and --install does the
 same where no managed copy is in place yet. Nothing is removed while the managed copy cannot be
 installed. A copy only its owner can remove, or one whose removal is declined, stays and is
-upgraded where it is, and the report says what owns it. Running the installer again is how the
-managed copy is upgraded.
+handled as a tool without a managed copy is, and the report says what owns it. Running the
+installer again is how the managed copy is upgraded.
 
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -894,7 +894,7 @@ upgrade_tool() {
     if is_stray_copy "$tool" "$path"; then
         local rc=0
         consolidate_and_install "$tool" "$(tool_version "$path")" || rc=$?
-        # A stray copy that stays is upgraded where it is, as it was before its tool recorded a managed copy.
+        # A stray copy that stays is handled as a tool without a managed copy is.
         case $rc in
         0) path=$(tool_managed "$tool") ;;
         # An earlier pass may have removed a copy, so the one that stays is read again.

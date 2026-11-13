@@ -1016,20 +1016,29 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("npm install -g @opencode/cli@latest", self.recorded())
 
-    def test_upgrade_removes_a_stray_opencode_then_installs_the_managed_package(self) -> None:
-        npm_bin = self.stray_npm_opencode("opencode-ai")
-        # An npm that lays the managed package down on install, so the check that it landed has something to find.
+    def npm_that_installs(self, shim: bool) -> None:
+        """An npm that lays the managed package down on install, and its shim where `shim` is set."""
+        steps = (
+            '    mkdir -p "$STUB_DIR/node_modules/@opencode/cli"\n'
+            '    printf "{}" >"$STUB_DIR/node_modules/@opencode/cli/package.json"\n'
+        )
+        if shim:
+            steps += (
+                "    printf '#!/bin/bash\\n# node_modules/@opencode/cli/bin/cli.js\\n'"
+                ' >"$STUB_DIR/node_modules/.bin/opencode"\n'
+                '    chmod +x "$STUB_DIR/node_modules/.bin/opencode"\n'
+            )
         npm = self.bin / "npm"
         npm.write_text(
             STUB.replace("$BANNER", "npm 10.0.0").replace(
-                "esac\nexit 0\n",
-                '"install -g @opencode/cli")\n'
-                '    mkdir -p "$STUB_DIR/node_modules/@opencode/cli"\n'
-                '    printf "{}" >"$STUB_DIR/node_modules/@opencode/cli/package.json"\n'
-                "    ;;\nesac\nexit 0\n",
+                "esac\nexit 0\n", '"install -g @opencode/cli")\n' + steps + "    ;;\nesac\nexit 0\n"
             ),
             encoding="utf-8",
         )
+
+    def test_upgrade_removes_a_stray_opencode_then_installs_the_managed_package(self) -> None:
+        npm_bin = self.stray_npm_opencode("opencode-ai")
+        self.npm_that_installs(shim=True)
         result = self.run_script(
             "-Upgrade",
             "-Yes",
@@ -1040,6 +1049,19 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [c for c in self.recorded() if c.startswith(("npm install", "npm uninstall"))]
         self.assertEqual(calls, ["npm uninstall -g opencode-ai", "npm install -g @opencode/cli"])
+
+    def test_a_managed_package_installed_where_path_does_not_reach_fails_the_tool(self) -> None:
+        npm_bin = self.stray_npm_opencode("opencode-ai")
+        self.npm_that_installs(shim=False)
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "opencode",
+            extra_path=npm_bin,
+            extra_env={"REMOVES": str(npm_bin / "opencode")},
+        )
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("is installed, but PATH does not reach it", result.stderr)
 
     def test_install_replaces_a_stray_opencode_when_no_managed_package_is_in_place(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
