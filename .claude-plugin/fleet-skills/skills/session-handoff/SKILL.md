@@ -265,8 +265,8 @@ the whole procedure below. Run every step without being reminded of any of them.
    with `new`, presents the parked decision queue, and saves memories last. Where the issue carries
    the `blocked` label left on in step 3, take it off once the next round is written and the queue
    presented. Remove it with `gh issue edit "<n>" --repo OWNER/NAME --remove-label blocked`, since
-   the round it marked is archived. Leave it on instead where a `decision` issue this session filed
-   on this link's work is still unanswered then. The lane waits on that decision now, and an
+   the round it marked is archived. Leave it on instead where a `decision` issue on this link's work
+   is still unanswered then, whichever session filed it. The lane waits on that decision now, and an
    away-mode run taking it could only park it again. Name that issue in a comment on the handoff,
    as a parking comment does, so a reader reads the question the lane now waits on. An `auto-*`
    lane differs in one way, since it holds one piece of work. Where that work is done, end the
