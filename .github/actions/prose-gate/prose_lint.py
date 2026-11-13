@@ -38,6 +38,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import unicodedata
@@ -2275,5 +2276,45 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if total else 0
 
 
+# The signal the SIGTERM handler recorded, where one interrupted the run.
+received: list[int] = []
+
+
+def on_sigterm(signum: int, _frame: object) -> None:
+    """Record SIGTERM and raise it as KeyboardInterrupt, so both signals unwind one path.
+
+    A second SIGTERM is ignored, since `uv run` forwards the one its process group already took.
+    """
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def run() -> int | signal.Signals:
+    """Run main, returning its status, or the signal that interrupted it."""
+    signal.signal(signal.SIGTERM, on_sigterm)
+    try:
+        return main()
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[-1] if received else signal.SIGINT)
+        print(f"prose_lint.py: interrupted by {signum.name}.", file=sys.stderr)
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    status = run()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)

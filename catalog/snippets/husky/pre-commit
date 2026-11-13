@@ -38,7 +38,8 @@ trap 'interrupted TERM; exit 143' TERM
 # The hub_fetch_run.py step runs in the background and is waited for, since a trap runs only once a foreground command returns.
 # It stops the gate it starts when the trap stops it.
 # The trap stops it with SIGTERM, because a background child ignores SIGINT.
-# A launcher such as uvx, uv run, or dotnet stays in the foreground, since that kill would reach it and not the tool it starts.
+# A launcher such as uvx, uv run, or dotnet stays in the foreground, so a Ctrl-C reaches the tool it starts.
+# In the background that tool would ignore SIGINT, and the trap's SIGTERM would reach it only through a launcher that forwards it.
 run_child() {
     "$@" &
     child=$!

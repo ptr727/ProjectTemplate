@@ -21,6 +21,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -8403,6 +8404,63 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         status, said = self.gate("--diff-commit", "--diff", "HEAD")
         self.assertEqual(2, status, said)
         self.assertIn("--diff and --diff-commit each choose the base", said)
+
+
+# Runs the gate as `__main__` with its first git call held open, so a signal lands mid-run.
+INTERRUPT_LAUNCHER = """
+import pathlib, runpy, subprocess, sys, time
+
+READY = pathlib.Path(sys.argv[2])
+
+def held(*args, **kwargs):
+    READY.touch()
+    time.sleep(60)
+
+subprocess.run = held
+sys.argv = [sys.argv[1], *sys.argv[3:]]
+runpy.run_path(sys.argv[0], run_name="__main__")
+"""
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows cannot deliver either signal for a script")
+class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
+    """A signal mid-run prints one line and ends the gate by the signal, with no traceback.
+
+    The gate runs under this interpreter directly, since `uv run` would exit with a status rather
+    than die by the signal. Its git call is a stub that marks itself started and sleeps.
+    """
+
+    def test_a_signal_mid_run_ends_the_gate_by_it(self) -> None:
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=sig.name):
+                outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
+                ready = outside / "started"
+                launcher = outside / "launch.py"
+                launcher.write_text(INTERRUPT_LAUNCHER, encoding="utf-8")
+                (outside / "doc.md").write_text("A line.\n", encoding="utf-8")
+                gate = subprocess.Popen(
+                    [sys.executable, str(launcher), str(PROSE_LINT_SCRIPT), str(ready)]
+                    + [str(outside / "doc.md")],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                )
+                try:
+                    deadline = time.monotonic() + 60
+                    while not ready.exists():
+                        if gate.poll() is not None or time.monotonic() > deadline:
+                            raise AssertionError("the gate never reached git")
+                        time.sleep(0.05)
+                    gate.send_signal(sig)
+                    _, stderr = gate.communicate(timeout=60)
+                finally:
+                    if gate.poll() is None:
+                        gate.kill()
+                        gate.communicate(timeout=60)
+                self.assertEqual(-sig, gate.returncode, stderr)
+                self.assertIn(f"prose_lint.py: interrupted by {sig.name}.", stderr)
+                self.assertNotIn("Traceback", stderr)
 
 
 VOCABULARY_CAP = 5

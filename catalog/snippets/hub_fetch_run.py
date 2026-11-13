@@ -183,7 +183,11 @@ received: list[int] = []
 
 
 def on_sigterm(signum: int, _frame: object) -> None:
-    """Record SIGTERM and raise it as KeyboardInterrupt, so both signals unwind one path."""
+    """Record SIGTERM and raise it as KeyboardInterrupt, so both signals unwind one path.
+
+    A second SIGTERM is ignored, since `uv run` forwards the one its process group already took.
+    """
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
     received.append(signum)
     raise KeyboardInterrupt
 
