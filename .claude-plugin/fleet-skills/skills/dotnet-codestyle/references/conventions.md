@@ -91,9 +91,13 @@ project.
 5. **Line endings**: not specified here, governed per repo by `.editorconfig` / `.gitattributes`
    per GOVERNANCE.md's "Line Endings" section.
 6. **`#region`**: do not use regions, prefer logical file/folder/namespace organization.
-7. **Member ordering (StyleCop SA1201)**: const -> static readonly -> static fields -> instance
-   readonly fields -> instance fields -> constructors -> public. Public members are ordered events -> properties -> indexers
-   -> methods -> operators. Non-public follows in same order, then nested types.
+7. **Member ordering (StyleCop SA1201, SA1202)**: order by kind first, across every access level
+   (SA1201). The kinds run fields, constructors, finalizers, delegates, events, enums, interfaces,
+   extension blocks, properties, indexers, conversion operators, operators, methods, nested
+   structs, and nested classes. Within one kind, order by access: public -> internal -> protected
+   internal -> protected -> private protected -> private (SA1202). Within one kind and access,
+   const precedes static, which precedes instance, and readonly precedes mutable (SA1203, SA1204,
+   SA1214).
 
 ## Comments and documentation
 

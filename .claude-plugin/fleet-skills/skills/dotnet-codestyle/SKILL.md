@@ -177,7 +177,8 @@ updates, dependency upgrades, benchmarks) on top:
 Key rules: no `var` (always explicit types), file-scoped namespaces, Allman braces, Nullable
 enabled, modern C# features (primary constructors, pattern matching, collection expressions). Every
 public surface has XML documentation. Private fields use `_camelCase`, static fields `s_camelCase`,
-constants PascalCase. Member ordering follows StyleCop SA1201.
+constants PascalCase. Member ordering follows StyleCop SA1201 by kind first, then SA1202 by access
+within one kind.
 
 For language features, naming, code structure, and XML documentation examples, see
 `references/conventions.md`.

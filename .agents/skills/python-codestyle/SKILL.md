@@ -125,12 +125,14 @@ A **build**-profile directory in its pip form builds its environment the way CI 
 pip interface, which writes no `uv.lock`. It installs every `requirements*.txt` in one command, since
 separate installs let one file's pins downgrade what another resolved. Where its `pyproject.toml`
 carries a `[project]` table it then installs the directory itself as editable. Without that, a
-`src`-layout package is not importable and pytest fails locally where CI passes:
+`src`-layout package is not importable and pytest fails locally where CI passes. Both installs pass
+`--python .venv/bin/python`, since `uv pip install` targets an active `VIRTUAL_ENV` ahead of
+`./.venv`:
 
 ```sh
 uv venv --clear                           # creates .venv, replacing an existing one
-uv pip install -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
-uv pip install -e .                       # only where pyproject.toml has a [project] table
+uv pip install --python .venv/bin/python -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
+uv pip install --python .venv/bin/python -e .   # only where pyproject.toml has a [project] table
 # in a declared directory whose .venv installs ruff, .venv/bin/python -m ruff replaces uvx ruff@latest
 uvx ruff@latest format                    # auto-format
 uvx ruff@latest check --fix               # auto-fix lint
@@ -286,7 +288,7 @@ Before pushing or opening a PR:
 A command-line script is one a person or an agent runs by name. A hook its host runs, taking its input from that host rather than from a command line, is not one.
 
 - **Every command-line script answers `--help` and `-h`** with the same text on stdout, then exits 0, changing nothing. That text opens on a usage line naming the script. An agent learns a script's interface by asking it, so a script that reads `--help` as an input acts in a way nobody predicted. A PowerShell script declaring its own parameters answers `-Help` and `-h` instead, from a `-Help` switch carrying an `h` alias. That form follows PowerShell's own parameter convention, so such a script owes no answer to a literal `--help`. A wrapper that forwards its arguments to another script answers whatever that script answers.
-- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. So a PowerShell script declaring its own parameters refuses a literal `--help` like any other unrecognized argument. Where no parameter takes the remaining arguments, the binder's refusal does that. A script with such a parameter refuses a dash-prefixed leftover itself. An unrecognized first argument is never taken as a default mode or as a target.
+- **An argument the script does not recognize is refused**, with a non-zero exit before any read or write. The refusal names it as an unknown or unrecognized option, argument, flag, or parameter, and PowerShell's own refusal of a parameter it cannot bind counts. That refusal comes from the binder only in an advanced script, one carrying `[CmdletBinding()]` or a `[Parameter()]` attribute. Without either, a plain `param()` block binds an unknown parameter into `$args` and runs on. Such a script refuses a non-empty `$args` itself, before any work. So a PowerShell script declaring its own parameters refuses a literal `--help` like any other unrecognized argument. A script with a parameter taking the remaining arguments refuses a dash-prefixed leftover itself. An unrecognized first argument is never taken as a default mode or as a target.
 
 <!-- /include -->
 
