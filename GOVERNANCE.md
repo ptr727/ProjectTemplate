@@ -164,7 +164,7 @@ The fleet's tooling lives in the hub once and a repository runs it from there ra
 
 ## Pull Request Title and Commit Message Conventions
 
-A PR title and a commit message share one contract. The subject is imperative, 72 characters or fewer, and has no trailing period. The 72 measures the authored title or subject, and the ` (#N)` suffix a squash merge appends sits outside it. Title case lowercases only the bind words the skill lists, and that list is exhaustive. Vague titles like `update stuff` or `wip` are out, while Dependabot's `Bump X from Y to Z` is fine as-is. Unsolicited `Co-Authored-By:` lines are out. So is any release-bump magnitude in the title, since Nerdbank.GitVersioning computes the next version from `version.json` and git history.
+A PR title and a commit message share one contract. The subject is imperative, 72 characters or fewer, and has no trailing period. The 72 measures the authored title or subject, and the `(#N)` suffix a squash merge appends sits outside it. Title case lowercases only the bind words the skill lists, and that list is exhaustive. Vague titles like `update stuff` or `wip` are out, while Dependabot's `Bump X from Y to Z` is fine as-is. Unsolicited `Co-Authored-By:` lines are out. So is any release-bump magnitude in the title, since Nerdbank.GitVersioning computes the next version from `version.json` and git history.
 
 This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub. That path is not a repo-relative link, since it is hub-local and not carried into every fleet repo. The summary above sketches the contract. Read the skill for the full format, rules, and examples.
 
