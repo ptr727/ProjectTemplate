@@ -48,9 +48,10 @@ reach this particular repo.
      is detached, `branch: null`, or on an old branch is an answer too. So is a `live.commit`
      behind the hub's own tip of `live.branch`. A checkout on `main` that has not pulled names
      the right branch and still serves stale content. Fetch that branch into the same hub
-     checkout. A `live.commit` other than `origin/<live.branch>` that
-     `git merge-base --is-ancestor <live.commit> origin/<live.branch>` accepts is behind. Moving
-     or fast-forwarding that checkout is the fix rather than re-installing.
+     checkout with full history. A `live.commit` other than `origin/<live.branch>` for which
+     `git merge-base --is-ancestor <live.commit> origin/<live.branch>` exits 0 is behind. An exit
+     other than 0 or 1 means the test could not judge, which is an answer to report as well.
+     Moving or fast-forwarding that checkout is the fix rather than re-installing.
    - Any other shape names no registration, or one this report could not read, and the `reason`
      it carries, where it carries one, says which.
 2. **Does this repo's own carried content still match the hub.** Compare `AGENTS.md`'s
