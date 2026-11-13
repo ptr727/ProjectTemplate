@@ -211,6 +211,22 @@ class CarriedRelativeLinkCase(unittest.TestCase):
             ],
         )
 
+    def test_rejects_a_template_repository_link_in_a_carried_audit_snippet(self) -> None:
+        (self.root / "snippets").mkdir()
+        (self.root / "snippets" / "AUDIT.md").write_text(
+            "# Audit\n\nSee <https://github.com/ptr727/ProjectTemplate>.\n", encoding="utf-8"
+        )
+        baseline = [
+            {
+                "path": "AUDIT.md",
+                "fidelity": "intent",
+                "reference": "snippets/AUDIT.md",
+                "appliesTo": "*",
+            }
+        ]
+
+        self.assertEqual(1, len(validate.carried_link_errors(self.root, baseline)))
+
     def test_accepts_a_universally_carried_reference_target(self) -> None:
         (self.root / "GOVERNANCE.md").write_text(
             "# Governance\n\n## Rule\n\nRead [the contract][contract].\n\n"

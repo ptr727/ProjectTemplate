@@ -758,7 +758,7 @@ def carried_link_errors(root, baseline):
                     repository_target == TEMPLATE_REPOSITORY_URL
                     or repository_target.startswith(f"{TEMPLATE_REPOSITORY_URL}/")
                 )
-                if is_template_link and source != "AUDIT.md":
+                if is_template_link:
                     errors.append(
                         f"files.json: {source} {region} links to the template repository "
                         f"at '{target}'"
