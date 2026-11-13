@@ -488,8 +488,8 @@ def markdown_rows(
     """The backlog table's rows, each repository and each count `SEARCHES` names linked.
 
     `SEARCHES` maps a column's header to the page and search listing what it counts. The workflow
-    run counts come from `gh run list` rather than from a search, so they print plain. Each search
-    ends at the report's own date, so a report read a week later still lists what it counted.
+    run counts come from `gh run list` rather than from a search, so they print plain. Each dated
+    search runs through the report's own date rather than staying open.
     """
     rows = table_rows(metrics)
     for m, row in zip(metrics, rows):
