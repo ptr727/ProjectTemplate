@@ -86,9 +86,9 @@ Ordinary fleet CI and Copilot code review therefore have separate runner policie
 
 The fleet runner variable never reaches Copilot configuration. Homelab labels never appear in the Copilot workflow.
 
-The organization-level Copilot runner type applies to both code review and the cloud agent. It selects a standard GitHub-hosted runner for both workloads. Repository customization of the Copilot runner type is disabled, which a setup step's own `runs-on` appears to contradict. Which of the two wins is unresolved and tracked in [issue #1448][issue-1448]. Before rollout, verify these effective organization settings rather than relying on the planned values.
+The organization-level Copilot runner type applies to both code review and the cloud agent. It selects a standard GitHub-hosted runner for both workloads. Repository customization of the Copilot runner type is disabled, so the organization setting wins over a setup step's own `runs-on`. Before rollout, verify these effective organization settings rather than relying on the planned values.
 
-The proposed implementation adds a dedicated `copilot-code-review.yml` workflow, which does not exist yet. Its `copilot-setup-steps` job runs on `ubuntu-latest`.
+The proposed implementation adds a dedicated `copilot-code-review.yml` workflow, which does not exist yet.
 
 The organization policy is the authorization boundary. An earlier draft of this plan pinned the image and asserted `runner.environment` at runtime. Neither is kept, since an assertion does not make a job safe after GitHub has assigned it to the wrong runner.
 
@@ -333,7 +333,6 @@ Implementation waits for an explicit decision on each item.
 
 <!-- GitHub -->
 
-[issue-1448]: https://github.com/ptr727/ProjectTemplate/issues/1448
 [issue-889]: https://github.com/ptr727/ProjectTemplate/issues/889
 
 <!-- External -->
