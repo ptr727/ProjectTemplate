@@ -300,8 +300,7 @@ it.
    `git -C <clone> status --porcelain` prints nothing. Then read
    `git -C <clone> status --porcelain --ignored` and name each ignored entry it lists in the
    session's closing message. `--porcelain` alone never lists them, and the removal deletes them.
-   Then delete that exact directory, as `repo-worktree` "Listing and Cleanup" requires of a
-   temporary standalone clone. A clone
+   Then delete that exact directory. A clone
    holding uncommitted work is left in place and named in the session's closing message.
 5. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory. A quirk of
