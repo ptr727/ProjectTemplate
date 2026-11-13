@@ -869,7 +869,7 @@ function Add-ToolNote {
         $listed = Get-DotnetSdk
         $managed = @()
         if ($State.Installed) {
-            $installedMajor = [int](($State.Installed -split '\.')[0])
+            $installedMajor = (Get-VersionKey $State.Installed)[0]
             $managed = @($Tool.Optional | Where-Object {
                     $major = ($_ -split '\.')[-1]
                     [int]$major -gt $installedMajor -and
