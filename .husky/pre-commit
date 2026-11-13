@@ -5,7 +5,6 @@
 # It deliberately does not source `_/husky.sh`.
 # That file is gitignored and arrives with an npm install this repository does not have.
 # Sourcing it would therefore break the hook in a fresh clone.
-# The path is kept for the fleet convention the line-ending pins are written against.
 #
 # The language-formatting half the fleet convention names runs via uvx, matching CI's own invocation for a repo with no `uv.lock` (the Scripts profile, CODESTYLE.md "Two profiles").
 #
@@ -47,19 +46,23 @@ fi
 # A path that is no longer a file is dropped, since the gate refuses a submodule or a deleted path.
 # An empty list skips the gate, which given no path would scan the whole tree.
 # The inner sh checks for that itself, since GNU xargs runs once on empty input and BSD xargs does not.
-# The list is read once on its own first, because a pipeline hides a failure of its first command.
+# The list goes to a file and is read from there, because a pipeline hides a failure of its first command.
 # `--skip-generated` passes over a staged file in a generated tree, as a whole-tree scan does.
 # The pull request gate reads every line the branch changes against its base.
 base=HEAD
 if git rev-parse -q --verify MERGE_HEAD >/dev/null; then
     base=MERGE_HEAD
 fi
-git diff --cached --name-only --diff-filter=ACMRT -z >/dev/null
+staged=$(mktemp)
+trap 'rm -f "$staged"' EXIT
+# Dash runs no EXIT trap on a signal it leaves untrapped, so the two an interrupt sends are trapped.
+trap 'echo "pre-commit: interrupted by SIGINT." >&2; exit 130' INT
+trap 'echo "pre-commit: interrupted by SIGTERM." >&2; exit 143' TERM
+git diff --cached --name-only --diff-filter=ACMRT -z >"$staged"
 # shellcheck disable=SC2016  # Each expansion belongs to the inner sh.
-git diff --cached --name-only --diff-filter=ACMRT -z |
-    xargs -0 sh -c 'base=$1; shift; for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
-        [ "$#" -eq 0 ] || exec uv run --no-project --script .github/actions/prose-gate/prose_lint.py \
-            --skip-generated --diff "$base" -- "$@"' sh "$base"
+xargs -0 sh -c 'base=$1; shift; for p do shift; if [ -f "$p" ]; then set -- "$@" "$p"; fi; done
+    [ "$#" -eq 0 ] || exec uv run --no-project --script .github/actions/prose-gate/prose_lint.py \
+        --skip-generated --diff "$base" -- "$@"' sh "$base" <"$staged"
 
 # The eol check is repo-wide rather than diff-scoped, and it is here because it is already fast.
 # It reads `.gitattributes` against `.editorconfig` for the whole repository and takes no file list.
