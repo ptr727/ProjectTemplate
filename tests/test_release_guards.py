@@ -2361,9 +2361,12 @@ class DotnetSdkLineCase(unittest.TestCase):
 
         The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
         """
-        if shutil.which("python3") is None:
+        bash = bash_or_skip()
+        # Asked of bash, since the step finds python3 the way bash does, and a found alias may not run.
+        probe = run([bash, "-c", "python3 -c pass"], capture_output=True, check=False, timeout=30)
+        if probe.returncode != 0:
             self.skipTest(
-                "the selection step reads global.json with python3, which this host lacks"
+                "the selection step reads global.json with python3, which bash here cannot run"
             )
         script = step_script(self.ACTION, self.SELECT)
         with tempfile.TemporaryDirectory() as directory:
@@ -2372,8 +2375,11 @@ class DotnetSdkLineCase(unittest.TestCase):
                 (workspace / "global.json").write_text(global_json, encoding="utf-8")
             output = workspace / "github-output"
             output.write_text("", encoding="utf-8")
+            # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
+            step = Path(directory) / "select.sh"
+            step.write_text(script, encoding="utf-8", newline="\n")
             result = run(
-                [bash_or_skip(), "-c", script],
+                [bash, str(step)],
                 cwd=workspace,
                 env={**os.environ, "GITHUB_OUTPUT": str(output)},
                 capture_output=True,
