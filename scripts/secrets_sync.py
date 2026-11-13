@@ -871,6 +871,17 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
             if state == "same":
                 print(f"  same      {title}")
                 continue
+            if (
+                state == "differs"
+                and local.mtime
+                and local.mtime > item.updated
+                and not a.overwrite_newer
+            ):
+                print(
+                    f"  skip      {title}  local {stamp(local.mtime)} is newer than remote {stamp(item.updated)},"
+                    " so pass --overwrite-newer to replace it"
+                )
+                continue
             action = {"only-remote": "create", "differs": "overwrite", "mode-differs": "chmod"}[
                 state
             ]
@@ -1164,6 +1175,11 @@ def build_parser() -> argparse.ArgumentParser:
     add_writes(p)
     p.add_argument("--bucket", action="append", required=True, metavar="BUCKET", help="repeatable")
     p.add_argument("--home", metavar="DIR", help="restore under this mode-700 directory instead")
+    p.add_argument(
+        "--overwrite-newer",
+        action="store_true",
+        help="replace a local file newer than the remote copy",
+    )
 
     p = sub.add_parser("archive", help="archive one item in a bucket")
     add_account(p)

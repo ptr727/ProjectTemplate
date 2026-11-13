@@ -679,6 +679,17 @@ class TestPush(Case):
         self.assertIn("would run: op document create", out)
         self.assertEqual(self.asked, [])
 
+    def test_a_dry_run_update_sends_nothing(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n")
+        self.write(".secrets/alpha")
+        code, out, err = self.push("--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertIn("would run: op document edit", out)
+        self.assertIn("would run: op item edit", out)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(self.item(vid, ".secrets/alpha")["content"], b"old\n")
+
     def test_a_declined_prompt_writes_nothing(self) -> None:
         path = self.write(".secrets/alpha")
         self.reply = False
@@ -862,7 +873,7 @@ class TestPull(Case):
         self.assert_quiet(out, err)
 
     def test_a_differing_local_file_is_overwritten_only_on_confirmation(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
         path = self.write(".secrets/alpha", b"local\n")
         self.reply = False
         self.assertEqual(self.run_main("pull", "--bucket", "alpha")[0], 1)
@@ -927,6 +938,19 @@ class TestPull(Case):
         self.assertNotIn("constructed rename failure", err)
         self.assertEqual(list((self.home / ".secrets").iterdir()), [])
 
+    def test_a_local_file_newer_than_the_remote_copy_is_skipped_unless_overwrite_newer(
+        self,
+    ) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2000-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha", b"rotated\n")
+        code, out, _ = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 0)
+        self.assertIn("--overwrite-newer", out)
+        self.assertEqual(path.read_bytes(), b"rotated\n")
+        code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes", "--overwrite-newer")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(path.read_bytes(), SECRET)
+
     def test_a_dry_run_writes_nothing(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
         code, out, _ = self.run_main("pull", "--bucket", "alpha", "--dry-run")
@@ -943,7 +967,7 @@ class TestPull(Case):
     def test_a_file_written_during_the_prompt_is_not_replaced(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET)
-        self.fake.add_item(vid, ".secrets/beta", SECRET)
+        self.fake.add_item(vid, ".secrets/beta", SECRET, updated="2099-01-01T00:00:00Z")
         self.write(".secrets/beta", b"local\n")
 
         def race(question: str) -> bool:
@@ -1064,6 +1088,17 @@ class TestArchive(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.fake.writes(), [["item", "delete", iid, "--vault", vid, "--archive"]])
         self.assertEqual([it["title"] for it in self.fake.items[vid].values()], [".secrets/beta"])
+
+    def test_a_dry_run_archive_sends_nothing(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET)
+        code, out, err = self.run_main(
+            "archive", "--bucket", "alpha", "--dry-run", str(self.home / ".secrets/alpha")
+        )
+        self.assertEqual(code, 0, err)
+        self.assertIn("would run: op item delete", out)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(len(self.fake.items[vid]), 1)
 
     def test_an_absent_vault_is_refused(self) -> None:
         code, _, err = self.run_main(
