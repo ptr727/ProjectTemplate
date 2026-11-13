@@ -8,7 +8,7 @@ Do not duplicate rules from `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or `WO
 
 ## Commit Messages and Pull Request Titles
 
-Use an imperative subject of at most 72 characters with no trailing period. Use US English and title case with lowercase short bind words. Do not add `Co-Authored-By:` unless requested. Do not put a release-bump magnitude in the title. The full contract is in [GOVERNANCE.md "Pull Request Title and Commit Message Conventions"](../GOVERNANCE.md#pull-request-title-and-commit-message-conventions).
+Use an imperative subject of at most 72 characters with no trailing period. The limit measures the authored title, and the ` (#N)` suffix a squash merge appends sits outside it. Use US English and title case, lowercasing only the short bind words the `comment-and-doc-style` skill lists, a list that is exhaustive. Do not add `Co-Authored-By:` unless requested. Do not put a release-bump magnitude in the title. The full contract is in [GOVERNANCE.md "Pull Request Title and Commit Message Conventions"](../GOVERNANCE.md#pull-request-title-and-commit-message-conventions).
 
 ## Reviewing Carried Fleet Content
 

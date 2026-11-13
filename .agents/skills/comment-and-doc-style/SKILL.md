@@ -369,14 +369,21 @@ name the hub to do its job, and a pointer to a hub-hosted tool the reader runs.
 ## PR titles and commit messages
 
 - **Format**: an imperative subject, 72 characters or fewer, no trailing period ("Add 24-Hour
-  PM2.5 Average Sensor", not "Added X" or "Adds X"). An optional body, blank-line separated,
+  PM2.5 Average Sensor", not "Added X" or "Adds X"). The 72 measures the authored title or subject.
+  The ` (#N)` suffix GitHub appends at a squash merge sits outside it, so a merged subject past 72
+  breaks no rule. An optional body, blank-line separated,
   explains *why* the change is being made when that is non-obvious, the diff already shows *what*.
+- **Closing keywords**: `branching-and-release-model` says where one may go. A form of `close`,
+  `fix`, or `resolve` directly before an issue reference closes that issue, even inside a sentence
+  that negates it. So `does not fix #N` closes #N. Write a reference to an issue left open with no
+  keyword beside it, as in `#N stays open`.
 - **Rules**: no vague titles (`update stuff`, `wip`). Dependabot's default `Bump X from Y to Z`
   titles are fine as-is. No `Co-Authored-By:` lines unless the developer explicitly asks. No
   release-bump magnitude in the title ("minor", "patch", "release v0.2.0"), Nerdbank.GitVersioning
   computes the next version from `version.json` and git history. A dependency version in a
   dependency-bump title is fine and expected. US English spelling, and title case with lowercase
-  short bind words (a, an, the, and, but, or, of, in, on, at, to, by, for, from). A hyphenated
+  short bind words. The bind-word list is exhaustive: a, an, the, and, but, or, of, in, on, at, to,
+  by, for, from, with, as, via, into, over, per. A hyphenated
   compound capitalizes both parts unless the second is a short preposition (*Built-in*,
   *EPA-Corrected*, *24-Hour*).
 

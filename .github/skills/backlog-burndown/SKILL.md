@@ -215,8 +215,9 @@ for, and it binds harder than any throughput target.
 - **Genuine duplicates are one group.** Never close an issue during triage on the orchestrator's
   own judgment. Comment to cross-link the pair, and let the fix close both.
 - **Closing keywords go on the promotion pull request**, not the feature pull request, per
-  `branching-and-release-model`. A feature pull request merging into develop fires no
-  auto-close, so a `Fixes #N` line there closes nothing. **The feature pull request body instead
+  `branching-and-release-model`. The hub's squash setting copies the body into the commit. So a
+  `Fixes #N` line there closes #N when the promotion brings that commit to main, a closure no
+  promotion body stated. **The feature pull request body instead
   carries a line reading `Closes on promotion: #N`**. It lists every issue that pull request
   actually fixes and nothing it merely mentions. The promotion body is assembled from that line,
   per "The Promotion Boundary". GitHub reads a closing keyword only where the issue reference
@@ -734,6 +735,10 @@ from a read of the body made immediately before the write, keeping every line th
 Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
 range calls for. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
+
+After opening the body and after each amendment, run the mechanical closing-set check that
+`branching-and-release-model` states in its negated-keyword bullet. A body naming a deferral issue
+in a sentence that negates a keyword still closes that issue, and reading the body misses it.
 
 ## Away Mode
 
