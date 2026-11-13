@@ -18,6 +18,7 @@ import importlib.util
 import io
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -79,9 +80,30 @@ def trusted(body: str, at: str) -> dict:
 
 
 def committed(pr: dict, at: str) -> dict:
-    """`pr` with its head commit, and its first suite, stamped at `at`."""
-    pr["commits"]["nodes"][-1]["commit"]["committedDate"] = at
+    """`pr` on a branch of its own, its head pushed and its first suite created at `at`."""
+    pr["headRepository"], pr["headRefName"] = {"nameWithOwner": "o/r"}, "feature/a"
     pr["commits"]["nodes"][-1]["commit"]["checkSuites"] = {"nodes": [{"createdAt": at}]}
+    pr[side.PUSHED_KEY] = at
+    return pr
+
+
+def logged(at: str, code: int = 0) -> mock.MagicMock:
+    """A REST read whose activity log prints `at`, as `PUSHED_JQ` prints a head pushed at `at`.
+
+    Any other path reads as failed, as the suite's own `gh_rest` stand-in does.
+    """
+
+    def rest(path: str, *_args: object, **_kwargs: object) -> subprocess.CompletedProcess:
+        if "/activity?" in path:
+            return subprocess.CompletedProcess([], code, f"{at}\n", "")
+        return subprocess.CompletedProcess([], 1, "", "no read in this suite")
+
+    return mock.MagicMock(side_effect=rest)
+
+
+def dated(pr: dict, at: str) -> dict:
+    """`pr` with its head commit's own date, which its author's clock sets, at `at`."""
+    pr["commits"]["nodes"][-1]["commit"]["committedDate"] = at
     return pr
 
 
@@ -306,7 +328,7 @@ EXPLICIT_RABBIT = {
 
 
 class TestSideReaders(unittest.TestCase):
-    def test_a_request_counts_for_the_head_only_once_it_postdates_the_commit(self) -> None:
+    def test_a_request_counts_for_the_head_only_once_it_postdates_the_push(self) -> None:
         pr = committed(
             fixtures.payload([], comments=[trusted("/review", fixtures.EARLY)]), fixtures.LATE
         )
@@ -413,11 +435,11 @@ class TestRequestSideReviews(SideCase):
         self.assertEqual(0, sent.call_count)
         green.assert_not_called()
 
-    def test_before_any_suite_the_commit_time_bounds_an_ask(self) -> None:
+    def test_before_any_suite_the_push_bounds_an_ask(self) -> None:
         pr = fixtures.payload([], comments=[trusted("/review", fixtures.LATE)])
-        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = fixtures.EARLY
+        pr[side.PUSHED_KEY] = fixtures.EARLY
         self.assertTrue(side.side_asked_on_head(pr, "/review"))
-        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = "2026-08-02T12:00:00Z"
+        pr[side.PUSHED_KEY] = "2026-08-02T12:00:00Z"
         self.assertFalse(side.side_asked_on_head(pr, "/review"))
 
     def test_an_unconfirmed_request_ends_the_run(self) -> None:
@@ -473,7 +495,7 @@ class TestChecksHold(unittest.TestCase):
 
     def test_an_ask_before_a_later_push_is_not_one_on_the_head(self) -> None:
         pr = checked(fixtures.check(started=fixtures.LATE), at=fixtures.LATE)
-        pr["commits"]["nodes"][-1]["commit"]["committedDate"] = fixtures.LATE
+        pr[side.PUSHED_KEY] = fixtures.LATE
         pr["comments"]["nodes"] = [trusted("/review", "2026-08-02T10:30:00Z")]
         self.assertFalse(side.side_asked_on_head(pr, "/review"))
 
@@ -508,12 +530,20 @@ class TestSideCounts(SideCase):
         self.assertFalse(side.asks_any(with_policy(fixtures.payload([]), policy.load_default())))
 
     def test_a_head_with_no_suite_yet_reads_as_just_arrived(self) -> None:
+        bare = with_policy(fixtures.payload([]), parsed(qodo=EXPLICIT_QODO))
+        self.assertEqual("PENDING", side.checks_hold(bare, NOW, *WINDOWS))
+
+    def test_a_head_whose_push_is_unread_is_asked_nothing_and_says_so(self) -> None:
+        """Unread, an ask already made for the head looks like one for an earlier head."""
         bare = with_policy(
             fixtures.payload([], comments=[trusted("/review", fixtures.LATE)]),
             parsed(qodo=EXPLICIT_QODO),
         )
         self.assertFalse(side.side_asked_on_head(bare, "/review"))
-        self.assertEqual("PENDING", side.checks_hold(bare, NOW, *WINDOWS))
+        post = mock.MagicMock()
+        lines = side.request_side_reviews(lambda: bare, mock.MagicMock(), post, "on-open")
+        post.assert_not_called()
+        self.assertEqual(["note: the head's push could not be read, so qodo was not asked"], lines)
 
 
 class TestUngatedSideReviewers(SideCase):
@@ -787,6 +817,7 @@ class TestWaitAsksSideReviewers(fixtures.GqlCase):
         with (
             contextlib.redirect_stdout(io.StringIO()) as out,
             mock.patch.object(pr_review, "gh_graphql", sent),
+            mock.patch.object(pr_review, "gh_rest", logged(fixtures.EARLY)),
             mock.patch.object(pr_review.time, "sleep"),
         ):
             pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"])
@@ -907,7 +938,9 @@ class TestSecondPassFixes(fixtures.GqlCase):
         made = {"url": "https://example.invalid/c/1", "body": "/review"}
         for state, asked in (("MERGED", False), ("OPEN", True)):
             with self.subTest(state):
-                pr = with_policy(fixtures.payload([]), parsed(qodo=EXPLICIT_QODO))
+                pr = committed(
+                    with_policy(fixtures.payload([]), parsed(qodo=EXPLICIT_QODO)), fixtures.EARLY
+                )
                 pr["state"] = state
                 post = mock.MagicMock(return_value=(made, True))
                 side.request_side_reviews(
@@ -951,9 +984,12 @@ class TestSecondPassFixes(fixtures.GqlCase):
     def test_an_after_checks_ask_given_no_poll_reads_the_checks_once(self) -> None:
         running = fixtures.check(status="IN_PROGRESS", conclusion="", started=fixtures.EARLY)
         pr = with_policy(checked(running), parsed(qodo={**EXPLICIT_QODO, "when": "after-checks"}))
+        pr = committed(pr, fixtures.EARLY)
         read, send = mock.MagicMock(return_value=pr), mock.MagicMock()
         with contextlib.redirect_stdout(io.StringIO()) as out:
-            side.ask(read, ARGS, send, pr_review.mutated, pr, "after-checks")
+            side.ask(
+                read, ARGS, send, pr_review.mutated, pr, logged(fixtures.EARLY), "after-checks"
+            )
         send.assert_not_called()
         self.assertIn("they read PENDING", out.getvalue())
         self.assertLessEqual(read.call_count, 3)
@@ -998,6 +1034,7 @@ class TestSideAskTiming(fixtures.GqlCase):
             contextlib.redirect_stdout(io.StringIO()) as out,
             mock.patch.object(pr_review, "gql", side_effect=read),
             mock.patch.object(pr_review, "gh_graphql", sent),
+            mock.patch.object(pr_review, "gh_rest", logged(fixtures.EARLY)),
             mock.patch.object(pr_review.time, "sleep", side_effect=slept.append),
         ):
             pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "60"])
@@ -1041,7 +1078,9 @@ class TestSideAskTiming(fixtures.GqlCase):
         post.assert_not_called()
 
     def test_a_poll_handed_to_the_ask_decides_the_checks(self) -> None:
-        pr = with_policy(checked(RUNNING), parsed(qodo=AFTER_CHECKS_QODO))
+        pr = committed(
+            with_policy(checked(RUNNING), parsed(qodo=AFTER_CHECKS_QODO)), fixtures.EARLY
+        )
         poll = mock.MagicMock(return_value="")
         send = mock.MagicMock(side_effect=lambda body: posted(body))
         with contextlib.redirect_stdout(io.StringIO()) as out:
@@ -1051,13 +1090,14 @@ class TestSideAskTiming(fixtures.GqlCase):
                 send,
                 pr_review.mutated,
                 pr,
+                logged(fixtures.EARLY),
                 "after-checks",
                 poll,
             )
         poll.assert_called_once()
         self.assertEqual("/review", send.call_args.kwargs["body"], out.getvalue())
 
-    def test_an_ask_and_a_commit_in_different_offsets_are_compared_as_instants(self) -> None:
+    def test_an_ask_and_a_push_in_different_offsets_are_compared_as_instants(self) -> None:
         """10:00 at -07:00 is 17:00 UTC, so a 12:00 UTC ask is five hours older than the head.
 
         10:00 at +05:00 is 05:00 UTC, so a 06:00 UTC ask is an hour newer than the head.
@@ -1097,6 +1137,73 @@ class TestSideAskTiming(fixtures.GqlCase):
                 )
                 self.assertFalse(confirmed)
                 self.assertEqual(node, made)
+
+
+PUSHED = "2026-08-02T10:20:00Z"
+
+
+class TestSideAskServerStamp(unittest.TestCase):
+    """An ask is placed against the head by GitHub's stamps on both sides, never by a commit's date."""
+
+    def asked(self, commit: str, ask: str) -> mock.MagicMock:
+        """The posts `ask` makes for a head pushed at `PUSHED` and dated `commit`, asked at `ask`."""
+        pr = fixtures.payload([], comments=[trusted("/review", ask)])
+        pr = dated(committed(with_policy(pr, parsed(qodo=EXPLICIT_QODO)), PUSHED), commit)
+        del pr[side.PUSHED_KEY]
+        send = mock.MagicMock(side_effect=lambda body: posted(body))
+        with contextlib.redirect_stdout(io.StringIO()):
+            side.ask(lambda: pr, ARGS, send, pr_review.mutated, pr, logged(PUSHED), "on-open")
+        return send
+
+    def test_a_backdated_commit_does_not_carry_an_earlier_ask_onto_the_head(self) -> None:
+        """Committed at 10:00 and pushed at 10:20, so a 10:05 ask was for the head before it."""
+        send = self.asked(commit="2026-08-02T10:00:00Z", ask="2026-08-02T10:05:00Z")
+        self.assertEqual(["/review"], [c.kwargs["body"] for c in send.call_args_list])
+
+    def test_a_future_dated_commit_does_not_hide_an_ask_on_the_head(self) -> None:
+        """Committed at 10:30 and pushed at 10:20, so a 10:25 ask was for this head."""
+        send = self.asked(commit="2026-08-02T10:30:00Z", ask="2026-08-02T10:25:00Z")
+        send.assert_not_called()
+
+    def test_the_push_is_read_off_the_head_branch_activity_log(self) -> None:
+        pr = committed(fixtures.payload([]), fixtures.EARLY)
+        pr["headRepository"], pr["headRefName"] = {"nameWithOwner": "fork/r"}, "fix/a&b"
+        rest = logged(fixtures.LATE)
+        self.assertEqual(fixtures.LATE, side.pushed(pr, rest)[side.PUSHED_KEY])
+        path, jq = rest.call_args.args
+        self.assertEqual("repos/fork/r/activity?ref=refs%2Fheads%2Ffix%2Fa%26b&per_page=100", path)
+        self.assertIn(f'"{fixtures.HEAD}"', jq)
+
+    def test_a_push_that_cannot_be_read_reads_empty(self) -> None:
+        pr = committed(fixtures.payload([]), fixtures.EARLY)
+        self.assertEqual("", side.pushed(pr, logged(fixtures.LATE, code=1))[side.PUSHED_KEY])
+        for field, value in (("headRepository", None), ("headRefName", ""), ("headRefOid", "x")):
+            with self.subTest(field):
+                rest = logged(fixtures.LATE)
+                self.assertEqual("", side.pushed({**pr, field: value}, rest)[side.PUSHED_KEY])
+                rest.assert_not_called()
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is not installed")
+    def test_the_projection_prints_the_newest_push_that_left_the_head(self) -> None:
+        """A force-push away and back leaves the head twice, and the later arrival is the one."""
+        log = [
+            {"after": MOVED, "timestamp": "2026-08-02T12:00:00Z"},
+            {"after": fixtures.HEAD, "timestamp": fixtures.LATE},
+            {"after": fixtures.HEAD, "timestamp": fixtures.EARLY},
+        ]
+        jq = side.PUSHED_JQ.replace("@HEAD@", fixtures.HEAD)
+        for entries, want in ((log, fixtures.LATE), (log[:1], ""), ([], "")):
+            with self.subTest(entries=len(entries)):
+                proc = subprocess.run(
+                    ["jq", "-r", jq],
+                    input=json.dumps(entries),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                    timeout=30,
+                )
+                self.assertEqual((0, want), (proc.returncode, proc.stdout.strip()))
 
 
 if __name__ == "__main__":

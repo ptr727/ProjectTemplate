@@ -397,11 +397,11 @@ mutation($pr:ID!,$bot:ID!){
 # The rollup rides this query and hangs off the last commit, which a case holds equal to `headRefOid`.
 HELD_FIELDS = """
     headRefOid baseRefName state mergeable mergeStateStatus mergedAt closedAt headRefName mergeCommit{ oid }
-    baseRepository{ defaultBranchRef{ name } }
+    baseRepository{ defaultBranchRef{ name } } headRepository{ nameWithOwner }
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }
-    commits(last:1){ nodes{ commit{ oid committedDate statusCheckRollup{ state
+    commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
         ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
@@ -1609,7 +1609,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
     await_green = functools.partial(side.await_green, read_held, start, a, backoff)
     send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
-    ask = functools.partial(side.ask, read_held, a, send, mutated, may_request and pr)
+    ask = functools.partial(side.ask, read_held, a, send, mutated, may_request and pr, gh_rest)
     ask("on-open")
     waits = owed and side.holds_for_checks(copilot, a.request)
     checks_hold = await_green() if waits else ""
