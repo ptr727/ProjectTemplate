@@ -726,7 +726,7 @@ def create_vault(op: Op, bucket: str) -> Vault:
 
 
 def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
-    """Read the item back and compare its id, its mode tag, and its bytes with what was pushed."""
+    """Read the item back and compare its id, its mode tag, and its bytes with what the plan read."""
     item = members(op, vault).get(plan.title)
     if item is None:
         raise Execution(f"{plan.title} is not listed after the write")
@@ -741,7 +741,7 @@ def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
     data = download(op, vault, item)
     if data != plan.local.data:
         raise Execution(
-            f"{plan.title} reads back as {short(data)} where {short(plan.local.data)} was pushed"
+            f"{plan.title} reads back as {short(data)} where the plan read {short(plan.local.data)}, so check the file and the item"
         )
 
 
@@ -951,10 +951,10 @@ SELFTEST_CONTENT = {
 }
 
 
-def listed(op: Op, vault: Vault, title: str) -> Item:
+def listed(op: Op, vault: Vault, title: str, after: str) -> Item:
     item = members(op, vault).get(title)
     if item is None:
-        raise Execution(f"{title} is not listed after op document create")
+        raise Execution(f"{title} is not listed after op {after}")
     return item
 
 
@@ -994,7 +994,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         )
         if not created:
             measure_fields(op, vault, results)
-        item = listed(op, vault, title)
+        item = listed(op, vault, title, "document create")
         created[label] = item
         back = download(op, vault, item)
         detail = "byte-exact" if back == content else f"{len(content)} bytes became {len(back)}"
@@ -1012,7 +1012,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         write=True,
         detail=first.title,
     )
-    retagged = listed(op, vault, first.title)
+    retagged = listed(op, vault, first.title, "item edit")
     results.append(
         Measured(
             "item edit --tags replaces",
@@ -1028,7 +1028,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         write=True,
         detail=first.title,
     )
-    after = listed(op, vault, first.title)
+    after = listed(op, vault, first.title, "document edit")
     results.append(
         Measured(
             "document edit keeps the item id",
@@ -1084,7 +1084,13 @@ def cmd_selftest(a: argparse.Namespace, op: Op) -> int:
         try:
             op.call(["vault", "create", name], write=True)
         finally:
-            vault = find_vault(list_vaults(op), bucket)
+            try:
+                vault = find_vault(list_vaults(op), bucket)
+            except BaseException:
+                sys.stderr.write(
+                    f"warning: {name} could not be listed, so delete it by hand if it exists\n"
+                )
+                raise
         if vault is None:
             raise Execution(f"{name} is not listed after op vault create")
         selftest_cases(op, vault, scratch, results)
@@ -1096,10 +1102,10 @@ def cmd_selftest(a: argparse.Namespace, op: Op) -> int:
                 sys.stderr.write(
                     f"warning: op vault delete failed rc={deleted.returncode}, so delete {name} by hand\n"
                 )
-        shutil.rmtree(scratch)
         for result in results:
             verdict = {True: "holds", False: "FAILS", None: "measured"}[result.holds]
             print(f"  {verdict:<9} {result.name}: {result.detail}")
+        shutil.rmtree(scratch)
     return 1 if any(r.holds is False for r in results) else 0
 
 

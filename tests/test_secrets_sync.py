@@ -35,6 +35,8 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "secrets_sync.py"
 sys.path.insert(0, str(SCRIPT.parent))
 import secrets_sync as ss
 
+REAL_RUN_OP = ss.run_op
+
 SECRET = b"alpha-constructed-secret-value\n"
 POSIX_ONLY = unittest.skipIf(sys.platform == "win32", "POSIX modes and symbolic links")
 WRITE_KEYS = frozenset(
@@ -86,6 +88,7 @@ class FakeOp:
         self.signin_ambient = False
         self.drop_create = False
         self.raw: dict[tuple[str, ...], bytes] = {}
+        self.vault_create_noop = False
 
     def add_vault(self, name: str) -> str:
         vid = f"v{next(self.ids)}"
@@ -155,7 +158,8 @@ class FakeOp:
         if key == ("vault", "list"):
             return ok(json.dumps([{"id": i, "name": n} for i, n in self.vaults.items()]).encode())
         if key == ("vault", "create"):
-            self.add_vault(argv[2])
+            if not self.vault_create_noop:
+                self.add_vault(argv[2])
             return ok()
         if key == ("vault", "delete"):
             self.vaults.pop(argv[2])
@@ -693,7 +697,7 @@ class TestPush(Case):
         self.assertEqual(code, 1)
         self.assertIn("case-insensitively", err)
 
-    def test_a_file_changed_after_the_plan_is_not_pushed(self) -> None:
+    def test_a_file_changed_after_the_plan_fails_its_read_back(self) -> None:
         path = self.write(".secrets/alpha")
 
         def change(question: str) -> bool:
@@ -703,7 +707,16 @@ class TestPush(Case):
         with unittest.mock.patch.object(ss, "ask", change):
             code, _, err = self.push(str(path))
         self.assertEqual(code, 2)
-        self.assertIn("reads back", err)
+        self.assertIn("where the plan read", err)
+        vid = next(iter(self.fake.vaults))
+        self.assertEqual(self.item(vid, ".secrets/alpha")["content"], b"changed\n")
+
+    def test_a_vault_create_that_lists_nothing_fails(self) -> None:
+        path = self.write(".secrets/alpha")
+        self.fake.vault_create_noop = True
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 2)
+        self.assertIn("not listed after op vault create", err)
 
     def test_an_edit_that_moves_the_item_to_another_id_fails(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n")
@@ -943,6 +956,15 @@ class TestPull(Case):
         self.assertIn("changed locally", err)
         self.assertEqual((self.home / ".secrets/alpha").read_bytes(), b"raced\n")
 
+    def test_a_restore_home_that_is_a_junction_is_refused(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
+        restore = self.scratch / "restore"
+        restore.mkdir(mode=0o700)
+        with unittest.mock.patch.object(Path, "is_junction", lambda path: path.name == "restore"):
+            code, _, err = self.run_main("pull", "--bucket", "alpha", "--home", str(restore))
+        self.assertEqual(code, 1)
+        self.assertIn("not a directory", err)
+
     def test_a_restore_home_that_is_absent_or_a_file_is_refused(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
         regular = self.scratch / "regular"
@@ -1043,6 +1065,13 @@ class TestArchive(Case):
         self.assertEqual(self.fake.writes(), [["item", "delete", iid, "--vault", vid, "--archive"]])
         self.assertEqual([it["title"] for it in self.fake.items[vid].values()], [".secrets/beta"])
 
+    def test_an_absent_vault_is_refused(self) -> None:
+        code, _, err = self.run_main(
+            "archive", "--bucket", "alpha", str(self.home / ".secrets/alpha")
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("no vault", err)
+
     def test_an_absent_item_is_refused(self) -> None:
         self.vault()
         code, _, _ = self.run_main(
@@ -1114,6 +1143,38 @@ class TestSelftest(Case):
         self.assertRegex(out, r"FAILS\s+item list carries 'updated_at'")
         self.assertEqual(self.fake.vaults, {})
 
+    def test_a_vault_create_that_lists_nothing_fails(self) -> None:
+        self.fake.vault_create_noop = True
+        with unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)):
+            code, _, err = self.run_main("selftest")
+        self.assertEqual(code, 2)
+        self.assertIn("not listed after op vault create", err)
+
+    def test_a_listing_that_fails_after_the_vault_create_says_to_check_by_hand(self) -> None:
+        def flaky(argv: Sequence[str], env: Mapping[str, str], attached: bool) -> ss.Outcome:
+            if key_of(argv) == ("vault", "list"):
+                return ss.Outcome(0, b"not json", b"")
+            return self.fake(argv, env, attached)
+
+        with (
+            unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)),
+            unittest.mock.patch.object(ss, "run_op", flaky),
+        ):
+            code, _, err = self.run_main("selftest")
+        self.assertEqual(code, 2)
+        self.assertIn("delete it by hand if it exists", err)
+
+    def test_results_print_even_when_the_scratch_removal_fails(self) -> None:
+        def broken(_path: object) -> None:
+            raise OSError("constructed removal failure")
+
+        with (
+            unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)),
+            unittest.mock.patch.object(ss.shutil, "rmtree", broken),
+        ):
+            _, out, _ = self.run_main("selftest")
+        self.assertIn("document round-trip, crlf", out)
+
     def test_a_failed_vault_delete_says_to_delete_it_by_hand(self) -> None:
         self.fake.fail_before.add(("vault", "delete"))
         with unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)):
@@ -1177,6 +1238,43 @@ class TestOutput(Case):
             with self.subTest(argv=argv):
                 self.assertEqual(raised.exception.code, expected)
         self.assertEqual(self.fake.calls, [])
+
+    def test_a_failed_call_prints_its_stderr_capped(self) -> None:
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ss.report_stderr(b"x" * (ss.STDERR_CAP + 500))
+        self.assertTrue(err.getvalue().startswith("x" * ss.STDERR_CAP + " ... 500 more"))
+
+    @POSIX_ONLY
+    def test_op_missing_from_path_is_an_execution_failure(self) -> None:
+        empty = self.scratch / "empty-bin"
+        empty.mkdir()
+        with self.assertRaises(ss.Execution) as raised:
+            REAL_RUN_OP(["whoami"], {"PATH": str(empty)}, attached=False)
+        self.assertIn("could not run op", str(raised.exception))
+
+    @POSIX_ONLY
+    def test_a_second_signal_during_cleanup_is_passed_over(self) -> None:
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            self.addCleanup(signal.signal, signum, signal.getsignal(signum))
+        cleaned: list[bool] = []
+
+        def interrupted(argv: Sequence[str]) -> int:
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+                time.sleep(1)
+            finally:
+                os.kill(os.getpid(), signal.SIGTERM)
+                cleaned.append(True)
+            return 0
+
+        with (
+            unittest.mock.patch.object(ss, "main", interrupted),
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            outcome = ss.run([])
+        self.assertEqual(outcome, signal.SIGTERM)
+        self.assertEqual(cleaned, [True])
 
     def test_mode_takes_an_octal_permission(self) -> None:
         for mode in ("999", "1777", "rw", "60"):
