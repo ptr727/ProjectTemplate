@@ -357,6 +357,244 @@ if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
         )
 
 
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxOptionalTools(LinuxFunctionsCase):
+    """An optional tool joins the default selection only under --optional, and naming it selects it."""
+
+    def selection(self, body: str) -> list[str]:
+        result = self.run_bash(f'{body}\nresolve_selection\nprintf "%s\\n" "${{SELECTED[@]}}"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.split()
+
+    def test_the_default_selection_leaves_every_optional_tool_out(self) -> None:
+        selected = self.selection("")
+        self.assertNotIn("powershell", selected)
+        self.assertNotIn("op", selected)
+        self.assertIn("gh", selected)
+        self.assertIn("dotnet", selected)
+
+    def test_optional_brings_every_optional_tool_in(self) -> None:
+        selected = self.selection("WITH_OPTIONAL=true")
+        self.assertIn("powershell", selected)
+        self.assertIn("op", selected)
+
+    def test_naming_an_optional_tool_selects_it_without_the_flag(self) -> None:
+        self.assertEqual(self.selection("REQUESTED=(op)"), ["op"])
+
+    def test_the_list_marks_each_optional_tool_and_only_those(self) -> None:
+        result = self.run_bash("list_tools")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        marked = [line.split()[0] for line in result.stdout.splitlines() if "(optional)" in line]
+        self.assertEqual(marked, ["powershell", "op"])
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxOpInstall(LinuxFunctionsCase):
+    """`op` comes from 1Password's own apt repository, and its manual download goes once apt has it."""
+
+    RECORDING = """
+ensure_prerequisites() { :; }
+remove_stale() { printf 'STALE %s\\n' "$*"; }
+install_keyring() { printf 'KEYRING %s\\n' "$*"; return 1; }
+write_sources() { printf 'SOURCES %s\\n' "$*"; return 1; }
+apt_install() { printf 'APT %s\\n' "$*"; }
+op_remove_download() { printf 'REMOVE\\n'; }
+op_version() { :; }
+"""
+
+    def unowned_copy(self) -> Path:
+        """A directory holding an executable `op`, standing in for a download on PATH."""
+        directory = self.dir / "downloaded"
+        directory.mkdir()
+        binary = directory / "op"
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o755)
+        return directory
+
+    def removal(
+        self, owned: int, only: str, setup: str = "DRY_RUN=true"
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the shared removal over an `op` first on PATH, as apply_tool runs an install, with errexit off."""
+        directory = self.unowned_copy()
+        body = (
+            f'PATH="{directory}:$PATH"\n'
+            f"dpkg_owns_path() {{ return {owned}; }}\n"
+            f"{setup}\n"
+            f'if remove_unowned_command op op "1Password CLI" "{only}"; then exit 0; else exit "$?"; fi'
+        )
+        return self.run_bash(body)
+
+    def test_install_registers_the_repository_for_the_host_architecture(self) -> None:
+        result = self.run_bash(f"{self.RECORDING}\nARCH=arm64\nop_install")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        site = "https://downloads.1password.com/linux"
+        keyring = "/etc/apt/keyrings/1password-archive-keyring.gpg"
+        vendor_keyring = "/usr/share/keyrings/1password-archive-keyring.gpg"
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                f"KEYRING {site}/keys/1password.asc {keyring} {site}/debian/arm64/dists/stable/InRelease true",
+                f"SOURCES 1password {site}/debian/arm64 stable main {keyring}",
+                f"STALE /etc/apt/sources.list.d/1password.list {vendor_keyring}",
+                "APT 1password-cli",
+                "REMOVE",
+            ],
+        )
+
+    def test_a_failed_install_keeps_the_downloaded_copy(self) -> None:
+        body = f"""{self.RECORDING}
+apt_install() {{ printf 'APT %s\\n' "$*"; return 100; }}
+ARCH=amd64
+if op_install; then exit 0; else exit "$?"; fi"""
+        result = self.run_bash(body)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("REMOVE", result.stdout)
+
+    def test_install_beside_an_existing_package_keeps_the_download(self) -> None:
+        for mode, removed in (("install", False), ("upgrade", True)):
+            with self.subTest(mode=mode):
+                body = f"""{self.RECORDING}
+op_version() {{ printf '2.41.0-1'; }}
+MODE={mode}
+ARCH=amd64
+op_install"""
+                result = self.run_bash(body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual("REMOVE" in result.stdout.splitlines(), removed, result.stdout)
+
+    def test_a_failed_source_write_stops_before_the_old_source_goes(self) -> None:
+        body = """SUDO=()
+tee() { return 1; }
+ARCH=amd64
+if write_sources op-test-absent https://example.invalid/debian stable main /nonexistent.gpg; then
+    printf 'CHANGED\\n'
+fi"""
+        result = self.run_bash(body)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("CHANGED", result.stdout)
+        self.assertIn("Cannot write", result.stderr)
+
+    def test_a_failed_keyring_install_stops_before_the_old_source_goes(self) -> None:
+        cases = {
+            "the keyring directory": ("return 1", "Cannot create"),
+            "the keyring file": ("[[ $2 == -d ]]", "Cannot install the keyring"),
+        }
+        for step, (stub, expected) in cases.items():
+            with self.subTest(step=step):
+                body = f"""run_root() {{ {stub}; }}
+fetch() {{ :; }}
+gpgv() {{ :; }}
+if install_keyring https://example.invalid/key /nonexistent/op-test.gpg https://example.invalid/InRelease false; then
+    printf 'CHANGED\\n'
+fi"""
+                result = self.run_bash(body)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("CHANGED", result.stdout)
+                self.assertIn(expected, result.stderr)
+
+    def test_an_architecture_without_a_build_is_skipped_and_changes_nothing(self) -> None:
+        result = self.run_bash(f"{self.RECORDING}\nARCH=i386\nop_install")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("skipping op on i386", result.stderr)
+
+    def test_an_unowned_copy_at_the_one_named_path_is_removed(self) -> None:
+        result = self.removal(1, str(self.dir / "downloaded" / "op"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"[dry run] rm -f {self.dir}/downloaded/op", result.stdout)
+
+    def test_an_unowned_copy_anywhere_else_is_left_with_a_warning(self) -> None:
+        result = self.removal(1, "/usr/local/bin/op")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("rm -f", result.stdout)
+        self.assertIn("so it stays", result.stderr)
+
+    def test_a_copy_dpkg_owns_is_left_alone(self) -> None:
+        result = self.removal(0, "")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_a_failed_ownership_query_stops_rather_than_removing(self) -> None:
+        result = self.removal(2, "")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("rm -f", result.stdout)
+        self.assertIn("Cannot determine dpkg ownership", result.stderr)
+
+    def test_a_failed_removal_warns_once_rather_than_looping(self) -> None:
+        result = self.removal(1, "", "ASSUME_YES=true\nrun_root() { return 1; }")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr.count("failed to remove"), 1, result.stderr)
+
+    def test_a_failed_ownership_query_stops_the_shadow_removal_too(self) -> None:
+        directory = self.unowned_copy()
+        (directory / "op").rename(directory / "jq")
+        body = f"""PATH="{directory}:$PATH"
+dpkg_owns_path() {{ return 2; }}
+DRY_RUN=true
+if tool_unshadow jq; then exit 0; else exit "$?"; fi"""
+        result = self.run_bash(body)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("rm -f", result.stdout)
+        self.assertIn("Cannot determine dpkg ownership", result.stderr)
+
+    def test_unshadowing_waits_for_the_package(self) -> None:
+        body = """op_version() { :; }
+op_remove_download() { printf 'REMOVE\\n'; }
+tool_unshadow op"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_upgrade_unshadows_beside_a_package_that_reads_current(self) -> None:
+        body = """MODE=upgrade
+op_version() { printf '2.42.0-1'; }
+op_target() { printf '2.42.0-1'; }
+tool_configured() { return 0; }
+op_remove_download() { printf 'UNSHADOW\\n'; }
+op_install() { printf 'INSTALL\\n'; }
+ARCH=amd64
+apply_tool op"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(), ["UNSHADOW", "op: current at 2.42.0-1, leaving it alone"]
+        )
+
+    def test_a_hand_installed_package_reads_unmanaged_until_the_repository_is_configured(
+        self,
+    ) -> None:
+        body = """tool_configured() { return 1; }
+tool_effective_status op 2.42.0-1 2.42.0-1"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "unmanaged")
+
+    def test_the_report_names_an_unconfigured_repository_and_an_unowned_copy(self) -> None:
+        cases = {
+            "/usr/local/bin/op": "is an unowned downloaded copy, which an install that adds",
+            "/opt/example/bin/op": "belongs to no package, and an install or upgrade leaves it",
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                body = f"""tool_configured() {{ return 1; }}
+unowned_command_path() {{ printf '{path}'; }}
+ARCH=amd64
+tool_note op
+printf '%s\\n' "${{NOTES[@]}}" """
+                result = self.run_bash(body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                notes = result.stdout.splitlines()
+                # The first note depends on whether this host carries the vendor's one-line source.
+                self.assertEqual(len(notes), 2, notes)
+                self.assertIn("1Password's", notes[0])
+                self.assertIn(f"{path} {expected}", notes[1])
+
+    def test_the_configured_repository_is_the_one_install_writes(self) -> None:
+        text = LINUX_INSTALLER.read_text(encoding="utf-8")
+        self.assertRegex(text, r'(?m)^    op\) \[\[ -f "\$SOURCES_DIR/1password\.sources" \]\] ;;$')
+        self.assertRegex(text, r'register_apt_source "1password" ')
+
+
 class TestInstallersNameTheBaselineLine(unittest.TestCase):
     """Each installer names the SDK line the global.json baseline selects.
 
@@ -881,6 +1119,75 @@ class TestWindowsInstalledVersion(unittest.TestCase):
         self.assertIn("no version comparison is possible", result.stdout)
         self.assertNotIn("INSTALL ", result.stdout)
         self.assertNotIn("UPGRADE ", result.stdout)
+
+
+# The registry and the optional list are the script's own assignments, read out of its syntax tree rather than restated.
+SELECTION_HARNESS = r"""
+param([string]$Installer, [string]$Cases)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$tokens = $null
+$errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Installer, [ref]$tokens, [ref]$errors)
+$wanted = @('Resolve-Selection', 'Show-List', 'Get-Tool')
+foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$assigned = @('DOTNET_MAJOR', 'TOOLS', 'OPTIONAL_TOOLS')
+foreach ($statement in $ast.EndBlock.Statements) {
+    if ($statement -is [System.Management.Automation.Language.AssignmentStatementAst] -and $assigned -contains $statement.Left.VariablePath.UserPath) {
+        . ([scriptblock]::Create($statement.Extent.Text))
+    }
+}
+function die { param([string]$Message) throw $Message }
+$script:LINES = @()
+function log { param([string]$Message = '') $script:LINES += $Message }
+$results = [ordered]@{}
+foreach ($case in (Get-Content -Raw -LiteralPath $Cases | ConvertFrom-Json).PSObject.Properties) {
+    $script:WANT_TOOLS = @($case.Value.want)
+    $script:WITH_OPTIONAL = [bool]$case.Value.optional
+    $script:MODE = $case.Value.mode
+    $script:SELECTED = Resolve-Selection
+    $script:LINES = @()
+    if ($script:MODE -eq 'list') { Show-List }
+    $results[$case.Name] = [ordered]@{ selected = @($script:SELECTED); lines = @($script:LINES) }
+}
+$results | ConvertTo-Json -Depth 4
+"""
+
+
+@unittest.skipUnless(
+    shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
+)
+class TestWindowsOptionalTools(unittest.TestCase):
+    """An optional tool joins the default selection only under -Optional, as on Linux, and -List shows it."""
+
+    def setUp(self) -> None:
+        cases = {
+            "default": {"want": [], "optional": False, "mode": "report"},
+            "optional": {"want": [], "optional": True, "mode": "install"},
+            "named": {"want": ["op"], "optional": False, "mode": "install"},
+            "list": {"want": [], "optional": False, "mode": "list"},
+        }
+        result = run_pwsh_harness(SELECTION_HARNESS, cases)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.results = json.loads(result.stdout)
+
+    def test_the_default_selection_leaves_the_optional_tool_out(self) -> None:
+        selected = self.results["default"]["selected"]
+        self.assertNotIn("op", selected)
+        self.assertIn("gh", selected)
+
+    def test_optional_brings_it_in_and_naming_it_selects_it(self) -> None:
+        self.assertIn("op", self.results["optional"]["selected"])
+        self.assertEqual(self.results["named"]["selected"], ["op"])
+
+    def test_the_list_shows_it_and_marks_it_as_the_optional_tool(self) -> None:
+        self.assertIn("op", self.results["list"]["selected"])
+        rows = {line.split()[0]: line for line in self.results["list"]["lines"][1:]}
+        self.assertIn("AgileBits.1Password.CLI", rows["op"])
+        self.assertIn("(optional tool)", rows["op"])
+        self.assertNotIn("(optional tool)", rows["gh"])
 
 
 OPTIONAL_APPLY_HARNESS = r"""

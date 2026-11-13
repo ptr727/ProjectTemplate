@@ -679,11 +679,11 @@ the issues it fixes in a `Closes on promotion:` line in its own commit message, 
    yields by handing the file over. A holder that already pushed and has an open pull request
    yields by having that pull request wait, its branch untouched. It also yields by the promotion
    fix taking the file, since the two must not be in flight on one file at once. Once the fix
-   lands, that pull request waits untouched until the freeze lifts. Reconciling its content is the
+   lands, that pull request waits untouched until the next round dispatches. Reconciling its content is the
    next round's worker's job rather than the orchestrator's, which opens no branch and edits
    nothing. The orchestrator retires that group's worktree, the branch and its pull request left
    standing. That is the worktree-only disposition "Cleanup Is the Orchestrator's" separates out,
-   and the retire-then-dispatch shape "Raising a Blocked Question" uses. The orchestrator then
+   and the retire-then-dispatch shape "Raising a Blocked Question" uses. That next round
    dispatches a fresh worker on that same branch. That worker is briefed either to merge develop in
    to pick the fix up, or to narrow the change to drop the file. Never rebase it, since its branch
    is already pushed and a rebase there needs what `GOVERNANCE.md` "Git and Commit Rules" forbids.

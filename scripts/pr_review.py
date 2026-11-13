@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2"]
 # ///
 """Consolidated Copilot-review status for a PR - one command, one compact digest.
 
@@ -158,6 +158,7 @@ Subcommands
            activity. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90. A pull request
            found no longer open, on the first read or on any poll, is neither requested nor polled further. `wait` then prints its digest and exits
            as `status` does, so a 0 there says nothing about review coverage, and `state=` says why.
+           No poll sleeps past --timeout. The digest prints after the reads that follow it. A SIGINT or SIGTERM prints one line naming it and re-raises that signal, exiting 130 on Windows instead.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
            present polls the checks only for an after-checks CodeRabbit or Qodo still to ask, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
@@ -232,12 +233,14 @@ Write Safety" for the rules these commands enforce.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import functools
 import io
 import itertools
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tarfile
@@ -944,20 +947,14 @@ def origin_owner() -> str | None:
         if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")
         and not k.startswith("GIT_CONFIG")
     }
+    argv = ["git", "-C", str(HERE), "remote", "get-url", "origin"]
     try:
-        url = _run(
-            ["git", "-C", str(HERE), "remote", "get-url", "origin"],
-            5,
-            "git could not be run",
-            text=True,
-            encoding="utf-8",
-            env=env,
-        ).stdout.strip()
+        url = _run(argv, 5, "git could not be run", text=True, encoding="utf-8", env=env).stdout
     # `_run` returns a missing git or a timeout as no output, and a decode error lands here.
     except Exception:  # noqa: BLE001
         return None
-    m = re.search(r"[:/]([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+?)(?:\.git)?/?$", url)
-    return m.group(1).lower() if m else None
+    slug = shared.origin_slug(url.strip())
+    return slug.split("/")[0] if slug else None
 
 
 def in_scope(target_owner: str) -> tuple[bool, str]:
@@ -1248,16 +1245,18 @@ def backoff[Polled](
 
     `delays` defaults to `POLL_DELAYS`, its last delay repeated only where a clock bounds the loop.
     A finite schedule ends by running out, with no clock where `start` is None. Otherwise `start`
-    is a `time.monotonic` reading and `timeout` is in seconds, checked before each sleep. Returns
-    the last value read, or `value` itself where the poll never sleeps.
+    is a `time.monotonic` reading and `timeout` is in seconds. Each sleep is cut to the time left,
+    so no sleep runs past the bound and one read follows it there. Returns the last value read, or
+    `value` itself where the poll never sleeps.
     """
     if delays is None:
         repeated = itertools.repeat(POLL_DELAYS[-1]) if start is not None else ()
         delays = itertools.chain(POLL_DELAYS, repeated)
     for delay in delays:
-        if not keep(value) or (start is not None and time.monotonic() - start > timeout):
+        left = float("inf") if start is None else timeout - (time.monotonic() - start)
+        if not keep(value) or left <= 0:
             break
-        time.sleep(delay)
+        time.sleep(min(delay, left))
         value = read()
     return value
 
@@ -1399,14 +1398,8 @@ def gh_takes_escape_flag() -> bool:
 
 def _gh_run(argv: list[str], raw: bool) -> subprocess.CompletedProcess:
     """Run one `gh` read, a log decoded leniently since its bytes are the runner's own."""
-    return _run(
-        argv,
-        30,
-        "gh could not be run",
-        text=True,
-        encoding="utf-8",
-        errors="replace" if raw else "strict",
-    )
+    errors = "replace" if raw else "strict"
+    return _run(argv, 30, "gh could not be run", text=True, encoding="utf-8", errors=errors)
 
 
 def answered_absent(proc: subprocess.CompletedProcess) -> bool:
@@ -1724,13 +1717,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         polls = True
     else:
         polls = True
-        backoff(
-            (done, answer, drift),
-            lambda: live_state(owner, repo, a.number, a.min_rounds),
-            lambda s: not any(s),
-            start,
-            a.timeout,
-        )
+        live = functools.partial(live_state, owner, repo, a.number, a.min_rounds)
+        backoff((done, answer, drift), live, lambda s: not any(s), start, a.timeout)
 
     ask("after-checks", await_green if polls else None)
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
@@ -2188,5 +2176,23 @@ def main(argv: list[str] | None = None) -> int:
     return run_wait(owner, repo, a)
 
 
+def on_sigterm(signum: int, _frame: object) -> None:
+    """Raise SIGTERM as a `KeyboardInterrupt` carrying its number, so both signals unwind one path."""
+    raise KeyboardInterrupt(signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    signal.signal(signal.SIGTERM, on_sigterm)
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt as stop:
+        signum = signal.Signals(stop.args[0] if stop.args else signal.SIGINT)
+        print(f"pr_review.py: interrupted by {signum.name}.", file=sys.stderr)
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if os.name == "nt":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
