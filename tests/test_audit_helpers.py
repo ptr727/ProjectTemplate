@@ -3052,7 +3052,7 @@ class IntentAdvisoryCase(unittest.TestCase):
         for label, down, want in cases:
             with self.subTest(label), self.patched({"snip/global.json": canon}):
                 got = audit.intent_trail("o/r", "main", "global.json", unit, down)
-            self.assertEqual(got, want)
+                self.assertEqual(got, want)
 
     def test_a_unit_without_repo_owned_keys_compares_whole(self) -> None:
         unit = {"path": "global.json", "fidelity": "intent", "reference": "snip/global.json"}

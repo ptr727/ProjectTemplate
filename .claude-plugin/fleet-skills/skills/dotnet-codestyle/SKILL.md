@@ -116,8 +116,8 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   baseline. The hub's host installers install the line the `catalog/snippets/configs/global.json`
   baseline selects, named in each installer and held equal to the baseline by the hub's tests.
   The Linux one adds the newest line the feed carries, and every other line under `--optional`.
-  The Windows one adds the next major and the two below it under `-Optional`. So a host reaches a
-  repository one major either side of the baseline. A fleet-wide move is a hub change to that
+  The Windows one adds the next major and the two below it under `-Optional`, beside an install
+  or upgrade of the baseline's SDK. A fleet-wide move is a hub change to that
   baseline, the installers, that fallback, and the devcontainer snippet's image tag. A repository
   not yet moved keeps building on its own line.
 

@@ -1798,7 +1798,7 @@ def carries_fleet_owned_values(item, canon_text, down_text):
     if not owned or canon_text is None:
         return False
     try:
-        canon = json.loads(canon_text.lstrip("\ufeff"))
+        canon = json.loads(canon_text)
         down = json.loads(down_text.lstrip("\ufeff"))
     except ValueError:
         return False

@@ -1,8 +1,9 @@
 name: .NET SDK
 description: >-
-  Install the .NET SDK line the caller's global.json selects through its sdk.version, so CI follows
-  the repository's own line, whether or not it is the fleet default. A caller carrying no such global.json yet gets the fallback line the
-  selection step names, which the hub's tests hold to the global.json baseline's major.
+  Install the .NET SDK line the caller's global.json selects through its sdk.version.
+  CI then follows the repository's own line, whether or not it is the fleet default.
+  A caller carrying no such global.json yet gets the fallback line the selection step names,
+  which the hub's tests hold to the global.json baseline's major.
 
 runs:
   using: composite

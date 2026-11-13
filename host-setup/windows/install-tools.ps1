@@ -862,11 +862,16 @@ function Add-ToolNote {
     }
     if ($Tool.Name -eq 'dotnet') {
         $listed = Get-DotnetSdk
-        $managed = @($Tool.Optional | Where-Object {
-                $major = ($_ -split '\.')[-1]
-                @($listed | Where-Object { ($_ -split '\.')[0] -eq $major }).Count -gt 0 -and
-                @(Get-WingetInstalled -Id $_ | Where-Object { $_ }).Count -gt 0
-            } | ForEach-Object { ($_ -split '\.')[-1] })
+        $managed = @()
+        if ($State.Installed) {
+            $installedMajor = [int](($State.Installed -split '\.')[0])
+            $managed = @($Tool.Optional | Where-Object {
+                    $major = ($_ -split '\.')[-1]
+                    [int]$major -gt $installedMajor -and
+                    @($listed | Where-Object { ($_ -split '\.')[0] -eq $major }).Count -gt 0 -and
+                    @(Get-WingetInstalled -Id $_ | Where-Object { $_ }).Count -gt 0
+                } | ForEach-Object { ($_ -split '\.')[-1] })
+        }
         $sdk = @($listed | Where-Object { $managed -notcontains ($_ -split '\.')[0] })
         $untracked = Get-UntrackedDotnetSdk -Installed $State.Installed -Sdk $sdk
         if ($untracked) {
