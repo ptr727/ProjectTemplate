@@ -1189,7 +1189,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("bun install -g @openai/codex@latest", self.recorded())
-        self.assertNotIn("codex upgrade", " ".join(self.recorded()))
+        self.assertNotIn("codex update", " ".join(self.recorded()))
 
     def test_the_report_names_outdated_integrations_for_a_scoop_owned_herdr(self) -> None:
         root = self.dir / "AgentTools"
