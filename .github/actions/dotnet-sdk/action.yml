@@ -15,7 +15,7 @@ runs:
         set -Eeuo pipefail
         fallback=10.x
         # A file passed on has to parse for both the dotnet host and setup-dotnet's JSON5 read.
-        # Comments are the one extension both accept, so they are dropped outside strings and the rest is parsed as strict JSON.
+        # Comments are the one extension both accept, so they are dropped outside strings and the rest is read with json.loads.
         # So a commented file still selects its line, and one with no sdk.version still gets the fallback.
         python3 - "$fallback" <<'PY'
         import json
