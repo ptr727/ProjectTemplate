@@ -2412,6 +2412,8 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(commented), ["global-json-file=global.json"])
         runner_only = '// MTP\n{"test": {"runner": "Microsoft.Testing.Platform"}}'
         self.assertEqual(self.select(runner_only), fallback)
+        byte_order_mark = '\ufeff{"sdk": {"version": "11.0.100"}}'
+        self.assertEqual(self.select(byte_order_mark), ["global-json-file=global.json"])
         slashes_in_a_string = (
             '{"sdk": {"version": "11.0.100"}, "note": "see https://example.test/a,}"}'
         )
