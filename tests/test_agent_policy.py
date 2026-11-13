@@ -838,6 +838,16 @@ class CommandLineCase(unittest.TestCase):
             )
         self.assertEqual(done.returncode, 1)
 
+    def test_a_malformed_registry_fails_loudly(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "repos.json"
+            path.write_text("{ not json", encoding="utf-8")
+            done = self.run_cli(
+                "render", "--registry", str(path), "--name", "Fixture", "--model", "release"
+            )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("unreadable", done.stderr)
+
 
 class RulesetsCase(unittest.TestCase):
     """The ruleset payloads configure.sh applies and spec/audit.py expects, composed per repository."""
