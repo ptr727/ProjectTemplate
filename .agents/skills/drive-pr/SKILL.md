@@ -103,7 +103,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    one per "Disposing of Every Finding" and wait again. Read `state=` in every digest `wait` or `status` prints.
    A peer can merge or close the pull request mid-drive. A digest carrying `state=MERGED` on a feature PR into develop means the merge has landed.
    Skip the merge in step 4 and go on to its post-merge path.
-   A finding still open there keeps its outcome owed, a thread `unresolved=` lists and an `introduced` finding step 2 left in the body alike.
+   A finding still open there keeps its outcome owed. That covers an unresolved thread, a finding the body lists, and every other finding step 4 says `merge` refuses on.
    Give each one per "Disposing of Every Finding" before that path's cleanup, a fix landing as a fresh feature -> develop pass.
    On a promotion PR it means the drive's end state is passed, so stop and report it merged.
    A digest carrying `state=CLOSED` is a stop to report, with its `closed_at=`.
