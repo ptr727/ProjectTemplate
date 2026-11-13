@@ -15,11 +15,11 @@ These gates keep committer and signature aligned:
    git filter-branch --tag-name-filter cat --commit-filter 'GIT_COMMITTER_NAME="<name>" GIT_COMMITTER_EMAIL="<email>" git commit-tree -S "$@"' -- --branches --tags
    ```
 
-3. **Re-identify the committer, and keep the author.** The command above sets the committer on every commit, which changes nothing on the rewriter's own. Leave `author` as the rewrite left it, an identity correction included, since verification reads only the committer.
-4. **Verify against GitHub, not the local checkout.** `git log --show-signature` checks a signature against the local keyring or allowed-signers file. It knows nothing of the account GitHub matches the committer to, so a commit can read good locally and still land unverified. Before the push, confirm the signing pass changed metadata only. Each branch's commit count and its `git log --format=%T` tree hashes match the values recorded before the signing pass. After the push, read every commit on each rewritten branch through the REST API and require `verified: true` with `reason: valid` on all of them. A single output line ending `true valid` is a pass, and any other line names a failing reason:
+3. **Re-identify the committer, and keep the author.** The command above sets the committer on every commit, the rewriter's own included. Leave `author` as the rewrite left it, an identity correction included, since verification reads only the committer.
+4. **Verify against GitHub, not the local checkout.** `git log --show-signature` checks a signature against the local keyring or allowed-signers file. It knows nothing of the account GitHub matches the committer to, so a commit can read good locally and still land unverified. Before the push, confirm the signing pass changed metadata only. Each branch's commit count and its `git log --format=%T` tree hashes match the values recorded before the signing pass. Publishing the rewrite is a force push, so an agent stops here and hands the push to the maintainer. After the maintainer's push, read every commit on each rewritten branch through the REST API and require `verified: true` with `reason: valid` on all of them. A single output line ending `true valid` is a pass, and any other line names a failing reason:
 
    ```sh
-   gh api --paginate "repos/{owner}/{repo}/commits?sha=<branch>&per_page=100" --jq '.[].commit.verification | "\(.verified) \(.reason)"' | sort | uniq -c
+   gh api --paginate "repos/<owner>/<repo>/commits?sha=<branch>&per_page=100" --jq '.[].commit.verification | "\(.verified) \(.reason)"' | sort | uniq -c
    ```
 
 Never leave a signature over a commit committed by another identity, and never leave a rewritten commit unsigned.
@@ -29,5 +29,6 @@ Never leave a signature over a commit committed by another identity, and never l
 Everything anchored to an old hash goes stale when the rewrite lands:
 
 - **Tags** move to the re-signed commits through `--tag-name-filter cat` above. A signed tag's signature no longer verifies after the rewrite, so re-create each one with `git tag -f -s` on its new commit.
+- **Remote tags and pull request refs** keep the old commits readable on GitHub. Each moved tag is pushed again, and GitHub keeps every pull request's commits until GitHub Support purges them.
 - **Other clones** diverge from the rewritten branch, so each one is re-cloned rather than pulled.
 - **Published artifacts** that record a commit hash keep naming a hash the branch no longer holds, and no rewrite reaches them.
