@@ -387,6 +387,54 @@ mise_key() {
     return 0
 }
 
+# The npm or bun command for a step, upgrade or remove, on the package owning a real path, as PKG_CMD, or PKG_WHY where none runs.
+# An upgrade and a consolidation share it, so a copy under a name the tool shipped under earlier is upgraded or removed by that name.
+# One of the tool's recorded names must own the files, so a fork providing the same command is never replaced or removed.
+PKG_CMD=()
+PKG_WHY=""
+
+package_step() {
+    local step="$1" tool="$2" real="$3" manager="$4" recorded pkg="" candidate dir action
+    local -a command=()
+    PKG_CMD=()
+    PKG_WHY=""
+    if [[ $step == "upgrade" ]]; then action="upgrade"; else action="remove"; fi
+    recorded=$(npm_package "$tool")
+    if [[ -z $recorded ]]; then
+        PKG_WHY="no $manager package name is recorded for $tool, so $action it with $manager by hand"
+        return 0
+    fi
+    # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
+    if [[ $manager == "bun" ]]; then dir="$(bun_global_dir)/node_modules"; else dir=$(npm_root); fi
+    while IFS= read -r candidate; do
+        if [[ -n $candidate && -n $dir && $real == "$dir/$candidate"/* ]]; then
+            pkg="$candidate"
+            break
+        fi
+    done < <(npm_packages "$tool")
+    if [[ $step == "upgrade" ]]; then
+        # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
+        command=("$manager" install -g "${pkg:-$recorded}@latest")
+    elif [[ $manager == "bun" ]]; then
+        command=(bun remove -g "${pkg:-$recorded}")
+    else
+        command=(npm uninstall -g "${pkg:-$recorded}")
+    fi
+    if ! command -v "$manager" >/dev/null; then
+        PKG_WHY="$manager is not on PATH, so run: ${command[*]}"
+    elif [[ $manager == "bun" && -z $pkg ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under bun's global package $recorded, so that package does not own it, $action it where it was installed"
+    elif [[ -z $dir || $real != "$dir"/* ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, $action it where it was installed"
+    elif [[ -z $pkg ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under the npm package $recorded, so that package does not own it, $action it where it was installed"
+    elif [[ $manager == "npm" && ! -w $dir ]]; then
+        PKG_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: ${command[*]}"
+    else
+        PKG_CMD=("${command[@]}")
+    fi
+}
+
 # The brew command for a verb, upgrade or uninstall, on the package holding a real path, as BREW_CMD, or BREW_WHY where none runs.
 # An upgrade and a consolidation share it, so both read the name from where brew put the files and both leave Homebrew's Node alone.
 BREW_CMD=()
@@ -439,41 +487,9 @@ manager_plan() {
         PLAN_WHY="Nix is declarative, so update it where it is declared, for example with nix profile upgrade or in your flake or home configuration"
         ;;
     npm | bun)
-        pkg=$(npm_package "$tool")
-        if [[ -z $pkg ]]; then
-            PLAN_WHY="no $manager package name is recorded for $tool, so upgrade it with $manager by hand"
-            return 0
-        fi
-        if ! command -v "$manager" >/dev/null; then
-            PLAN_WHY="$manager is not on PATH, so run: $manager install -g $pkg@latest"
-            return 0
-        fi
-        # The recorded package must be the one that owns the file, so a fork providing the same command is never replaced by it.
-        if [[ $manager == "bun" ]]; then
-            dir="$(bun_global_dir)/node_modules"
-            if [[ -z $dir || $real != "$dir/$pkg"/* ]]; then
-                PLAN_WHY="its files at $(hide_home "$real") are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
-                return 0
-            fi
-        fi
-        if [[ $manager == "npm" ]]; then
-            # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
-            dir=$(npm_root)
-            if [[ -z $dir || $real != "$dir"/* ]]; then
-                PLAN_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
-                return 0
-            fi
-            if [[ $real != "$dir/$pkg"/* ]]; then
-                PLAN_WHY="its files at $(hide_home "$real") are not under the npm package $pkg, so that package does not own it, upgrade it where it was installed"
-                return 0
-            fi
-            if [[ ! -w $dir ]]; then
-                PLAN_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: npm install -g $pkg@latest"
-                return 0
-            fi
-        fi
-        # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-        PLAN_CMD=("$manager" install -g "$pkg@latest")
+        package_step upgrade "$tool" "$real" "$manager"
+        PLAN_CMD=("${PKG_CMD[@]}")
+        PLAN_WHY="$PKG_WHY"
         ;;
     brew)
         brew_step upgrade "$tool" "$real"
@@ -543,23 +559,9 @@ stray_plan() {
     fi
     case "$manager" in
     npm | bun)
-        if ! command -v "$manager" >/dev/null; then
-            STRAY_WHY="$manager is not on PATH, so remove it with $manager by hand"
-            return 0
-        fi
-        if [[ $manager == "npm" ]]; then dir=$(npm_root); else dir="$(bun_global_dir)/node_modules"; fi
-        while IFS= read -r pkg; do
-            [[ -n $pkg && -n $dir && $real == "$dir/$pkg"/* ]] || continue
-            if [[ $manager == "bun" ]]; then
-                STRAY_CMD=(bun remove -g "$pkg")
-            elif [[ -w $dir ]]; then
-                STRAY_CMD=(npm uninstall -g "$pkg")
-            else
-                STRAY_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: npm uninstall -g $pkg"
-            fi
-            return 0
-        done < <(npm_packages "$tool")
-        STRAY_WHY="its files at $(hide_home "$real") are not a $manager package recorded for $tool, so remove it with $manager by hand"
+        package_step remove "$tool" "$real" "$manager"
+        STRAY_CMD=("${PKG_CMD[@]}")
+        STRAY_WHY="$PKG_WHY"
         ;;
     brew)
         brew_step uninstall "$tool" "$real"
@@ -621,6 +623,7 @@ consolidate() {
         fi
         # Under --dry-run nothing is removed, so the same copy would resolve again forever.
         [[ $DRY_RUN == true ]] && return 0
+        CHANGED+=("$tool: removed the $manager copy at $(hide_home "$path")")
         hash -r
     done
     warn "$tool: a copy still resolves ahead of the managed one after $n removals"
@@ -655,6 +658,11 @@ consolidate_and_install() {
         return 1
     fi
     [[ $DRY_RUN == true ]] && return 1
+    if [[ ! -x $managed ]]; then
+        warn "$tool: its installer finished, but no managed copy is at $(hide_home "$managed")"
+        FAILED+=("$tool")
+        return 1
+    fi
     extend_path
     hash -r
     record_change "$tool" "$installed"

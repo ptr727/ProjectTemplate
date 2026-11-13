@@ -431,9 +431,6 @@ function Get-ScoopApp {
     return $null
 }
 
-# Whether the npm package a tool is recorded under is the one that owns its files.
-# The package must be installed under the prefix, and the file must sit in it or a shim must name its directory.
-# This keeps a fork that provides the same command from being replaced by the recorded package.
 # The directory an npm package installs into under the prefix of the npm on PATH, or nothing where npm cannot say.
 function Get-NpmPackageDirectory {
     param([string]$Package)
@@ -443,6 +440,9 @@ function Get-NpmPackageDirectory {
     return (Join-Path (Join-Path $prefix 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar))
 }
 
+# Whether the npm package a tool is recorded under is the one that owns its files.
+# The package must be installed under the prefix, and the file must sit in it or a shim must name its directory.
+# This keeps a fork that provides the same command from being replaced by the recorded package.
 function Test-NpmPackageOwnership {
     param([string]$Path, [string]$Package)
     $directory = Get-NpmPackageDirectory -Package $Package
@@ -482,6 +482,17 @@ function Test-BunPackageOwnership {
     $cut = $resolved.LastIndexOf('\')
     $shimDirectory = if ($cut -gt 0) { $resolved.Substring(0, $cut) } else { '' }
     return ($shimDirectory -ieq $bin -and (Test-Path -LiteralPath (Join-Path $directory 'package.json')))
+}
+
+# The package among a tool's recorded npm names that owns its files under a manager, npm or bun, or nothing where none does.
+# An upgrade and a consolidation share it, so a copy under a name the tool shipped under earlier is upgraded or removed by that name.
+function Get-OwningNpmPackage {
+    param([string]$Tool, [string]$Path, [string]$Manager)
+    foreach ($pkg in (Get-KnownNpmPackage -Tool $Tool)) {
+        $owned = if ($Manager -eq 'npm') { Test-NpmPackageOwnership -Path $Path -Package $pkg } else { Test-BunPackageOwnership -Path $Path -Package $pkg }
+        if ($owned) { return $pkg }
+    }
+    return $null
 }
 
 # What a scoop step, update or uninstall, runs for a tool's app, as Command and Arguments, or Why none runs.
@@ -540,7 +551,8 @@ function Get-ManagerPlan {
     switch ($Manager) {
         'winget' { $plan.Why = 'winget owns it and upgrade-host upgrades it' }
         { $_ -in 'npm', 'bun' } {
-            $pkg = Get-NpmPackage -Tool $Tool
+            $pkg = Get-OwningNpmPackage -Tool $Tool -Path $Path -Manager $Manager
+            if (-not $pkg) { $pkg = Get-NpmPackage -Tool $Tool }
             if (-not $pkg) {
                 $plan.Why = "no $Manager package name is recorded for $Tool, so upgrade it with $Manager by hand"
             } elseif (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
@@ -769,9 +781,8 @@ function Get-StrayPlan {
                 $plan.Why = "$Manager is not on PATH, so remove it with $Manager by hand"
                 return $plan
             }
-            foreach ($pkg in (Get-KnownNpmPackage -Tool $ToolName)) {
-                $owned = if ($Manager -eq 'npm') { Test-NpmPackageOwnership -Path $Path -Package $pkg } else { Test-BunPackageOwnership -Path $Path -Package $pkg }
-                if (-not $owned) { continue }
+            $pkg = Get-OwningNpmPackage -Tool $ToolName -Path $Path -Manager $Manager
+            if ($pkg) {
                 if ($Manager -eq 'bun') {
                     $plan.Command = 'bun'
                     $plan.Arguments = @('remove', '-g', $pkg)
@@ -820,6 +831,7 @@ function Invoke-Consolidate {
         }
         # Under -DryRun nothing is removed, so the same copy would resolve again forever.
         if ($script:DRY_RUN) { return 0 }
+        $script:CHANGED.Add("${ToolName}: removed the $manager copy at $(Hide-Home -Path $path)")
     }
     warn "${ToolName}: a copy still resolves ahead of $label after $n removals"
     return 1
@@ -861,6 +873,11 @@ function Invoke-ConsolidateAndInstall {
         return 1
     }
     if ($script:DRY_RUN) { return 1 }
+    if (-not (Test-ManagedPresent $ToolName)) {
+        warn "${ToolName}: its installer finished, but $(Get-ManagedLabel $ToolName) is not installed"
+        $script:FAILED.Add($ToolName)
+        return 1
+    }
     Update-SessionPath
     Add-VersionChange -ToolName $ToolName -Installed $Installed
     return 1
@@ -1084,7 +1101,7 @@ function Invoke-ToolInstall {
     $tool = Get-Tool $ToolName
     $path = Get-ToolPath $ToolName
     if ($path -and (Test-StrayCopy -ToolName $ToolName -Path $path)) {
-        # As in install-tools.ps1, -Install with a managed copy in place leaves it at its version, so removing what resolves ahead of it waits for -Upgrade.
+        # -Install with a managed copy in place leaves it at its version, so removing what resolves ahead of it waits for -Upgrade.
         if (Test-ManagedPresent $ToolName) {
             log "${ToolName}: $(Hide-Home $path) resolves ahead of $(Get-ManagedLabel $ToolName), -Upgrade removes it, -Install leaves it to avoid downgrading what resolves ahead of it"
             return

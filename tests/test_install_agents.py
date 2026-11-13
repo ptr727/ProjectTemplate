@@ -189,6 +189,20 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(
             self.called(), ["npm uninstall -g opencode-ai", "curl https://opencode.ai/v2/install"]
         )
+        self.assertIn("opencode: removed the npm copy at", result.stdout)
+
+    def test_a_stray_opencode_that_stays_is_upgraded_by_its_own_package_name(self) -> None:
+        self.stray_npm_opencode()
+        self.curl()
+        # A global root this user cannot write makes the stray one only its owner can remove.
+        node_modules = self.dir / "lib" / "node_modules"
+        node_modules.chmod(0o555)
+        self.addCleanup(node_modules.chmod, 0o755)
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("run as its owner: npm uninstall -g opencode-ai", result.stdout)
+        self.assertIn("run as its owner: npm install -g opencode-ai@latest", result.stdout)
+        self.assertEqual(self.called(), [])
 
     def test_a_dry_run_of_the_consolidation_prints_both_steps_and_runs_nothing(self) -> None:
         self.stray_npm_opencode()
@@ -221,7 +235,8 @@ class TestInstallAgents(unittest.TestCase):
         result = self.run_script("--upgrade", "--yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("cannot be installed: curl is not installed", result.stdout)
-        self.assertEqual(self.called(), [])
+        # The stray stays, so it is upgraded under the package name that owns it.
+        self.assertEqual(self.called(), ["npm install -g opencode-ai@latest"])
 
     def test_a_managed_opencode_alone_is_upgraded_by_its_installer(self) -> None:
         self.stub("opencode", "2.0.0", where=self.home / ".opencode" / "bin")
@@ -875,6 +890,18 @@ class TestInstallAgentsWindows(unittest.TestCase):
 
     def test_upgrade_removes_a_stray_opencode_then_installs_the_managed_package(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
+        # An npm that lays the managed package down on install, so the check that it landed has something to find.
+        npm = self.bin / "npm"
+        npm.write_text(
+            STUB.replace("$BANNER", "npm 10.0.0").replace(
+                "esac\nexit 0\n",
+                '"install -g @opencode/cli")\n'
+                '    mkdir -p "$STUB_DIR/node_modules/@opencode/cli"\n'
+                '    printf "{}" >"$STUB_DIR/node_modules/@opencode/cli/package.json"\n'
+                "    ;;\nesac\nexit 0\n",
+            ),
+            encoding="utf-8",
+        )
         result = self.run_script(
             "-Upgrade",
             "-Yes",
@@ -885,6 +912,16 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [c for c in self.recorded() if c.startswith(("npm install", "npm uninstall"))]
         self.assertEqual(calls, ["npm uninstall -g opencode-ai", "npm install -g @opencode/cli"])
+
+    def test_a_stray_opencode_that_stays_is_planned_by_its_own_package_name(self) -> None:
+        npm_bin = self.stray_npm_opencode("opencode-ai")
+        # A prefix this user cannot write leaves the managed package uninstallable, so the stray stays.
+        self.dir.chmod(0o555)
+        self.addCleanup(self.dir.chmod, 0o755)
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("npm install -g opencode-ai@latest", result.stdout)
+        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
 
     def test_a_managed_package_path_does_not_reach_fails_the_upgrade(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
