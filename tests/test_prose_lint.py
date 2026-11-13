@@ -8371,6 +8371,23 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         self.assertEqual(1, status, said)
         self.assertIn("tool.py:1: comment-added", said)
 
+    def test_a_merge_leaves_out_a_comment_the_branch_already_committed(self) -> None:
+        """Against MERGE_HEAD alone, a file both parents changed reads the branch's own lines as new."""
+        self.write("tool.py", "value = 1\n")
+        self.write("other.py", "other = 1\n\n\n\nend = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("checkout", "-qb", "feature")
+        self.write("other.py", self.COMMENT + "other = 1\n\n\n\nend = 1\n")
+        self.git("commit", "-qam", "feature comment, allowed where it landed")
+        self.git("checkout", "-q", "develop")
+        self.write("other.py", "other = 1\n\n\n\nend = 2\n")
+        self.git("commit", "-qam", "develop edits the same file")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        status, said = self.gate("--diff-commit")
+        self.assertEqual(0, status, said)
+
     def test_a_merge_still_refuses_a_comment_its_resolution_adds(self) -> None:
         self.merge_in_progress()
         self.write("other.py", self.COMMENT + "other = 3\n")

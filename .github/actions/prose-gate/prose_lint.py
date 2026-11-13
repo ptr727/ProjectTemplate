@@ -464,8 +464,10 @@ def tree_env() -> dict[str, str]:
 def commit_base(root: Path) -> str:
     """What the commit in progress adds to: MERGE_HEAD in a merge, HEAD, or the empty tree.
 
-    Against HEAD, a merge reads every line its merged-in parent brought as added. A first commit
-    has no HEAD, and the empty tree, hashed in the repository's own object format, has nothing.
+    Against HEAD, a merge reads every line its merged-in parent brought as added. So the run also
+    keeps a merge to the lines HEAD's diff names, which leaves the lines new against both parents.
+    A first commit has no HEAD, and the empty tree, hashed in the repository's own object format,
+    has nothing.
     The format is read from the config, since a git before 2.29 has no `--show-object-format`.
     Such a git cannot open a SHA-256 repository, so an unset format is SHA-1.
     """
@@ -2225,6 +2227,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     if a.diff is not None and scope is None:
         return refuse("error-no-diff", base=a.diff)
+    if scope is not None and a.diff_commit and a.diff == "MERGE_HEAD":
+        # A merge commit adds only what differs from both parents, so the branch's own lines stay out.
+        ours = changed_lines("HEAD", scan_root, tuple(a.exclude), scan_paths, {})
+        if ours is None:
+            return refuse("error-no-diff", base="HEAD")
+        scope = {k: v & ours[k] for k, v in scope.items() if k in ours and v & ours[k]}
     if scope is not None:
         matched = [f for f in files if keys[f] in scope]
         # A non-empty diff whose readable files the scan matched none of failed to scope.

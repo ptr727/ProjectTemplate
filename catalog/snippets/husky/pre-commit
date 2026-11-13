@@ -74,7 +74,7 @@ else
 fi
 
 # The prose gate reads the paths this commit stages, so an unrelated untracked file cannot refuse it.
-# `--diff-commit` has the gate diff against HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
+# `--diff-commit` has the gate diff against HEAD, or against both parents on a merge commit, so no line either parent brought reads as added.
 # It reads their working-tree content, so a partially staged file is judged on all of its edits.
 # A path that is no longer a file is dropped, since the gate refuses a submodule or a deleted path.
 # An empty list skips the gate, which given no path would scan the whole tree.

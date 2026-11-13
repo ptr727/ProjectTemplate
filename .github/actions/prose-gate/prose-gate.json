@@ -64,7 +64,7 @@
     },
     "--diff-commit": {
       "action": "store_true",
-      "help": "as --diff, against what the commit in progress adds to: MERGE_HEAD during a merge, HEAD otherwise, and the empty tree before a first commit, for a pre-commit hook"
+      "help": "as --diff, against what the commit in progress adds to: both parents during a merge, HEAD otherwise, and the empty tree before a first commit, for a pre-commit hook"
     },
     "--allow-comments": {
       "action": "store_true",

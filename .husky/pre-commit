@@ -71,7 +71,7 @@ else
 fi
 
 # The prose gate is scoped to what changed, which is the policy for prose.
-# `--diff-commit` has the gate diff against HEAD, or MERGE_HEAD on a merge commit, so the lines a merged-in parent brought are not read as added.
+# `--diff-commit` has the gate diff against HEAD, or against both parents on a merge commit, so no line either parent brought reads as added.
 # A rule is applied as a file is next edited rather than swept across the tree.
 # Whole-tree costs about 2.2 seconds where the diff-scoped run costs about 0.15.
 # The gate reads the paths this commit stages, so an unrelated untracked file cannot refuse it.
