@@ -473,6 +473,19 @@ class TestInstallAgents(unittest.TestCase):
             "it sits inside mise's Node, and the npm on PATH does not own it", result.stdout
         )
 
+    def test_a_stray_inside_a_mise_node_is_never_fixed_by_removing_that_node(self) -> None:
+        install = self.dir / "mise" / "installs" / "node" / "20.1.0"
+        self.stub(
+            "opencode", "1.0.0", where=install / "lib" / "node_modules" / "opencode-ai" / "bin"
+        )
+        (self.dir / "mise_ls.json").write_text(
+            json.dumps({"core:node": [{"install_path": str(install)}]}), encoding="utf-8"
+        )
+        self.stub("mise", "mise 2024.1.1")
+        result = self.run_script("--report")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("mise unuse", result.stdout)
+
     def test_bun_honors_its_global_dir_variable_and_not_bunfig(self) -> None:
         custom = self.dir / "custom-global"
         self.stub("codex", "1.0.0", where=custom / "node_modules" / "@openai" / "codex" / "bin")
@@ -960,13 +973,11 @@ class TestInstallAgentsWindows(unittest.TestCase):
         notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])
         self.assertIn("did not report its prefix, so run: npm uninstall -g opencode-ai", notes)
 
-    @unittest.skipIf(
-        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
-    )
     def test_a_managed_shim_is_not_called_a_stray_where_npm_cannot_say(self) -> None:
-        # No npm on the test PATH, and the shim names the recorded package, so it is not told apart as a stray.
+        # An npm stub with no prefix file answers, and the shim names the recorded package.
         shims = self.dir / "npm"
         self.own_npm(self.stub("opencode", "2.0.0", shims), self.dir, "@opencode/cli")
+        self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Report", "-Json", "opencode", extra_path=shims)
         self.assertEqual(result.returncode, 0, result.stderr)
         notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])

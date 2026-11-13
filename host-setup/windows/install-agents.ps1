@@ -505,7 +505,7 @@ function Get-OwningNpmPackage {
     return $null
 }
 
-# The recorded npm name a tool's path or its shim's text shows, read without asking npm, or nothing where neither shows one.
+# Which of a tool's npm names, current or earlier, its path or its shim's text shows, read without asking npm, or nothing where neither does.
 function Get-NamedNpmPackage {
     param([string]$Tool, [string]$Path)
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'

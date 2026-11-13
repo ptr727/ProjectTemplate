@@ -447,6 +447,34 @@ package_step() {
     fi
 }
 
+# The mise command for a step, upgrade or remove, on the tool mise's listing holds at a real path.
+# It is MISE_CMD, or MISE_WHY where none runs.
+# An upgrade and a stray's removal share it, so both read the key from mise's own listing and both leave mise's Node alone.
+MISE_CMD=()
+MISE_WHY=""
+
+mise_step() {
+    local step="$1" real="$2" name action
+    MISE_CMD=()
+    MISE_WHY=""
+    if [[ $step == "upgrade" ]]; then action="upgrade"; else action="remove"; fi
+    # The tool is named by mise's own listing, matched on install path, rather than read from the directory name.
+    name=$(mise_key "$real")
+    if [[ -z $name ]]; then
+        MISE_WHY="mise and jq must both be on PATH and mise's listing must hold an entry whose install path holds $(hide_home "$real"), and none does, so $action it with mise by hand"
+        return 0
+    fi
+    # A Node runtime is never changed for an agent in it.
+# An upgrade would leave the agent behind, and a removal would take the runtime from under it.
+    case "$name" in
+    node | core:node | nodejs)
+        MISE_WHY="it sits inside mise's Node, and the npm on PATH does not own it, so $action it where it was installed"
+        return 0
+        ;;
+    esac
+    if [[ $step == "upgrade" ]]; then MISE_CMD=(mise upgrade "$name"); else MISE_CMD=(mise unuse -g "$name"); fi
+}
+
 # The brew command for a verb, upgrade or uninstall, on the package holding a real path, as BREW_CMD, or BREW_WHY where none runs.
 # An upgrade and a stray's removal share it, so both read the name from where brew put the files and both leave Homebrew's Node alone.
 BREW_CMD=()
@@ -509,20 +537,9 @@ manager_plan() {
         PLAN_WHY="$BREW_WHY"
         ;;
     mise)
-        # The tool is named by mise's own listing, matched on install path, rather than read from the directory name.
-        name=$(mise_key "$real")
-        if [[ -z $name ]]; then
-            PLAN_WHY="mise and jq must both be on PATH and mise's listing must hold an entry whose install path holds $(hide_home "$real"), and none does, so upgrade it with mise by hand"
-            return 0
-        fi
-        # A Node runtime is never upgraded for an agent in it, which would leave the agent behind in the old Node.
-        case "$name" in
-        node | core:node | nodejs)
-            PLAN_WHY="it sits inside mise's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
-            return 0
-            ;;
-        esac
-        PLAN_CMD=(mise upgrade "$name")
+        mise_step upgrade "$real"
+        PLAN_CMD=("${MISE_CMD[@]}")
+        PLAN_WHY="$MISE_WHY"
         ;;
     esac
 }
@@ -577,8 +594,8 @@ stray_removal() {
         printf 'as root, apt remove %s' "${name:-<package>}"
         ;;
     mise)
-        name=$(mise_key "$real")
-        printf 'mise unuse -g %s' "${name:-<tool>}"
+        mise_step remove "$real"
+        if ((${#MISE_CMD[@]} > 0)); then printf '%s' "${MISE_CMD[*]}"; else printf '%s' "$MISE_WHY"; fi
         ;;
     nix)
         printf 'remove it where Nix declares it, for example with nix profile remove'
