@@ -722,7 +722,10 @@ def markdown_section(text, name):
 
 
 def carried_link_errors(root, baseline):
-    """Reject links that stop being truthful when their Markdown source is carried."""
+    """Reject links that stop being truthful when their Markdown source is carried.
+
+    The text read is the hub copy a carrier adapts, and its links resolve where the carried file lands.
+    """
     universal = {
         item["path"]
         for item in baseline
@@ -735,7 +738,7 @@ def carried_link_errors(root, baseline):
         if not isinstance(item, dict) or not isinstance(item.get("path"), str):
             continue
         source = item["path"]
-        path = root / source
+        path = root / hub_copy(item, source)
         if not source.endswith(".md") or not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")

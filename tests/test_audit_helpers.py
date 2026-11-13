@@ -4207,6 +4207,12 @@ class SecretStemCase(unittest.TestCase):
                 [],
                 [".gitignore", "ops/.gitignore"],
             ),
+            (
+                "a .gitignore whose class names .secrets keeps its old guard line silent",
+                {".gitignore": ".[Ss]ecrets/\n[Ss]ecrets/\n"},
+                [],
+                [],
+            ),
         ]
         for label, texts, named, naming in cases:
             with self.subTest(label):

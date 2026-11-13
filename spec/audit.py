@@ -480,12 +480,17 @@ def secret_name_breaks(name, in_secrets):
     return not ENV_SECRET_NAME.fullmatch(named) or (in_secrets and named.endswith(".txt"))
 
 
+def dotted_secrets(segment):
+    """Whether one path or .gitignore segment names .secrets itself, a class such as [Ss] included, with no wildcard."""
+    return not set(segment) & set("*?") and fnmatch.fnmatchcase(".secrets", segment)
+
+
 def misnamed_secrets(segment):
     """Whether one path or .gitignore segment names a secrets folder other than .secrets, in any letter case.
 
     A class such as [Ss] matches as its letters do, and a segment able to name .secrets itself is not one.
     """
-    if set(segment) & set("*?") or fnmatch.fnmatchcase(".secrets", segment):
+    if set(segment) & set("*?") or dotted_secrets(segment):
         return False
     return any(fnmatch.fnmatchcase(name, segment.lower()) for name in ("secrets", ".secrets"))
 
@@ -670,7 +675,7 @@ def named_secret_signals(tree, read_text, directories, holding):
         elif gitignore:
             lines = text.splitlines()
             live = [line.strip() for line in lines if not line.strip().startswith("#")]
-            if any(".secrets" in line.lstrip("!").split("/") for line in live):
+            if any(dotted_secrets(s) for line in live for s in line.lstrip("!").split("/")):
                 continue
             for line in lines:
                 found = ignored_secrets_folder(line)
