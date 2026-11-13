@@ -34,10 +34,10 @@ dependency it stays free of, though the hook still needs network for the
 `hub_fetch_run.py` calls above. A fully offline clone therefore fails the commit loudly on the
 fetch rather than silently skipping the doc gates.
 
-A copied `.husky/pre-commit` is an extensionless shebang script, so pin it to **LF** in
-`.gitattributes` (`.husky/pre-commit text eol=lf`), git-level enforcement independent of the
-editor. The fleet's `[*]` `.editorconfig` default already gives it LF, no path-specific
-override needed. A CRLF shebang breaks execution.
+A copied `.husky/pre-commit` is an extensionless shebang script, and a CRLF shebang breaks
+execution. The fleet's paired LF defaults, `[*]` in `.editorconfig` and `* text=auto eol=lf` in
+`.gitattributes`, already give it LF, so it takes no per-file pin. Only a repository whose two
+defaults are CRLF pins it to LF in both files.
 
 Both language blocks run unconditionally, with no tool-presence guard.
 A repo that keeps a
