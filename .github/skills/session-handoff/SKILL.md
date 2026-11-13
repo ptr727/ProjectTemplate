@@ -297,8 +297,11 @@ it.
    is because the body keeps the count it was written with, and a resume reads the issue's comments.
 4. **Remove the hub clone** "The Attended Session" step 0 made, where it made one, once no step
    above still needs `$handoff`. No other step or sweep reaches that clone. From outside it, confirm
-   `git -C <clone> status --porcelain` prints nothing, then delete that exact directory. Ignored
-   files there are tool caches, so the removal takes them too. A clone
+   `git -C <clone> status --porcelain` prints nothing. Then read
+   `git -C <clone> status --porcelain --ignored` and name each ignored entry it lists in the
+   session's closing message. `--porcelain` alone never lists them, and the removal deletes them.
+   Then delete that exact directory, as `repo-worktree` "Listing and Cleanup" requires of a
+   temporary standalone clone. A clone
    holding uncommitted work is left in place and named in the session's closing message.
 5. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory. A quirk of
