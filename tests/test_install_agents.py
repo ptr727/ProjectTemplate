@@ -940,6 +940,21 @@ class TestInstallAgentsWindows(unittest.TestCase):
         writes = [c for c in self.recorded() if not c.endswith("--version") and c not in READS]
         self.assertEqual(writes, [])
 
+    @unittest.skipIf(
+        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
+    )
+    def test_an_opencode_1_shim_is_a_stray_where_npm_cannot_say(self) -> None:
+        # No npm on the test PATH, so only the shim's own text names its package.
+        shims = self.dir / "npm"
+        self.own_npm(self.stub("opencode", "1.0.0", shims), self.dir, "opencode-ai")
+        result = self.run_script("-Report", "-Json", "opencode", extra_path=shims)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])
+        self.assertIn("npm uninstall -g opencode-ai", notes)
+
+    @unittest.skipIf(
+        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
+    )
     def test_a_managed_shim_is_not_called_a_stray_where_npm_cannot_say(self) -> None:
         # No npm on the test PATH, so nothing can tell the managed shim from another copy.
         shims = self.dir / "npm"

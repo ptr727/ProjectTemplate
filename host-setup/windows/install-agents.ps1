@@ -131,7 +131,8 @@ several sources, opencode 2 replaced opencode 1's npm package, and its installer
 only. Another copy PATH reaches first, an npm opencode-ai among them, is reported with the command
 that removes it and is never removed here. -Upgrade and -Install leave opencode alone while one
 is first on PATH, and act on the managed package once none is. Where npm cannot report its
-prefix, an npm copy cannot be told from the managed package and is handled as any npm copy is.
+prefix, only an npm copy whose shim names opencode-ai is told from the managed package, and any
+other npm copy is handled as any npm copy is.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -494,11 +495,10 @@ function Test-BunPackageOwnership {
     return ($shimDirectory -ieq $bin -and (Test-Path -LiteralPath (Join-Path $directory 'package.json')))
 }
 
-# The package among a tool's recorded npm names that owns its files under a manager, npm or bun, or nothing where none does.
-# An upgrade and a stray's removal share it, so a copy under a name the tool shipped under earlier is named by that name.
+# The package among the given npm names that owns a tool's files under a manager, npm or bun, or nothing where none does.
 function Get-OwningNpmPackage {
-    param([string]$Tool, [string]$Path, [string]$Manager)
-    foreach ($pkg in (Get-KnownNpmPackage -Tool $Tool)) {
+    param([string[]]$Names, [string]$Path, [string]$Manager)
+    foreach ($pkg in $Names) {
         $owned = if ($Manager -eq 'npm') { Test-NpmPackageOwnership -Path $Path -Package $pkg } else { Test-BunPackageOwnership -Path $Path -Package $pkg }
         if ($owned) { return $pkg }
     }
@@ -516,8 +516,9 @@ function Get-NamedNpmPackage {
 }
 
 # What an npm or bun step, upgrade or remove, runs for the package owning a tool's files, as Command and Arguments, or Why none runs.
-# An upgrade and a stray's removal share it, so a copy under a name the tool shipped under earlier is named by that name.
-# One of the tool's recorded names must own the files, so a fork providing the same command is never replaced or removed.
+# An upgrade and a stray's removal share it.
+# An upgrade matches only the recorded package, while a removal also matches a name the tool shipped under earlier.
+# The matched name must own the files, so a fork providing the same command is never replaced or removed.
 function Get-PackageStep {
     param([string]$Step, [string]$Tool, [string]$Path, [string]$Manager)
     $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
@@ -527,9 +528,10 @@ function Get-PackageStep {
         $plan.Why = "no $Manager package name is recorded for $Tool, so $action it with $Manager by hand"
         return $plan
     }
-    $pkg = Get-OwningNpmPackage -Tool $Tool -Path $Path -Manager $Manager
+    # An upgrade under an earlier name would reinstall the version that name replaced.
+    $names = if ($Step -eq 'upgrade') { @($recorded) } else { Get-KnownNpmPackage -Tool $Tool }
+    $pkg = Get-OwningNpmPackage -Names $names -Path $Path -Manager $Manager
     # Where npm or bun cannot say which package owns the files, a removal names the one the path or its shim shows.
-    # An upgrade names the recorded package instead, since an earlier name would reinstall the version it replaced.
     $name = if ($pkg) { $pkg } elseif ($Step -eq 'remove') { Get-NamedNpmPackage -Tool $Tool -Path $Path } else { $null }
     if (-not $name) { $name = $recorded }
     # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
@@ -780,8 +782,11 @@ function Test-StrayCopy {
     $managed = Get-ManagedRecord $ToolName
     if (-not $managed) { return $false }
     if ((Get-ToolManager $Path) -ne $managed.Manager) { return $true }
-    # Where npm cannot say where it installs, an npm copy cannot be told from the managed one, so it is not called a stray.
-    if (-not (Get-NpmPrefix)) { return $false }
+    # Where npm cannot say where it installs, only a shim naming another of the tool's packages is told from the managed one.
+    if (-not (Get-NpmPrefix)) {
+        $named = Get-NamedNpmPackage -Tool $ToolName -Path $Path
+        return [bool]($named -and $named -ne (Get-NpmPackage -Tool $ToolName))
+    }
     # The managed copy is the recorded package's shim inside the prefix of the npm on PATH, so a shim elsewhere naming it is a stray.
     return -not ((Test-NpmOwnership -Path $Path) -and (Test-NpmPackageOwnership -Path $Path -Package (Get-NpmPackage -Tool $ToolName)))
 }

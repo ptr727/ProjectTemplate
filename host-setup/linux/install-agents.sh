@@ -385,13 +385,14 @@ mise_key() {
 }
 
 # The npm or bun command for a step, upgrade or remove, on the package owning a real path, as PKG_CMD, or PKG_WHY where none runs.
-# An upgrade and a stray's removal share it, so a copy under a name the tool shipped under earlier is named by that name.
-# One of the tool's recorded names must own the files, so a fork providing the same command is never replaced or removed.
+# An upgrade and a stray's removal share it.
+# An upgrade matches only the recorded package, while a removal also matches a name the tool shipped under earlier.
+# The matched name must own the files, so a fork providing the same command is never replaced or removed.
 PKG_CMD=()
 PKG_WHY=""
 
 package_step() {
-    local step="$1" tool="$2" real="$3" manager="$4" recorded pkg="" named candidate dir action
+    local step="$1" tool="$2" real="$3" manager="$4" recorded pkg="" named candidate dir action names
     local -a command=()
     PKG_CMD=()
     PKG_WHY=""
@@ -403,16 +404,17 @@ package_step() {
     fi
     # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
     if [[ $manager == "bun" ]]; then dir="$(bun_global_dir)/node_modules"; else dir=$(npm_root); fi
+    # An upgrade under an earlier name would reinstall the version that name replaced.
+    if [[ $step == "upgrade" ]]; then names="$recorded"; else names=$(npm_packages "$tool"); fi
     while IFS= read -r candidate; do
         if [[ -n $candidate && -n $dir && $real == "$dir/$candidate"/* ]]; then
             pkg="$candidate"
             break
         fi
-    done < <(npm_packages "$tool")
+    done <<<"$names"
     # Where npm or bun cannot say which package owns the files, a removal names the one the path itself shows.
-    # An upgrade names the recorded package instead, since an earlier name would reinstall the version it replaced.
     named="$pkg"
-    if [[ -z $named ]]; then
+    if [[ -z $named && $step == "remove" ]]; then
         while IFS= read -r candidate; do
             if [[ -n $candidate && $real == */node_modules/"$candidate"/* ]]; then
                 named="$candidate"
