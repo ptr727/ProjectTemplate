@@ -165,7 +165,7 @@ With no tool named, --report and --upgrade select every managed tool, while --in
 none, so an install always names what it installs, or says --all.
 
 A tool reads as "self" when no package manager owns it, so this script runs the tool's own
-updater, and as the name of a package manager when one owns it. --upgrade then runs that
+updater, or for the managed opencode its installer, and as the name of a package manager when one owns it. --upgrade then runs that
 manager's upgrade for that one package: npm or bun install the latest tag, Homebrew upgrades the
 formula or cask, and mise upgrades the tool. apt is upgraded by upgrade-host.sh, and Nix is
 declarative, so neither is run. An npm directory this user cannot write is reported with its

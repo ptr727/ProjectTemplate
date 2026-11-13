@@ -720,15 +720,15 @@ $TOOLS = @(
     }
     @{
         Name    = 'opencode'
-        Source  = 'npm install -g @opencode/cli'
+        Source  = "npm install -g $(Get-NpmPackage -Tool 'opencode')"
         # The managed copy is the npm package Get-NpmPackage records, upgraded through npm's plan, so no Upgrade of its own runs.
         Managed = $true
         Install = {
             if (-not $script:DRY_RUN -and -not (Get-ToolPath 'npm')) {
-                warn 'opencode installs on Windows as the npm package @opencode/cli, and npm is not installed (https://opencode.ai/docs/)'
+                warn "opencode installs on Windows as the npm package $(Get-NpmPackage -Tool 'opencode'), and npm is not installed (https://opencode.ai/docs/)"
                 return 1
             }
-            return (Invoke-Step -Command 'npm' -Arguments @('install', '-g', '@opencode/cli'))
+            return (Invoke-Step -Command 'npm' -Arguments @('install', '-g', (Get-NpmPackage -Tool 'opencode')))
         }
     }
     @{
