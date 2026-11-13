@@ -49,6 +49,12 @@ import pr_review_rounds
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
 from import_probe import import_delta
+from test_pre_commit_hook import (
+    assert_group_ended,
+    end_group,
+    wait_until_started,
+    write_executable,
+)
 
 DEFAULT_POLICY = pr_review.review_policy.load_default()
 _POLICY_PATCH = mock.patch.object(
@@ -3165,10 +3171,10 @@ class TestCli(GqlCase):
         self.assertIn("waited=", self.out.getvalue())
 
     def test_wait_sleeps_no_further_than_its_timeout_and_then_prints_the_digest(self) -> None:
-        """The outcome prints at the bound, so an outer bound just above `--timeout` still reads it.
+        """No sleep runs past `--timeout`, so the outcome follows it by the reads alone.
 
         Sleeps of 15, 20, and 30 seconds reach 65, and the next is cut from 45 to 35. Uncut, the
-        wait reached 110 seconds on a 100-second bound before it printed anything.
+        wait slept to 110 seconds on a 100-second bound before it printed anything.
         """
         self.answer(payload([], pending=True))
         clock = [0.0]
@@ -8523,6 +8529,7 @@ class TestWaitInterrupt(unittest.TestCase):
     """
 
     def test_sigterm_mid_wait_prints_one_line_and_ends_by_that_signal(self) -> None:
+        """The signal goes half a second after the stand-in starts, once the read is under way."""
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             scripts = root / "checkout" / "scripts"
@@ -8532,11 +8539,9 @@ class TestWaitInterrupt(unittest.TestCase):
             subprocess.run(["git", "init", "--quiet", str(scripts.parent)], check=True, env=env)
             origin = "https://github.com/acme/widget.git"
             subprocess.run([*git, "remote", "add", "origin", origin], check=True, env=env)
-            bin_dir, held = root / "bin", root / "gh.pid"
+            bin_dir, ready = root / "bin", root / "gh.started"
             bin_dir.mkdir()
-            gh = bin_dir / "gh"
-            gh.write_text(f'#!/bin/sh\necho $$ > "{held}"\nexec sleep 300\n', encoding="utf-8")
-            gh.chmod(0o755)
+            write_executable(bin_dir / "gh", f'#!/bin/sh\n: > "{ready}"\nexec sleep 300\n')
             env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
             argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
             proc = subprocess.Popen(
@@ -8545,33 +8550,19 @@ class TestWaitInterrupt(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
                 start_new_session=True,
             )
             try:
-                deadline = time.monotonic() + 60
-                while not held.is_file() or not held.read_text(encoding="utf-8").strip():
-                    self.assertIsNone(proc.poll(), "the wait ended before its first read")
-                    self.assertLess(time.monotonic(), deadline, "no read started within 60s")
-                    time.sleep(0.05)
+                wait_until_started(proc, ready)
+                time.sleep(0.5)
                 proc.send_signal(signal.SIGTERM)
                 _, err = proc.communicate(timeout=60)
-                survived = self.running(int(held.read_text(encoding="utf-8")))
             finally:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-                proc.wait(timeout=60)
+                end_group(proc)
             self.assertEqual(-signal.SIGTERM, proc.returncode, err)
-            self.assertEqual(["pr_review.py: interrupted by SIGTERM"], err.splitlines())
-            self.assertFalse(survived, "the read in flight outlived the interrupted wait")
-
-    @staticmethod
-    def running(pid: int) -> bool:
-        """Whether `pid` names a live process, read by the null signal."""
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return False
-        return True
+            self.assertEqual("pr_review.py: interrupted by SIGTERM.\n", err)
+            assert_group_ended(proc.pid)
 
 
 if __name__ == "__main__":
