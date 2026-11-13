@@ -38,8 +38,9 @@ trap 'if [ -n "$staged" ]; then rm -f "$staged"; fi' EXIT
 trap 'interrupted INT; exit 130' INT
 trap 'interrupted TERM; exit 143' TERM
 
-# A tool runs in the background and is waited for, since a trap runs only once a foreground command returns.
+# The Python step runs in the background and is waited for, since a trap runs only once a foreground command returns.
 # The trap stops it with SIGTERM, because a background child ignores SIGINT.
+# A launcher such as uvx, uv run, or dotnet stays in the foreground, since that kill would reach it and not the tool it starts.
 run_child() {
     "$@" &
     child=$!
@@ -51,9 +52,9 @@ run_child() {
 
 # Ruff and mypy, via uvx per this repo's own CI invocation for a repo with no `uv.lock`.
 # Ruff runs the version CI pins, taking the manifest the validator reads as a requirement.
-run_child uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff format --check .
-run_child uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff check .
-run_child uvx mypy@latest
+uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff format --check .
+uvx --with-requirements .github/actions/python-tool-pins/requirements.txt ruff check .
+uvx mypy@latest
 
 # The interpreter is chosen by running the probes spec/host-tools.json declares, in its order.
 # Running one rather than testing for a name is the point.

@@ -471,8 +471,6 @@ def commit_base(root: Path) -> str:
     for ref in ("MERGE_HEAD", "HEAD"):
         if git_text("-C", str(root), "rev-parse", "-q", "--verify", f"{ref}^{{commit}}", env=env):
             return ref
-    if git_text("-C", str(root), "symbolic-ref", "-q", "HEAD", env=env) is None:
-        return "HEAD"
     found = git_text("-C", str(root), "rev-parse", "--show-object-format", env=env)
     try:
         return hashlib.new((found or "").strip(), b"tree 0\0").hexdigest()

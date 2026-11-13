@@ -369,8 +369,12 @@ class TestTheHookCleansUpWhenInterrupted(HookCase):
     A hook that exits 130 or 143 instead has not died by the signal, so a calling loop runs on.
     """
 
-    # The tool the hook runs first, which it starts in the background rather than in the foreground.
-    first_tool = "uvx"
+    def block_last_step(self, ready: Path) -> None:
+        """Make the eol step, the one the hook starts in the background, mark itself and sleep."""
+        (self.root / "scripts" / "repo_gate.py").write_text(
+            f"import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep({WAIT_SECONDS})\n",
+            encoding="utf-8",
+        )
 
     def interrupt(self, sig: signal.Signals) -> tuple[int, str]:
         ready = self.outside / "gate-started"
@@ -407,23 +411,19 @@ class TestTheHookCleansUpWhenInterrupted(HookCase):
         return hook.returncode, stderr
 
     def interrupt_the_hook_alone(self, sig: signal.Signals) -> tuple[int, str]:
-        """Signal the hook's own process while its first tool runs, as a `kill` of one PID does.
+        """Signal the hook's own process while its background step runs, as a `kill` of one PID does.
 
-        The tool takes no signal of its own here, so only the hook's trap can stop it.
+        The step takes no signal of its own here, so only the hook's trap can stop it. Under
+        Husky.Net the hook runs as the inner shell its generated `husky.sh` starts, which is the
+        shell this case signals.
         """
-        ready = self.outside / "tool-started"
-        blocking = self.outside / "blocking-tool"
-        blocking.mkdir()
-        write_executable(
-            blocking / self.first_tool,
-            f'#!/bin/sh\n: >"{ready}"\nexec sleep {WAIT_SECONDS}\n',
-        )
-        env = dict(self.env)
-        env["PATH"] = f"{blocking}{os.pathsep}{env['PATH']}"
+        ready = self.outside / "step-started"
+        ready.unlink(missing_ok=True)
+        self.block_last_step(ready)
         hook = subprocess.Popen(
             ["sh", ".husky/pre-commit"],
             cwd=str(self.root),
-            env=env,
+            env=self.env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -451,15 +451,13 @@ class TestTheHookCleansUpWhenInterrupted(HookCase):
         self.assertIn("pre-commit: interrupted by SIGTERM.", stderr)
         self.assertEqual([], list(self.tmp.iterdir()))
 
-    def test_a_signal_to_the_hook_alone_stops_the_tool_it_runs(self) -> None:
+    def test_a_signal_to_the_hook_alone_stops_the_step_it_runs(self) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
             with self.subTest(signal=sig.name):
                 status, stderr = self.interrupt_the_hook_alone(sig)
                 self.assertEqual(-sig, status, stderr)
                 self.assertIn(f"pre-commit: interrupted by {sig.name}.", stderr)
                 self.assertEqual([], list(self.tmp.iterdir()))
-                shutil.rmtree(self.outside / "blocking-tool")
-                (self.outside / "tool-started").unlink()
 
 
 class TestTheSnippetDiffsAMergeAgainstItsMergedInParent(
@@ -478,7 +476,13 @@ class TestTheSnippetRefusesWhenItsPathListFails(TestTheHookRefusesWhenItsPathLis
 
 class TestTheSnippetCleansUpWhenInterrupted(TestTheHookCleansUpWhenInterrupted):
     hook = SNIPPET_HOOK
-    first_tool = "dotnet"
+
+    def block_last_step(self, ready: Path) -> None:
+        """Make the helper block on the eol step, the one the snippet starts in the background."""
+        (self.root / "hub_fetch_run.py").write_text(
+            f"import pathlib, time\npathlib.Path({str(ready)!r}).touch()\ntime.sleep({WAIT_SECONDS})\n",
+            encoding="utf-8",
+        )
 
 
 @unittest.skipUnless(sys.platform == "linux", "runs a bash hook with executable stubs")

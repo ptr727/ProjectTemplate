@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Drive hub_fetch_run.py's unborn-HEAD rewrite, probe-failure path, provenance, and uv run.
+"""Drive hub_fetch_run.py's commit lookup, provenance, uv run, and interrupt handling.
 
-The git cases run in constructed temp repositories, and the snippet bounds its own git probe with
-a timeout. The network is stubbed, so nothing here reaches GitHub.
+The network is stubbed, so nothing here reaches GitHub.
 
 Run as `python3 tests/test_hub_fetch_run.py`, or under `python3 -m unittest discover -s tests`.
 """
@@ -21,7 +20,6 @@ import signal
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 import urllib.error
 import urllib.request
@@ -29,6 +27,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Self
 from unittest import mock
+
+from test_pre_commit_hook import assert_group_ended, end_group, wait_until_started
 
 ROOT = Path(__file__).resolve().parent.parent
 SNIPPET = ROOT / "catalog" / "snippets" / "hub_fetch_run.py"
@@ -66,112 +66,6 @@ def in_dir(path: Path):
         yield
     finally:
         os.chdir(old)
-
-
-class HeadProbeTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.tmp = Path(self._tmp.name)
-
-    def unborn_repo(self, name: str = "unborn") -> Path:
-        repo = self.tmp / name
-        repo.mkdir()
-        git(repo, "init", "-q")
-        return repo
-
-    def born_repo(self) -> Path:
-        repo = self.unborn_repo("born")
-        git(repo, "commit", "-q", "--allow-empty", "-m", "first")
-        return repo
-
-    def test_unborn_head_rewrites_only_diff_head(self) -> None:
-        argv = ["--check", "x", "--diff", "HEAD", ".", "--diff", "main", "HEAD"]
-        with in_dir(self.unborn_repo()):
-            result = hub.resolve_unborn_head(argv)
-        self.assertEqual(
-            result,
-            ["--check", "x", "--diff", hub.EMPTY_TREE, ".", "--diff", "main", "HEAD"],
-        )
-
-    def test_unborn_head_leaves_other_diff_values_alone(self) -> None:
-        argv = ["--diff", "origin/develop", ".", "HEAD"]
-        with in_dir(self.unborn_repo()):
-            self.assertEqual(hub.resolve_unborn_head(argv), argv)
-
-    def test_born_head_rewrites_nothing(self) -> None:
-        argv = ["--diff", "HEAD", "."]
-        with in_dir(self.born_repo()):
-            self.assertEqual(hub.resolve_unborn_head(argv), argv)
-
-    def test_input_list_is_not_mutated(self) -> None:
-        argv = ["--diff", "HEAD"]
-        with in_dir(self.unborn_repo()):
-            hub.resolve_unborn_head(argv)
-        self.assertEqual(argv, ["--diff", "HEAD"])
-
-    def test_head_is_unborn_distinguishes_states(self) -> None:
-        with in_dir(self.unborn_repo()):
-            self.assertTrue(hub.head_is_unborn())
-        with in_dir(self.born_repo()):
-            self.assertFalse(hub.head_is_unborn())
-
-    def assert_probe_exits(self, run: mock.Mock) -> str:
-        stderr = io.StringIO()
-        with (
-            mock.patch.object(hub.subprocess, "run", run),
-            contextlib.redirect_stderr(stderr),
-            self.assertRaises(SystemExit) as caught,
-        ):
-            hub.resolve_unborn_head(["--diff", "HEAD"])
-        self.assertEqual(caught.exception.code, 1)
-        return stderr.getvalue()
-
-    def test_non_git_directory_is_a_probe_failure(self) -> None:
-        plain = self.tmp / "plain"
-        plain.mkdir()
-        env = {"GIT_CEILING_DIRECTORIES": str(self.tmp)}
-        stderr = io.StringIO()
-        with (
-            in_dir(plain),
-            mock.patch.dict(os.environ, env),
-            contextlib.redirect_stderr(stderr),
-            self.assertRaises(SystemExit) as caught,
-        ):
-            hub.resolve_unborn_head(["--diff", "HEAD"])
-        self.assertEqual(caught.exception.code, 1)
-        self.assertIn("failed unexpectedly", stderr.getvalue())
-
-    def test_nonzero_exit_with_stderr_is_a_probe_failure(self) -> None:
-        probe = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"fatal: boom")
-        message = self.assert_probe_exits(mock.Mock(return_value=probe))
-        self.assertIn("boom", message)
-
-    def test_exit_two_is_a_probe_failure(self) -> None:
-        probe = subprocess.CompletedProcess([], 2, stdout=b"", stderr=b"")
-        self.assert_probe_exits(mock.Mock(return_value=probe))
-
-    def test_missing_git_executable_is_a_probe_failure(self) -> None:
-        message = self.assert_probe_exits(mock.Mock(side_effect=FileNotFoundError("git")))
-        self.assertIn("could not run git", message)
-
-    def test_hung_probe_is_a_probe_failure(self) -> None:
-        run = mock.Mock(side_effect=subprocess.TimeoutExpired("git", 30))
-        message = self.assert_probe_exits(run)
-        self.assertIn("could not run git", message)
-
-    def test_probe_is_bounded_by_a_timeout(self) -> None:
-        probe = subprocess.CompletedProcess([], 0, stdout=b"", stderr=b"")
-        run = mock.Mock(return_value=probe)
-        with mock.patch.object(hub.subprocess, "run", run):
-            hub.head_is_unborn()
-        self.assertIsNotNone(run.call_args.kwargs.get("timeout"))
-
-    def test_probe_is_not_run_without_a_diff_head_pair(self) -> None:
-        run = mock.Mock(side_effect=AssertionError("probe must not run"))
-        with mock.patch.object(hub.subprocess, "run", run):
-            self.assertEqual(hub.resolve_unborn_head(["--diff", "main"]), ["--diff", "main"])
-            self.assertEqual(hub.resolve_unborn_head(["HEAD", "--diff"]), ["HEAD", "--diff"])
 
 
 class FakeResponse:
@@ -502,33 +396,14 @@ class InterruptTests(unittest.TestCase):
             start_new_session=True,
         )
         try:
-            deadline = time.monotonic() + TIMEOUT
-            while not ready.exists():
-                if helper.poll() is not None or time.monotonic() > deadline:
-                    raise AssertionError("the stub never started: " + helper.communicate()[1])
-                time.sleep(0.05)
+            wait_until_started(helper, ready)
             self.assertNotEqual([], list(scratch.iterdir()), "the helper holds no fetched tree")
             (os.killpg if group else os.kill)(helper.pid, sig)
             _, stderr = helper.communicate(timeout=TIMEOUT)
-            self.assert_group_ended(helper.pid)
+            assert_group_ended(helper.pid)
         finally:
-            if helper.poll() is None:
-                os.killpg(helper.pid, signal.SIGKILL)
-                helper.communicate(timeout=TIMEOUT)
+            end_group(helper)
         return helper.returncode, stderr, [p.name for p in scratch.iterdir()]
-
-    def assert_group_ended(self, pgid: int) -> None:
-        """Every process the helper started is gone, which a survivor would fail by holding the group."""
-        deadline = time.monotonic() + TIMEOUT
-        while True:
-            try:
-                os.killpg(pgid, 0)
-            except ProcessLookupError:
-                return
-            if time.monotonic() > deadline:
-                os.killpg(pgid, signal.SIGKILL)
-                raise AssertionError("a process the helper started outlived it")
-            time.sleep(0.05)
 
     def test_a_signal_mid_run_stops_the_script_and_removes_the_tree(self) -> None:
         for sig in (signal.SIGINT, signal.SIGTERM):
