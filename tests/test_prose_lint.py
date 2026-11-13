@@ -2871,6 +2871,11 @@ class TestSentenceSplitRule(BaitCase):
         found = prose_lint.check_file(path, {"sentence-split"})
         self.assertEqual([(2, "sentence-split")], [(n, kind) for n, kind, _ in found])
 
+    def test_a_span_wrapped_in_a_blockquote_keeps_the_quote_marker(self) -> None:
+        """The marker is no span content, so the quoted line is still skipped as a quote."""
+        text = "> See `git remote\n> get-url` now and\nthen it ends.\n"
+        self.assertEqual([], self.kinds(text, {"sentence-split"}))
+
     def test_a_finished_sentence_does_not_continue(self) -> None:
         for text in (
             "One sentence.\nAnother sentence.\n",

@@ -1008,6 +1008,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
 
     Each table cell's inline token maps its whole row. Emptying a span twice is not idempotent, so
     a row has its code spans emptied once, a cell at a time.
+    A blockquote's markers are kept out of a span wrapped across its lines.
     """
     matter = front_matter_end(lines)
     code: set[int] = set()
@@ -1043,7 +1044,9 @@ def extract_markdown(lines: list[str]) -> Extracted:
                 if parents[-1:] in (["th_open"], ["td_open"]):
                     texts = [by_cell(text, strip_inline_code) for text in texts]
                 else:
-                    texts = strip_inline_code("\n".join(texts)).split("\n")
+                    heads = [m.group() if (m := QUOTE_PREFIX.match(t)) else "" for t in texts]
+                    body = "\n".join(t[len(h) :] for t, h in zip(texts, heads, strict=True))
+                    texts = [h + t for h, t in zip(heads, strip_inline_code(body).split("\n"))]
                 spanless.update(zip(numbers, texts, strict=True))
             if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
