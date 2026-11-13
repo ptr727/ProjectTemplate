@@ -633,15 +633,20 @@ class Plan:
 def push_mode(local: Local, item: Item | None, override: int | None) -> int:
     """The mode a pushed item's tag carries.
 
-    On Windows `st_mode` carries no POSIX permission, so the tag is never derived from it there.
+    An existing item's tag is read first, so a missing or malformed one refuses unless --mode
+    replaces it. On Windows `st_mode` carries no POSIX permission, so the tag is never derived there.
     """
     if override is not None:
         return override
+    try:
+        current = mode_of(item) if item is not None else None
+    except Refusal as exc:
+        raise Refusal(f"{exc}, so pass --mode to replace it") from exc
     if not IS_WINDOWS:
         assert local.mode is not None
         return local.mode & 0o777
-    if item is not None:
-        return mode_of(item)
+    if current is not None:
+        return current
     raise Refusal(
         "on Windows a new item needs --mode, since no POSIX mode can be read from the file"
     )
@@ -703,11 +708,9 @@ def push_plans(
             plans.append(Plan("create", title, path, local, None, mode))
             continue
         remote = download(op, vault, item)
-        if remote == local.data:
-            if mode_or_none(item) == mode:
-                print(f"  same      {title}")
-            else:
-                plans.append(Plan("retag", title, path, local, item, mode, remote))
+        same_bytes = remote == local.data
+        if same_bytes and mode_or_none(item) == mode:
+            print(f"  same      {title}")
             continue
         assert local.mtime is not None
         if item.updated > local.mtime and not a.overwrite_newer:
@@ -721,7 +724,9 @@ def push_plans(
                 " so pass --overwrite-newer to replace it"
             )
             continue
-        plans.append(Plan("update", title, path, local, item, mode, remote))
+        plans.append(
+            Plan("retag" if same_bytes else "update", title, path, local, item, mode, remote)
+        )
     return plans
 
 

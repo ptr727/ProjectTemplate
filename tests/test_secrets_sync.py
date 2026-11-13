@@ -637,6 +637,33 @@ class TestPush(Case):
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("item", "edit")])
         self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0640",))
 
+    def test_a_mode_change_against_a_newer_remote_tag_is_stale_too(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(
+            vid, ".secrets/alpha", SECRET, ("mode:0600",), updated="2099-01-01T00:00:00Z"
+        )
+        path = self.write(".secrets/alpha", mode=0o644)
+        code, out, _ = self.push()
+        self.assertEqual(code, 0)
+        self.assertIn("--overwrite-newer", out)
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 1)
+        self.assertIn("--overwrite-newer", err)
+        self.assertEqual(self.fake.writes(), [])
+        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0600",))
+
+    def test_a_malformed_tag_on_an_existing_item_needs_mode(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", "mode:0644"))
+        self.write(".secrets/alpha")
+        code, _, err = self.push()
+        self.assertEqual(code, 1)
+        self.assertIn("pass --mode", err)
+        self.assertEqual(self.fake.writes(), [])
+        code, _, err = self.push("--mode", "0600")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0600",))
+
     def test_a_symlink_source_is_refused(self) -> None:
         target = self.write("target")
         (self.home / "link").symlink_to(target)
@@ -947,6 +974,21 @@ class TestPull(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual((restore / ".secrets/alpha").read_bytes(), SECRET)
         self.assertFalse((self.home / ".secrets").exists())
+
+    def test_the_secret_lands_in_a_temporary_file_that_is_0600_before_its_mode_is_set(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:0644",))
+        seen: list[int] = []
+        real_fsync = os.fsync
+
+        def observed(fd: int) -> None:
+            seen.append(stat.S_IMODE(os.fstat(fd).st_mode))
+            real_fsync(fd)
+
+        with unittest.mock.patch.object(ss.os, "fsync", observed):
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(seen, [0o600])
+        self.assertEqual(stat.S_IMODE((self.home / ".secrets/alpha").stat().st_mode), 0o644)
 
     def test_the_temporary_file_is_removed_when_the_rename_fails(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
