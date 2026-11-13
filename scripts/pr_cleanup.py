@@ -63,6 +63,7 @@ from typing import NamedTuple
 import gh_graphql as shared
 import handoff
 import pr_review as core
+from pr_cleanup_rest import CleanupUnread, cleanup_rest, promotion_refusal
 
 Q_CLEANUP_TARGET = """
 query($o:String!,$r:String!,$n:Int!){
@@ -102,11 +103,6 @@ mutation($refId:ID!){
 """
 DELETE_SETTLE_DELAYS = (1, 2, 4)
 PERMANENT = ("develop", "main")
-COMMIT_ID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
-
-
-class CleanupUnread(Exception):
-    """A read `cleanup` needed did not produce an answer, reported at exit 2."""
 
 
 def cleanup_read(query: str, **variables: object) -> dict:
@@ -119,16 +115,6 @@ def cleanup_read(query: str, **variables: object) -> dict:
     except shared.GraphQLError as exc:
         sys.stderr.write(exc.detail)
         raise CleanupUnread(str(exc)) from exc
-
-
-def cleanup_rest(path: str, what: str, jq: str = ".") -> object:
-    """One REST read for `cleanup`, retried, raising with its stderr where nothing parsed."""
-    proc = core.reread(path, jq)
-    data = core.parsed_json(proc)
-    if data is None:
-        sys.stderr.write(proc.stderr)
-        raise CleanupUnread(f"the {what} read failed rc={proc.returncode} or printed no JSON")
-    return data
 
 
 def cleanup_ref(owner: str, repo: str, branch: str) -> dict | None:
@@ -164,53 +150,6 @@ def branch_rules(owner: str, repo: str, branch: str) -> list[str]:
     if protected:
         found.append("branch protection")
     return found
-
-
-def in_history(owner: str, repo: str, branch: str, oid: str) -> bool:
-    """Whether commit `oid` is in `branch`'s history, read from GitHub's comparison of the two."""
-    found = cleanup_rest(
-        f"repos/{owner}/{repo}/compare/{branch}...{oid}",
-        f"comparison of {oid} with {branch}",
-        "{status: .status}",
-    )
-    status = found.get("status") if isinstance(found, dict) else None
-    if status not in ("ahead", "behind", "diverged", "identical"):
-        raise CleanupUnread(
-            f"the comparison of {oid} with {branch} returned no status: {found!r}"[:400]
-        )
-    return status in ("behind", "identical")
-
-
-def promotion_refusal(owner: str, repo: str, head: str, default: str) -> str | None:
-    """Why a pull request merged into the default branch is no promotion, or None where it is one.
-
-    The documented promotion that `develop`'s rules cannot resolve is a branch cut from the
-    default branch that merges `develop`, landed by a merge commit. So its merged head is in the
-    default branch's history, and that head is a merge whose second parent is in `develop`'s.
-    Each fact is read from GitHub, never inferred from the head's name, which any branch can take.
-    """
-    if not core.safe_ref(default):
-        raise CleanupUnread(
-            f"the default branch {default!r} holds a character that changes a REST path"
-        )
-    if not COMMIT_ID.fullmatch(head):
-        raise CleanupUnread(f"the pull request's head {head!r} is no commit id")
-    if not in_history(owner, repo, default, head):
-        return (
-            f"its merged head {head} is not in {default!r}'s history, so no merge commit landed it"
-        )
-    parents = cleanup_rest(
-        f"repos/{owner}/{repo}/commits/{head}", "head commit", "[.parents[].sha]"
-    )
-    if not isinstance(parents, list) or not all(
-        isinstance(p, str) and COMMIT_ID.fullmatch(p) for p in parents
-    ):
-        raise CleanupUnread(f"the head commit read returned no parent list: {parents!r}"[:400])
-    if len(parents) != 2:
-        return f"its merged head {head} has {len(parents)} parents, so it merged no develop"
-    if not in_history(owner, repo, "develop", parents[1]):
-        return f"its merged head's second parent {parents[1]} is not in develop's history"
-    return None
 
 
 def permanent_branch(branch: str, default: str) -> bool:
