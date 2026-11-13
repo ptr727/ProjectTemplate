@@ -264,14 +264,14 @@ require_secret() {
 # The reason is that the file runs with the positional parameters in view and can change them.
 # What the file itself prints goes to /dev/null rather than into the value.
 # `BASH_ENV`, `POSIXLY_CORRECT` and `SHELLOPTS` are dropped so nothing but the file runs ahead of the read.
-# The child runs `require_secret` on <env-file> before sourcing it, and defines it there, so an include behind `declare -F require_secret` is checked too.
-# The caller still owes that guard on every include, since an include without it is sourced unchecked.
+# It checks nothing about the file, so a caller runs `require_secret` on it first.
+# The child defines `require_secret`, so a file the env file includes behind `declare -F require_secret` is checked, and an unguarded include is not.
 read_env_value() {
     local checks
     checks=$(declare -f require_secret secret_verdict secret_shape_verdict secret_state unresolved_link_reason secret_content_verdict secret_content_state secret_content_refusal) || {
-        printf 'ERROR: read_env_value cannot check %s, since a function it ships to the reading bash is not defined\n' "$1" >&2
+        printf 'ERROR: read_env_value cannot read %s, since a function it ships to check the files that one includes is not defined\n' "$1" >&2
         return 1
     }
     # shellcheck disable=SC2016  # Every expansion belongs to the child bash.
-    env -u BASH_ENV -u POSIXLY_CORRECT -u SHELLOPTS bash -Eeuo pipefail -c 'eval "$1"; shift; env_read_name=$2; unset -v "$env_read_name"; require_secret "$1"; set -a; source "$1" >/dev/null; set +a; printf "%s" "${!env_read_name:-}"' _ "$checks" "$1" "$2"
+    env -u BASH_ENV -u POSIXLY_CORRECT -u SHELLOPTS bash -Eeuo pipefail -c 'eval "$1"; shift; env_read_name=$2; unset -v "$env_read_name"; set -a; source "$1" >/dev/null; set +a; printf "%s" "${!env_read_name:-}"' _ "$checks" "$1" "$2"
 }

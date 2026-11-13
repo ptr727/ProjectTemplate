@@ -319,14 +319,6 @@ class ReadEnvValue(Tree):
         )
         self.assertEqual((result.returncode, result.stdout), (0, ""))
 
-    def test_a_loose_mode_on_the_file_itself_is_refused(self) -> None:
-        env = write(self.root / "app.env", "APP_HOST=two\n", 0o644)
-        result = run('read_env_value "$1" APP_HOST', str(env))
-        self.assertEqual(
-            (result.returncode, result.stdout, result.stderr),
-            (1, "", f"ERROR: {env} is mode 644, and must give group and other no access\n"),
-        )
-
     def guarded_include(self, content: str, mode: int = 0o600) -> Path:
         write(self.root / "extra.env", content, mode)
         return write(
