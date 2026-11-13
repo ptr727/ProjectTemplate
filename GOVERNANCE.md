@@ -63,6 +63,7 @@ Two workflow models, set per repo by the registry `workflowModel` field. Most re
 promotions, and forward-only with no back-merges. That model has promotion traps worth knowing before the
 first one (never delete `develop`, resolve an EOL-only conflict by taking `develop`'s side).
 **GitHub's own "default branch" repository setting reads `main`, but `develop` is where work starts and where in-flight content lives.** So a worktree or clone that defaults to "the default branch" lands on `main`. It can silently miss content already merged to `develop` but not yet promoted. Branch from `develop`, on either workflow model, unless the task is explicitly about `main`-only content.
+Issue-closing keywords go only in a promotion pull request's body. A squash setting can copy a pull request's body into its commit. Then a keyword in a feature pull request's body closes its issue once the promotion reaches `main`. A direct-push commit message does the same. So neither carries a keyword. Where either names the issues it fixes, it uses the inert `Closes on promotion:` line. A keyword fires even inside a sentence that negates it.
 **Operational** repos differ substantially (direct-to-`develop`, advisory CI, dispatch-only
 release), covered as a delta rather than a separate model.
 
@@ -163,7 +164,7 @@ The fleet's tooling lives in the hub once and a repository runs it from there ra
 
 ## Pull Request Title and Commit Message Conventions
 
-A PR title and a commit message share one contract. The subject is imperative, 72 characters or fewer, and has no trailing period. Vague titles like `update stuff` or `wip` are out, while Dependabot's `Bump X from Y to Z` is fine as-is. Unsolicited `Co-Authored-By:` lines are out. So is any release-bump magnitude in the title, since Nerdbank.GitVersioning computes the next version from `version.json` and git history.
+A PR title and a commit message share one contract. The subject is imperative, 72 characters or fewer, and has no trailing period. The 72 measures the authored title or subject, and the `(#N)` suffix a squash merge appends sits outside it. Title case lowercases only the bind words the skill lists, and that list is exhaustive. Vague titles like `update stuff` or `wip` are out, while Dependabot's `Bump X from Y to Z` is fine as-is. Unsolicited `Co-Authored-By:` lines are out. So is any release-bump magnitude in the title, since Nerdbank.GitVersioning computes the next version from `version.json` and git history.
 
 This is packaged as the `comment-and-doc-style` Skill at `.agents/skills/comment-and-doc-style/SKILL.md` in the hub. That path is not a repo-relative link, since it is hub-local and not carried into every fleet repo. The summary above sketches the contract. Read the skill for the full format, rules, and examples.
 

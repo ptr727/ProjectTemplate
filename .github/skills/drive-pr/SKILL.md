@@ -187,7 +187,9 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    repo's auto-delete-head-branches setting is kept off fleet-wide (to protect `develop` and
    `main` from it, GitHub has no per-branch exception). So nothing deletes an ordinary feature
    branch automatically. Stop here and report the merged PR when the target is develop only.
-5. Open the develop -> main promotion PR if it does not exist yet, or find the existing one.
+5. Open the develop -> main promotion PR if it does not exist yet, or find the existing one. Its
+   body carries the closing keywords, checked as `branching-and-release-model`'s closing-keyword
+   bullets state.
 6. Drive its review loop the same way. A finding that needs a code change never gets pushed to
    the promotion PR directly, since its head is develop. So land the fix as a fresh pass through
    steps 1 to 4 in its own worktree and branch. Then return here.

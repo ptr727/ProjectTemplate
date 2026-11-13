@@ -98,6 +98,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    another session merged meanwhile rides along, as `backlog-burndown` "Away Mode" accepts.
    Where no report named a head, a promotion made ready by hand, the go-ahead covers the head
    this step recorded.
+   Whichever case set it, run the closing-set check `branching-and-release-model` states in its
+   negated-keyword bullet on the head step 3 merges. This step runs from a hub checkout, so read
+   the range's commit messages from the target rather than with a local `git log`:
+   `gh api --paginate repos/owner/repo/compare/main...<sha> --jq '.commits[].commit.message' > <file>`.
+   Run that read on its own and stop the merge on a non-zero exit, since a failed read is not a
+   range with no closure. Then run that bullet's `grep` over `<file>`. Stop and report any closure
+   it prints that the promotion body does not state, rather than merging.
 3. `gh pr merge [number] --merge --match-head-commit <sha> --repo owner/repo`, where `<sha>` is
    the head the go-ahead covers. Attended, that is the head `drive-pr`'s ready report named, or
    the moved head the maintainer approved after step 2's re-ask. Under an away-mode grant, or
