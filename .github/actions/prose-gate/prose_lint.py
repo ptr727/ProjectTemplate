@@ -1294,7 +1294,7 @@ def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
 
     A Markdown code span is quoted data, as a fence is, so the `spanless` unit has it blanked.
     Outside Markdown a backtick is structural, such as a shell command substitution, so a code
-    line is read whole. So is Markdown front matter and an HTML block.
+    line is read whole. So are Markdown front matter and an HTML block.
     """
     return [f for line in unit.lines for f in charset_findings(line.number, line.text)]
 
