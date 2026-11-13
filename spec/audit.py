@@ -1790,25 +1790,25 @@ def baseline_file_findings(slug, ground, path, item, ref=None):
 def carries_fleet_owned_values(item, canon_text, down_text):
     """Whether a copy of a unit declaring `repoOwnedKeys` holds every other leaf its JSON canonical holds.
 
-    A value at one of those keys is the repository's own choice, and a key the copy adds is its own too.
-    So such a copy is current whatever those hold, and a text either side that is not JSON is judged as before.
+    A value at one of those keys is the repository's own choice, and so is a top-level block the canonical lacks.
+    A leaf the copy adds inside a block the canonical holds reads as one the canonical dropped.
+    A text either side that is not plain JSON, a byte-order mark aside, is dated as before.
     """
     owned = item.get("repoOwnedKeys")
     if not owned or canon_text is None:
         return False
     try:
-        canon, down = json.loads(canon_text), json.loads(down_text)
+        canon = json.loads(canon_text.lstrip("\ufeff"))
+        down = json.loads(down_text.lstrip("\ufeff"))
     except ValueError:
         return False
-    if not isinstance(canon, dict) or not isinstance(down, dict):
-        return False
+    canon_leaves = dict(validate.json_leaves(canon))
     held = dict(validate.json_leaves(down))
+    blocks = {key.split(".", 1)[0] for key in canon_leaves}
+    if any(k.split(".", 1)[0] in blocks and k not in canon_leaves and k not in owned for k in held):
+        return False
     missing = object()
-    return all(
-        held.get(key, missing) == value
-        for key, value in validate.json_leaves(canon)
-        if key not in owned
-    )
+    return all(held.get(k, missing) == v for k, v in canon_leaves.items() if k not in owned)
 
 
 def intent_trail(slug, ref, path, item, down_text):

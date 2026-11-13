@@ -36,7 +36,7 @@ MANAGED_TOOLS=("${TOOLS[@]}")
 readonly PYTHON_PACKAGES=(build-essential ca-certificates curl python3 python3-dev python3-venv python3-pip)
 readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-setuptools python3-wheel)
 
-# The SDK line a fleet .NET repository's global.json selects in its sdk block, which the dotnet default set carries wherever the feed does.
+# The fleet's default SDK line, the one the hub's global.json baseline selects, which the dotnet default set carries wherever the feed does.
 # It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
 # The hub's tests/test_install_tools.py fails while it differs from that baseline, so a move of that baseline edits both.
 readonly DOTNET_FLEET_LINE="10.0"
@@ -871,7 +871,7 @@ dotnet_sdk_fleet() {
 }
 
 # The package the dotnet row reports on.
-# The fleet line comes first, since a host holding only a newer line builds no fleet .NET repository.
+# The fleet line comes first, since a host holding only a newer line builds no repository on the fleet default.
 dotnet_sdk_primary() {
     local package
     package=$(dotnet_sdk_fleet)
@@ -931,7 +931,7 @@ microsoft_feed() {
 }
 
 # The default set is the fleet's SDK line and the newest line, one package where the two are the same.
-# The fleet line is the one a fleet .NET repository's global.json sdk block selects, so a host without it builds no repository carrying one.
+# The fleet line is the default the hub's global.json baseline selects, so a host without it builds no repository on that default.
 # The newest line is installed beside it, so a newer line stays an addition rather than a replacement.
 # The optional set is every other SDK line the feed carries, for a host that has to build against more than one.
 dotnet_install() {
@@ -1206,7 +1206,7 @@ tool_note() {
             fleet=$(dotnet_sdk_fleet)
             latest=$(dotnet_sdk_latest)
             if [[ -z $fleet ]]; then
-                note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select"
+                note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the fleet default line"
             fi
             # The row reads the fleet line, so a pending upgrade of the newest line, also in the default set, is named here.
             # Without a fleet line the row reads the newest line itself, so its own status already says so.
@@ -1523,7 +1523,7 @@ list_tools() {
     log "Package sets:"
     info "python default  : ${PYTHON_PACKAGES[*]}"
     info "python optional : ${PYTHON_OPTIONAL[*]}"
-    info "dotnet default  : dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select, and the newest line the feed carries"
+    info "dotnet default  : dotnet-sdk-$DOTNET_FLEET_LINE, the fleet default line, and the newest line the feed carries"
     info "dotnet optional : every other SDK line the feed carries"
 }
 

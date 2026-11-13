@@ -14,7 +14,7 @@ Use each tool's official casing in task labels, docs, and prose, per the `commen
 
 ### Toolchain Versions
 
-The hub sets each language's default toolchain line once, in a carried baseline file. Each repository selects its own line in its own copy of that file. That copy is the repository's source of truth, and the hub's workflows install the line it selects. They fall back to the hub's default only where a repository carries no selector.
+Where the hub carries a baseline file that selects a language's toolchain line, that file sets the fleet's default line once. Each repository selects its own line in its own copy of that file. That copy is the repository's source of truth, and the hub's workflows install the line it selects. They fall back to the hub's default only where a repository carries no selector.
 
 - **A repository may lead or lag the default.** One repository can move to a newer major while the fleet stays, or hold an older line while the fleet moves.
 - **A move edits the selector and every setting that names the same line, together.** These include a target framework, a devcontainer image tag, and any fixed language version.

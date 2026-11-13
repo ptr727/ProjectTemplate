@@ -3036,7 +3036,18 @@ class IntentAdvisoryCase(unittest.TestCase):
                 trailing,
             ),
             ("a fleet value dropped", '{"sdk": {"version": "11.0.100"}}', trailing),
+            (
+                "a value the canonical dropped",
+                '{"sdk": {"version": "11.0.100", "rollForward": "latestFeature", "allowPrerelease": false}}',
+                trailing,
+            ),
+            (
+                "a byte-order mark",
+                '\ufeff{"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}}',
+                None,
+            ),
             ("not JSON", "{", trailing),
+            ("not an object", "[]", trailing),
         ]
         for label, down, want in cases:
             with self.subTest(label), self.patched({"snip/global.json": canon}):

@@ -634,7 +634,7 @@ function Write-InstallFailure {
 
 # --- Tools ---
 
-# The SDK major a fleet .NET repository's global.json selects in its sdk block, the winget package's major.
+# The fleet's default SDK major, the one the hub's global.json baseline selects, and the winget package's major.
 # It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
 # The hub's tests/test_install_tools.py fails while it differs from that baseline, so a move of that baseline edits both.
 $DOTNET_MAJOR = 10
@@ -861,9 +861,13 @@ function Add-ToolNote {
         note 'dotnet' "optional set not selected: $($Tool.Optional -join ', ')"
     }
     if ($Tool.Name -eq 'dotnet') {
-        $optionalMajors = @($Tool.Optional | ForEach-Object { ($_ -split '\.')[-1] })
         $listed = Get-DotnetSdk
-        $sdk = @($listed | Where-Object { $optionalMajors -notcontains ($_ -split '\.')[0] })
+        $managed = @($Tool.Optional | Where-Object {
+                $major = ($_ -split '\.')[-1]
+                @($listed | Where-Object { ($_ -split '\.')[0] -eq $major }).Count -gt 0 -and
+                @(Get-WingetInstalled -Id $_ | Where-Object { $_ }).Count -gt 0
+            } | ForEach-Object { ($_ -split '\.')[-1] })
+        $sdk = @($listed | Where-Object { $managed -notcontains ($_ -split '\.')[0] })
         $untracked = Get-UntrackedDotnetSdk -Installed $State.Installed -Sdk $sdk
         if ($untracked) {
             note 'dotnet' "dotnet --list-sdks holds $untracked, newer than the $($State.Installed) winget installed, so something other than $($State.Package), such as Visual Studio, put it there. dotnet runs it wherever no global.json pins another, and the status compares $($State.Package) alone"
@@ -1643,15 +1647,15 @@ function Invoke-ToolApply {
     if ($script:WITH_OPTIONAL) { $packages += $record.Optional }
 
     foreach ($package in $packages) {
-        if ($package -ne $target -and -not (Get-WingetAvailable -Id $package)) {
-            info "${ToolName}: winget carries no $package yet, so it is skipped"
-            continue
-        }
         $started = Get-Date
         $code = if ($state.Rows.Count -gt 0 -and $script:MODE -eq 'upgrade' -and $package -eq $target) {
             Invoke-WingetUpgrade -Id $package
         } else {
             Invoke-WingetInstall -Id $package
+        }
+        if ($code -eq $script:NOT_FOUND -and $package -ne $target) {
+            info "${ToolName}: winget carries no $package yet, so it is skipped"
+            continue
         }
         if ($code -ne 0) {
             $executable = $null
