@@ -409,7 +409,8 @@ package_step() {
             break
         fi
     done < <(npm_packages "$tool")
-    # Where npm or bun cannot say which package owns the files, the command names the one the path itself shows.
+    # Where npm or bun cannot say which package owns the files, a removal names the one the path itself shows.
+    # An upgrade names the recorded package instead, since an earlier name would reinstall the version it replaced.
     named="$pkg"
     if [[ -z $named ]]; then
         while IFS= read -r candidate; do
@@ -421,7 +422,7 @@ package_step() {
     fi
     if [[ $step == "upgrade" ]]; then
         # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-        command=("$manager" install -g "${named:-$recorded}@latest")
+        command=("$manager" install -g "${pkg:-$recorded}@latest")
     elif [[ $manager == "bun" ]]; then
         command=(bun remove -g "${named:-$recorded}")
     else

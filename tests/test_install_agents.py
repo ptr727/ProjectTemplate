@@ -930,6 +930,16 @@ class TestInstallAgentsWindows(unittest.TestCase):
     @unittest.skipIf(
         shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
     )
+    def test_a_copy_no_manager_owns_is_still_a_stray_where_npm_cannot_say(self) -> None:
+        # An npm that reports no prefix, so only an npm copy goes untold, and this one is no npm copy.
+        self.stub("opencode", "1.0.0")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("remove it by hand", result.stderr)
+        writes = [c for c in self.recorded() if not c.endswith("--version") and c not in READS]
+        self.assertEqual(writes, [])
+
     def test_a_managed_shim_is_not_called_a_stray_where_npm_cannot_say(self) -> None:
         # No npm on the test PATH, so nothing can tell the managed shim from another copy.
         shims = self.dir / "npm"

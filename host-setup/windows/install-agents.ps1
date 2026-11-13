@@ -130,7 +130,8 @@ opencode is the one tool with a managed copy, the npm package @opencode/cli, sin
 several sources, opencode 2 replaced opencode 1's npm package, and its installer script is bash
 only. Another copy PATH reaches first, an npm opencode-ai among them, is reported with the command
 that removes it and is never removed here. -Upgrade and -Install leave opencode alone while one
-is first on PATH, and act on the managed package once none is.
+is first on PATH, and act on the managed package once none is. Where npm cannot report its
+prefix, an npm copy cannot be told from the managed package and is handled as any npm copy is.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -527,8 +528,9 @@ function Get-PackageStep {
         return $plan
     }
     $pkg = Get-OwningNpmPackage -Tool $Tool -Path $Path -Manager $Manager
-    # Where npm or bun cannot say which package owns the files, the command names the one the path or its shim shows.
-    $name = if ($pkg) { $pkg } else { Get-NamedNpmPackage -Tool $Tool -Path $Path }
+    # Where npm or bun cannot say which package owns the files, a removal names the one the path or its shim shows.
+    # An upgrade names the recorded package instead, since an earlier name would reinstall the version it replaced.
+    $name = if ($pkg) { $pkg } elseif ($Step -eq 'remove') { Get-NamedNpmPackage -Tool $Tool -Path $Path } else { $null }
     if (-not $name) { $name = $recorded }
     # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
     $arguments = if ($Step -eq 'upgrade') { @('install', '-g', "$name@latest") } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
@@ -777,9 +779,9 @@ function Test-StrayCopy {
     param([string]$ToolName, [string]$Path)
     $managed = Get-ManagedRecord $ToolName
     if (-not $managed) { return $false }
-    # Where npm cannot say where it installs, no copy can be told from the managed one, so none is called a stray.
-    if (-not (Get-NpmPrefix)) { return $false }
     if ((Get-ToolManager $Path) -ne $managed.Manager) { return $true }
+    # Where npm cannot say where it installs, an npm copy cannot be told from the managed one, so it is not called a stray.
+    if (-not (Get-NpmPrefix)) { return $false }
     # The managed copy is the recorded package's shim inside the prefix of the npm on PATH, so a shim elsewhere naming it is a stray.
     return -not ((Test-NpmOwnership -Path $Path) -and (Test-NpmPackageOwnership -Path $Path -Package (Get-NpmPackage -Tool $ToolName)))
 }
