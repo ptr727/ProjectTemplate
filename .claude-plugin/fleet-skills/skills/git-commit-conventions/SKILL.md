@@ -163,12 +163,7 @@ the rewrite looks, a rejected push is recoverable, a force-pushed one is not.
 
 ## History rewrites re-identify only what changed
 
-**Do not rewrite a commit that does not need to change.** A history rewrite (e.g. `git filter-repo`
-to strip PII) re-signs every touched commit with the rewriter's key. If that commit is still
-committed by a bot (`dependabot[bot]`, `github-actions[bot]`) or GitHub's own web-flow, the signature will not match the committer. The require-signed-commits rule then rejects it. Scope the
-rewrite to only the commits that must change. Set `committer` (and `author`) to the rewriter's
-identity on any non-own commit that must be modified. Verify with `git log --show-signature` after
-any rewrite. See `references/history-rewrite.md` for the full rule.
+**Do not rewrite history unless a commit must change, and re-sign every commit the rewrite reaches.** A rewrite cascades, since a commit's hash covers its parents' hashes, so it reaches every descendant of the earliest commit it changes. `git filter-repo` (for example, to strip PII) strips the signature from every commit it processes and signs nothing. So the rewritten history lands unsigned, which the require-signed-commits rule rejects. State each branch's reach before rewriting, and re-sign in a pass that signs each commit. GitHub verifies a signature against the commit's `committer`. So in that pass set `committer` to the rewriter's signing identity on every commit another identity committed, such as a bot's. Keep its `author`, since verification reads only the committer. Verify through GitHub's API (`commit.verification.verified` and `reason`), since `git log --show-signature` cannot see GitHub's committer match. See `references/history-rewrite.md` for the full rule.
 
 ## Never run destructive git commands without being asked
 
