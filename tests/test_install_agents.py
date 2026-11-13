@@ -51,7 +51,6 @@ case "$*" in
 "prefix -g") cat "$STUB_DIR/npm_prefix" 2>/dev/null || true ;;
 "ls --json") cat "$STUB_DIR/mise_ls.json" 2>/dev/null || true ;;
 "which opencode"|"which codex") cat "$STUB_DIR/mise_which" 2>/dev/null || true ;;
-"uninstall -g "*|"remove -g "*) [[ -z ${REMOVES:-} ]] || rm -f "$REMOVES" ;;
 esac
 exit 0
 """
@@ -69,7 +68,7 @@ fi
 exit 0
 """
 
-# An installer that lays the managed opencode down, so the check that it landed has something to find.
+# An installer that lays the managed opencode down, so the report of the new version has something to read.
 MANAGED_INSTALLER = """#!/bin/bash
 mkdir -p "$HOME/.opencode/bin"
 printf '#!/bin/bash\\nprintf "2.0.0\\\\n"\\n' >"$HOME/.opencode/bin/opencode"
@@ -182,165 +181,53 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         return self.bin / "opencode"
 
-    def test_the_report_names_how_a_stray_opencode_is_consolidated(self) -> None:
+    def test_the_report_names_how_to_fix_a_stray_opencode_by_hand(self) -> None:
         self.stray_npm_opencode()
         self.curl()
         notes = " ".join(self.report()["opencode"]["notes"])
-        self.assertIn(
-            "--upgrade removes it with npm uninstall -g opencode-ai, then installs the managed one",
-            notes,
-        )
+        self.assertIn("remove it by hand: npm uninstall -g opencode-ai", notes)
+        self.assertIn("then run: install-agents.sh --install opencode", notes)
 
-    def test_upgrade_removes_a_stray_opencode_then_runs_the_managed_installer(self) -> None:
-        self.managed_opencode()
-        link = self.stray_npm_opencode()
-        self.curl()
-        result = self.run_script("--upgrade", "--yes", "opencode", extra_env={"REMOVES": str(link)})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            self.called(), ["npm uninstall -g opencode-ai", "curl https://opencode.ai/v2/install"]
-        )
-        self.assertIn("opencode: removed the npm copy at", result.stdout)
-
-    def test_a_stray_opencode_that_stays_is_upgraded_by_its_own_package_name(self) -> None:
+    def test_upgrade_with_a_stray_opencode_and_no_managed_copy_removes_nothing(self) -> None:
         self.stray_npm_opencode()
         self.curl()
-        # A global root this user cannot write makes the stray one only its owner can remove.
-        node_modules = self.dir / "lib" / "node_modules"
-        node_modules.chmod(0o555)
-        self.addCleanup(node_modules.chmod, 0o755)
         result = self.run_script("--upgrade", "--yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("run as its owner: npm uninstall -g opencode-ai", result.stdout)
-        self.assertIn("run as its owner: npm install -g opencode-ai@latest", result.stdout)
         self.assertEqual(self.called(), [])
+        self.assertIn("remove it by hand: npm uninstall -g opencode-ai", result.stderr)
 
-    def test_a_dry_run_of_the_consolidation_prints_both_steps_and_runs_nothing(self) -> None:
-        self.stray_npm_opencode()
-        self.curl()
-        result = self.run_script("--upgrade", "--yes", "--dry-run", "opencode")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry run] npm uninstall -g opencode-ai", result.stdout)
-        self.assertIn("https://opencode.ai/v2/install", result.stdout)
-        self.assertEqual(self.called(), [])
-
-    def test_upgrade_replaces_a_stray_opencode_with_a_managed_copy_that_lands(self) -> None:
-        link = self.stray_npm_opencode()
-        self.curl()
-        (self.dir / "installer.sh").write_text(MANAGED_INSTALLER, encoding="utf-8")
-        result = self.run_script("--upgrade", "--yes", "opencode", extra_env={"REMOVES": str(link)})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            self.called(), ["npm uninstall -g opencode-ai", "curl https://opencode.ai/v2/install"]
-        )
-        self.assertIn("opencode 1.0.0 -> 2.0.0", result.stdout)
-
-    def test_an_installer_that_leaves_no_managed_copy_fails_the_tool(self) -> None:
-        link = self.stray_npm_opencode()
-        self.curl()
-        result = self.run_script("--install", "--yes", "opencode", extra_env={"REMOVES": str(link)})
-        self.assertEqual(result.returncode, 3)
-        self.assertIn("its installer finished, but no managed copy is at", result.stderr)
-
-    def test_install_replaces_a_stray_opencode_when_no_managed_copy_is_in_place(self) -> None:
-        self.stray_npm_opencode()
-        self.curl()
-        result = self.run_script("--install", "--yes", "--dry-run", "opencode")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry run] npm uninstall -g opencode-ai", result.stdout)
-        self.assertIn("https://opencode.ai/v2/install", result.stdout)
-        self.assertNotIn("already installed", result.stdout)
-
-    def test_nothing_is_removed_while_a_copy_behind_it_cannot_be(self) -> None:
-        # A removable npm copy sits first on PATH, and a copy no manager owns sits behind it.
-        node_modules = self.dir / "lib" / "node_modules"
-        package = node_modules / "opencode-ai" / "bin"
-        package.mkdir(parents=True)
-        (package / "opencode").write_text(STUB.replace("$BANNER", "1.0.0"), encoding="utf-8")
-        (package / "opencode").chmod(0o755)
-        front = self.dir / "front"
-        front.mkdir()
-        (front / "opencode").symlink_to(package / "opencode")
-        (self.dir / "npm_root").write_text(str(node_modules), encoding="utf-8")
-        self.stub("npm", "npm 10.0.0")
-        self.stub("opencode", "1.0.0")
-        self.curl()
-        result = self.run_script(
-            "--upgrade", "--yes", "opencode", extra_env={"REMOVES": str(front / "opencode")}
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("nothing is removed, since", result.stdout)
-        # The nearer copy keeps answering, so it is upgraded under the package name that owns it.
-        self.assertEqual(self.called(), ["npm install -g opencode-ai@latest"])
-
-    def test_install_leaves_a_stray_opencode_ahead_of_the_managed_copy(self) -> None:
+    def test_upgrade_with_a_stray_opencode_upgrades_the_managed_copy_beside_it(self) -> None:
         self.managed_opencode()
         self.stray_npm_opencode()
+        self.curl()
+        result = self.run_script("--upgrade", "--yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["curl https://opencode.ai/v2/install"])
+        self.assertIn("the managed copy is then what PATH reaches", result.stderr)
+
+    def test_install_leaves_a_stray_opencode_and_names_its_fix(self) -> None:
+        self.stray_npm_opencode()
+        self.curl()
         result = self.run_script("--install", "--yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--upgrade removes it, --install leaves it", result.stdout)
         self.assertEqual(self.called(), [])
+        self.assertIn("remove it by hand: npm uninstall -g opencode-ai", result.stderr)
 
-    def test_a_stray_opencode_no_manager_owns_stays_and_runs_its_own_updater(self) -> None:
+    def test_a_stray_opencode_no_manager_owns_is_fixed_by_deleting_it(self) -> None:
         self.stub("opencode", "1.0.0")
         self.curl()
         result = self.run_script("--upgrade", "--yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("no package manager owns it, so delete it by hand", result.stdout)
-        self.assertEqual(self.called(), ["opencode upgrade"])
+        self.assertIn("so remove it by hand: rm ", result.stderr)
+        self.assertEqual(self.called(), [])
 
-    def test_the_managed_install_is_refused_where_curl_is_missing(self) -> None:
-        lines = SCRIPT.read_text(encoding="utf-8").rstrip("\n").split("\n")
-        functions = self.dir / "functions.sh"
-        functions.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
-        result = subprocess.run(
-            [
-                "bash",
-                "-c",
-                f'source "{functions}"\nPATH=/nonexistent managed_install_refusal opencode\n',
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env={**os.environ, "LC_ALL": "C.UTF-8"},
-            check=False,
-            timeout=30,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("curl is not installed", result.stdout)
-
-    def test_a_refused_managed_install_removes_nothing(self) -> None:
-        # The refusal is stubbed rather than curl hidden, since a host curl in /usr/bin would answer.
-        self.stray_npm_opencode()
+    def test_install_puts_the_managed_opencode_down_where_none_exists(self) -> None:
         self.curl()
-        lines = SCRIPT.read_text(encoding="utf-8").rstrip("\n").split("\n")
-        functions = self.dir / "functions.sh"
-        functions.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
-        script = (
-            f'source "{functions}"\n'
-            "managed_install_refusal() { printf 'refused for the test'; }\n"
-            "ASSUME_YES=true\n"
-            "upgrade_tool opencode\n"
-        )
-        result = subprocess.run(
-            ["bash", "-c", script],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env={
-                "PATH": f"{self.bin}:/usr/bin:/bin",
-                "HOME": str(self.home),
-                "CALLS": str(self.calls),
-                "STUB_DIR": str(self.dir),
-                "LC_ALL": "C.UTF-8",
-            },
-            stdin=subprocess.DEVNULL,
-            check=False,
-            timeout=60,
-        )
+        (self.dir / "installer.sh").write_text(MANAGED_INSTALLER, encoding="utf-8")
+        result = self.run_script("--install", "--yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cannot be installed: refused for the test", result.stdout)
-        self.assertNotIn("npm uninstall", " ".join(self.called()))
+        self.assertEqual(self.called(), ["curl https://opencode.ai/v2/install"])
+        self.assertIn("opencode - -> 2.0.0", result.stdout)
 
     def test_a_removal_npm_cannot_resolve_names_the_package_in_the_path(self) -> None:
         # No npm on the test PATH, so only the node_modules segment names the package.
@@ -354,19 +241,6 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("npm uninstall -g opencode-ai", result.stdout)
         self.assertNotIn("npm uninstall -g @opencode/cli", result.stdout)
-
-    # The test PATH keeps /usr/bin and /bin for the script's own tools, so a host curl there would answer.
-    @unittest.skipIf(
-        shutil.which("curl", path="/usr/bin:/bin"), "a host curl in /usr/bin or /bin is reachable"
-    )
-    def test_nothing_is_removed_while_the_managed_copy_cannot_be_installed(self) -> None:
-        # No curl stub, and the test PATH carries no curl, so the managed installer cannot be fetched.
-        self.stray_npm_opencode()
-        result = self.run_script("--upgrade", "--yes", "opencode")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cannot be installed: curl is not installed", result.stdout)
-        # The stray stays, so it is upgraded under the package name that owns it.
-        self.assertEqual(self.called(), ["npm install -g opencode-ai@latest"])
 
     def test_a_managed_opencode_alone_is_upgraded_by_its_installer(self) -> None:
         self.stub("opencode", "2.0.0", where=self.home / ".opencode" / "bin")
@@ -995,22 +869,17 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         return npm_bin
 
-    def test_the_report_names_how_a_stray_opencode_is_consolidated(self) -> None:
+    def managed_package(self) -> None:
+        managed = self.dir / "node_modules" / "@opencode" / "cli"
+        managed.mkdir(parents=True)
+        (managed / "package.json").write_text("{}", encoding="utf-8")
+
+    def test_the_report_names_how_to_fix_a_stray_opencode_by_hand(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
         result = self.run_script("-Report", "-Json", "opencode", extra_path=npm_bin)
         notes = " ".join(json.loads(result.stdout)["tools"][0]["notes"])
-        self.assertIn(
-            "-Upgrade removes it with npm uninstall -g opencode-ai, then installs the npm package @opencode/cli",
-            notes,
-        )
-
-    def test_a_dry_run_of_the_consolidation_prints_both_steps_and_runs_nothing(self) -> None:
-        npm_bin = self.stray_npm_opencode("opencode-ai")
-        result = self.run_script("-Upgrade", "-Yes", "-DryRun", "opencode", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry run] npm uninstall -g opencode-ai", result.stdout)
-        self.assertIn("[dry run] npm install -g @opencode/cli", result.stdout)
-        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
+        self.assertIn("remove it by hand: npm uninstall -g opencode-ai", notes)
+        self.assertIn("then run: install-agents.ps1 -Install opencode", notes)
 
     def test_a_managed_opencode_is_upgraded_through_npm(self) -> None:
         npm_bin = self.stray_npm_opencode("@opencode/cli")
@@ -1018,76 +887,41 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("npm install -g @opencode/cli@latest", self.recorded())
 
-    def npm_that_installs(self, shim: bool) -> None:
-        """An npm that lays the managed package down on install, and its shim where `shim` is set."""
-        steps = (
-            '    mkdir -p "$STUB_DIR/node_modules/@opencode/cli"\n'
-            '    printf "{}" >"$STUB_DIR/node_modules/@opencode/cli/package.json"\n'
-        )
-        if shim:
-            steps += (
-                "    printf '#!/bin/bash\\n# node_modules/@opencode/cli/bin/cli.js\\n'"
-                ' >"$STUB_DIR/node_modules/.bin/opencode"\n'
-                '    chmod +x "$STUB_DIR/node_modules/.bin/opencode"\n'
-            )
-        npm = self.bin / "npm"
-        npm.write_text(
-            STUB.replace("$BANNER", "npm 10.0.0").replace(
-                "esac\nexit 0\n", '"install -g @opencode/cli")\n' + steps + "    ;;\nesac\nexit 0\n"
-            ),
-            encoding="utf-8",
-        )
-
-    def test_upgrade_removes_a_stray_opencode_then_installs_the_managed_package(self) -> None:
+    def test_upgrade_with_a_stray_opencode_and_no_managed_package_removes_nothing(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
-        self.npm_that_installs(shim=True)
-        result = self.run_script(
-            "-Upgrade",
-            "-Yes",
-            "opencode",
-            extra_path=npm_bin,
-            extra_env={"REMOVES": str(npm_bin / "opencode")},
-        )
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [c for c in self.recorded() if c.startswith(("npm install", "npm uninstall"))]
-        self.assertEqual(calls, ["npm uninstall -g opencode-ai", "npm install -g @opencode/cli"])
+        self.assertEqual(calls, [])
+        self.assertIn("remove it by hand: npm uninstall -g opencode-ai", result.stderr)
 
-    def test_a_managed_package_installed_where_path_does_not_reach_fails_the_tool(self) -> None:
+    def test_upgrade_with_a_stray_opencode_upgrades_the_managed_package_beside_it(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
-        self.npm_that_installs(shim=False)
-        result = self.run_script(
-            "-Upgrade",
-            "-Yes",
-            "opencode",
-            extra_path=npm_bin,
-            extra_env={"REMOVES": str(npm_bin / "opencode")},
-        )
-        self.assertEqual(result.returncode, 3)
-        self.assertIn("is installed, but PATH does not reach it", result.stderr)
-
-    def test_nothing_is_removed_while_a_copy_behind_the_stray_cannot_be(self) -> None:
-        # A removable npm copy sits first on PATH, and a copy no manager owns sits behind it.
-        npm_bin = self.stray_npm_opencode("opencode-ai")
-        self.stub("opencode", "1.0.0")
-        result = self.run_script(
-            "-Upgrade",
-            "-Yes",
-            "opencode",
-            extra_path=npm_bin,
-            extra_env={"REMOVES": str(npm_bin / "opencode")},
-        )
+        self.managed_package()
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("nothing is removed, since", result.stdout)
+        self.assertIn("npm install -g @opencode/cli@latest", self.recorded())
         self.assertNotIn("npm uninstall", " ".join(self.recorded()))
-        self.assertIn("npm install -g opencode-ai@latest", self.recorded())
+        self.assertIn("the managed package is then what PATH reaches", result.stderr)
 
-    def test_install_replaces_a_stray_opencode_when_no_managed_package_is_in_place(self) -> None:
+    def test_install_leaves_a_stray_opencode_and_names_its_fix(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
-        result = self.run_script("-Install", "-Yes", "-DryRun", "opencode", extra_path=npm_bin)
+        result = self.run_script("-Install", "-Yes", "opencode", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry run] npm uninstall -g opencode-ai", result.stdout)
-        self.assertIn("[dry run] npm install -g @opencode/cli", result.stdout)
-        self.assertNotIn("already installed", result.stdout)
+        calls = [c for c in self.recorded() if c.startswith(("npm install", "npm uninstall"))]
+        self.assertEqual(calls, [])
+        self.assertIn("remove it by hand: npm uninstall -g opencode-ai", result.stderr)
+
+    # Root writes any directory, so the unwritable prefix this test builds would not hold.
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write any prefix")
+    def test_an_unwritable_prefix_fails_the_upgrade_of_the_managed_package(self) -> None:
+        npm_bin = self.stray_npm_opencode("opencode-ai")
+        self.managed_package()
+        self.dir.chmod(0o555)
+        self.addCleanup(self.dir.chmod, 0o755)
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("not writable", result.stderr)
 
     def test_a_shim_outside_the_npm_prefix_is_not_planned_as_an_npm_removal(self) -> None:
         # A shim naming the package's directory, left by an earlier Node outside the prefix the npm on PATH reports.
@@ -1099,71 +933,25 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("npm uninstall", " ".join(self.recorded()))
 
-    @unittest.skipIf(
-        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
-    )
-    def test_a_refused_install_names_no_removal_for_a_stray_outside_the_npm_on_path(self) -> None:
-        # A shim left in an npm-shaped directory after Node was removed, with no npm to own it.
-        left = self.dir / "npm"
-        self.stub("opencode", "1.0.0", left)
-        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=left)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cannot be installed: npm is not installed", result.stdout)
-        self.assertNotIn("needs this copy removed first", result.stdout)
-
-    # Root writes any directory, so the unwritable prefix this test builds would not hold.
-    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write any prefix")
-    def test_a_stray_opencode_that_stays_is_planned_by_its_own_package_name(self) -> None:
-        npm_bin = self.stray_npm_opencode("opencode-ai")
-        # A prefix this user cannot write leaves the managed package uninstallable, so the stray stays.
-        self.dir.chmod(0o555)
-        self.addCleanup(self.dir.chmod, 0o755)
-        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("npm install -g opencode-ai@latest", result.stdout)
-        self.assertIn("It needs this copy removed first", result.stdout)
-        self.assertIn("npm uninstall -g opencode-ai", result.stdout)
-        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
-
-    def test_a_managed_package_path_does_not_reach_fails_the_upgrade(self) -> None:
-        npm_bin = self.stray_npm_opencode("opencode-ai")
-        managed = self.dir / "node_modules" / "@opencode" / "cli"
-        managed.mkdir(parents=True)
-        (managed / "package.json").write_text("{}", encoding="utf-8")
-        result = self.run_script(
-            "-Upgrade",
-            "-Yes",
-            "opencode",
-            extra_path=npm_bin,
-            extra_env={"REMOVES": str(npm_bin / "opencode")},
-        )
-        self.assertEqual(result.returncode, 3)
-        self.assertIn("is installed, but PATH does not reach it", result.stderr)
-
-    # The test PATH keeps /usr/bin and /bin, so a host npm there would answer.
-    @unittest.skipIf(
-        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
-    )
-    def test_a_stray_opencode_stays_and_runs_its_own_updater_while_npm_is_absent(self) -> None:
-        self.stub("opencode", "1.0.0")
-        result = self.run_script("-Upgrade", "-Yes", "opencode")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cannot be installed: npm is not installed", result.stdout)
-        self.assertIn("opencode upgrade", self.recorded())
-        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
-
-    def test_a_stray_choco_opencode_stays_and_runs_no_choco(self) -> None:
+    def test_a_stray_choco_opencode_names_its_removal_and_runs_no_choco(self) -> None:
         bin_dir = self.dir / "chocolatey" / "bin"
         self.stub("opencode", "1.0.0", bin_dir)
         self.stub("choco", "choco 2.0.0")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=bin_dir)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("choco needs an elevated shell", result.stdout + result.stderr)
-        self.assertEqual(
-            [c for c in self.recorded() if c.startswith("choco") and not c.endswith("--version")],
-            [],
-        )
+        self.assertIn("choco uninstall", result.stderr)
+        calls = [c for c in self.recorded() if not c.endswith("--version")]
+        self.assertEqual([c for c in calls if c.startswith(("choco", "npm install"))], [])
+
+    def test_a_stray_opencode_no_manager_owns_is_fixed_by_deleting_it(self) -> None:
+        self.stub("opencode", "1.0.0")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Remove-Item", result.stderr)
+        calls = [c for c in self.recorded() if c.startswith(("opencode upgrade", "npm install"))]
+        self.assertEqual(calls, [])
 
     def test_upgrade_drives_only_present_tools(self) -> None:
         self.stub("claude", "2.1.0 (Claude Code)")

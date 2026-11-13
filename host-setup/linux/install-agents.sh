@@ -14,8 +14,7 @@
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
-# A tool recording a managed copy (opencode) has other copies consolidated into it before any of that applies.
-# An npm, bun, or Homebrew copy ahead of it is removed where that needs no root.
+# A tool recording a managed copy (opencode) is upgraded through that copy, and another copy ahead of it is reported for a fix by hand.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
@@ -151,9 +150,8 @@ installs a tool only when it is named. Runs as the user who owns the tools, neve
 
 Actions, name one, default --report:
   -r, --report      Report each tool, where it lives, and what manages it, change nothing
-  -u, --upgrade     Upgrade each tool already installed, and install only a managed copy
-  -i, --install     Install the named tools that are missing, leave an installed one alone,
-                    except a copy consolidation replaces with the managed one
+  -u, --upgrade     Upgrade each tool already installed, and install nothing
+  -i, --install     Install the named tools that are missing, leave an installed one alone
   -l, --list        List the managed tools and where each installs from
   -h, --help        Show this help
 
@@ -176,13 +174,11 @@ one outdated, and a herdr server still running the previous binary is left runni
 as needing a restart, since stopping it would end every pane inside it.
 
 opencode is the one tool with a managed copy, ~/.opencode/bin/opencode from its own installer,
-since it ships from several sources and opencode 2 replaced opencode 1's npm package. Any other
-copy PATH reaches first, an npm opencode-ai among them, is consolidated: --upgrade removes it
-through npm, bun, or Homebrew after a prompt and installs the managed copy, and --install does the
-same where no managed copy is in place yet. Nothing is removed while the managed copy cannot be
-installed, or while any copy ahead of it is one only its owner can remove. Such a copy, or one
-whose removal is declined, stays and is handled as a tool without a managed copy is, and the
-report says what owns it. Running the installer again is how the managed copy is upgraded.
+since it ships from several sources and opencode 2 replaced opencode 1's npm package. Running the
+installer again is how --upgrade keeps it current. Another copy PATH reaches first, an npm
+opencode-ai among them, is reported with the command that removes it and is never removed here.
+--upgrade then upgrades the managed copy where one is installed, and --install installs it only
+once no other copy is in the way.
 
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -276,7 +272,7 @@ npm_package() {
 }
 
 # Every npm registry name a tool has shipped under, current first, one per line.
-# A copy under an earlier name is still that tool's, so consolidation can remove it, as it does opencode 1's opencode-ai.
+# A copy under an earlier name is still that tool's, so its removal is named by that name, as opencode 1's opencode-ai is.
 npm_packages() {
     npm_package "$1"
     printf '\n'
@@ -389,7 +385,7 @@ mise_key() {
 }
 
 # The npm or bun command for a step, upgrade or remove, on the package owning a real path, as PKG_CMD, or PKG_WHY where none runs.
-# An upgrade and a consolidation share it, so a copy under a name the tool shipped under earlier is upgraded or removed by that name.
+# An upgrade and a stray's removal share it, so a copy under a name the tool shipped under earlier is named by that name.
 # One of the tool's recorded names must own the files, so a fork providing the same command is never replaced or removed.
 PKG_CMD=()
 PKG_WHY=""
@@ -447,7 +443,7 @@ package_step() {
 }
 
 # The brew command for a verb, upgrade or uninstall, on the package holding a real path, as BREW_CMD, or BREW_WHY where none runs.
-# An upgrade and a consolidation share it, so both read the name from where brew put the files and both leave Homebrew's Node alone.
+# An upgrade and a stray's removal share it, so both read the name from where brew put the files and both leave Homebrew's Node alone.
 BREW_CMD=()
 BREW_WHY=""
 
@@ -526,10 +522,10 @@ manager_plan() {
     esac
 }
 
-# --- Consolidation ---
+# --- Managed Copies ---
 
-# A tool can record one managed copy, the one this script installs and upgrades, as install-tools.sh does for its own tools.
-# Any other copy PATH resolves to ahead of it is consolidated: removed through whatever owns it, so the managed copy is what PATH reaches.
+# A tool can record one managed copy, the one this script installs and upgrades.
+# Another copy PATH reaches first is reported with the commands that fix it, and never removed here, since the fix is a one-off.
 # A tool recording none keeps whatever copy it has and is upgraded through whatever owns it.
 tool_managed() {
     if declare -F "$(tool_function "$1" managed)" >/dev/null; then
@@ -547,167 +543,61 @@ is_managed_copy() {
     [[ $real -ef $managed ]]
 }
 
-# Whether a copy of the tool PATH resolves to is one consolidation removes.
+# Whether a copy of the tool PATH resolves to is another copy than its managed one.
 is_stray_copy() {
     local tool="$1" path="$2"
     [[ -n $(tool_managed "$tool") ]] || return 1
     ! is_managed_copy "$tool" "$path"
 }
 
-# What removing a stray copy runs, as STRAY_CMD (the command) or STRAY_WHY (why none runs, naming the command where one exists).
-# Never both.
-# Only a removal this user can run without elevating is run, so a system package, Nix, or mise's declared tool is named rather than touched.
-STRAY_CMD=()
-STRAY_WHY=""
-
-stray_plan() {
-    local tool="$1" path="$2" manager="$3" real pkg dir name
-    STRAY_CMD=()
-    STRAY_WHY=""
+# The command that removes a stray copy through whatever owns it, or what to do where no one command does.
+stray_removal() {
+    local tool="$1" path="$2" manager="$3" real name
     if ! real=$(tool_real_path "$path"); then
-        STRAY_WHY="it is a mise shim and mise which could not resolve it, so remove it with mise by hand"
+        printf 'remove it with mise, since mise which could not resolve its shim'
         return 0
     fi
     case "$manager" in
     npm | bun)
         package_step remove "$tool" "$real" "$manager"
-        STRAY_CMD=("${PKG_CMD[@]}")
-        STRAY_WHY="$PKG_WHY"
+        if ((${#PKG_CMD[@]} > 0)); then printf '%s' "${PKG_CMD[*]}"; else printf '%s' "$PKG_WHY"; fi
         ;;
     brew)
         brew_step uninstall "$tool" "$real"
-        STRAY_CMD=("${BREW_CMD[@]}")
-        STRAY_WHY="$BREW_WHY"
+        if ((${#BREW_CMD[@]} > 0)); then printf '%s' "${BREW_CMD[*]}"; else printf '%s' "$BREW_WHY"; fi
         ;;
     apt)
         name=$(dpkg -S "$real" 2>/dev/null) || name=""
         name="${name%%:*}"
-        STRAY_WHY="apt owns it${name:+ as the package $name}, and removing it needs root, so run as root: apt remove ${name:-<package>}"
+        printf 'as root, apt remove %s' "${name:-<package>}"
         ;;
     mise)
         name=$(mise_key "$real")
-        STRAY_WHY="mise declares it, so remove ${name:-it} from mise's configuration, for example with: mise unuse -g ${name:-<tool>}"
+        printf 'mise unuse -g %s' "${name:-<tool>}"
         ;;
     nix)
-        STRAY_WHY="Nix is declarative, so remove it where it is declared, for example with nix profile remove or in your flake or home configuration"
+        printf 'remove it where Nix declares it, for example with nix profile remove'
         ;;
     self)
-        STRAY_WHY="no package manager owns it, so delete it by hand: rm $(hide_home "$path")"
+        printf 'rm %s' "$(hide_home "$path")"
         ;;
     *)
-        STRAY_WHY="$manager owns it, so remove it with $manager by hand"
+        printf 'remove it with %s' "$manager"
         ;;
     esac
 }
 
-# Every copy of a tool PATH holds ahead of its managed copy, nearest first, one per line.
-stray_copies() {
-    local tool="$1" path
-    while IFS= read -r path; do
-        [[ -n $path ]] || continue
-        is_managed_copy "$tool" "$path" && return 0
-        printf '%s\n' "$path"
-    done < <(type -ap "$tool" 2>/dev/null)
-    return 0
-}
-
-# Why a copy ahead of the managed one cannot be removed, or nothing where every one can.
-# Read before any copy is removed, so a removal never leaves an older copy this script cannot touch answering instead.
-stray_blocker() {
-    local tool="$1" path
-    while IFS= read -r path; do
-        stray_plan "$tool" "$path" "$(tool_manager "$path")"
-        if ((${#STRAY_CMD[@]} == 0)); then
-            printf '%s stays, since %s' "$(hide_home "$path")" "$STRAY_WHY"
-            return 0
-        fi
-    done < <(stray_copies "$tool")
-    return 0
-}
-
-# Why the managed copy cannot be installed on this host, or nothing where it can.
-# Read before any copy is removed, so consolidation never leaves a host with no copy at all.
-managed_install_refusal() {
-    command -v curl >/dev/null || printf 'curl is not installed, so its installer cannot be fetched'
-    return 0
-}
-
-# Removes each stray copy PATH resolves to, nearest first, until PATH reaches the managed copy or nothing.
-# A loop, since PATH can stack more than one copy ahead of the managed one.
-# Returns 0 once no stray copy is reached, and 1 where a removal failed.
-# Returns 2 where a copy stays, because this script cannot remove it or the prompt was declined.
-consolidate() {
-    local tool="$1" path manager n
-    for ((n = 0; n < 8; n++)); do
-        path=$(tool_path "$tool")
-        [[ -n $path ]] || return 0
-        is_stray_copy "$tool" "$path" || return 0
-        manager=$(tool_manager "$path")
-        stray_plan "$tool" "$path" "$manager"
-        if ((${#STRAY_CMD[@]} == 0)); then
-            log "$tool: $(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), and it stays: $STRAY_WHY"
-            return 2
-        fi
-        log "$tool: $(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), removing it"
-        if ! confirm "  Run ${STRAY_CMD[*]}?"; then
-            log "$tool: left $(hide_home "$path") in place"
-            return 2
-        fi
-        if ! run "${STRAY_CMD[@]}"; then
-            warn "$tool: ${STRAY_CMD[*]} failed"
-            return 1
-        fi
-        # Under --dry-run nothing is removed, so the same copy would resolve again forever.
-        [[ $DRY_RUN == true ]] && return 0
-        CHANGED+=("$tool: removed the $manager copy at $(hide_home "$path")")
-        hash -r
-    done
-    warn "$tool: a copy still resolves ahead of the managed one after $n removals"
-    return 1
-}
-
-# Consolidates a tool, then installs its managed copy where none is in place.
-# Shared by --install and --upgrade, so both leave the same single copy behind.
-# Returns 0 where a managed copy is in place for the caller to upgrade, and 1 where this call finished the tool.
-# Returns 2 where a stray copy stays, so the caller handles that copy as it would any tool without a managed copy.
-consolidate_and_install() {
-    local tool="$1" installed="$2" managed refusal blocker rc=0
+# How to fix a stray copy by hand, naming its removal and then what makes the managed copy the one PATH reaches.
+stray_fixup() {
+    local tool="$1" path="$2" manager="$3" managed next
     managed=$(tool_managed "$tool")
-    if [[ ! -x $managed ]]; then
-        refusal=$(managed_install_refusal "$tool")
-        if [[ -n $refusal ]]; then
-            log "$tool: the copy PATH reaches stays, since the managed copy cannot be installed: $refusal"
-            return 2
-        fi
+    if [[ -x $managed ]]; then
+        next="the managed copy is then what PATH reaches"
+    else
+        next="then run: install-agents.sh --install $tool"
     fi
-    blocker=$(stray_blocker "$tool")
-    if [[ -n $blocker ]]; then
-        log "$tool: nothing is removed, since $blocker"
-        return 2
-    fi
-    consolidate "$tool" || rc=$?
-    if ((rc == 1)); then
-        FAILED+=("$tool")
-        return 1
-    fi
-    ((rc == 0)) || return 2
-    [[ -x $managed ]] && return 0
-    log "$tool: installing the managed copy from $("$(tool_function "$tool" source)")"
-    if ! "$(tool_function "$tool" install)"; then
-        warn "$tool: its installer failed after the copy ahead of it was removed, so run --install $tool to install it again"
-        FAILED+=("$tool")
-        return 1
-    fi
-    [[ $DRY_RUN == true ]] && return 1
-    if [[ ! -x $managed ]]; then
-        warn "$tool: its installer finished, but no managed copy is at $(hide_home "$managed")"
-        FAILED+=("$tool")
-        return 1
-    fi
-    extend_path
-    hash -r
-    record_change "$tool" "$installed"
-    return 1
+    printf '%s is the %s copy rather than the managed %s, so remove it by hand: %s, and %s' \
+        "$(hide_home "$path")" "$manager" "$(hide_home "$managed")" "$(stray_removal "$tool" "$path" "$manager")" "$next"
 }
 
 # --- claude ---
@@ -724,18 +614,11 @@ codex_install() { run_installer "$(codex_source)" sh; }
 
 # --- opencode ---
 
-# The opencode tool ships from its own installer, npm, bun, Homebrew, and mise, so it records the one copy every other is consolidated into.
+# The opencode tool ships from its own installer, npm, bun, Homebrew, and mise, so it records the one copy this script keeps.
 # The installer writes ~/.opencode/bin, and running it again is the documented update, which also carries an opencode 1 there to opencode 2.
 opencode_source() { printf 'https://opencode.ai/v2/install'; }
 opencode_managed() { printf '%s' "$HOME/.opencode/bin/opencode"; }
-# A copy elsewhere that consolidation could not remove keeps its own updater, as it had before opencode recorded a managed copy.
-opencode_upgrade() {
-    if is_managed_copy opencode "$1"; then
-        run_installer "$(opencode_source)" bash
-    else
-        run "$1" upgrade
-    fi
-}
+opencode_upgrade() { run_installer "$(opencode_source)" bash; }
 opencode_install() { run_installer "$(opencode_source)" bash; }
 
 # --- herdr ---
@@ -845,21 +728,13 @@ report() {
             installed=$(tool_version "$path")
             manager=$(tool_manager "$path")
             status="present"
-            local upgrades=true removes=false refusal="" blocker=""
+            local upgrades=true stray=false
             if is_stray_copy "$tool" "$path"; then
-                [[ -x $(tool_managed "$tool") ]] || refusal=$(managed_install_refusal "$tool")
-                blocker=$(stray_blocker "$tool")
-                stray_plan "$tool" "$path" "$manager"
-                if ((${#STRAY_CMD[@]} > 0)) && [[ -n $blocker ]]; then
-                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), and it stays, since $blocker"
-                elif ((${#STRAY_CMD[@]} > 0)) && [[ -z $refusal ]]; then
-                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), --upgrade removes it with ${STRAY_CMD[*]}, then $([[ -x $(tool_managed "$tool") ]] && printf upgrades || printf installs) the managed one"
-                    removes=true
-                else
-                    note "$tool" "$(hide_home "$path") is the $manager copy rather than the managed $(hide_home "$(tool_managed "$tool")"), and it stays: ${refusal:-$STRAY_WHY}"
-                fi
+                note "$tool" "$(stray_fixup "$tool" "$path" "$manager")"
+                stray=true
+                upgrades=false
             fi
-            if [[ $removes == false && $manager != "self" ]]; then
+            if [[ $stray == false && $manager != "self" ]]; then
                 manager_plan "$tool" "$path" "$manager"
                 if ((${#PLAN_CMD[@]} > 0)); then
                     note "$tool" "installed through $manager, --upgrade runs: ${PLAN_CMD[*]}"
@@ -925,21 +800,10 @@ upgrade_tool() {
         return 0
     fi
     if is_stray_copy "$tool" "$path"; then
-        local rc=0
-        consolidate_and_install "$tool" "$(tool_version "$path")" || rc=$?
-        # A stray copy that stays is handled as a tool without a managed copy is.
-        case $rc in
-        0) path=$(tool_managed "$tool") ;;
-        # An earlier pass may have removed a copy, so the one that stays is read again.
-        2)
-            path=$(tool_path "$tool")
-            if [[ -z $path ]]; then
-                log "$tool: not installed, leaving it absent"
-                return 0
-            fi
-            ;;
-        *) return 0 ;;
-        esac
+        warn "$tool: $(stray_fixup "$tool" "$path" "$(tool_manager "$path")")"
+        # The managed copy is still upgraded where one is installed, since that is the copy this script keeps.
+        [[ -x $(tool_managed "$tool") ]] || return 0
+        path=$(tool_managed "$tool")
     fi
     manager=$(tool_manager "$path")
     installed=$(tool_version "$path")
@@ -1006,16 +870,8 @@ install_tool() {
     local tool="$1" path now
     path=$(tool_path "$tool")
     if [[ -n $path ]] && is_stray_copy "$tool" "$path"; then
-        # As in install-tools.sh, --install with a managed copy in place leaves it at its version, so removing what resolves ahead of it waits for --upgrade.
-        if [[ -x $(tool_managed "$tool") ]]; then
-            log "$tool: $(hide_home "$path") resolves ahead of the managed copy, --upgrade removes it, --install leaves it to avoid downgrading what resolves ahead of it"
-            return 0
-        fi
-        local rc=0
-        consolidate_and_install "$tool" "$(tool_version "$path")" || rc=$?
-        ((rc == 2)) || return 0
-        # An earlier pass may have removed a copy, so the one that stays is read again.
-        path=$(tool_path "$tool")
+        warn "$tool: $(stray_fixup "$tool" "$path" "$(tool_manager "$path")")"
+        return 0
     fi
     if [[ -n $path ]]; then
         log "$tool: already installed at $(hide_home "$path"), leaving it alone, --upgrade updates it"
