@@ -231,11 +231,10 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("| Total | 4 | 2 | 1 | 6 | 2 |", text)
 
     def test_markdown_links_the_repository_in_each_review_table(self) -> None:
-        result = bm.ReviewMetrics(
-            name="alpha", url="https://github.com/o/alpha", bots={"copilot": bm.BotStats()}
-        )
-        text = bm.render_markdown(self.START, self.END, [metrics()], [], [result])
-        self.assertEqual(text.count("| [alpha](https://github.com/o/alpha) |"), 2)
+        result = bm.ReviewMetrics(name="alpha", bots={"copilot": bm.BotStats()})
+        linked = metrics(url="https://github.com/o/alpha")
+        text = bm.render_markdown(self.START, self.END, [linked], [], [result])
+        self.assertEqual(text.count("| [alpha](https://github.com/o/alpha) |"), 3)
 
     def test_json_carries_the_figures_with_each_item_linked(self) -> None:
         item = {"number": 7, "title": "A title", "url": "https://github.com/o/alpha/issues/7"}

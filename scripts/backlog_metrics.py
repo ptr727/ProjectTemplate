@@ -283,7 +283,6 @@ class ReviewMetrics:
     duplicates_skipped: int = 0
     policy_changes: list[str] = field(default_factory=list)
     truncated: list[str] = field(default_factory=list)
-    url: str = ""
 
 
 def is_automation(actor: Mapping[str, Any] | None) -> bool:
@@ -509,13 +508,16 @@ def label_line(m: RepoMetrics) -> str:
 def billing_lines(
     month: str, repos: Sequence[str], usage: Mapping[str, Any] | None, error: str
 ) -> list[str]:
+    """The billing lines, printed from the `billing_data` the JSON output carries."""
     if usage is None:
         return [f"Billing was unavailable for {month}: {error}"]
-    minutes = sum_actions_minutes(usage)
-    per_repo = ", ".join(f"{repo} {minutes.get(repo, 0.0):.1f}" for repo in repos)
+    data = billing_data(month, repos, usage, error)
+    per_repo = ", ".join(
+        f"{repo} {minutes:.1f}" for repo, minutes in data["actions_minutes"].items()
+    )
     return [
         f"Actions minutes, {month} (minutes): {per_repo}",
-        f"Copilot gross, {month} (USD): {sum_copilot_gross(usage):.2f}",
+        f"Copilot gross, {month} (USD): {data['copilot_gross_usd']:.2f}",
     ]
 
 
@@ -570,43 +572,38 @@ REVIEW_REPO_HEADERS = (
 )
 
 
+def cell(value: Any) -> str:
+    """One JSON figure as the Markdown prints it, `n/a` for a null and one decimal for a ratio."""
+    return ratio_text(value) if value is None or isinstance(value, float) else str(value)
+
+
+def shown_trigger(r: ReviewMetrics, figures: Mapping[str, Any]) -> str:
+    if r.policy_error:
+        return "error"
+    if figures["policy_trigger"] is None:
+        return "n/a"
+    return figures["policy_trigger"] + (DEFAULT_MARK if figures["policy_from_default"] else "")
+
+
 def review_bot_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
-    return [
-        [
-            r.name,
-            bot,
-            "error" if r.policy_error else r.policy.get(bot, "n/a"),
-            r.policy_branch or "n/a",
-            str(stats.requests_by_automation),
-            str(stats.requests_by_user),
-            str(stats.automatic_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
-            str(stats.explicit_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
-            str(stats.unclassified_rounds) if bot in AUTOMATIC_ROUND_BOTS else "n/a",
-            per_merged(sum(stats.rounds), len(stats.rounds)),
-            str(max(stats.rounds, default=0)) if stats.rounds else "n/a",
-            str(stats.findings),
-            str(stats.missed_by_local),
-            str(stats.findings_on_green_heads),
-        ]
-        for r in reviews
-        for bot, stats in r.bots.items()
-    ]
+    """The per-bot table, printed from the `review_data` the JSON output carries."""
+    rows = []
+    for r in reviews:
+        data = review_data(r)
+        for bot, figures in data["bots"].items():
+            counted = [v for k, v in figures.items() if not k.startswith("policy_")]
+            branch = data["policy_branch"] or "n/a"
+            rows.append([r.name, bot, shown_trigger(r, figures), branch, *map(cell, counted)])
+    return rows
 
 
 def review_repo_rows(reviews: Sequence[ReviewMetrics]) -> list[list[str]]:
-    return [
-        [
-            r.name,
-            str(r.prs),
-            str(r.promotions_skipped),
-            per_merged(r.commits, r.prs),
-            str(r.local_findings),
-            str(r.local_unknown),
-            str(r.failing_heads),
-            str(r.failing_after_clean_local),
-        ]
-        for r in reviews
-    ]
+    """The per-repository table, printed from the `review_data` the JSON output carries."""
+    rows = []
+    for r in reviews:
+        figures = list(review_data(r).values())[: len(REVIEW_REPO_HEADERS) - 1]
+        rows.append([r.name, *map(cell, figures)])
+    return rows
 
 
 def review_notes(reviews: Sequence[ReviewMetrics]) -> list[str]:
@@ -652,7 +649,7 @@ def render_markdown(
     out.append("")
     out.extend(f"- {line}" for line in [*billing, *notes(metrics), *review_notes(reviews)])
     if reviews:
-        urls = {r.name: r.url for r in reviews}
+        urls = {m.name: m.url for m in metrics}
         for title, headers, body in (
             ("Review return on cost, per bot", REVIEW_BOT_HEADERS, review_bot_rows(reviews)),
             (
@@ -944,7 +941,7 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
             variables["after"] = after
         return graphql(REVIEW_QUERY, variables)
 
-    result = ReviewMetrics(name=name, url=f"{GITHUB}/{owner}/{name}")
+    result = ReviewMetrics(name=name)
     for bot in BOT_LOGINS:
         result.bots[bot] = BotStats()
     seen = 0
