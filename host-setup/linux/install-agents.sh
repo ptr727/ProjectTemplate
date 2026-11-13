@@ -14,7 +14,7 @@
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
-# A tool recording a managed copy (opencode) is upgraded through that copy, and another copy ahead of it is reported for a fix by hand.
+# A tool recording a managed copy (opencode) is managed through that copy, and another copy ahead of it is reported for a fix by hand.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
@@ -177,8 +177,8 @@ opencode is the one tool with a managed copy, ~/.opencode/bin/opencode from its 
 since it ships from several sources and opencode 2 replaced opencode 1's npm package. Running the
 installer again is how --upgrade keeps it current. Another copy PATH reaches first, an npm
 opencode-ai among them, is reported with the command that removes it and is never removed here.
---upgrade then upgrades the managed copy where one is installed, and --install installs it only
-once no other copy is in the way.
+--upgrade and --install leave opencode alone while one is first on PATH, and act on the managed
+copy once none is.
 
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -587,17 +587,12 @@ stray_removal() {
     esac
 }
 
-# How to fix a stray copy by hand, naming its removal and then what makes the managed copy the one PATH reaches.
+# How to fix a stray copy by hand: its removal, then an install.
+# The install leaves a managed copy in place alone and names any stray still ahead of it.
 stray_fixup() {
-    local tool="$1" path="$2" manager="$3" managed next
-    managed=$(tool_managed "$tool")
-    if [[ -x $managed ]]; then
-        next="the managed copy is then what PATH reaches"
-    else
-        next="then run: install-agents.sh --install $tool"
-    fi
-    printf '%s is the %s copy rather than the managed %s, so remove it by hand: %s, and %s' \
-        "$(hide_home "$path")" "$manager" "$(hide_home "$managed")" "$(stray_removal "$tool" "$path" "$manager")" "$next"
+    local tool="$1" path="$2" manager="$3"
+    printf '%s is the %s copy rather than the managed %s, so remove it by hand: %s, and then run: install-agents.sh --install %s' \
+        "$(hide_home "$path")" "$manager" "$(hide_home "$(tool_managed "$tool")")" "$(stray_removal "$tool" "$path" "$manager")" "$tool"
 }
 
 # --- claude ---
@@ -801,9 +796,7 @@ upgrade_tool() {
     fi
     if is_stray_copy "$tool" "$path"; then
         warn "$tool: $(stray_fixup "$tool" "$path" "$(tool_manager "$path")")"
-        # The managed copy is still upgraded where one is installed, since that is the copy this script keeps.
-        [[ -x $(tool_managed "$tool") ]] || return 0
-        path=$(tool_managed "$tool")
+        return 0
     fi
     manager=$(tool_manager "$path")
     installed=$(tool_version "$path")
@@ -821,7 +814,7 @@ upgrade_tool() {
     fi
 
     log "$tool: at ${installed:-an unreadable version}, running its updater"
-    if ! "$(tool_function "$tool" upgrade)" "$path"; then
+    if ! "$(tool_function "$tool" upgrade)"; then
         warn "$tool: its updater failed"
         FAILED+=("$tool")
         record_change "$tool" "$installed"

@@ -15,7 +15,7 @@
 # The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
-# A tool recording a Managed copy (opencode) is upgraded through that copy, and another copy ahead of it is reported for a fix by hand.
+# A tool recording a Managed copy (opencode) is managed through that copy, and another copy ahead of it is reported for a fix by hand.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
@@ -129,8 +129,8 @@ restart, since stopping it would end every pane inside it.
 opencode is the one tool with a managed copy, the npm package @opencode/cli, since it ships from
 several sources, opencode 2 replaced opencode 1's npm package, and its installer script is bash
 only. Another copy PATH reaches first, an npm opencode-ai among them, is reported with the command
-that removes it and is never removed here. -Upgrade then upgrades the managed package where one is
-installed, and -Install installs it only once no other copy is in the way.
+that removes it and is never removed here. -Upgrade and -Install leave opencode alone while one
+is first on PATH, and act on the managed package once none is.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -450,13 +450,19 @@ function Test-NpmPackageOwnership {
     return (Test-NpmShimName -Path $Path -Package $Package)
 }
 
+# Whether text, a path or a shim's content, names an npm package's directory.
+function Test-NamesNpmPackage {
+    param([string]$Text, [string]$Package)
+    $needle = 'node_modules\' + ($Package -replace '/', '\') + '\'
+    return (($Text -replace '/', '\').IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+
 # Whether a shim's text names an npm package's directory.
 function Test-NpmShimName {
     param([string]$Path, [string]$Package)
     $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
     if (-not $text) { return $false }
-    $needle = 'node_modules\' + ($Package -replace '/', '\') + '\'
-    return (($text -replace '/', '\').IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    return (Test-NamesNpmPackage -Text $text -Package $Package)
 }
 
 # Whether the tool is bun's global install of the recorded package.
@@ -503,9 +509,7 @@ function Get-NamedNpmPackage {
     param([string]$Tool, [string]$Path)
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     foreach ($pkg in (Get-KnownNpmPackage -Tool $Tool)) {
-        $needle = 'node_modules\' + ($pkg -replace '/', '\') + '\'
-        if ($resolved.IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0) { return $pkg }
-        if (Test-NpmShimName -Path $Path -Package $pkg) { return $pkg }
+        if ((Test-NamesNpmPackage -Text $resolved -Package $pkg) -or (Test-NpmShimName -Path $Path -Package $pkg)) { return $pkg }
     }
     return $null
 }
@@ -579,18 +583,6 @@ function Get-ChocoPackage {
         if ($hit) { return ($hit.FullName.Substring($lib.Length).TrimStart('\', '/') -split '[\\/]')[0] }
     }
     return '<package>'
-}
-
-# Why npm cannot install a package globally for this user, or nothing where it can.
-# The install of the managed package reads it, and so does its upgrade while another copy sits ahead of it.
-function Get-NpmInstallRefusal {
-    param([string]$Package)
-    if (-not (Get-ToolPath 'npm')) { return 'npm is not installed' }
-    $prefix = Get-NpmPrefix
-    if ($prefix -and -not (Test-DirectoryWritable -Directory $prefix)) {
-        return "the npm prefix $(Hide-Home -Path $prefix) is not writable by this user, so run in an elevated shell: npm install -g $Package"
-    }
-    return ''
 }
 
 # What an upgrade does for a tool a package manager owns.
@@ -724,19 +716,10 @@ $TOOLS = @(
         Name    = 'opencode'
         Source  = 'npm install -g @opencode/cli'
         Managed = @{ Manager = 'npm'; Package = '@opencode/cli' }
-        # Run only while another copy sits ahead of the managed package, since the managed one is otherwise upgraded through npm's plan.
-        Upgrade = {
-            $refusal = if ($script:DRY_RUN) { '' } else { Get-NpmInstallRefusal -Package '@opencode/cli' }
-            if ($refusal) {
-                warn "opencode: $refusal"
-                return 1
-            }
-            return (Invoke-Step -Command 'npm' -Arguments @('install', '-g', '@opencode/cli@latest'))
-        }
+        Upgrade = { Invoke-Step -Command 'opencode' -Arguments @('upgrade') }
         Install = {
-            $refusal = if ($script:DRY_RUN) { '' } else { Get-NpmInstallRefusal -Package '@opencode/cli' }
-            if ($refusal) {
-                warn "opencode: $refusal (https://opencode.ai/docs/)"
+            if (-not $script:DRY_RUN -and -not (Get-ToolPath 'npm')) {
+                warn 'opencode installs on Windows as the npm package @opencode/cli, and npm is not installed (https://opencode.ai/docs/)'
                 return 1
             }
             return (Invoke-Step -Command 'npm' -Arguments @('install', '-g', '@opencode/cli'))
@@ -789,15 +772,6 @@ function Get-ManagedLabel {
     return "the $($managed.Manager) package $($managed.Package)"
 }
 
-# Whether the managed copy is installed, whatever PATH resolves to first.
-function Test-ManagedPresent {
-    param([string]$ToolName)
-    $managed = Get-ManagedRecord $ToolName
-    if (-not $managed) { return $false }
-    $directory = Get-NpmPackageDirectory -Package $managed.Package
-    return [bool]($directory -and (Test-Path -LiteralPath (Join-Path $directory 'package.json') -PathType Leaf))
-}
-
 # Whether a copy PATH resolves to is another copy than the tool's managed one.
 function Test-StrayCopy {
     param([string]$ToolName, [string]$Path)
@@ -816,7 +790,7 @@ function Get-StrayPlan {
         'scoop' { $plan = Get-ScoopStep -Tool $ToolName -Verb 'uninstall' }
         'choco' { $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco uninstall $(Get-ChocoPackage -Tool $ToolName) -y" }
         'winget' { $plan.Why = "winget owns it, so remove it by hand: winget uninstall $ToolName" }
-        default { $plan.Why = "no package manager owns it, so delete it by hand: Remove-Item $(Hide-Home -Path $Path)" }
+        default { $plan.Why = "no package manager owns it, so delete $(Hide-Home -Path $Path) by hand" }
     }
     return $plan
 }
@@ -827,8 +801,7 @@ function Get-StrayFixup {
     $manager = Get-ToolManager $Path
     $plan = Get-StrayPlan -ToolName $ToolName -Path $Path -Manager $manager
     $removal = if ($plan.Command) { "$($plan.Command) $($plan.Arguments -join ' ')" } else { $plan.Why }
-    $next = if (Test-ManagedPresent $ToolName) { 'the managed package is then what PATH reaches' } else { "then run: install-agents.ps1 -Install $ToolName" }
-    return "$(Hide-Home -Path $Path) is the $manager copy rather than $(Get-ManagedLabel $ToolName), so remove it by hand: $removal, and $next"
+    return "$(Hide-Home -Path $Path) is the $manager copy rather than $(Get-ManagedLabel $ToolName), so remove it by hand: $removal, and then run: install-agents.ps1 -Install $ToolName"
 }
 
 # --- Report ---
@@ -948,13 +921,6 @@ function Invoke-ToolUpgrade {
     }
     if (Test-StrayCopy -ToolName $ToolName -Path $path) {
         warn "${ToolName}: $(Get-StrayFixup -ToolName $ToolName -Path $path)"
-        # The managed copy is still upgraded where one is installed, since that is the copy this script keeps.
-        if (-not (Test-ManagedPresent $ToolName)) { return }
-        log "${ToolName}: upgrading $(Get-ManagedLabel $ToolName)"
-        if ((& $tool.Upgrade) -ne 0) {
-            warn "${ToolName}: its upgrade failed"
-            $script:FAILED.Add($ToolName)
-        }
         return
     }
     $manager = Get-ToolManager $path

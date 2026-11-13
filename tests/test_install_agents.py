@@ -196,14 +196,16 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(self.called(), [])
         self.assertIn("remove it by hand: npm uninstall -g opencode-ai", result.stderr)
 
-    def test_upgrade_with_a_stray_opencode_upgrades_the_managed_copy_beside_it(self) -> None:
+    def test_upgrade_leaves_opencode_alone_while_a_stray_sits_ahead_of_the_managed_copy(
+        self,
+    ) -> None:
         self.managed_opencode()
         self.stray_npm_opencode()
         self.curl()
         result = self.run_script("--upgrade", "--yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["curl https://opencode.ai/v2/install"])
-        self.assertIn("the managed copy is then what PATH reaches", result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn("then run: install-agents.sh --install opencode", result.stderr)
 
     def test_install_leaves_a_stray_opencode_and_names_its_fix(self) -> None:
         self.stray_npm_opencode()
@@ -895,14 +897,16 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertIn("remove it by hand: npm uninstall -g opencode-ai", result.stderr)
 
-    def test_upgrade_with_a_stray_opencode_upgrades_the_managed_package_beside_it(self) -> None:
+    def test_upgrade_leaves_opencode_alone_while_a_stray_sits_ahead_of_the_managed_package(
+        self,
+    ) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
         self.managed_package()
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("npm install -g @opencode/cli@latest", self.recorded())
-        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
-        self.assertIn("the managed package is then what PATH reaches", result.stderr)
+        calls = [c for c in self.recorded() if c.startswith(("npm install", "npm uninstall"))]
+        self.assertEqual(calls, [])
+        self.assertIn("then run: install-agents.ps1 -Install opencode", result.stderr)
 
     def test_install_leaves_a_stray_opencode_and_names_its_fix(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
@@ -911,17 +915,6 @@ class TestInstallAgentsWindows(unittest.TestCase):
         calls = [c for c in self.recorded() if c.startswith(("npm install", "npm uninstall"))]
         self.assertEqual(calls, [])
         self.assertIn("remove it by hand: npm uninstall -g opencode-ai", result.stderr)
-
-    # Root writes any directory, so the unwritable prefix this test builds would not hold.
-    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root can write any prefix")
-    def test_an_unwritable_prefix_fails_the_upgrade_of_the_managed_package(self) -> None:
-        npm_bin = self.stray_npm_opencode("opencode-ai")
-        self.managed_package()
-        self.dir.chmod(0o555)
-        self.addCleanup(self.dir.chmod, 0o755)
-        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 3)
-        self.assertIn("not writable", result.stderr)
 
     def test_a_shim_outside_the_npm_prefix_is_not_planned_as_an_npm_removal(self) -> None:
         # A shim naming the package's directory, left by an earlier Node outside the prefix the npm on PATH reports.
@@ -949,9 +942,9 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Remove-Item", result.stderr)
-        calls = [c for c in self.recorded() if c.startswith(("opencode upgrade", "npm install"))]
-        self.assertEqual(calls, [])
+        self.assertIn("no package manager owns it, so delete", result.stderr)
+        writes = [c for c in self.recorded() if not c.endswith("--version") and c not in READS]
+        self.assertEqual(writes, [])
 
     def test_upgrade_drives_only_present_tools(self) -> None:
         self.stub("claude", "2.1.0 (Claude Code)")
