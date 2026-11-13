@@ -118,13 +118,14 @@ class CountingTests(unittest.TestCase):
         self.assertTrue(bm.compute_metrics("alpha", full, [], [], [], []).truncated)
         self.assertFalse(bm.compute_metrics("alpha", [issue()], [], [], [], []).truncated)
 
-    def test_per_merged_has_one_decimal_and_na_without_a_merge(self) -> None:
-        self.assertEqual(bm.per_merged(7, 2), "3.5")
-        self.assertEqual(bm.per_merged(1, 3), "0.3")
-        self.assertEqual(bm.per_merged(0, 4), "0.0")
-        self.assertEqual(bm.per_merged(5, 0), "n/a")
+    def test_a_ratio_has_one_decimal_and_na_without_a_merge(self) -> None:
+        self.assertEqual(bm.ratio_text(bm.ratio(7, 2)), "3.5")
+        self.assertEqual(bm.ratio_text(bm.ratio(1, 3)), "0.3")
+        self.assertEqual(bm.ratio_text(bm.ratio(0, 4)), "0.0")
+        self.assertEqual(bm.ratio_text(bm.ratio(5, 0)), "n/a")
+        self.assertIsNone(bm.ratio(5, 0))
 
-    def test_the_mean_of_rounds_is_per_merged_with_no_helper_of_its_own(self) -> None:
+    def test_the_mean_of_rounds_is_a_ratio_with_no_helper_of_its_own(self) -> None:
         stats = {"copilot": bm.BotStats(rounds=[1, 2]), "qodo": bm.BotStats()}
         row = bm.review_bot_rows([bm.ReviewMetrics(name="alpha", bots=stats)])
         index = bm.REVIEW_BOT_HEADERS.index("Rounds per reviewed PR (mean)")

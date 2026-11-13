@@ -167,10 +167,6 @@ def ratio_text(value: float | None) -> str:
     return "n/a" if value is None else f"{value:.1f}"
 
 
-def per_merged(count: int, merged: int) -> str:
-    return ratio_text(ratio(count, merged))
-
-
 def pr_item(item: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "number": item.get("number"),
