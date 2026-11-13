@@ -4189,6 +4189,15 @@ class SecretStemCase(unittest.TestCase):
                 [".gitignore", "compose.yml"],
             ),
             (
+                "a floating line is not silenced by a code directory its case cannot match",
+                {
+                    ".gitignore": "secrets/\n",
+                    "src/App/Secrets/Store.cs": "",
+                },
+                [],
+                [".gitignore"],
+            ),
+            (
                 "a class matching a bare folder is a signal, and one able to name .secrets is not",
                 {
                     ".gitignore": "[Ss]ecrets/\n",

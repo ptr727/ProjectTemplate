@@ -685,7 +685,11 @@ def named_secret_signals(tree, read_text, directories, holding):
                         i for i, p in enumerate(parts) if misnamed_secrets(p) or set(p) & set("*?[")
                     )
                     prefix = posixpath.join(directory, *parts[:stop])
-                    code = any(not prefix or h.startswith(f"{prefix}/") for h in holding)
+                    code = any(
+                        (not prefix or h.startswith(f"{prefix}/"))
+                        and fnmatch.fnmatchcase(posixpath.basename(h), parts[-1])
+                        for h in holding
+                    )
                     signal = not code and (not prefix or prefix in directories)
                 if signal:
                     bare.add(path)

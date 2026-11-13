@@ -16,7 +16,7 @@ The result must be exactly two rulesets named `develop` and `main`. A missing ru
 
 ## Secrets
 
-From the same hub checkout, run `uv run --no-project --script spec/audit.py <Repo>` and read its secret findings. It resolves the required set from the hub's `spec/secrets.json` plus this repository's registry entry. It confirms each required name exists in the stores its mechanism claims, by name only and never by value. For this repository that is `<required-secrets>`. `repo-config/configure.sh check <owner>/<repo> <model>` asserts the same names per store. `repo-config/configure.sh apply <owner>/<repo> <model>` writes each one from the host's `~/.secrets/` directory.
+From the same hub checkout, run `uv run --no-project --script spec/audit.py <Repo>` and read its secret findings. It resolves the required set from the hub's `spec/secrets.json` plus this repository's registry entry. It confirms each required name exists in the stores its mechanism claims, by name only and never by value. `repo-config/configure.sh check <owner>/<repo> <model>` asserts the same names per store. `repo-config/configure.sh apply <owner>/<repo> <model>` writes each one from the host's `~/.secrets/` directory.
 
 ## Verdict and Follow-Up
 
