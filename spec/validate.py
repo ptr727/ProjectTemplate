@@ -1051,12 +1051,12 @@ def json_leaves(value, prefix=""):
 
 def repo_owned_errors(path, fid, ref, owned):
     """What is wrong with a files.json unit's repoOwnedKeys, which only a JSON intent reference can carry."""
-    if not (isinstance(owned, list) and owned and all(isinstance(k, str) and k for k in owned)):
+    if not (is_str_list(owned) and owned and all(owned)):
         return [f"files.json: {path} repoOwnedKeys must be a non-empty array of dotted key paths"]
     if fid != "intent" or not isinstance(ref, str) or not canonical_file_in_root(ref):
         return [f"files.json: {path} repoOwnedKeys needs fidelity 'intent' and a reference file"]
     try:
-        leaves = dict(json_leaves(json.loads((ROOT / ref).read_text(encoding="utf-8"))))
+        leaves = dict(json_leaves(load(ref)))
     except ValueError:
         return [f"files.json: {path} repoOwnedKeys needs a reference that parses as JSON"]
     return [
