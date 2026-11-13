@@ -388,13 +388,19 @@ class TestSession(Case):
         self.assertIn("does not accept", err)
         self.assertEqual(self.fake.keys()[-1], ("signout",))
 
-    def test_signin_output_that_does_not_parse_is_still_signed_out(self) -> None:
+    def test_signin_output_that_does_not_parse_fails(self) -> None:
         self.fake.ambient = False
         self.fake.signin_output = b'export A="constructed-1"\nexport B="constructed-2"\n'
         code, _, err = self.run_main("status")
         self.assertEqual(code, 2)
         self.assertIn("session assignment", err)
-        self.assertEqual(self.fake.keys()[-1], ("signout",))
+
+    def test_a_failed_signout_is_reported(self) -> None:
+        self.fake.ambient = False
+        self.fake.fail_before.add(("signout",))
+        code, _, err = self.run_main("status")
+        self.assertEqual(code, 0, err)
+        self.assertIn("warning: op signout failed", err)
 
     def test_a_signin_the_desktop_app_holds_is_used_and_not_signed_out(self) -> None:
         self.fake.ambient = False
@@ -761,6 +767,21 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertNotIn("carriage return", err)
 
+    def test_a_non_utf8_file_with_a_carriage_return_does_not_warn(self) -> None:
+        path = self.write(".secrets/binary", b"\xff\r\n")
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("carriage return", err)
+
+    def test_a_named_path_whose_remote_copy_is_newer_is_refused(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"remote\n", updated="2099-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha")
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 1)
+        self.assertIn("--overwrite-newer", err)
+        self.assertEqual(self.fake.writes(), [])
+
     def test_an_item_missing_after_the_write_fails(self) -> None:
         path = self.write(".secrets/alpha")
         self.fake.drop_create = True
@@ -839,7 +860,15 @@ class TestPull(Case):
         self.assertEqual(len(self.asked), 2)
 
     def test_a_missing_or_malformed_mode_tag_is_refused(self) -> None:
-        for tags in ((), ("mode:999",), ("mode:0600", "mode:0640"), ("mode:17777",), ("mode:",)):
+        for tags in (
+            (),
+            ("mode:999",),
+            ("mode:0600", "mode:0640"),
+            ("mode:17777",),
+            ("mode:",),
+            ("mode:4755",),
+            ("mode:1777",),
+        ):
             with self.subTest(tags=tags):
                 fake = FakeOp()
                 fake.add_item(fake.add_vault("Secrets alpha"), ".secrets/alpha", SECRET, tags)
@@ -999,6 +1028,7 @@ class TestStatus(Case):
         code, out, _ = self.run_main("status")
         self.assertEqual(code, 0)
         self.assertNotIn("no bucket holds", out)
+        self.assertRegex(out, r"link\s+\.secrets/alpha")
 
 
 class TestArchive(Case):
@@ -1083,6 +1113,14 @@ class TestSelftest(Case):
         self.assertEqual(code, 2)
         self.assertRegex(out, r"FAILS\s+item list carries 'updated_at'")
         self.assertEqual(self.fake.vaults, {})
+
+    def test_a_failed_vault_delete_says_to_delete_it_by_hand(self) -> None:
+        self.fake.fail_before.add(("vault", "delete"))
+        with unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)):
+            code, _, err = self.run_main("selftest")
+        self.assertEqual(code, 0)
+        self.assertIn("by hand", err)
+        self.assertEqual(len(self.fake.vaults), 1)
 
     def test_the_vault_is_deleted_even_when_the_scratch_removal_fails(self) -> None:
         def broken(_path: object) -> None:

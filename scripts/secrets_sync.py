@@ -141,7 +141,6 @@ class Op:
         self.account = account
         self.dry_run = dry_run
         self.session: dict[str, str] = {}
-        self.created = False
 
     def env(self) -> dict[str, str]:
         return {**os.environ, **self.session}
@@ -255,18 +254,13 @@ def session(op: Op) -> Iterator[None]:
     signin = run_op(op.argv(["signin"]), op.env(), attached=True)
     if signin.returncode != 0:
         raise Execution(f"op signin failed rc={signin.returncode}")
-    try:
-        parsed = parse_session(signin.stdout)
-    except Execution:
-        signout(op)
-        raise
+    parsed = parse_session(signin.stdout)
     if parsed is None:
         if op.probe(["whoami"]).returncode != 0:
             raise Execution("op signin printed no session assignment, and op whoami still refuses")
         yield
         return
     op.session = {parsed[0]: parsed[1]}
-    op.created = True
     try:
         if op.probe(["whoami"]).returncode != 0:
             raise Execution("op whoami does not accept the session op signin printed")
@@ -358,15 +352,23 @@ def is_link(path: Path) -> bool:
     return path.is_symlink() or path.is_junction()
 
 
-def refuse_symlinks(home: Path, title: str) -> None:
-    """Refuse a title whose path below the home directory passes through a link."""
+def first_link(home: Path, title: str) -> Path | None:
+    """The first link on a title's path below the home directory, or None where it has none."""
     current = home
     for part in title.split("/"):
         current = current / part
         if is_link(current):
-            raise Refusal(
-                f"{title}: {current} is a symbolic link, which this tool never reads or writes through"
-            )
+            return current
+    return None
+
+
+def refuse_symlinks(home: Path, title: str) -> None:
+    """Refuse a title whose path below the home directory passes through a link."""
+    link = first_link(home, title)
+    if link is not None:
+        raise Refusal(
+            f"{title}: {link} is a symbolic link, which this tool never reads or writes through"
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -584,7 +586,10 @@ def cmd_status(a: argparse.Namespace, op: Op) -> int:
         items = members(op, found)
         print(f"{found.name}:")
         for title in sorted(items):
-            there = "present" if os.path.lexists(local_path(home, title)) else "absent"
+            if first_link(home, title) is not None:
+                there = "link"
+            else:
+                there = "present" if os.path.lexists(local_path(home, title)) else "absent"
             print(f"  {there:<8} {title}")
             held.add(title)
     unheld = [t for t in secrets_files(home) if t not in held]
@@ -687,6 +692,11 @@ def push_plans(
             continue
         assert local.mtime is not None
         if item.updated > local.mtime and not a.overwrite_newer:
+            if a.paths:
+                raise Refusal(
+                    f"{title}: remote {stamp(item.updated)} is newer than local {stamp(local.mtime)},"
+                    " so pass --overwrite-newer to replace it"
+                )
             print(
                 f"  skip      {title}  remote {stamp(item.updated)} is newer than local {stamp(local.mtime)},"
                 " so pass --overwrite-newer to replace it"
@@ -801,7 +811,10 @@ def cmd_push(a: argparse.Namespace, op: Op) -> int:
 
 
 def check_restore_home(home: Path) -> None:
-    """Refuse a restore root that is absent, a link, not a directory, or not exactly mode 0700."""
+    """Refuse a restore root that is absent, a link, or not a directory.
+
+    Off Windows it must also be exactly mode 0700, a check NTFS permissions cannot answer.
+    """
     try:
         st = os.lstat(home)
     except FileNotFoundError as exc:
