@@ -1,6 +1,6 @@
 # History Rewrites: Re-identification Rules
 
-**Every commit a history rewrite reaches needs a valid signature again. The pass that re-signs it re-identifies the committer of each commit that is not the rewriter's own.** The facts below about the tooling drive every rule after them.
+**Every commit a history rewrite reaches needs a valid signature again. The pass that re-signs it re-identifies the committer of each commit that another identity committed.** The facts below about the tooling drive every rule after them.
 
 - **A rewrite cascades to every descendant.** A commit's hash covers its parents' hashes. So changing one commit changes the hash of every commit below it, on every branch that holds it. Rewriting a commit near the root rewrites nearly the whole branch, however few commits the edit itself changes.
 - **`git filter-repo` strips signatures and signs nothing.** Its documentation says a rewritten commit's signature "cannot continue to work" and is removed. A run strips the signature from every commit it processes, including one whose content it leaves alone. By default it processes every ref. So every commit it emits lands unsigned, which a require-signed-commits rule rejects.
