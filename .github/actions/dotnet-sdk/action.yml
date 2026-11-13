@@ -38,7 +38,9 @@ runs:
             except ValueError as error:
                 print(f"::warning::global.json could not be read ({error}), so this installs the {fallback} fallback.")
             else:
-                selected = isinstance(document.get("sdk", {}).get("version"), str)
+                # The host reads a missing or null sdk as no selection, so either takes the fallback rather than failing.
+                sdk = document.get("sdk")
+                selected = isinstance(sdk, dict) and isinstance(sdk.get("version"), str)
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write("global-json-file=global.json\n" if selected else f"dotnet-version={fallback}\n")
         PY
