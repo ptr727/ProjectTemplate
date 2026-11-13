@@ -31,12 +31,12 @@ change from one resync to the next.
 
 Read RESYNC.md section 0. A repo with no instruction set at all, or a partial one, is not this
 skill's job. It is STANDUP.md sections 1A and 2 instead, since an absent carried file is a
-baseline that never arrived rather than drift to converge. Verify the host before that first audit. Run
-`python3 scripts/host_gate.py --repo <path-to-target-checkout>` from a hub checkout fetched as the next section
-says, since `scripts/` is hub-hosted and no carrier holds it. A stale tool answers `--version`, looks healthy, and
-produces a wrong answer. Then run `uv run --no-project --script spec/audit.py <RepoName>`,
+baseline that never arrived rather than drift to converge. First create the hub and target
+worktrees and verify the host, as the next section says, since no hub tool runs before the host gate.
+A stale tool answers `--version`, looks healthy, and produces a wrong answer. Then run
+`uv run --no-project --script spec/audit.py <RepoName>`,
 the target's `registry/repos.json` `name` field rather than an `owner/repo` slug or a checkout
-path. Then read whether the findings are letters (absent) or drift (present but stale). Do both before doing
+path. Then read whether the findings are letters (absent) or drift (present but stale). Do all of this before doing
 anything else. The finding kind names the procedure the repo is owed.
 
 ## Reach the hub and measure before changing anything
@@ -54,8 +54,10 @@ hub worktree that only read the hub is removed by hand once it is clean, its bra
 refuses a mutating git command run directly in a primary checkout. However, its rules classify git
 and gh commands only. So a plain file write is never denied, and the re-vendoring this skill exists
 to govern goes uncaught. A compound command is judged whole, so a copy chained to a denied git
-write does not run either. Prose is the enforcement here, and following it is not optional. With the
-host already gated, run the audit end to end, `RESYNC.md` section 2. `uv run --no-project --script spec/audit.py <RepoName>` measures the target's ground-truth
+write does not run either. Prose is the enforcement here, and following it is not optional. Verify
+the host with `python3 scripts/host_gate.py --repo <path-to-target-worktree>`, run from your hub
+worktree, since `scripts/` is hub-hosted and no carrier holds it. Then run the audit end to end,
+`RESYNC.md` section 2. `uv run --no-project --script spec/audit.py <RepoName>` measures the target's ground-truth
 branch, which the registry's `groundTruthBranch` names and which is `main` for every cataloged
 repo today, never `develop`. That is the invocation "Confirm the procedure before starting"
 already ran, run again here. Convergence lands on a ref `main` does not hold yet, so a run that
