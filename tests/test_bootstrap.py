@@ -2764,7 +2764,7 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Menu, [ref]$tokens, [ref]$errors)
-$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Confirm-HubRoot')
+$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Test-HubClean', 'Confirm-HubRoot')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }

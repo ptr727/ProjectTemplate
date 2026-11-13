@@ -283,13 +283,18 @@ detect_hub_root() {
     return 0
 }
 
+hub_root_clean() {
+    local status
+    status=$(git -C "$HUB_ROOT" status --porcelain --untracked-files=all) || return 1
+    [[ -z $status ]]
+}
+
 # Whether HUB_ROOT is clean and sitting on $DEFAULT_REF, with no assumption that it agrees with origin.
 # A failed git command must never read the same as its emptiest possible success.
 # So each one's own exit status is captured rather than only its output.
 hub_root_clean_on_default_ref() {
-    local status branch
-    status=$(git -C "$HUB_ROOT" status --porcelain --untracked-files=all) || return 1
-    [[ -z $status ]] || return 1
+    local branch
+    hub_root_clean || return 1
     branch=$(git -C "$HUB_ROOT" rev-parse --abbrev-ref HEAD) || return 1
     [[ $branch == "$DEFAULT_REF" ]]
 }
@@ -322,9 +327,9 @@ ensure_hub_root() {
         else
             # The freshness check below itself fetches, which updates FETCH_HEAD and the ref it fetches into even though it touches no working file.
             # So the freshness check is as much a change as fetch_hub's own clone.
-            local status head ref_head
+            local head ref_head
             if ref_head=$(hub_ref_commit) &&
-                status=$(git -C "$HUB_ROOT" status --porcelain --untracked-files=all) && [[ -z $status ]] &&
+                hub_root_clean &&
                 head=$(git -C "$HUB_ROOT" rev-parse HEAD) &&
                 [[ $head == "$ref_head" ]]; then
                 return 0
