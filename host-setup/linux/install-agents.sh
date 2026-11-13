@@ -14,7 +14,8 @@
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
-# A tool recording a managed copy (opencode) is the exception: another copy is removed where this user can, and the managed one kept.
+# A tool recording a managed copy (opencode) is the exception.
+# An npm, bun, or Homebrew copy ahead of it is removed where that needs no root.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.

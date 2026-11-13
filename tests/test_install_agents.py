@@ -287,6 +287,30 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("no package manager owns it, so delete it by hand", result.stdout)
         self.assertEqual(self.called(), ["opencode upgrade"])
 
+    def test_the_managed_install_is_refused_where_curl_is_missing(self) -> None:
+        lines = SCRIPT.read_text(encoding="utf-8").rstrip("\n").split("\n")
+        functions = self.dir / "functions.sh"
+        functions.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                f'source "{functions}"\nPATH=/nonexistent managed_install_refusal opencode\n',
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env={**os.environ, "LC_ALL": "C.UTF-8"},
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("curl is not installed", result.stdout)
+
+    # The test PATH keeps /usr/bin and /bin for the script's own tools, so a host curl there would answer.
+    @unittest.skipIf(
+        shutil.which("curl", path="/usr/bin:/bin"), "a host curl in /usr/bin or /bin is reachable"
+    )
     def test_nothing_is_removed_while_the_managed_copy_cannot_be_installed(self) -> None:
         # No curl stub, and the test PATH carries no curl, so the managed installer cannot be fetched.
         self.stray_npm_opencode()
@@ -1016,6 +1040,10 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
         self.assertIn("is installed, but PATH does not reach it", result.stderr)
 
+    # The test PATH keeps /usr/bin and /bin, so a host npm there would answer.
+    @unittest.skipIf(
+        shutil.which("npm", path="/usr/bin:/bin"), "a host npm in /usr/bin or /bin is reachable"
+    )
     def test_a_stray_opencode_stays_and_runs_its_own_updater_while_npm_is_absent(self) -> None:
         self.stub("opencode", "1.0.0")
         result = self.run_script("-Upgrade", "-Yes", "opencode")

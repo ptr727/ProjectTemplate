@@ -15,7 +15,8 @@
 # The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
-# A tool recording a Managed copy (opencode) is the exception: another copy is removed where this user can, and the managed one kept.
+# A tool recording a Managed copy (opencode) is the exception.
+# An npm, bun, or scoop copy ahead of it is removed where that needs no elevation.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
@@ -495,6 +496,40 @@ function Get-OwningNpmPackage {
     return $null
 }
 
+# What an npm or bun step, upgrade or remove, runs for the package owning a tool's files, as Command and Arguments, or Why none runs.
+# An upgrade and a consolidation share it, so a copy under a name the tool shipped under earlier is upgraded or removed by that name.
+# One of the tool's recorded names must own the files, so a fork providing the same command is never replaced or removed.
+function Get-PackageStep {
+    param([string]$Step, [string]$Tool, [string]$Path, [string]$Manager)
+    $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
+    $action = if ($Step -eq 'upgrade') { 'upgrade' } else { 'remove' }
+    $recorded = Get-NpmPackage -Tool $Tool
+    if (-not $recorded) {
+        $plan.Why = "no $Manager package name is recorded for $Tool, so $action it with $Manager by hand"
+        return $plan
+    }
+    $pkg = Get-OwningNpmPackage -Tool $Tool -Path $Path -Manager $Manager
+    $name = if ($pkg) { $pkg } else { $recorded }
+    # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
+    $arguments = if ($Step -eq 'upgrade') { @('install', '-g', "$name@latest") } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
+    $shown = "$Manager $($arguments -join ' ')"
+    if (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
+        $plan.Why = "$Manager is not on PATH, so run: $shown"
+    } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
+        $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, $action it where it was installed"
+    } elseif ($Manager -eq 'npm' -and -not $pkg) {
+        $plan.Why = "its files at $(Hide-Home -Path $Path) are not the npm package $recorded, so that package does not own it, $action it where it was installed"
+    } elseif ($Manager -eq 'bun' -and -not $pkg) {
+        $plan.Why = "its files at $(Hide-Home -Path $Path) are not under bun's global package $recorded, so that package does not own it, $action it where it was installed"
+    } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmPrefix))) {
+        $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: $shown"
+    } else {
+        $plan.Command = $Manager
+        $plan.Arguments = $arguments
+    }
+    return $plan
+}
+
 # What a scoop step, update or uninstall, runs for a tool's app, as Command and Arguments, or Why none runs.
 # An upgrade and a consolidation share it, so both read the app from scoop and both leave scoop's Node and a global app alone.
 function Get-ScoopStep {
@@ -534,7 +569,7 @@ function Get-ChocoPackage {
 # The install reads it, and so does a consolidation before it removes anything, so a host is never left with no copy.
 function Get-NpmInstallRefusal {
     param([string]$Package)
-    if (-not (Get-ToolPath 'npm')) { return "npm is not installed, so the npm package $Package cannot be installed" }
+    if (-not (Get-ToolPath 'npm')) { return 'npm is not installed' }
     $prefix = Get-NpmPrefix
     if ($prefix -and -not (Test-DirectoryWritable -Directory $prefix)) {
         return "the npm prefix $(Hide-Home -Path $prefix) is not writable by this user, so run in an elevated shell: npm install -g $Package"
@@ -550,27 +585,7 @@ function Get-ManagerPlan {
     $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
     switch ($Manager) {
         'winget' { $plan.Why = 'winget owns it and upgrade-host upgrades it' }
-        { $_ -in 'npm', 'bun' } {
-            $pkg = Get-OwningNpmPackage -Tool $Tool -Path $Path -Manager $Manager
-            if (-not $pkg) { $pkg = Get-NpmPackage -Tool $Tool }
-            if (-not $pkg) {
-                $plan.Why = "no $Manager package name is recorded for $Tool, so upgrade it with $Manager by hand"
-            } elseif (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
-                $plan.Why = "$Manager is not on PATH, so run: $Manager install -g $pkg@latest"
-            } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
-                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
-            } elseif ($Manager -eq 'npm' -and -not (Test-NpmPackageOwnership -Path $Path -Package $pkg)) {
-                $plan.Why = "its files at $(Hide-Home -Path $Path) are not the npm package $pkg, so that package does not own it, upgrade it where it was installed"
-            } elseif ($Manager -eq 'bun' -and -not (Test-BunPackageOwnership -Path $Path -Package $pkg)) {
-                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
-            } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmPrefix))) {
-                $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: npm install -g $pkg@latest"
-            } else {
-                # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-                $plan.Command = $Manager
-                $plan.Arguments = @('install', '-g', "$pkg@latest")
-            }
-        }
+        { $_ -in 'npm', 'bun' } { $plan = Get-PackageStep -Step 'upgrade' -Tool $Tool -Path $Path -Manager $Manager }
         'scoop' { $plan = Get-ScoopStep -Tool $Tool -Verb 'update' }
         'choco' { $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade $(Get-ChocoPackage -Tool $Tool) -y" }
     }
@@ -776,31 +791,7 @@ function Get-StrayPlan {
     param([string]$ToolName, [string]$Path, [string]$Manager)
     $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
     switch ($Manager) {
-        { $_ -in 'npm', 'bun' } {
-            if (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
-                $plan.Why = "$Manager is not on PATH, so remove it with $Manager by hand"
-                return $plan
-            }
-            # The path shape only suggests npm, so the npm on PATH must own the files before it is asked to remove them.
-            if ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
-                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, remove it where it was installed"
-                return $plan
-            }
-            $pkg = Get-OwningNpmPackage -Tool $ToolName -Path $Path -Manager $Manager
-            if ($pkg) {
-                if ($Manager -eq 'bun') {
-                    $plan.Command = 'bun'
-                    $plan.Arguments = @('remove', '-g', $pkg)
-                } elseif (Test-DirectoryWritable -Directory (Get-NpmPrefix)) {
-                    $plan.Command = 'npm'
-                    $plan.Arguments = @('uninstall', '-g', $pkg)
-                } else {
-                    $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: npm uninstall -g $pkg"
-                }
-                return $plan
-            }
-            $plan.Why = "its files at $(Hide-Home -Path $Path) are not a $Manager package recorded for $ToolName, so remove it with $Manager by hand"
-        }
+        { $_ -in 'npm', 'bun' } { $plan = Get-PackageStep -Step 'remove' -Tool $ToolName -Path $Path -Manager $Manager }
         'scoop' { $plan = Get-ScoopStep -Tool $ToolName -Verb 'uninstall' }
         'choco' { $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco uninstall $(Get-ChocoPackage -Tool $ToolName) -y" }
         'winget' { $plan.Why = "winget owns it, so remove it by hand: winget uninstall $ToolName" }
@@ -843,12 +834,14 @@ function Invoke-Consolidate {
 }
 
 # Why a stray copy stays, given why the managed copy cannot be installed, or nothing where it can.
-# A refused install names the stray's removal too, since an npm copy in the same prefix holds the shim the managed package needs.
+# A refused install names an npm stray's removal too, since an npm copy in the same prefix holds the shim the managed package needs.
 function Get-StrayStayReason {
-    param([string]$ToolName, [string]$Refusal, $Stray)
+    param([string]$ToolName, [string]$Refusal, $Stray, [string]$Manager)
     if (-not $Refusal) { return $Stray.Why }
+    $reason = "$(Get-ManagedLabel $ToolName) cannot be installed: $Refusal"
+    if ($Manager -ne 'npm') { return $reason }
     $removal = if ($Stray.Command) { "$($Stray.Command) $($Stray.Arguments -join ' ')" } else { $Stray.Why }
-    return "$(Get-ManagedLabel $ToolName) cannot be installed: $Refusal. It needs this copy removed first: $removal"
+    return "$reason. It needs this copy removed first: $removal"
 }
 
 # Why the managed copy cannot be installed on this host, or nothing where it can.
@@ -869,8 +862,9 @@ function Invoke-ConsolidateAndInstall {
         $refusal = Get-ManagedInstallRefusal $ToolName
         if ($refusal) {
             $path = Get-ToolPath $ToolName
-            $stray = Get-StrayPlan -ToolName $ToolName -Path $path -Manager (Get-ToolManager $path)
-            log "${ToolName}: $(Hide-Home -Path $path) stays, since $(Get-StrayStayReason -ToolName $ToolName -Refusal $refusal -Stray $stray)"
+            $manager = Get-ToolManager $path
+            $stray = Get-StrayPlan -ToolName $ToolName -Path $path -Manager $manager
+            log "${ToolName}: $(Hide-Home -Path $path) stays, since $(Get-StrayStayReason -ToolName $ToolName -Refusal $refusal -Stray $stray -Manager $manager)"
             return 2
         }
     }
@@ -936,7 +930,7 @@ function Show-Report {
                     note $tool "$(Hide-Home $path) is the $manager copy rather than $label, -Upgrade removes it with $($stray.Command) $($stray.Arguments -join ' '), then $next $label unless another copy PATH reaches stays"
                     $removes = $true
                 } else {
-                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays: $(Get-StrayStayReason -ToolName $tool -Refusal $refusal -Stray $stray)"
+                    note $tool "$(Hide-Home $path) is the $manager copy rather than $label, and it stays: $(Get-StrayStayReason -ToolName $tool -Refusal $refusal -Stray $stray -Manager $manager)"
                 }
             }
             if (-not $removes -and $manager -ne 'self') {
