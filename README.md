@@ -51,7 +51,7 @@ Nothing here is installed as a dependency. The rules are read, and the baseline 
 - [Using This Repo](#using-this-repo)
   - [Deploy the Host Guardrails](#deploy-the-host-guardrails)
   - [Install the Fleet Skills](#install-the-fleet-skills)
-  - [Carry the Rules Into a Repository](#carry-the-rules-into-a-repository)
+  - [Carry the Rules into a Repository](#carry-the-rules-into-a-repository)
   - [Adopting Outside This Fleet](#adopting-outside-this-fleet)
 - [Diverging From a Rule](#diverging-from-a-rule)
   - [A Repository Diverging From a Carried Unit](#a-repository-diverging-from-a-carried-unit)
@@ -201,7 +201,7 @@ python3 scripts/skills_install.py --report   # read-only: what does each channel
 
 A host stood up end to end by the [`host-setup/`][host-setup-dir] bootstrap gets this step at the end of its host mode. It runs as part of the agent setup, which also installs the Claude Code safety kit and writes the host-wide rules for Codex and opencode. A fresh machine therefore finishes with the tools, the identity, and the skills copy Codex and opencode read. The Claude Code plugin registration, the kit, and the host-wide rules act only on agents already installed. So run the agent setup again after installing a coding agent, before its first session. `bootstrap.sh --agent-setup` or `bootstrap.ps1 -AgentSetup` runs that setup on its own. `--agent-status` or `-AgentStatus` reports it. [`docs/host-setup.md`][host-setup] "Fleet Skills Install" carries the details, including how the install degrades where the `claude` CLI is absent.
 
-### Carry the Rules Into a Repository
+### Carry the Rules into a Repository
 
 A repository that does not exist yet is stood up with [`STANDUP.md`][standup], which is ordered rather than a menu. The order is to verify commit identity and signing before the first commit, and to hand the maintainer what only they can supply. Next, classify the repo and write its [registry][repos] entry, and carry the instruction set before authoring anything of your own. Then carry the remaining baseline, the workflows, and the settings. The two steps with a closing window are first. This is because signing has to be live before the first commit, and the rules have to be loaded before the first authored file.
 
