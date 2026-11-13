@@ -2396,10 +2396,13 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(runner_only), [fallback])
         self.assertEqual(self.select(None), [fallback])
 
-    def test_comments_and_trailing_commas_are_read_as_the_dotnet_host_reads_them(self) -> None:
-        """The dotnet host accepts both, so a file holding them still selects its line or the fallback."""
+    def test_comments_are_read_as_the_dotnet_host_reads_them(self) -> None:
+        """The dotnet host accepts comments, so a file holding them still selects its line or the fallback."""
         fallback = [f"dotnet-version={baseline_line()[0]}.x"]
-        commented = '// the fleet line\n{"sdk": {"version": "11.0.100", /* pinned */ "rollForward": "latestFeature",},}'
+        commented = (
+            '// the fleet line\n{"sdk": {"version": "11.0.100", // the TFM major\n'
+            '"rollForward": /* floats */ "latestFeature"}}'
+        )
         self.assertEqual(self.select(commented), ["global-json-file=global.json"])
         runner_only = '// MTP\n{"test": {"runner": "Microsoft.Testing.Platform"}}'
         self.assertEqual(self.select(runner_only), fallback)
@@ -2413,7 +2416,8 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select("{not json"), [f"dotnet-version={fallback}"])
         self.assertIn("::warning::global.json could not be read", self.last_stdout)
         self.assertIn(f"so this installs the {fallback} fallback.", self.last_stdout)
-        self.assertEqual(self.select('["sdk"]'), [f"dotnet-version={fallback}"])
+        trailing_comma = '{"sdk": {"version": "11.0.100",}}'
+        self.assertEqual(self.select(trailing_comma), [f"dotnet-version={fallback}"])
 
     def test_every_hub_sdk_step_selects_the_line_one_way(self) -> None:
         """Each hub step installing the SDK reaches the shared action, which alone pins setup-dotnet.

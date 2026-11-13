@@ -14,8 +14,8 @@ runs:
       run: |
         set -Eeuo pipefail
         fallback=10.x
-        # The dotnet host accepts comments and trailing commas in global.json, so this reads it the same way.
-        # They are dropped outside strings, then the rest is parsed as strict JSON.
+        # The dotnet host accepts comments in global.json and nothing else beyond strict JSON, so this reads it the same way.
+        # Comments are dropped outside strings, then the rest is parsed as strict JSON.
         # So a commented file still selects its line, and one with no sdk.version still gets the fallback.
         python3 - "$fallback" <<'PY'
         import json
@@ -29,15 +29,14 @@ runs:
         selected = False
         if path.is_file():
             text = path.read_text(encoding="utf-8-sig")
-            tolerated = re.compile(r'("(?:\\.|[^"\\])*")|//[^\n]*|/\*.*?\*/|,(?=\s*[}\]])', re.S)
-            text = tolerated.sub(lambda match: match.group(1) or "", text)
+            comments = re.compile(r'("(?:\\.|[^"\\])*")|//[^\n]*|/\*.*?\*/', re.S)
+            text = comments.sub(lambda match: match.group(1) or "", text)
             try:
                 document = json.loads(text)
             except ValueError as error:
                 print(f"::warning::global.json could not be read ({error}), so this installs the {fallback} fallback.")
             else:
-                sdk = document.get("sdk") if isinstance(document, dict) else None
-                selected = isinstance(sdk, dict) and isinstance(sdk.get("version"), str)
+                selected = isinstance(document.get("sdk", {}).get("version"), str)
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write("global-json-file=global.json\n" if selected else f"dotnet-version={fallback}\n")
         PY
