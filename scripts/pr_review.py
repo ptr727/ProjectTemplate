@@ -158,7 +158,7 @@ Subcommands
            activity. The loop runs in-process, so a 45-minute wait costs one agent turn, not 90. A pull request
            found no longer open, on the first read or on any poll, is neither requested nor polled further. `wait` then prints its digest and exits
            as `status` does, so a 0 there says nothing about review coverage, and `state=` says why.
-           No poll sleeps past --timeout. The digest prints after the reads that follow it. A SIGINT or SIGTERM prints one line naming it and ends the process by that signal.
+           No poll sleeps past --timeout. The digest prints after the reads that follow it. A SIGINT or SIGTERM prints one line naming it and re-raises that signal, exiting 130 on Windows instead.
            Exit 0 = review present, or on a held head an attested local pass whose checks no longer
            hold the poll, with no thread open where the pull request is open. Exit 0 on a review
            present polls the checks only for an after-checks CodeRabbit or Qodo still to ask, so it does not prove the required checks ran. On an open attested held head whose commit the payload carries,
