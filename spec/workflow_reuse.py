@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["markdown-it-py>=4", "pyyaml>=6"]
+# dependencies = ["markdown-it-py==4.3.0", "mdurl==0.1.2", "pyyaml==6.0.3"]
 # ///
 """Workflow-reuse measurement: how much of the fleet's GitHub Actions YAML is a copy of a hub canonical.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["editorconfig>=0.17", "ruamel.yaml>=0.18"]
+# dependencies = ["editorconfig==0.17.1", "ruamel.yaml==0.19.1"]
 # ///
 """Write and check the central bot-settings repositories from the hub.
 
