@@ -15,6 +15,7 @@
 # The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
+# A tool recording a Managed copy (opencode) is managed through that copy, and another copy ahead of it is reported for a fix by hand.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
@@ -125,8 +126,13 @@ agent integrations are reinstalled after an upgrade wherever herdr reports one o
 herdr server still running the previous binary is left running and reported as needing a
 restart, since stopping it would end every pane inside it.
 
-codex and opencode document no installer on Windows other than a package manager, so -Install
-refuses them here and names the documented route rather than inventing one.
+opencode is the one tool with a managed copy, the npm package @opencode/cli, since it ships from
+several sources, opencode 2 replaced opencode 1's npm package, and its installer script is bash
+only. Another copy PATH reaches first, an npm opencode-ai among them, is reported with the command
+that removes it and is never removed here. -Upgrade and -Install leave opencode alone while one
+is first on PATH, and act on the managed package once none is. Where npm cannot report its
+prefix, only an npm copy whose shim names opencode-ai is told from the managed package, and any
+other npm copy is handled as any npm copy is.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -240,7 +246,7 @@ function Invoke-Installer {
 function Update-SessionPath {
     $separator = [IO.Path]::PathSeparator
     $present = @($env:PATH -split [regex]::Escape($separator))
-    $wanted = @(Join-Path $HOME '.local/bin'; Join-Path $HOME '.opencode/bin')
+    $wanted = @(Join-Path $HOME '.local/bin')
     if ($IsWindows) { $wanted += @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') }
     foreach ($dir in $wanted) {
         if ($dir -and (Test-Path -LiteralPath $dir -PathType Container) -and ($present -notcontains $dir)) {
@@ -274,9 +280,20 @@ function Get-NpmPackage {
     switch ($Tool) {
         'claude' { return '@anthropic-ai/claude-code' }
         'codex' { return '@openai/codex' }
-        'opencode' { return 'opencode-ai' }
+        'opencode' { return '@opencode/cli' }
     }
     return $null
+}
+
+# Every npm registry name a tool has shipped under, current first.
+# A copy under an earlier name is still that tool's, so its removal is named by that name, as opencode 1's opencode-ai is.
+function Get-KnownNpmPackage {
+    param([string]$Tool)
+    $names = @()
+    $current = Get-NpmPackage -Tool $Tool
+    if ($current) { $names += $current }
+    if ($Tool -eq 'opencode') { $names += 'opencode-ai' }
+    return , $names
 }
 
 # A path with every link along it followed to its final target, or the path as given where it cannot be read.
@@ -413,21 +430,41 @@ function Get-ScoopApp {
     return $null
 }
 
+# The directory an npm package installs into under the prefix of the npm on PATH, or nothing where npm cannot say.
+function Get-NpmPackageDirectory {
+    param([string]$Package)
+    $prefix = Get-NpmPrefix
+    if (-not $prefix) { return $null }
+    $prefix = (Resolve-FinalPath -Path $prefix).TrimEnd('\', '/')
+    return (Join-Path (Join-Path $prefix 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar))
+}
+
 # Whether the npm package a tool is recorded under is the one that owns its files.
 # The package must be installed under the prefix, and the file must sit in it or a shim must name its directory.
 # This keeps a fork that provides the same command from being replaced by the recorded package.
 function Test-NpmPackageOwnership {
     param([string]$Path, [string]$Package)
-    $prefix = (Resolve-FinalPath -Path (Get-NpmPrefix)).TrimEnd('\', '/')
-    $directory = Join-Path (Join-Path $prefix 'node_modules') ($Package -replace '/', [IO.Path]::DirectorySeparatorChar)
-    if (-not (Test-Path -LiteralPath (Join-Path $directory 'package.json') -PathType Leaf)) { return $false }
+    $directory = Get-NpmPackageDirectory -Package $Package
+    if (-not $directory -or -not (Test-Path -LiteralPath (Join-Path $directory 'package.json') -PathType Leaf)) { return $false }
     $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
     if (Test-PathUnder -Path $resolved -Root $directory -Below) { return $true }
     # A shim is a script beside the package rather than a link into it, so its text must name the package's directory.
+    return (Test-NpmShimName -Path $Path -Package $Package)
+}
+
+# Whether text, a path or a shim's content, names an npm package's directory.
+function Test-NamesNpmPackage {
+    param([string]$Text, [string]$Package)
+    $needle = 'node_modules\' + ($Package -replace '/', '\') + '\'
+    return (($Text -replace '/', '\').IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+}
+
+# Whether a shim's text names an npm package's directory.
+function Test-NpmShimName {
+    param([string]$Path, [string]$Package)
     $text = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
     if (-not $text) { return $false }
-    $needle = 'node_modules\' + ($Package -replace '/', '\') + '\'
-    return (($text -replace '/', '\').IndexOf($needle, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+    return (Test-NamesNpmPackage -Text $text -Package $Package)
 }
 
 # Whether the tool is bun's global install of the recorded package.
@@ -458,6 +495,102 @@ function Test-BunPackageOwnership {
     return ($shimDirectory -ieq $bin -and (Test-Path -LiteralPath (Join-Path $directory 'package.json')))
 }
 
+# The package among the given npm names that owns a tool's files under a manager, npm or bun, or nothing where none does.
+function Get-OwningNpmPackage {
+    param([string[]]$Names, [string]$Path, [string]$Manager)
+    foreach ($pkg in $Names) {
+        $owned = if ($Manager -eq 'npm') { Test-NpmPackageOwnership -Path $Path -Package $pkg } else { Test-BunPackageOwnership -Path $Path -Package $pkg }
+        if ($owned) { return $pkg }
+    }
+    return $null
+}
+
+# Which of a tool's npm names, current or earlier, its path or its shim's text shows, read without asking npm, or nothing where neither does.
+function Get-NamedNpmPackage {
+    param([string]$Tool, [string]$Path)
+    $resolved = (Resolve-FinalPath -Path $Path) -replace '/', '\'
+    foreach ($pkg in (Get-KnownNpmPackage -Tool $Tool)) {
+        if ((Test-NamesNpmPackage -Text $resolved -Package $pkg) -or (Test-NpmShimName -Path $Path -Package $pkg)) { return $pkg }
+    }
+    return $null
+}
+
+# What an npm or bun step, upgrade or remove, runs for the package owning a tool's files, as Command and Arguments, or Why none runs.
+# An upgrade and a stray's removal share it.
+# An upgrade matches only the recorded package, while a removal also matches a name the tool shipped under earlier.
+# The matched name must own the files, so a fork providing the same command is never replaced or removed.
+function Get-PackageStep {
+    param([string]$Step, [string]$Tool, [string]$Path, [string]$Manager)
+    $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
+    $action = if ($Step -eq 'upgrade') { 'upgrade' } else { 'remove' }
+    $recorded = Get-NpmPackage -Tool $Tool
+    if (-not $recorded) {
+        $plan.Why = "no $Manager package name is recorded for $Tool, so $action it with $Manager by hand"
+        return $plan
+    }
+    # An upgrade under an earlier name would reinstall the version that name replaced.
+    $names = if ($Step -eq 'upgrade') { @($recorded) } else { Get-KnownNpmPackage -Tool $Tool }
+    $pkg = Get-OwningNpmPackage -Names $names -Path $Path -Manager $Manager
+    # Where npm or bun cannot say which package owns the files, a removal names the one the path or its shim shows.
+    $name = if ($pkg) { $pkg } elseif ($Step -eq 'remove') { Get-NamedNpmPackage -Tool $Tool -Path $Path } else { $null }
+    if (-not $name) { $name = $recorded }
+    # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
+    $arguments = if ($Step -eq 'upgrade') { @('install', '-g', "$name@latest") } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
+    $shown = "$Manager $($arguments -join ' ')"
+    if (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
+        $plan.Why = "$Manager is not on PATH, so run: $shown"
+    } elseif ($Step -eq 'remove' -and $Manager -eq 'npm' -and -not (Get-NpmPrefix)) {
+        $plan.Why = "the npm on PATH did not report its prefix, so run: $shown"
+    } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
+        $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, $action it where it was installed"
+    } elseif ($Manager -eq 'npm' -and -not $pkg) {
+        $plan.Why = "its files at $(Hide-Home -Path $Path) are not the npm package $recorded, so that package does not own it, $action it where it was installed"
+    } elseif ($Manager -eq 'bun' -and -not $pkg) {
+        $plan.Why = "its files at $(Hide-Home -Path $Path) are not under bun's global package $recorded, so that package does not own it, $action it where it was installed"
+    } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmPrefix))) {
+        $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: $shown"
+    } else {
+        $plan.Command = $Manager
+        $plan.Arguments = $arguments
+    }
+    return $plan
+}
+
+# What a scoop step, update or uninstall, runs for a tool's app, as Command and Arguments, or Why none runs.
+# An upgrade and a stray's removal share it, so both read the app from scoop and both leave scoop's Node and a global app alone.
+function Get-ScoopStep {
+    param([string]$Tool, [string]$Verb)
+    $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
+    $action = if ($Verb -eq 'update') { 'upgrade' } else { 'remove' }
+    $app = $null
+    if (Get-Command scoop -CommandType Application -ErrorAction SilentlyContinue) {
+        $which = Invoke-Captured -Command 'scoop' -Arguments @('which', $Tool) -TimeoutSec $script:READ_TIMEOUT
+        if ($which.ExitCode -eq 0) { $app = Get-ScoopApp -Path $which.Output.Trim() }
+    }
+    if ($app -and $app.App -in 'nodejs', 'nodejs-lts') {
+        $plan.Why = "it sits inside scoop's Node, and the npm on PATH does not own it, so $action it where it was installed"
+    } elseif ($app -and $app.Global) {
+        $plan.Why = "scoop's global apps need an elevated shell and this script never elevates, so run in one: scoop $Verb $($app.App) --global"
+    } elseif ($app) {
+        $plan.Command = 'scoop'
+        $plan.Arguments = @($Verb, $app.App)
+    } else {
+        $plan.Why = "scoop's name for $Tool could not be read, so run scoop $Verb with it by hand"
+    }
+    return $plan
+}
+
+# The choco package holding a tool, read from the choco lib directory, or a placeholder where it cannot be read.
+function Get-ChocoPackage {
+    param([string]$Tool)
+    $lib = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { $null }
+    if ($lib -and (Test-Path -LiteralPath $lib -PathType Container)) {
+        $hit = Get-ChildItem -LiteralPath $lib -Recurse -Filter "$Tool.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($hit) { return ($hit.FullName.Substring($lib.Length).TrimStart('\', '/') -split '[\\/]')[0] }
+    }
+    return '<package>'
+}
+
 # What an upgrade does for a tool a package manager owns.
 # Command and Arguments hold the command to run, or Why holds the reason none runs, and never both.
 # The reason names the command where one exists, so the person can run it where this script may not.
@@ -466,52 +599,9 @@ function Get-ManagerPlan {
     $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
     switch ($Manager) {
         'winget' { $plan.Why = 'winget owns it and upgrade-host upgrades it' }
-        { $_ -in 'npm', 'bun' } {
-            $pkg = Get-NpmPackage -Tool $Tool
-            if (-not $pkg) {
-                $plan.Why = "no $Manager package name is recorded for $Tool, so upgrade it with $Manager by hand"
-            } elseif (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
-                $plan.Why = "$Manager is not on PATH, so run: $Manager install -g $pkg@latest"
-            } elseif ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
-                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, upgrade it where it was installed"
-            } elseif ($Manager -eq 'npm' -and -not (Test-NpmPackageOwnership -Path $Path -Package $pkg)) {
-                $plan.Why = "its files at $(Hide-Home -Path $Path) are not the npm package $pkg, so that package does not own it, upgrade it where it was installed"
-            } elseif ($Manager -eq 'bun' -and -not (Test-BunPackageOwnership -Path $Path -Package $pkg)) {
-                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under bun's global package $pkg, so that package does not own it, upgrade it where it was installed"
-            } elseif ($Manager -eq 'npm' -and -not (Test-DirectoryWritable -Directory (Get-NpmPrefix))) {
-                $plan.Why = "the npm prefix $(Hide-Home -Path (Get-NpmPrefix)) is not writable by this user, so run in an elevated shell: npm install -g $pkg@latest"
-            } else {
-                # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-                $plan.Command = $Manager
-                $plan.Arguments = @('install', '-g', "$pkg@latest")
-            }
-        }
-        'scoop' {
-            $app = $null
-            if (Get-Command scoop -CommandType Application -ErrorAction SilentlyContinue) {
-                $which = Invoke-Captured -Command 'scoop' -Arguments @('which', $Tool) -TimeoutSec $script:READ_TIMEOUT
-                if ($which.ExitCode -eq 0) { $app = Get-ScoopApp -Path $which.Output.Trim() }
-            }
-            if ($app -and $app.App -in 'nodejs', 'nodejs-lts') {
-                $plan.Why = "it sits inside scoop's Node, and the npm on PATH does not own it, so upgrade it where it was installed"
-            } elseif ($app -and $app.Global) {
-                $plan.Why = "scoop's global apps need an elevated shell and this script never elevates, so run in one: scoop update $($app.App) --global"
-            } elseif ($app) {
-                $plan.Command = 'scoop'
-                $plan.Arguments = @('update', $app.App)
-            } else {
-                $plan.Why = "scoop's name for $Tool could not be read, so run scoop update with it by hand"
-            }
-        }
-        'choco' {
-            $pkg = '<package>'
-            $lib = if ($env:ChocolateyInstall) { Join-Path $env:ChocolateyInstall 'lib' } else { $null }
-            if ($lib -and (Test-Path -LiteralPath $lib -PathType Container)) {
-                $hit = Get-ChildItem -LiteralPath $lib -Recurse -Filter "$Tool.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($hit) { $pkg = ($hit.FullName.Substring($lib.Length).TrimStart('\', '/') -split '[\\/]')[0] }
-            }
-            $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade $pkg -y"
-        }
+        { $_ -in 'npm', 'bun' } { $plan = Get-PackageStep -Step 'upgrade' -Tool $Tool -Path $Path -Manager $Manager }
+        'scoop' { $plan = Get-ScoopStep -Tool $Tool -Verb 'update' }
+        'choco' { $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade $(Get-ChocoPackage -Tool $Tool) -y" }
     }
     return $plan
 }
@@ -612,7 +702,9 @@ function Add-HerdrNote {
 # --- The tools ---
 
 # Each tool names where it installs from, how it updates, and how it installs.
-# Neither codex nor opencode documents a Windows installer outside a package manager, so their install refuses and says which route their documentation names.
+# A tool can record a Managed copy, the one this script installs and upgrades.
+# The opencode tool records one, since it ships from several sources and opencode 2 replaced opencode 1's npm package.
+# Its installer script is bash only, so on Windows the managed copy is its documented npm package.
 $TOOLS = @(
     @{
         Name    = 'claude'
@@ -622,20 +714,21 @@ $TOOLS = @(
     }
     @{
         Name    = 'codex'
-        Source  = 'https://learn.chatgpt.com/docs/codex/cli'
+        Source  = 'https://chatgpt.com/codex/install.ps1'
         Upgrade = { Invoke-Step -Command 'codex' -Arguments @('update') }
-        Install = {
-            warn 'codex documents no Windows installer outside a package manager, and the route for Windows is on https://learn.chatgpt.com/docs/codex/cli, install it that way'
-            return 1
-        }
+        Install = { Invoke-Installer -Url 'https://chatgpt.com/codex/install.ps1' }
     }
     @{
         Name    = 'opencode'
-        Source  = 'https://opencode.ai/docs/'
-        Upgrade = { Invoke-Step -Command 'opencode' -Arguments @('upgrade') }
+        Source  = "npm install -g $(Get-NpmPackage -Tool 'opencode')"
+        # The managed copy is the npm package Get-NpmPackage records, upgraded through npm's plan, so no Upgrade of its own runs.
+        Managed = $true
         Install = {
-            warn 'opencode documents no Windows installer outside a package manager, install it with scoop install opencode, choco install opencode, or npm install -g opencode-ai (https://opencode.ai/docs/)'
-            return 1
+            if (-not $script:DRY_RUN -and -not (Get-ToolPath 'npm')) {
+                warn "opencode installs on Windows as the npm package $(Get-NpmPackage -Tool 'opencode'), and npm is not installed (https://opencode.ai/docs/)"
+                return 1
+            }
+            return (Invoke-Step -Command 'npm' -Arguments @('install', '-g', (Get-NpmPackage -Tool 'opencode')))
         }
     }
     @{
@@ -665,6 +758,61 @@ function Get-Tool {
     return ($script:TOOLS | Where-Object { $_.Name -ceq $ToolName } | Select-Object -First 1)
 }
 
+# --- Managed Copies ---
+
+# A tool can record a Managed copy, the one this script installs and upgrades.
+# Another copy PATH reaches first is reported with the commands that fix it, and never removed here, since the fix is a one-off.
+
+# Whether a tool records a managed copy, read by key since strict mode refuses a missing one.
+function Test-ManagedTool {
+    param([string]$ToolName)
+    $tool = Get-Tool $ToolName
+    return [bool]($tool -and $tool.ContainsKey('Managed') -and $tool.Managed)
+}
+
+# How the managed copy reads in a message.
+function Get-ManagedLabel {
+    param([string]$ToolName)
+    return "the npm package $(Get-NpmPackage -Tool $ToolName)"
+}
+
+# Whether a copy PATH resolves to is another copy than the tool's managed one.
+function Test-StrayCopy {
+    param([string]$ToolName, [string]$Path)
+    if (-not (Test-ManagedTool $ToolName)) { return $false }
+    if ((Get-ToolManager $Path) -ne 'npm') { return $true }
+    # Where npm cannot say where it installs, only a shim naming another of the tool's packages is told from the managed one.
+    if (-not (Get-NpmPrefix)) {
+        $named = Get-NamedNpmPackage -Tool $ToolName -Path $Path
+        return [bool]($named -and $named -ne (Get-NpmPackage -Tool $ToolName))
+    }
+    # The managed copy is the recorded package's shim inside the prefix of the npm on PATH, so a shim elsewhere naming it is a stray.
+    return -not ((Test-NpmOwnership -Path $Path) -and (Test-NpmPackageOwnership -Path $Path -Package (Get-NpmPackage -Tool $ToolName)))
+}
+
+# The command that removes a stray copy through whatever owns it, as Command and Arguments, or Why where no one command does.
+function Get-StrayPlan {
+    param([string]$ToolName, [string]$Path, [string]$Manager)
+    $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
+    switch ($Manager) {
+        { $_ -in 'npm', 'bun' } { $plan = Get-PackageStep -Step 'remove' -Tool $ToolName -Path $Path -Manager $Manager }
+        'scoop' { $plan = Get-ScoopStep -Tool $ToolName -Verb 'uninstall' }
+        'choco' { $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco uninstall $(Get-ChocoPackage -Tool $ToolName) -y" }
+        'winget' { $plan.Why = "winget owns it, so remove it by hand: winget uninstall $ToolName" }
+        default { $plan.Why = "no package manager owns it, so delete $(Hide-Home -Path $Path) by hand" }
+    }
+    return $plan
+}
+
+# How to fix a stray copy by hand, naming its removal and then what makes the managed copy the one PATH reaches.
+function Get-StrayFixup {
+    param([string]$ToolName, [string]$Path)
+    $manager = Get-ToolManager $Path
+    $plan = Get-StrayPlan -ToolName $ToolName -Path $Path -Manager $manager
+    $removal = if ($plan.Command) { "$($plan.Command) $($plan.Arguments -join ' ')" } else { $plan.Why }
+    return "$(Hide-Home -Path $Path) is the $manager copy rather than $(Get-ManagedLabel $ToolName), so remove it by hand: $removal, and then run: install-agents.ps1 -Install $ToolName"
+}
+
 # --- Report ---
 
 function Get-RestartPending {
@@ -691,7 +839,13 @@ function Show-Report {
             $manager = Get-ToolManager $path
             $status = 'present'
             $upgrades = $true
-            if ($manager -ne 'self') {
+            $stray = $false
+            if (Test-StrayCopy -ToolName $tool -Path $path) {
+                note $tool (Get-StrayFixup -ToolName $tool -Path $path)
+                $stray = $true
+                $upgrades = $false
+            }
+            if (-not $stray -and $manager -ne 'self') {
                 $plan = Get-ManagerPlan -Tool $tool -Path $path -Manager $manager
                 if ($plan.Command) {
                     note $tool "installed through $manager, -Upgrade runs: $($plan.Command) $($plan.Arguments -join ' ')"
@@ -774,6 +928,10 @@ function Invoke-ToolUpgrade {
         log "${ToolName}: not installed, leaving it absent"
         return
     }
+    if (Test-StrayCopy -ToolName $ToolName -Path $path) {
+        warn "${ToolName}: $(Get-StrayFixup -ToolName $ToolName -Path $path)"
+        return
+    }
     $manager = Get-ToolManager $path
     $installed = Get-ToolVersion $path
     $shownVersion = if ($installed) { $installed } else { 'an unreadable version' }
@@ -849,6 +1007,10 @@ function Invoke-ToolInstall {
     param([string]$ToolName)
     $tool = Get-Tool $ToolName
     $path = Get-ToolPath $ToolName
+    if ($path -and (Test-StrayCopy -ToolName $ToolName -Path $path)) {
+        warn "${ToolName}: $(Get-StrayFixup -ToolName $ToolName -Path $path)"
+        return
+    }
     if ($path) {
         log "${ToolName}: already installed at $(Hide-Home $path), leaving it alone, -Upgrade updates it"
         return

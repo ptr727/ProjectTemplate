@@ -54,6 +54,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    whose own file table names exactly the changed files covers it, `coverage=table`. That is the
    reading a Copilot round at Balanced review effort gives. Where no round covering the head carries a table of its own, the newest round
    that does stands in as `coverage=carried:table`. Its table has to name exactly the changed files.
+   The bound is that file set rather than file recency. The carry exists for a later head that
+   changed those files and drew a round with no table of its own.
    Either table may leave out an added, modified, renamed, or deleted file with no changed line,
    such as a binary. That holds while some changed file has one. On a develop -> main promotion, a
    file that only green Dependabot bumps changed is taken out of that comparison. The head reads

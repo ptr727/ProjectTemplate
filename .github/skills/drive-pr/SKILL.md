@@ -103,6 +103,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    one per "Disposing of Every Finding" and wait again. Read `state=` in every digest `wait` or `status` prints.
    A peer can merge or close the pull request mid-drive. A digest carrying `state=MERGED` on a feature PR into develop means the merge has landed.
    Skip the merge in step 4 and go on to its post-merge path.
+   A finding still open there keeps its outcome owed. That covers an unresolved thread and every finding step 4 names, whether or not `merge` would refuse on it.
+   Give each one per "Disposing of Every Finding" before that path's cleanup, a fix landing as a fresh feature -> develop pass.
    On a promotion PR it means the drive's end state is passed, so stop and report it merged.
    A digest carrying `state=CLOSED` is a stop to report, with its `closed_at=`.
    On such a PR `state=` decides the next step over any exit code `wait` or `status` returns. A promotion re-reviews content its feature PRs already carried.
@@ -130,9 +132,10 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    line's route here. The hub's `scripts/README.md` "`pr_merge.py`" gives each route in full.
 
    - `next=done` is merged and cleaned up.
-   - `next=cleanup` is a merge that landed with its cleanup still owed. Run the `cleanup` command
-     below. Report a pull request another hand merged as a merge this run cannot vouch for. The
-     head that merged may be one the gate never read.
+   - `next=cleanup` is a merge that landed with its cleanup still owed. Give its open findings the
+     outcome step 3 owes after a peer merge, then run the `cleanup` command below. Report a pull
+     request another hand merged as a merge this run cannot vouch for. The head that merged may be
+     one the gate never read.
    - `next=readback` is a merge that may have landed. Read it back with `gh pr view <number> --repo
      <owner>/<repo> --json state`. `MERGED` means run `cleanup`, and `OPEN` means treat it as
      `redrive`. Only a read that still cannot answer is reported, saying the merge may have landed.

@@ -26,9 +26,12 @@ import itertools
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -46,6 +49,12 @@ import pr_review_rounds
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import without_git_location
 from import_probe import import_delta
+from test_pre_commit_hook import (
+    assert_group_ended,
+    end_group,
+    wait_until_started,
+    write_executable,
+)
 
 DEFAULT_POLICY = pr_review.review_policy.load_default()
 _POLICY_PATCH = mock.patch.object(
@@ -335,6 +344,11 @@ SENT_AFTER = {
 QUOTA_REFUSED = (
     "Copilot was unable to review this pull request because the user who requested the "
     "review has reached their quota limit."
+)
+
+BILLING_REFUSED = (
+    "The job was not started because a payment on this account failed or its spending limit "
+    "is too low."
 )
 
 # Quoted from the corpus rather than invented: CodeRabbit's own comment, trimmed to the marker and its opening line.
@@ -1344,6 +1358,34 @@ class TestRefusal(GqlCase):
         self.answer(payload([review(login="ptr727", body=REFUSED), review(oid=OLD)]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertIn("refusal=no", out)
+
+    def test_a_billing_failure_notice_covers_nothing_and_owes_no_acknowledgment(self) -> None:
+        """A job that never started reviewed nothing, so it is no round on any head.
+
+        Read as a review, it counted toward the round cap and held the head for an acknowledgment
+        of a body with no overview. On an earlier head it left a noted part `merge` refused on.
+        It names no quota that resets, so it reads as the generic refusal the maintainer clears.
+        """
+        self.assertEqual(BILLING_REFUSED, pr_review_rounds.refusal_of({"body": BILLING_REFUSED}))
+        self.assertFalse(pr_review_rounds.quota_refusal({"body": BILLING_REFUSED}))
+        self.assertEqual(
+            0, pr_review_rounds.reviewed_heads(payload([review(body=BILLING_REFUSED)]))
+        )
+        self.answer(payload([review(body=BILLING_REFUSED)]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertIn("refusal=YES", out)
+        self.assertNotIn("review_on_head=yes", out)
+        self.assertNotIn("shapes=HELD", out)
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as captured,
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(41, pr_review.main(["wait", "7", "--repo", "o/r", "--timeout", "0"]))
+        self.assertIn("status=REVIEW_IS_A_REFUSAL", captured.getvalue())
+        self.answer(payload([review(oid=OLD, body=BILLING_REFUSED, rid="A"), review(rid="B")]))
+        out, _ = pr_review.digest("o", "r", 7)
+        self.assertNotIn("shapes=NOTED", out)
+        self.assertNotIn("the body carries no", out)
 
 
 class TestQuotaRefusal(GqlCase):
@@ -3160,6 +3202,29 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7"]))
         slept.assert_not_called()
         self.assertIn("waited=", self.out.getvalue())
+
+    def test_wait_sleeps_no_further_than_its_timeout_and_then_prints_the_digest(self) -> None:
+        """No sleep runs past `--timeout`, so the outcome follows it by the reads alone.
+
+        Sleeps of 15, 20, and 30 seconds reach 65, and the next is cut from 45 to 35. Uncut, the
+        wait slept to 110 seconds on a 100-second bound before it printed anything.
+        """
+        self.answer(payload([], pending=True))
+        clock = [0.0]
+
+        def sleep(seconds: float) -> None:
+            clock[0] += seconds
+
+        with (
+            mock.patch.object(pr_review.time, "monotonic", side_effect=lambda: clock[0]),
+            mock.patch.object(pr_review.time, "sleep", side_effect=sleep),
+        ):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "100"]))
+        self.assertEqual(100, clock[0])
+        out = self.out.getvalue()
+        self.assertIn("pr=7", out)
+        self.assertIn("waited=100s", out)
+        self.assertIn("\nstatus=PENDING", out)
 
     def test_wait_exits_forty_four_where_the_review_closed_but_a_check_is_starved(self) -> None:
         """Exit 0 was saying the review loop closing is the merge gate, and it is not.
@@ -7332,10 +7397,11 @@ class TestContract(unittest.TestCase):
         self.assertEqual(delays, sorted(delays))
 
     def test_the_backoff_sleeps_the_schedule_until_the_timeout(self) -> None:
-        """The last delay repeats, and the bound is read before each sleep rather than after.
+        """The last delay repeats, and each sleep is cut to the time left, so none runs past the bound.
 
-        Six sleeps reach 290 seconds and a seventh 410, so with a 400-second bound the eighth is
-        never taken.
+        Six sleeps reach 290 seconds, so with a 400-second bound the seventh is cut to 110 and no
+        eighth is taken. Uncut, the seventh reached 410, and an outer bound at 400 ended the
+        process before anything printed.
         """
         clock = [0.0]
         slept: list[int] = []
@@ -7350,7 +7416,7 @@ class TestContract(unittest.TestCase):
             mock.patch.object(pr_review.time, "sleep", side_effect=sleep),
         ):
             last = pr_review.backoff(0, lambda: next(reads), lambda _: True, 0.0, 400)
-        self.assertEqual([15, 20, 30, 45, 60, 120, 120], slept)
+        self.assertEqual([15, 20, 30, 45, 60, 120, 110], slept)
         self.assertEqual(7, last)
 
     def test_the_backoff_returns_the_first_value_it_does_not_keep(self) -> None:
@@ -8483,6 +8549,53 @@ class TestWorkflowRunErrorTolerance(unittest.TestCase):
         nodes = pr_review_checks.check_nodes(payload([review()], checks=[old, new, other]))
         kept = sorted((n["name"], n["conclusion"]) for n in nodes)
         self.assertEqual([("lint", "FAILURE"), ("lint", "SUCCESS")], kept)
+
+
+@unittest.skipIf(os.name == "nt", "Windows cannot deliver SIGTERM for a script to handle")
+class TestWaitInterrupt(unittest.TestCase):
+    """A SIGTERM mid-wait prints one line naming it, stops the read in flight, and ends by it.
+
+    An outer bound kills a wait with SIGTERM, and a wait killed that way once printed nothing at
+    all. The script runs under its interpreter directly, since a launcher hides the signal death.
+    It runs from a copy of the scripts tree whose origin names a constructed owner. A stand-in
+    `gh` on PATH holds the first read open, so the signal lands mid-wait with a child to stop.
+    """
+
+    def test_sigterm_mid_wait_prints_one_line_and_ends_by_that_signal(self) -> None:
+        """The signal goes half a second after the stand-in starts, once the read is under way."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "checkout" / "scripts"
+            shutil.copytree(REPO / "scripts", scripts, ignore=shutil.ignore_patterns("__pycache__"))
+            env = without_git_location()
+            git = ["git", "-C", str(scripts.parent)]
+            subprocess.run(["git", "init", "--quiet", str(scripts.parent)], check=True, env=env)
+            origin = "https://github.com/acme/widget.git"
+            subprocess.run([*git, "remote", "add", "origin", origin], check=True, env=env)
+            bin_dir, ready = root / "bin", root / "gh.started"
+            bin_dir.mkdir()
+            write_executable(bin_dir / "gh", f'#!/bin/sh\n: > "{ready}"\nexec sleep 300\n')
+            env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+            argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
+            proc = subprocess.Popen(
+                [*argv, "--repo", "acme/widget", "--timeout", "600"],
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                start_new_session=True,
+            )
+            try:
+                wait_until_started(proc, ready)
+                time.sleep(0.5)
+                proc.send_signal(signal.SIGTERM)
+                _, err = proc.communicate(timeout=60)
+            finally:
+                end_group(proc)
+            self.assertEqual(-signal.SIGTERM, proc.returncode, err)
+            self.assertEqual("pr_review.py: interrupted by SIGTERM.\n", err)
+            assert_group_ended(proc.pid)
 
 
 if __name__ == "__main__":

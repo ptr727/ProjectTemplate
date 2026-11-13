@@ -26,9 +26,11 @@ readonly SUDOERS_FILE="/etc/sudoers.d/90-host-setup-sudo-timestamp"
 readonly SUDO_TIMESTAMP_TIMEOUT=60
 
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
-# The one optional member, powershell, joins the default selection only under --optional.
-readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell)
+readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell op)
 MANAGED_TOOLS=("${TOOLS[@]}")
+
+# Managed tools left out of the default selection unless --optional is given or the tool is named.
+readonly OPTIONAL_TOOLS=(powershell op)
 
 # Package sets.
 # The default set is what a tool needs to be useful.
@@ -36,9 +38,9 @@ MANAGED_TOOLS=("${TOOLS[@]}")
 readonly PYTHON_PACKAGES=(build-essential ca-certificates curl python3 python3-dev python3-venv python3-pip)
 readonly PYTHON_OPTIONAL=(python-is-python3 python-dev-is-python3 pipx python3-setuptools python3-wheel)
 
-# The SDK line a fleet .NET repository's global.json selects in its sdk block, which the dotnet default set carries wherever the feed does.
+# The fleet's default SDK line, the one the hub's global.json baseline selects, which the dotnet default set carries wherever the feed does.
 # It is named here rather than read from the hub's global.json baseline, so the script still runs fetched on its own.
-# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a TFM move edits both.
+# The hub's tests/test_install_tools.py fails while it differs from that baseline, so a move of that baseline edits both.
 readonly DOTNET_FLEET_LINE="10.0"
 
 MODE="report"
@@ -169,8 +171,8 @@ usage() {
 Usage: install-tools.sh [options] [tool ...]
 
 Installs the host tools the fleet's repositories expect, from upstream where the distro package
-trails upstream. With no tool named, every managed tool is selected, and the optional tool
-joins it under --optional.
+trails upstream. With no tool named, every managed tool is selected except the ones --list marks
+optional, which join it under --optional.
 
 Actions, name one, default --report:
   -r, --report      Report installed and available versions, change nothing
@@ -185,7 +187,7 @@ Options:
   -j, --json        Write the report as JSON rather than a table, for a program to read
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt before changing the host
-  -o, --optional    Include the optional tool and the optional package sets, where a tool has one
+  -o, --optional    Include the optional tools and the optional package sets, where a tool has one
       --repo PATH   Include apt packages declared by PATH/host-tools.json
 
 Versions read as apt versions for an apt-managed tool and as upstream versions for a standalone
@@ -205,10 +207,10 @@ Removing the file it names undoes it, and "update-alternatives --auto sudo" undo
 implementation switch it asks for on a host whose sudo parses no timestamp_type.
 
 Examples:
-  install-tools.sh                       Report on every tool
-  install-tools.sh --json                Report on every tool, as JSON
+  install-tools.sh                       Report on every tool but the optional ones
+  install-tools.sh --json                Report on the same tools, as JSON
   install-tools.sh --install             Install what is missing
-  install-tools.sh --upgrade --yes       Bring every tool current, no prompt
+  install-tools.sh --upgrade --yes       Bring the same tools current, no prompt
   install-tools.sh --upgrade node jq     Bring two tools current
   install-tools.sh --install --optional python dotnet
   install-tools.sh --upgrade --dry-run   Show what an upgrade would run
@@ -367,6 +369,51 @@ dpkg_owns_path() {
     dpkg-query -S "$canonical_dir/${path##*/}" >/dev/null 2>&1
 }
 
+# Return true when no dpkg package owns a path.
+# A failed ownership query dies rather than reading as unowned, since a caller removes what this calls unowned.
+path_is_unowned() {
+    local path="$1" status=0
+    dpkg_owns_path "$path" || status=$?
+    case "$status" in
+    0) return 1 ;;
+    1) return 0 ;;
+    *) die "Cannot determine dpkg ownership of $path" ;;
+    esac
+}
+
+# Where PATH first resolves a command, when no dpkg package owns that file, or empty otherwise.
+unowned_command_path() {
+    local resolved
+    resolved=$(type -P "$1" 2>/dev/null || true)
+    [[ $resolved == /* ]] || return 0
+    if path_is_unowned "$resolved"; then
+        printf '%s' "$resolved"
+    fi
+}
+
+# Remove each downloaded copy of a command that answers ahead of the apt package, after a prompt.
+# A fourth argument limits removal to that one path, and an unowned copy anywhere else is left with a warning.
+remove_unowned_command() {
+    local tool="$1" command="$2" label="$3" only="${4:-}" resolved
+    while true; do
+        # The ownership test's own die ends only this substitution, so the run is ended here.
+        resolved=$(unowned_command_path "$command") || exit 1
+        [[ -n $resolved ]] || break
+        if [[ -n $only && $resolved != "$only" ]]; then
+            warn "$tool: $resolved belongs to no package and is not $only, so it stays and keeps answering ahead of the package"
+            break
+        fi
+        log "$tool: removing downloaded copy at $resolved, which answers ahead of the package"
+        confirm "  Remove $resolved?" || die "Declined, downloaded $label left as it is"
+        run_root rm -f "$resolved" || {
+            warn "$tool: failed to remove $resolved, it keeps answering ahead of the package"
+            break
+        }
+        [[ $DRY_RUN == true ]] && break
+        hash -r
+    done
+}
+
 # Install a package that displaces distro packages, asking apt what it would remove and putting that in front of the operator first.
 # Asking apt beats naming the conflicts here, because the conflict set belongs to the upstream package and changes without notice.
 # Orphaned dependencies are left for a later apt autoremove rather than swept here, since autoremove reaches the whole host.
@@ -425,8 +472,9 @@ install_keyring() {
         return 1
     fi
 
-    run_root install -d -m 0755 "$KEYRING_DIR"
-    run_root install -m 0644 "$staged" "$path"
+    # Its caller can go on to remove the old source with errexit off, so a failed write ends the run here.
+    run_root install -d -m 0755 "$KEYRING_DIR" || die "Cannot create $KEYRING_DIR"
+    run_root install -m 0644 "$staged" "$path" || die "Cannot install the keyring at $path"
     return 0
 }
 
@@ -448,7 +496,8 @@ write_sources() {
         return 0
     fi
 
-    printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null
+    # Its caller can go on to remove the old source with errexit off, so a failed write ends the run here.
+    printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null || die "Cannot write $path"
     return 0
 }
 
@@ -460,6 +509,20 @@ remove_stale() {
         run_root rm -f "$path"
         APT_DIRTY=true
     done
+}
+
+# Register an upstream apt repository, then remove the predecessor files named after its first eight arguments.
+# Predecessors go only once the replacement is written, so a key that fails its proof leaves the old source working.
+register_apt_source() {
+    local name="$1" key_url="$2" keyring="$3" release_url="$4" armored="$5" uris="$6" suites="$7" components="$8"
+    shift 8
+    if install_keyring "$key_url" "$keyring" "$release_url" "$armored"; then
+        APT_DIRTY=true
+    fi
+    if write_sources "$name" "$uris" "$suites" "$components" "$keyring"; then
+        APT_DIRTY=true
+    fi
+    [[ $# -eq 0 ]] || remove_stale "$@"
 }
 
 ensure_prerequisites() {
@@ -507,18 +570,10 @@ gh_install() {
     ensure_prerequisites
 
     # The keyring moved to /etc/apt/keyrings and the sources file to deb822, so both predecessors are cleared.
-    remove_stale "$SOURCES_DIR/github-cli.list" "/usr/share/keyrings/githubcli-archive-keyring.gpg"
-
-    if install_keyring "https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
-        "$KEYRING_DIR/githubcli-archive-keyring.gpg" \
-        "https://cli.github.com/packages/dists/stable/InRelease" false; then
-        APT_DIRTY=true
-    fi
-
-    if write_sources "github-cli" "https://cli.github.com/packages" "stable" "main" \
-        "$KEYRING_DIR/githubcli-archive-keyring.gpg"; then
-        APT_DIRTY=true
-    fi
+    register_apt_source "github-cli" "https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
+        "$KEYRING_DIR/githubcli-archive-keyring.gpg" "https://cli.github.com/packages/dists/stable/InRelease" false \
+        "https://cli.github.com/packages" "stable" "main" \
+        "$SOURCES_DIR/github-cli.list" "/usr/share/keyrings/githubcli-archive-keyring.gpg"
 
     apt_install gh
 }
@@ -632,16 +687,9 @@ node_install() {
     local major
     major=$(node_lts_major) || die "Cannot read the current LTS line from the upstream release index"
 
-    if install_keyring "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
-        "$KEYRING_DIR/nodesource.gpg" \
-        "https://deb.nodesource.com/node_$major.x/dists/nodistro/InRelease" true; then
-        APT_DIRTY=true
-    fi
-
-    if write_sources "nodesource" "https://deb.nodesource.com/node_$major.x" "nodistro" "main" \
-        "$KEYRING_DIR/nodesource.gpg"; then
-        APT_DIRTY=true
-    fi
+    register_apt_source "nodesource" "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
+        "$KEYRING_DIR/nodesource.gpg" "https://deb.nodesource.com/node_$major.x/dists/nodistro/InRelease" true \
+        "https://deb.nodesource.com/node_$major.x" "nodistro" "main"
 
     # The upstream package carries npm itself and conflicts with the distro npm and nodejs-doc, so installing it displaces them.
     apt_install_displacing nodejs
@@ -671,28 +719,8 @@ ripgrep_source() { printf 'distro'; }
 ripgrep_version() { apt_installed_version ripgrep; }
 ripgrep_target() { apt_candidate_version ripgrep; }
 
-ripgrep_download_path() {
-    local resolved
-    resolved=$(type -P rg 2>/dev/null || true)
-    [[ $resolved == /* ]] || return 0
-    dpkg_owns_path "$resolved" || printf '%s' "$resolved"
-}
-
-ripgrep_remove_download() {
-    local resolved
-    while true; do
-        resolved=$(ripgrep_download_path)
-        [[ -n $resolved ]] || break
-        log "ripgrep: removing downloaded copy at $resolved before the distro package install"
-        confirm "  Remove $resolved?" || die "Declined, downloaded Ripgrep left as it is"
-        run_root rm -f "$resolved"
-        [[ $DRY_RUN == true ]] && break
-        hash -r
-    done
-}
-
 ripgrep_install() {
-    ripgrep_remove_download
+    remove_unowned_command ripgrep rg Ripgrep
     apt_install ripgrep
 }
 
@@ -822,18 +850,11 @@ docker_install() {
     fi
 
     ensure_prerequisites
-    remove_stale "$SOURCES_DIR/docker.list"
 
-    if install_keyring "https://download.docker.com/linux/$DISTRO_ID/gpg" \
-        "$KEYRING_DIR/docker.gpg" \
-        "https://download.docker.com/linux/$DISTRO_ID/dists/$CODENAME/InRelease" true; then
-        APT_DIRTY=true
-    fi
-
-    if write_sources "docker" "https://download.docker.com/linux/$DISTRO_ID" "$CODENAME" "stable" \
-        "$KEYRING_DIR/docker.gpg"; then
-        APT_DIRTY=true
-    fi
+    register_apt_source "docker" "https://download.docker.com/linux/$DISTRO_ID/gpg" \
+        "$KEYRING_DIR/docker.gpg" "https://download.docker.com/linux/$DISTRO_ID/dists/$CODENAME/InRelease" true \
+        "https://download.docker.com/linux/$DISTRO_ID" "$CODENAME" "stable" \
+        "$SOURCES_DIR/docker.list"
 
     apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
@@ -871,7 +892,7 @@ dotnet_sdk_fleet() {
 }
 
 # The package the dotnet row reports on.
-# The fleet line comes first, since a host holding only a newer line builds no fleet .NET repository.
+# The fleet line comes first, since a host holding only a newer line builds no repository on the fleet default.
 dotnet_sdk_primary() {
     local package
     package=$(dotnet_sdk_fleet)
@@ -925,13 +946,15 @@ microsoft_feed() {
     local deb="$TMP_DIR/packages-microsoft-prod.deb"
     fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb" ||
         die "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION"
-    run_root dpkg -i "$deb"
+    # The PowerShell install runs this with errexit off and goes on to remove a working pwsh.
+    # So a failed install ends the run here, on the dotnet path as well.
+    run_root dpkg -i "$deb" || die "Cannot install Microsoft's feed from $deb"
     APT_DIRTY=true
     apt_refresh
 }
 
 # The default set is the fleet's SDK line and the newest line, one package where the two are the same.
-# The fleet line is the one a fleet .NET repository's global.json sdk block selects, so a host without it builds no repository carrying one.
+# The fleet line is the default the hub's global.json baseline selects, so a host without it builds no repository on that default.
 # The newest line is installed beside it, so a newer line stays an addition rather than a replacement.
 # The optional set is every other SDK line the feed carries, for a host that has to build against more than one.
 dotnet_install() {
@@ -1024,21 +1047,8 @@ powershell_install() {
     apt_install powershell
 }
 
-# Return true when a pwsh path is not owned by dpkg.
 # The direct-download layout installs /opt/microsoft/powershell/7 and a /usr/local/bin/pwsh symlink.
 # The apt package owns /usr/bin/pwsh instead.
-# Dpkg ownership distinguishes package-managed paths from copies installed by another source.
-# This applies the same ownership test as tool_unshadow to a shadowing copy.
-powershell_path_is_unowned() {
-    local path="$1" status=0
-    dpkg_owns_path "$path" || status=$?
-    case "$status" in
-    0) return 1 ;;
-    1) return 0 ;;
-    *) die "Cannot determine dpkg ownership of $path" ;;
-    esac
-}
-
 powershell_non_apt_paths() {
     local -a paths=()
 
@@ -1046,10 +1056,10 @@ powershell_non_apt_paths() {
     # Remove the whole direct-download tree when no package owns its binary.
     # The tree check uses the binary because dpkg-query -S answers about files.
     # Removing the tree also clears files that the apt package does not carry.
-    if [[ -e /usr/local/bin/pwsh || -L /usr/local/bin/pwsh ]] && powershell_path_is_unowned /usr/local/bin/pwsh; then
+    if [[ -e /usr/local/bin/pwsh || -L /usr/local/bin/pwsh ]] && path_is_unowned /usr/local/bin/pwsh; then
         paths+=(/usr/local/bin/pwsh)
     fi
-    if [[ -d /opt/microsoft/powershell/7 ]] && powershell_path_is_unowned /opt/microsoft/powershell/7/pwsh; then
+    if [[ -d /opt/microsoft/powershell/7 ]] && path_is_unowned /opt/microsoft/powershell/7/pwsh; then
         paths+=(/opt/microsoft/powershell/7)
     fi
 
@@ -1059,8 +1069,8 @@ powershell_non_apt_paths() {
     # A relative PATH entry such as "." or "./bin" is never trusted.
     # This is the same guard used by tool_shadow_path.
     local resolved
-    resolved=$(type -P pwsh 2>/dev/null || true)
-    if [[ $resolved == /* ]] && powershell_path_is_unowned "$resolved"; then
+    resolved=$(unowned_command_path pwsh) || exit 1
+    if [[ -n $resolved ]]; then
         case "$resolved" in
         /usr/local/bin/pwsh | /opt/microsoft/powershell/7/pwsh) ;;
         *) die "Non-apt pwsh at $resolved is outside the known cleanup paths, remove it before installing powershell" ;;
@@ -1081,6 +1091,53 @@ powershell_remove_non_apt() {
     run_root rm -rf "${paths[@]}"
 }
 
+# --- op ---
+
+op_source() { printf 'downloads.1password.com'; }
+op_version() { apt_installed_version 1password-cli; }
+op_target() { apt_candidate_version 1password-cli; }
+
+# The repository's 386 and arm trees declare Go architecture names, which apt matches to no dpkg architecture.
+op_arch_supported() {
+    case "$ARCH" in
+    amd64 | arm64 | armhf) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+# 1Password's manual install puts op in /usr/local/bin, ahead of the package's /usr/bin on PATH.
+# Only that copy is removed, since an unowned op elsewhere can be a wrapper or a version manager's shim.
+op_remove_download() {
+    remove_unowned_command op op "1Password CLI" "$BIN_DIR/op"
+}
+
+# The vendor's optional debsig step is skipped, since apt already checks the package against the signed InRelease.
+# The 1Password desktop app's package writes this same sources file naming its own keyring, and a later install or upgrade of op writes it back.
+op_install() {
+    if ! op_arch_supported; then
+        warn "1Password's repository carries amd64, arm64 and armhf only, skipping op on $ARCH"
+        return 0
+    fi
+
+    local had
+    had=$(op_version)
+    ensure_prerequisites
+
+    # The vendor's one-line file names another keyring, and apt refuses two Signed-By values for one repository.
+    register_apt_source "1password" "https://downloads.1password.com/linux/keys/1password.asc" \
+        "$KEYRING_DIR/1password-archive-keyring.gpg" \
+        "https://downloads.1password.com/linux/debian/$ARCH/dists/stable/InRelease" true \
+        "https://downloads.1password.com/linux/debian/$ARCH" "stable" "main" \
+        "$SOURCES_DIR/1password.list" "/usr/share/keyrings/1password-archive-keyring.gpg"
+
+    apt_install 1password-cli || return 1
+    # Removed only once the package is in place, and under --install only where this run added it.
+    # So a failed install leaves the working copy, and --install never removes a newer one beside an existing package.
+    if [[ -z $had || $MODE == "upgrade" ]]; then
+        op_remove_download
+    fi
+}
+
 # --- Tool dispatch ---
 
 tool_function() {
@@ -1089,14 +1146,24 @@ tool_function() {
 }
 
 # Whether a tool's upstream repository is in place.
-# A tool installed from the distro while its upstream repository is unconfigured reads as current against the distro's own version.
+# A tool installed while its sources file is absent reads as current against whatever apt already has.
 # That is the one thing the report must not say, so it reads as unmanaged instead.
 tool_configured() {
     case "$1" in
     gh) [[ -f "$SOURCES_DIR/github-cli.sources" ]] ;;
     node) [[ -f "$SOURCES_DIR/nodesource.sources" ]] ;;
+    # No distro carries 1password-cli, so the cases this guards are the vendor's one-line source and a .deb installed by hand.
+    op) [[ -f "$SOURCES_DIR/1password.sources" ]] ;;
     *) return 0 ;;
     esac
+}
+
+tool_is_optional() {
+    local tool
+    for tool in "${OPTIONAL_TOOLS[@]}"; do
+        [[ $tool == "$1" ]] && return 0
+    done
+    return 1
 }
 
 tool_effective_status() {
@@ -1191,7 +1258,7 @@ tool_note() {
         ;;
     ripgrep)
         local resolved
-        resolved=$(ripgrep_download_path)
+        resolved=$(unowned_command_path rg) || exit 1
         if [[ -n $resolved ]]; then
             note "ripgrep" "$(hide_home "$resolved") is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
         fi
@@ -1206,7 +1273,7 @@ tool_note() {
             fleet=$(dotnet_sdk_fleet)
             latest=$(dotnet_sdk_latest)
             if [[ -z $fleet ]]; then
-                note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select"
+                note "dotnet" "the feed carries no dotnet-sdk-$DOTNET_FLEET_LINE, the fleet default line"
             fi
             # The row reads the fleet line, so a pending upgrade of the newest line, also in the default set, is named here.
             # Without a fleet line the row reads the newest line itself, so its own status already says so.
@@ -1256,6 +1323,24 @@ tool_note() {
         # So the note says why rather than reading as absent.
         if [[ ! -f "$SOURCES_DIR/microsoft-prod.sources" && ! -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
             note "powershell" "Microsoft's repository is not configured, so no package is available yet"
+        fi
+        ;;
+    op)
+        if ! op_arch_supported; then
+            note "op" "1Password's repository carries no $ARCH build, so --install/--upgrade skip it and leave any copy in place"
+            return 0
+        fi
+        if [[ -f "$SOURCES_DIR/1password.list" ]] && ! tool_configured op; then
+            note "op" "1Password's one-line 1password.list is configured instead of 1password.sources, and an install or upgrade replaces it"
+        elif ! tool_configured op; then
+            note "op" "1Password's repository is not configured, so apt reads no upstream version yet"
+        fi
+        local resolved
+        resolved=$(unowned_command_path op) || exit 1
+        if [[ $resolved == "$BIN_DIR/op" ]]; then
+            note "op" "$resolved is an unowned downloaded copy, which an install that adds the package or any upgrade removes"
+        elif [[ -n $resolved ]]; then
+            note "op" "$(hide_home "$resolved") belongs to no package, and an install or upgrade leaves it in place in case it is a wrapper or a shim"
         fi
         ;;
     *) ;;
@@ -1342,14 +1427,22 @@ report() {
 }
 
 # Remove a copy of a managed tool found earlier on PATH than its managed destination, so the managed copy is what PATH resolves to afterward.
-# Ripgrep migrates an unowned download to apt, while jq, uv, and git-restore-mtime install as loose binaries in $BIN_DIR.
+# Ripgrep and op migrate an unowned download to apt, while jq, uv, and git-restore-mtime install as loose binaries in $BIN_DIR.
 tool_unshadow() {
     local tool="$1"
     local -a names=()
     case "$tool" in
     jq | git-restore-mtime) names=("$tool") ;;
     ripgrep)
-        ripgrep_remove_download
+        remove_unowned_command ripgrep rg Ripgrep
+        return 0
+        ;;
+    op)
+        # Only beside an installed package, so the copy is never removed before anything replaces it.
+        # Under --install, apply_tool reaches this only while $BIN_DIR/op is absent, so --install never removes a newer download.
+        if [[ -n $(op_version) ]]; then
+            op_remove_download
+        fi
         return 0
         ;;
     uv) names=(uv uvx) ;;
@@ -1366,7 +1459,7 @@ tool_unshadow() {
 
             # A distro package's own file, found only when PATH puts it ahead of $BIN_DIR, which this script does not set up.
             # Removing it directly would desync dpkg's database from the filesystem, so it stays, and the fix is the PATH order.
-            if dpkg_owns_path "$resolved"; then
+            if ! path_is_unowned "$resolved"; then
                 warn "$tool: $resolved belongs to a distro package and stays, put $BIN_DIR ahead of it on PATH instead"
                 break
             fi
@@ -1393,6 +1486,7 @@ tool_unshadow() {
 # A refusal is not a failure and does end the run.
 # An unverifiable keyring, a checksum mismatch, or a declined prompt stops everything rather than being collected.
 # This is because continuing past one would install something nobody vouched for.
+# A failed keyring, sources, or Microsoft feed write stops everything too, since the next step removes a working source or copy.
 # Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status
@@ -1420,7 +1514,7 @@ apply_tool() {
     # So removing a newer shadow first would downgrade what PATH resolves to.
     if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
         tool_unshadow "$tool"
-    elif [[ -n $(tool_shadow_path "$tool") ]]; then
+    elif [[ $(tool_mechanism "$tool") == "binary" && -n $(tool_shadow_path "$tool") ]]; then
         log "$tool: still shadowed on PATH, --upgrade removes it, --install leaves it to avoid downgrading what's shadowing it"
     fi
 
@@ -1449,8 +1543,8 @@ apply_tool() {
     if [[ $status == "current" ]]; then
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" ]]; then
-        # The available version is the distro's until the upstream repository is read, so quoting it here would name the wrong upstream.
-        log "$tool: installed from the distro, moving it to $("$(tool_function "$tool" source)")"
+        # The available version is whatever apt already has until the managed source is written, so quoting it here could name the wrong upstream.
+        log "$tool: installed without the sources file this script manages, moving it to $("$(tool_function "$tool" source)")"
     else
         log "$tool: ${status}${target:+, upstream carries $target}"
     fi
@@ -1512,8 +1606,8 @@ list_tools() {
             printf '  %-18s apt:%s (repository)\n' "$tool" "${REPO_PACKAGES[$tool]}"
             continue
         fi
-        # The one optional member is marked here, since --list shows the whole registry, and its line says what the default selection leaves out.
-        if [[ $tool == "powershell" ]]; then
+        # An optional tool is marked here, since --list shows the whole registry, and its line says what the default selection leaves out.
+        if tool_is_optional "$tool"; then
             printf '  %-18s %s (optional)\n' "$tool" "$("$(tool_function "$tool" source)")"
         else
             printf '  %-18s %s\n' "$tool" "$("$(tool_function "$tool" source)")"
@@ -1523,7 +1617,7 @@ list_tools() {
     log "Package sets:"
     info "python default  : ${PYTHON_PACKAGES[*]}"
     info "python optional : ${PYTHON_OPTIONAL[*]}"
-    info "dotnet default  : dotnet-sdk-$DOTNET_FLEET_LINE, the line fleet .NET repositories select, and the newest line the feed carries"
+    info "dotnet default  : dotnet-sdk-$DOTNET_FLEET_LINE, the fleet default line, and the newest line the feed carries"
     info "dotnet optional : every other SDK line the feed carries"
 }
 
@@ -1569,7 +1663,7 @@ resolve_selection() {
             local -a filtered=()
             local tool
             for tool in "${SELECTED[@]}"; do
-                [[ $tool == "powershell" ]] || filtered+=("$tool")
+                tool_is_optional "$tool" || filtered+=("$tool")
             done
             SELECTED=("${filtered[@]}")
         fi

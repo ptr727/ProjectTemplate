@@ -43,12 +43,12 @@ An agent session is billed on the context it carries, not the work it does. Ever
 
 ### Reading
 
-- **Map a large file, then read one range.** For anything over about 200 lines, list the headings with `grep -n '^## '` first and read only the range the task needs. Read the section, not the file that contains it.
+- **Map a large file, then read one range.** For anything over about 200 lines, list the headings with `grep -nE '^#+ '` first and read only the range the task needs. Read the section, not the file that contains it.
 - **Prefer an in-place edit to a whole-file rewrite.** Rewriting a file bills its full content again on top of what the read already cost.
 
 ### Commands
 
-- **Bound output at the source.** Write every command so its output is the answer, not the haystack. A `--jq` projection on an API call does that. So do a count or files-only flag on a search, a summary flag on a diff, and an explicit cap on anything unbounded. A command whose output you then skim is a command that should have been narrower.
+- **Bound output at the source.** Write every command so its output is the answer, not the haystack. A `--jq` projection on a `gh` API call does that. So do a count or files-only flag on a search, a summary flag on a diff, and an explicit cap on anything unbounded. A command whose output you then skim is a command that should have been narrower.
 - **Keep a long query in a file, not in the command.** A heredoc re-typed on every call costs its own length in context each time, often more than the answer it retrieves.
 - **Keep generated caches outside the checkout when the executor restricts writes.** Give each task a cache directory under a writable temporary root. Point tools such as uv and ruff there through their own cache variables. Never repurpose `HOME` or an agent's configuration directory to make a tool run.
 - **Report an execution boundary separately from a check finding.** A denied path, network request, or Docker socket says the check did not run. Preserve that failure, then use the executor's approval mechanism for the required rerun. Request the narrowest reusable command prefix the executor supports. Report the rerun's result as the verification evidence.
@@ -81,7 +81,7 @@ Each cell is the name that tool's subagent dispatch takes, which follows the lat
 
 ```text
 Task: <the one question or edit, stated so the answer compresses>
-Paths: <exact files or globs - never "find the relevant files">
+Paths: <exact files or globs>
 Rules that bind this task: <the specific rules, quoted, not a pointer to a doc>
 Return: <the shape of the answer - a list, a diff, a yes/no with evidence>
 Bounds: <what not to touch, and what to do when a rule looks incomplete>
@@ -89,7 +89,7 @@ If a rule you were given does not cover what you find, stop and report it. Do no
 ```
 
 - **Wait in a background process, not in a poll loop.** A review or CI wait is a sequence of near-identical requests, each billed for whatever context it happens to carry. Run the wait as one backgrounded command rather than as a sequence of turns.
-- **A wait separates its outcomes, and says which one it reached.** The condition was met, it has not been met yet, and the wait cannot reach it at all are different results. A backgrounded wait that emits nothing renders them identically. Run the command once in the foreground and read its output before backgrounding it. That is because a wait is only as good as the command inside it. It is also because an unsupported flag on the installed tool version exits non-zero with an empty stdout that every naive test reads as "nothing yet". Never let a fallback stand in for a failed command, since `|| echo '[]'`, `|| true`, and `2>/dev/null` convert an error into that same reading. That conversion is the suppression the write-safety rules already forbid on a mutation. Make the wait emit on failure as loudly as on success, so silence means "still running" and nothing else. Bound it too, so a condition that is never coming ends in a report rather than in another wait.
+- **A wait separates its outcomes, and says which one it reached.** The condition was met, it has not been met yet, and the wait cannot reach it at all are different results. A backgrounded wait that emits nothing renders them identically. Run the command once in the foreground and read its output before backgrounding it. That is because a wait is only as good as the command inside it. It is also because an unsupported flag on the installed tool version exits non-zero with an empty stdout that every naive test reads as "nothing yet". Never let a fallback stand in for a failed command, since `|| echo '[]'` and `|| true` convert an error into that same reading. That conversion is the suppression `GOVERNANCE.md` "Repository Boundaries and Write Safety" already forbids on a mutation. Make the wait emit on failure as loudly as on success. Bound it too, so a condition that is never coming ends in a report rather than in another wait.
 - **Never write a wait as an unbounded shell loop.** This is a prohibition rather than a preference. A loop that waits for something, with no bound anywhere in the command that runs it, is forbidden. That holds in a tool call, in a script, and in a brief handed to a subagent. The bound goes inside that command. The wait then says which of these it found: the condition met, the bound reached, or the check itself failing. **Prefer the mechanism that already signals.** Where the dispatch mechanism reports a subagent's completion itself, polling that subagent's output file is a second channel. The answer is already on its way. **The agent that starts a wait owns the process it leaves.** A process a tool call leaves running survives the turn, the subagent, and the run that dispatched it. So a run that dispatched workers does not report itself done while it cannot say what it left running.
 
 ## Where the Rules Live
@@ -100,7 +100,7 @@ Every rule below is a level-two section of [`GOVERNANCE.md`](./GOVERNANCE.md) un
 | --- | --- |
 | Why the rules are shaped this way | `Foundational Principles` |
 | Recording a durable lesson, updating governance, or work here waiting on a fix in another repository | `Durable Knowledge and Self-Improvement`, surfaced at its decision moments by the `agent-conduct` Skill, and the section keeps the full rules |
-| Any push, API mutation, comment, label, or merge, or which checkout the work happens in | `Repository Boundaries and Write Safety`, its task-isolation rule surfaced at the task-start moment by the `repo-worktree` Skill, and the section keeps the full rules |
+| Any push, API mutation, comment, label, or merge, or which checkout the work happens in | `Repository Boundaries and Write Safety`, its task-isolation rule surfaced at the task-start moment by the `repo-worktree` Skill, and the section keeps the full rules. Who takes a merge or another irreversible step is `Communicating with the User` |
 | Quoting data into a comment, commit, test, or doc | `Representative Data in Agent-Authored Text` |
 | Committing, signing, rebasing, force-pushing | `Git and Commit Rules`, packaged as the `git-commit-conventions` Skill |
 | Branch choice, promotion, keeping branches in sync | `Branching Model`, packaged as the `branching-and-release-model` Skill |

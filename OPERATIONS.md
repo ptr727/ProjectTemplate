@@ -135,6 +135,7 @@ The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works a
 
 ## Configuration Layout
 
+- **Trusted inputs of [scripts/agent_policy.py](./scripts/agent_policy.py)** are the registry, `spec/agent-policy.default.json`, `spec/files.json`, and the `repo-config/` ruleset payloads. They are also the `--checkout` tree and its `origin`, and the files `check` reads at `--ref`. `configure.sh` pins that ref to the target repository's default branch. All are maintainer-controlled. One that does not parse fails loudly with a nonzero exit. The script adds no guard for a symlinked write target or a non-GitHub origin. It adds none for an inherited `GIT_DIR` or `GIT_CONFIG*`, or for a bot file shape beyond the refusals the code already holds.
 - [spec/](./spec/) is the machine-readable ground truth, holding project types, the file and section baseline, and required or forbidden secrets.
 - [registry/repos.json](./registry/repos.json) is the fleet registry, naming every project with its types, publish mechanism, and status.
 - [repo-config/](./repo-config/) holds the hub-only branch rulesets, fleet settings, documentation, and apply script. It sits outside `.github/`, which is Actions-owned.

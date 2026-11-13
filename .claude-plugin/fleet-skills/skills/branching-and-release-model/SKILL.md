@@ -59,7 +59,8 @@ rather than guessing from the repo's contents.
   the feature -> `develop` PR.** GitHub auto-closes an issue only when the closing keyword merges
   into the **default branch** (`main`), so a feature -> `develop` PR merge never fires it.
   Reference the issue in the `develop` PR body if useful, but the actual closing keyword belongs on
-  the promotion PR. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
+  the promotion PR. In an operational repository that reference is required, as the
+  `Closes on promotion:` line that "Operational repositories (the complete delta)" below sets. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
   promotion that already merged without it, or completed work with no promotion imminent. Closing by hand is
   not a repair for a botched promotion. Cite the squash SHA and re-read that commit before closing.
 - **Neither ruleset requires branches to be up to date before merging.** The reasons differ on
@@ -136,10 +137,12 @@ stays the same:
   The host write guard allows the in-place commit only once the repository's
   `.github/agent-policy.json` on `main` lists `develop` in its `guard` section. The maintainer's
   merge to `main` therefore grants the exemption, and until then the guard denies it.
-- **A direct push names the issues it fixes in its commit message**, as one line such as
-  `Closes on promotion: #N, #M`. The words `on promotion:` keep GitHub from reading the line as a closing keyword. The promotion
-  PR carrying the push puts a closing keyword in its own body for each issue the line names, per the
-  closing-keyword bullet above. Its body takes no closing keyword for a push without the line.
+- **A change reaching `develop` names the issues it fixes in one line**, such as
+  `Closes on promotion: #N, #M`. A direct push writes the line in its commit message. A pull
+  request into `develop` writes it in its body. The promotion reads a merged pull request's line
+  from its body, never from its commits. The words `on promotion:` keep GitHub from reading the line as a closing keyword. The promotion
+  PR carrying the change puts a closing keyword in its own body for each issue the line names, per the
+  closing-keyword bullet above. Its body takes no closing keyword for a change without the line.
 - **A PR into `develop` stays available, and CI runs on it, reported but not required.** Dropping
   the requirement permits the direct push. It does not withdraw the pull request, so a change worth
   reviewing takes one and both paths into `develop` are legitimate.
