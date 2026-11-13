@@ -622,10 +622,10 @@ def editor_text(text):
 
 
 def compose_project_bases(tree, read_text):
-    """The directory each compose file a devcontainer lists resolves its paths against, the first listed file's.
+    """The directories each compose file a devcontainer lists resolves its paths against, each set's first file's.
 
     Compose resolves every relative path in a multi-file set against the first file's directory.
-    A compose file no devcontainer lists keeps its own directory, so it has no entry here.
+    A file two sets list resolves against each set's base. One no devcontainer lists keeps its own directory.
     """
     bases = {}
     for path in sorted(tree):
@@ -635,7 +635,7 @@ def compose_project_bases(tree, read_text):
         named = re.findall(r'"([^"]*)"', listing[1]) if listing else []
         listed = [posixpath.normpath(posixpath.join(posixpath.dirname(path), n)) for n in named]
         for file in listed:
-            bases.setdefault(file, posixpath.dirname(listed[0]))
+            bases.setdefault(file, set()).add(posixpath.dirname(listed[0]))
     return bases
 
 
@@ -644,7 +644,7 @@ def named_secret_signals(tree, read_text, directories, holding):
 
     The files read are each .gitignore and each compose or editor config file. A compose file is
     read by its keys, for the paths compose resolves on the host against the file's own directory.
-    Where a devcontainer lists it in a dockerComposeFile set, they resolve against the first file's.
+    Where a devcontainer lists it in a dockerComposeFile set, they resolve against that set's first file's.
     An editor file is read for a path a workspace variable roots, since any other depends on a
     launch's working directory. So an absolute path such as /run/secrets/<name>, a container mount
     point, is no signal, and neither is one secret_path_target refuses. A .gitignore line is
@@ -700,10 +700,10 @@ def named_secret_signals(tree, read_text, directories, holding):
                     bare.add(path)
         else:
             if compose:
-                root = bases.get(path, directory)
                 document = _yaml(text, loader=ComposeLoader)[0]
                 found = [
-                    (SECRET_PATH.fullmatch(value), file)
+                    (SECRET_PATH.fullmatch(value), file, root)
+                    for root in sorted(bases.get(path, {directory}))
                     for value, file in compose_host_paths(document)
                 ]
             else:
@@ -714,8 +714,8 @@ def named_secret_signals(tree, read_text, directories, holding):
                 )
                 root = posixpath.join(root, listing[1]) if listing else root
                 file = ".devcontainer" not in path
-                found = [(match, file) for match in SECRET_REFERENCE.finditer(live)]
-            for match, file in found:
+                found = [(match, file, root) for match in SECRET_REFERENCE.finditer(live)]
+            for match, file, root in found:
                 if not match:
                     continue
                 written, folder, rest = match.group(1, 2, 3)

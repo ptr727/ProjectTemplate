@@ -4261,6 +4261,29 @@ class SecretStemCase(unittest.TestCase):
             got,
         )
 
+    def test_a_compose_file_two_sets_list_resolves_against_each_first_file(self) -> None:
+        """Each devcontainer's set has its own project directory, so a shared file is read against both."""
+        texts = {
+            ".devcontainer/a/devcontainer.json": (
+                '{"dockerComposeFile": ["../../docker-compose.yml", "../compose.shared.yml"]}\n'
+            ),
+            ".devcontainer/b/devcontainer.json": (
+                '{"dockerComposeFile": ["compose.yml", "../compose.shared.yml"]}\n'
+            ),
+            ".devcontainer/compose.shared.yml": "services:\n  app:\n    env_file: ./.secrets/App.env\n",
+        }
+
+        got = audit.secret_stem_findings(set(texts), texts.get)
+
+        self.assertEqual(len(got), 1, got)
+        self.assertTrue(
+            got[0][1].endswith(
+                ": .devcontainer/b/.secrets/App.env (named in .devcontainer/compose.shared.yml), "
+                ".secrets/App.env (named in .devcontainer/compose.shared.yml)"
+            ),
+            got,
+        )
+
     def test_a_named_path_resolves_against_its_file_and_stays_inside_the_repo(self) -> None:
         """A compose path is relative to its own directory, an editor's to its workspace, and one leaving the repo is no signal."""
         texts = {
