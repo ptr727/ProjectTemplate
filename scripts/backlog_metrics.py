@@ -748,9 +748,9 @@ def render_json(
 ) -> str:
     """The report as one JSON document, the headline totals at its top level.
 
-    `notes` holds every line the Markdown report lists under its table, billing included, so a
-    consumer can print what this run noted without re-deriving it. `scripts/README.md` documents
-    each field.
+    `notes` holds the billing lines and the notes the Markdown report lists after its label lines.
+    A consumer can then print what this run noted without re-deriving it. `scripts/README.md`
+    documents each field.
     """
     by_name = {r.name: r for r in reviews}
     document = {
@@ -1070,8 +1070,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 received: list[int] = []
 
 
-def on_sigterm(signum: int, _frame: object) -> None:
-    """Record SIGTERM in `received` and raise KeyboardInterrupt, the path SIGINT takes."""
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal in `received` and raise KeyboardInterrupt, so both unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
+    `uv run` forwards to a process group the terminal's SIGINT already reached.
+    """
+    if received:
+        return
     received.append(signum)
     raise KeyboardInterrupt
 
@@ -1080,9 +1086,11 @@ def run() -> int | signal.Signals:
     """Run main, returning its status, or the signal that interrupted it once the unwind ran.
 
     The unwind stops the `gh` call in flight, since `subprocess.run` kills its child on any
-    exception.
+    exception. A SIGINT inherited as ignored, as a background child's is, stays ignored.
     """
-    signal.signal(signal.SIGTERM, on_sigterm)
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
     try:
         return main()
     except KeyboardInterrupt:

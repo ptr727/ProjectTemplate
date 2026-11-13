@@ -304,7 +304,46 @@ class RenderingTests(unittest.TestCase):
             entry["items"]["copilot_review_runs"],
             [{"id": 11, "name": bm.REVIEW_WORKFLOW, "html_url": "r11"}],
         )
+        self.assertEqual(
+            list(entry),
+            ["name", "html_url", *doc["totals"], "open_issues_by_label", "truncated", "items"]
+            + ["review"],
+        )
         review = entry["review"]
+        self.assertEqual(
+            list(review),
+            [
+                "merged_prs_read",
+                "promotion_prs_excluded",
+                "commits_per_merged_pr",
+                "local_findings",
+                "local_attestations_unknown",
+                "failing_heads",
+                "failing_heads_after_clean_local_review",
+                "policy_branch",
+                "policy_error",
+                "policy_history_error",
+                "policy_changes",
+                "truncated",
+                "bots",
+            ],
+        )
+        self.assertEqual(
+            list(review["bots"]["copilot"]),
+            [
+                "policy_trigger",
+                "requests_by_automation",
+                "requests_by_user",
+                "automatic_rounds",
+                "explicit_rounds",
+                "unclassified_rounds",
+                "rounds_per_reviewed_pr_mean",
+                "rounds_per_reviewed_pr_max",
+                "threaded_findings",
+                "findings_missed_by_local_review",
+                "findings_on_green_heads",
+            ],
+        )
         self.assertEqual(review["merged_prs_read"], 0)
         self.assertIsNone(review["commits_per_merged_pr"])
         copilot = review["bots"]["copilot"]
@@ -1259,8 +1298,10 @@ class InterruptTests(unittest.TestCase):
     """
 
     def test_a_signal_mid_run_stops_gh_and_ends_the_script_by_it(self) -> None:
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            with self.subTest(signal=sig.name):
+        """A SIGTERM straight after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
+        for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
+            sig = sigs[0]
+            with self.subTest(signals=[s.name for s in sigs]):
                 bin_dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
                 gh = bin_dir / "gh"
                 gh.write_text(HELD_GH, encoding="utf-8")
@@ -1287,7 +1328,8 @@ class InterruptTests(unittest.TestCase):
                             raise AssertionError("the script never reached gh")
                         time.sleep(0.05)
                     gh_pid = int(pid_file.read_text())
-                    script.send_signal(sig)
+                    for each in sigs:
+                        script.send_signal(each)
                     _, stderr = script.communicate(timeout=60)
                 finally:
                     if script.poll() is None:
