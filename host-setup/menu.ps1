@@ -365,12 +365,16 @@ function Test-HubCheckout {
     if ($script:REF -eq $script:DEFAULT_REF) { $script:HUB_ROOT = $top }
 }
 
+function Test-HubClean {
+    $status = & git -C $script:HUB_ROOT status --porcelain --untracked-files=all
+    return ($LASTEXITCODE -eq 0 -and -not $status)
+}
+
 # Whether HUB_ROOT is clean and sitting on $DEFAULT_REF, with no assumption that it agrees with origin.
 # A failed git call must never read the same as its emptiest possible success.
 # So $LASTEXITCODE is checked after each one rather than only its output.
 function Test-HubCleanOnDefaultRef {
-    $status = & git -C $script:HUB_ROOT status --porcelain
-    if ($LASTEXITCODE -ne 0 -or $status) { return $false }
+    if (-not (Test-HubClean)) { return $false }
     $branch = & git -C $script:HUB_ROOT rev-parse --abbrev-ref HEAD
     if ($LASTEXITCODE -ne 0) { return $false }
     return ("$branch".Trim() -eq $script:DEFAULT_REF)
@@ -402,12 +406,9 @@ function Confirm-HubRoot {
             $script:HUB_ROOT = ''
         } else {
             $refHead = Get-HubRefCommit
-            if ($refHead) {
-                $status = & git -C $script:HUB_ROOT status --porcelain
-                if ($LASTEXITCODE -eq 0 -and -not $status) {
-                    $head = & git -C $script:HUB_ROOT rev-parse HEAD
-                    if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq $refHead) { return $true }
-                }
+            if ($refHead -and (Test-HubClean)) {
+                $head = & git -C $script:HUB_ROOT rev-parse HEAD
+                if ($LASTEXITCODE -eq 0 -and "$head".Trim() -eq $refHead) { return $true }
             }
             $script:HUB_ROOT = ''
         }

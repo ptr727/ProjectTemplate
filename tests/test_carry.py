@@ -578,6 +578,15 @@ class CarryHubTests(unittest.TestCase):
         with self.assertRaisesRegex(carry.CarryError, "not at freshly fetched origin/main"):
             self.verify("feature/local", "Promoted")
 
+    def test_an_untracked_file_refuses_whatever_the_status_setting(self) -> None:
+        """The working-tree reader carries an untracked file, and the setting would hide it."""
+        subprocess.run(
+            ["git", "-C", self.hub, "config", "status.showUntrackedFiles", "no"], check=True
+        )
+        (self.hub / "stray.md").write_text("not committed\n", encoding="utf-8")
+        with self.assertRaisesRegex(carry.CarryError, "hub checkout has local changes"):
+            self.verify("main", "Promoted")
+
 
 class CarrySectionTests(unittest.TestCase):
     """The verbatim-section re-vendor: what it replaces, what it must not touch, and what it refuses."""

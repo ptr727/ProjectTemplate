@@ -2764,7 +2764,7 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null
 $errors = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Menu, [ref]$tokens, [ref]$errors)
-$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Confirm-HubRoot')
+$wanted = @('info', 'fail', 'Get-HubLockPath', 'Lock-Hub', 'Invoke-WithHubLock', 'Get-MarkerPath', 'Test-HubRemovable', 'Test-HubFetchedHere', 'Invoke-FetchHubLocked', 'Invoke-Cleanup', 'Get-HubRefCommit', 'Test-HubClean', 'Confirm-HubRoot')
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -3125,6 +3125,14 @@ class HubRefFreshnessCases:
         self.commit("develop again")
         self.git("push", "--quiet", "origin", "develop")
         self.assert_check("develop", "refetched")
+
+    def test_a_tree_holding_an_untracked_file_is_stale_whatever_the_status_setting(self) -> None:
+        """A bare status read under status.showUntrackedFiles=no prints nothing for the file."""
+        self.fetch("main")
+        hub = self.dir / "hub"
+        self.git("config", "status.showUntrackedFiles", "no", cwd=hub)
+        (hub / "stray.md").write_text("not committed\n", encoding="utf-8")
+        self.assert_check("main", "refetched")
 
 
 class TestMenuHubRefFreshness(HubRefFreshnessCases, unittest.TestCase):

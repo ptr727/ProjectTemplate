@@ -172,8 +172,8 @@ task may be live there.
 
 A previous session's own worktree holding it is retired rather than switched. It normally sits at
 the very `~/repos/worktrees/<Repo>-<task-slug>` path the command above wants, so `worktree add`
-aborts on the existing directory whatever its branch is. Remove it when it is clean, and stop when
-it is not, because a dirty tree there may be uncommitted work. `backlog-burndown` calls this
+aborts on the existing directory whatever its branch is. Remove it when it is clean by the
+hand-removal read in "Listing and Cleanup". Stop when it is not, because a dirty tree there may be uncommitted work. `backlog-burndown` calls this
 retire-then-dispatch and cites this skill for it.
 
 A machine not yet migrated to this layout still isolates exactly the same way, since the mandate is the isolation rather than the path. Create the worktree beside whatever layout the machine

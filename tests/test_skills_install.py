@@ -40,7 +40,8 @@ class AgentsHomeCase(unittest.TestCase):
 class SourceRefCase(unittest.TestCase):
     """source_ref()'s dirty check must watch every path this installer actually reads from,
     not only .agents/skills/. Otherwise a modified marketplace.json/generated plugin would report
-    dirty=False over bytes that were never installed."""
+    dirty=False over bytes that were never installed. It names its untracked mode too, since
+    copytree installs an untracked skill that status.showUntrackedFiles=no would hide."""
 
     def test_git_status_is_scoped_to_both_watched_paths(self) -> None:
         calls = []
@@ -63,6 +64,8 @@ class SourceRefCase(unittest.TestCase):
             str(skills_install.CLAUDE_PLUGIN_DIR.relative_to(skills_install.ROOT).as_posix()),
             status_call,
         )
+        self.assertIn("--untracked-files=all", status_call)
+        self.assertLess(status_call.index("--untracked-files=all"), status_call.index("--"))
 
     def test_a_handed_in_commit_stands_in_where_git_cannot_answer(self) -> None:
         """A bootstrap runs the installer from a tarball tree with no .git, and hands in the commit
