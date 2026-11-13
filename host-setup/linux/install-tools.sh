@@ -472,8 +472,7 @@ install_keyring() {
         return 1
     fi
 
-    # Callers run this with errexit off, and the gh, docker, and op installs go on to remove the old source.
-    # So a failed write ends the run here.
+    # Its caller can go on to remove the old source with errexit off, so a failed write ends the run here.
     run_root install -d -m 0755 "$KEYRING_DIR" || die "Cannot create $KEYRING_DIR"
     run_root install -m 0644 "$staged" "$path" || die "Cannot install the keyring at $path"
     return 0
@@ -497,8 +496,7 @@ write_sources() {
         return 0
     fi
 
-    # Callers run this with errexit off, and the gh, docker, and op installs go on to remove the old source.
-    # So a failed write ends the run here.
+    # Its caller can go on to remove the old source with errexit off, so a failed write ends the run here.
     printf '%s' "$content" | "${SUDO[@]}" tee "$path" >/dev/null || die "Cannot write $path"
     return 0
 }
@@ -511,6 +509,20 @@ remove_stale() {
         run_root rm -f "$path"
         APT_DIRTY=true
     done
+}
+
+# Register an upstream apt repository, then remove the predecessor files named after its first eight arguments.
+# Predecessors go only once the replacement is written, so a key that fails its proof leaves the old source working.
+register_apt_source() {
+    local name="$1" key_url="$2" keyring="$3" release_url="$4" armored="$5" uris="$6" suites="$7" components="$8"
+    shift 8
+    if install_keyring "$key_url" "$keyring" "$release_url" "$armored"; then
+        APT_DIRTY=true
+    fi
+    if write_sources "$name" "$uris" "$suites" "$components" "$keyring"; then
+        APT_DIRTY=true
+    fi
+    [[ $# -eq 0 ]] || remove_stale "$@"
 }
 
 ensure_prerequisites() {
@@ -557,20 +569,11 @@ gh_target() { apt_candidate_version gh; }
 gh_install() {
     ensure_prerequisites
 
-    if install_keyring "https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
-        "$KEYRING_DIR/githubcli-archive-keyring.gpg" \
-        "https://cli.github.com/packages/dists/stable/InRelease" false; then
-        APT_DIRTY=true
-    fi
-
-    if write_sources "github-cli" "https://cli.github.com/packages" "stable" "main" \
-        "$KEYRING_DIR/githubcli-archive-keyring.gpg"; then
-        APT_DIRTY=true
-    fi
-
     # The keyring moved to /etc/apt/keyrings and the sources file to deb822, so both predecessors are cleared.
-    # That happens once the replacement is written, so a key that fails its proof leaves the old source working.
-    remove_stale "$SOURCES_DIR/github-cli.list" "/usr/share/keyrings/githubcli-archive-keyring.gpg"
+    register_apt_source "github-cli" "https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
+        "$KEYRING_DIR/githubcli-archive-keyring.gpg" "https://cli.github.com/packages/dists/stable/InRelease" false \
+        "https://cli.github.com/packages" "stable" "main" \
+        "$SOURCES_DIR/github-cli.list" "/usr/share/keyrings/githubcli-archive-keyring.gpg"
 
     apt_install gh
 }
@@ -684,16 +687,9 @@ node_install() {
     local major
     major=$(node_lts_major) || die "Cannot read the current LTS line from the upstream release index"
 
-    if install_keyring "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
-        "$KEYRING_DIR/nodesource.gpg" \
-        "https://deb.nodesource.com/node_$major.x/dists/nodistro/InRelease" true; then
-        APT_DIRTY=true
-    fi
-
-    if write_sources "nodesource" "https://deb.nodesource.com/node_$major.x" "nodistro" "main" \
-        "$KEYRING_DIR/nodesource.gpg"; then
-        APT_DIRTY=true
-    fi
+    register_apt_source "nodesource" "https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key" \
+        "$KEYRING_DIR/nodesource.gpg" "https://deb.nodesource.com/node_$major.x/dists/nodistro/InRelease" true \
+        "https://deb.nodesource.com/node_$major.x" "nodistro" "main"
 
     # The upstream package carries npm itself and conflicts with the distro npm and nodejs-doc, so installing it displaces them.
     apt_install_displacing nodejs
@@ -855,17 +851,10 @@ docker_install() {
 
     ensure_prerequisites
 
-    if install_keyring "https://download.docker.com/linux/$DISTRO_ID/gpg" \
-        "$KEYRING_DIR/docker.gpg" \
-        "https://download.docker.com/linux/$DISTRO_ID/dists/$CODENAME/InRelease" true; then
-        APT_DIRTY=true
-    fi
-
-    if write_sources "docker" "https://download.docker.com/linux/$DISTRO_ID" "$CODENAME" "stable" \
-        "$KEYRING_DIR/docker.gpg"; then
-        APT_DIRTY=true
-    fi
-    remove_stale "$SOURCES_DIR/docker.list"
+    register_apt_source "docker" "https://download.docker.com/linux/$DISTRO_ID/gpg" \
+        "$KEYRING_DIR/docker.gpg" "https://download.docker.com/linux/$DISTRO_ID/dists/$CODENAME/InRelease" true \
+        "https://download.docker.com/linux/$DISTRO_ID" "$CODENAME" "stable" \
+        "$SOURCES_DIR/docker.list"
 
     apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
@@ -1134,20 +1123,12 @@ op_install() {
     had=$(op_version)
     ensure_prerequisites
 
-    if install_keyring "https://downloads.1password.com/linux/keys/1password.asc" \
-        "$KEYRING_DIR/1password-archive-keyring.gpg" \
-        "https://downloads.1password.com/linux/debian/$ARCH/dists/stable/InRelease" true; then
-        APT_DIRTY=true
-    fi
-
-    if write_sources "1password" "https://downloads.1password.com/linux/debian/$ARCH" "stable" "main" \
-        "$KEYRING_DIR/1password-archive-keyring.gpg"; then
-        APT_DIRTY=true
-    fi
-
     # The vendor's one-line file names another keyring, and apt refuses two Signed-By values for one repository.
-    # It goes once the replacement is written, so a key that fails its proof leaves the vendor's source working.
-    remove_stale "$SOURCES_DIR/1password.list" "/usr/share/keyrings/1password-archive-keyring.gpg"
+    register_apt_source "1password" "https://downloads.1password.com/linux/keys/1password.asc" \
+        "$KEYRING_DIR/1password-archive-keyring.gpg" \
+        "https://downloads.1password.com/linux/debian/$ARCH/dists/stable/InRelease" true \
+        "https://downloads.1password.com/linux/debian/$ARCH" "stable" "main" \
+        "$SOURCES_DIR/1password.list" "/usr/share/keyrings/1password-archive-keyring.gpg"
 
     apt_install 1password-cli || return 1
     # Removed only once the package is in place, and under --install only where this run added it.
@@ -1505,6 +1486,7 @@ tool_unshadow() {
 # A refusal is not a failure and does end the run.
 # An unverifiable keyring, a checksum mismatch, or a declined prompt stops everything rather than being collected.
 # This is because continuing past one would install something nobody vouched for.
+# A failed keyring, sources, or Microsoft feed write stops everything too, since the next step removes a working source or copy.
 # Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status

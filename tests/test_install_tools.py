@@ -474,16 +474,22 @@ fi"""
         self.assertIn("Cannot write", result.stderr)
 
     def test_a_failed_keyring_install_stops_before_the_old_source_goes(self) -> None:
-        body = """run_root() { return 1; }
-fetch() { :; }
-gpgv() { :; }
+        cases = {
+            "the keyring directory": ("return 1", "Cannot create"),
+            "the keyring file": ("[[ $2 == -d ]]", "Cannot install the keyring"),
+        }
+        for step, (stub, expected) in cases.items():
+            with self.subTest(step=step):
+                body = f"""run_root() {{ {stub}; }}
+fetch() {{ :; }}
+gpgv() {{ :; }}
 if install_keyring https://example.invalid/key /nonexistent/op-test.gpg https://example.invalid/InRelease false; then
     printf 'CHANGED\\n'
 fi"""
-        result = self.run_bash(body)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn("CHANGED", result.stdout)
-        self.assertIn("Cannot create", result.stderr)
+                result = self.run_bash(body)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("CHANGED", result.stdout)
+                self.assertIn(expected, result.stderr)
 
     def test_an_architecture_without_a_build_is_skipped_and_changes_nothing(self) -> None:
         result = self.run_bash(f"{self.RECORDING}\nARCH=i386\nop_install")
@@ -585,7 +591,7 @@ printf '%s\\n' "${{NOTES[@]}}" """
     def test_the_configured_repository_is_the_one_install_writes(self) -> None:
         text = LINUX_INSTALLER.read_text(encoding="utf-8")
         self.assertRegex(text, r'(?m)^    op\) \[\[ -f "\$SOURCES_DIR/1password\.sources" \]\] ;;$')
-        self.assertRegex(text, r'write_sources "1password" ')
+        self.assertRegex(text, r'register_apt_source "1password" ')
 
 
 class TestInstallersNameTheBaselineLine(unittest.TestCase):

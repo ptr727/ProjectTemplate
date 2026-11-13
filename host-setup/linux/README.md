@@ -67,7 +67,7 @@ A report changes nothing and reads the apt cache as it stands. An available vers
 
 `--json` writes the same report as one JSON object, for a program to read instead of the table. It carries a `schema` number, the `platform`, a `tools` list, and a top-level `notes` list for what belongs to no tool. Each entry in `tools` carries `tool`, `installed`, `available`, `source`, `mechanism`, `status`, and that tool's own `notes`, and a version that was not read is `null`. Like `source`, `mechanism` names how this script manages the tool rather than where the installed copy came from. It is `apt` for a tool any apt upgrade moves, and `binary` for a released binary in `/usr/local/bin` that only this script moves. Inside a WSL distribution, `docker` reads `docker-desktop`, since this script leaves it to Docker Desktop. A change to what a field means raises `schema`.
 
-An install or upgrade collects a tool whose install fails and carries on, so one failure does not strand the rest of the run. A refusal is different and ends the run. An unverifiable keyring, a checksum mismatch, or a declined prompt stops everything, because continuing past one would install something nobody vouched for.
+An install or upgrade collects a tool whose install fails and carries on, so one failure does not strand the rest of the run. A refusal is different and ends the run. An unverifiable keyring, a checksum mismatch, or a declined prompt stops everything, because continuing past one would install something nobody vouched for. A failed keyring, sources, or Microsoft feed write stops everything too, since the step after it removes a working source or copy.
 
 ## Docker, node, dotnet, powershell, and op
 
