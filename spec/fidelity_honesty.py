@@ -90,6 +90,7 @@ def fidelity_pass(spec):
     spreads = []  # (unit dict, spread dict) for the full table
     promote = []  # intent units that are uniform fleet-wide
     mislabel = []  # verbatim units that diverge non-stale
+    owned = {e["path"] for e in spec["files"].get("baseline", []) if e.get("repoOwnedKeys")}
 
     for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
         unit = {"path": label, "fidelity": fid}
@@ -149,7 +150,7 @@ def fidelity_pass(spec):
         # An absent section does not disqualify it either, for the same reason an unavailable file does not.
         # Neither is evidence that a repo decided something locally, and only such evidence argues against promotion.
         # Treating absence as disqualifying would be the same conflation this bucket was split out to end.
-        if fid == "intent" and spread["match"] and not spread["differs"]:
+        if fid == "intent" and label not in owned and spread["match"] and not spread["differs"]:
             promote.append((unit, spread))
         if fid == "verbatim" and spread["differs"]:
             mislabel.append((unit, spread))
