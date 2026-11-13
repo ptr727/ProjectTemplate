@@ -41,6 +41,8 @@ Every tool the contract names has a winget package, so nothing here carries a fa
 
 Ripgrep uses the upstream project's documented `BurntSushi.ripgrep.MSVC` package. It provides the `rg` command used for repository searches and `rg --files` discovery.
 
+The 1Password CLI uses `AgileBits.1Password.CLI`, which provides `op`. It is the one optional tool here, for a repository that reads its secrets from a 1Password vault. It joins the default selection only under `-Optional`, the same as on Linux, and naming it selects it either way. `-List` shows it either way and marks it `(optional tool)`.
+
 A tool that turns out to have no winget package is a finding to raise rather than a second source to add quietly. This is because the moment one tool comes from somewhere else, this directory stops being one program and becomes two.
 
 ## Elevation and Scope
@@ -142,6 +144,8 @@ This moved a boundary the tool used to hold. WSL used to be read-only here, and 
 | `upgrade-host.sh --release` moves to the next distribution release | no peer | Windows Update owns a feature update, and an action pretending to drive one is the one thing this must not carry |
 | `install-tools.sh` carries several functions per tool | `install-tools.ps1` carries one registry record per tool | Every source is `winget`, so the per-tool variation those functions exist for does not arise |
 | `git-restore-mtime` is managed | not managed | The spec declares it not applicable on Windows, since it serves a Linux deploy path |
+| `powershell` and `op` are optional tools, selected under `--optional` | `op` is the one optional tool, selected under `-Optional` | `pwsh` runs every script here, so on Windows it is a prerequisite rather than a managed tool |
+| `op` comes from 1Password's own apt repository, on `amd64`, `arm64`, and `armhf` only | `op` comes from `winget` as `AgileBits.1Password.CLI` | No distro packages it, while `winget` carries the vendor's own build |
 | `install-tools.sh` refuses docker entirely inside a WSL *distribution* | `install-tools.ps1` checks the WSL *platform* version before installing docker | A WSL distribution takes docker only from Docker Desktop's own WSL integration, and Windows needs WSL2 present for Docker Desktop's own backend |
 | `sudo` re-runs a command as root | nothing elevates | `winget` raises UAC per installer, which is the path with the fewest failures |
 | `install-tools.sh --sudo-timestamp` shares one sudo credential cache across a user's terminals | no peer | Nothing here elevates on Windows, so there is no cached credential to share |
@@ -183,7 +187,7 @@ host-setup\windows\setup-wsl.ps1 -Install Debian -DryRun
 
 Two of those are guards rather than previews, and each prints a refusal rather than a command. They are `upgrade-host.ps1 -Wsl -DryRun` on a host running Docker Desktop, and an `-Upgrade` whose `-Scope` disagrees with the installed copy. A `[dry run]` line from either means the guard sits in the wrong place.
 
-The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of the `shellcheck` step and locally through the invocation in [`GOVERNANCE.md`][governance]. [`tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires is one this registry carries, and that no script here opens with a shebang.
+The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of the `shellcheck` step and locally through the invocation in [`GOVERNANCE.md`][governance]. [`tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires is one this registry carries, and that every optional tool is one it carries too. It also asserts that no script here opens with a shebang.
 
 <!-- Repo -->
 

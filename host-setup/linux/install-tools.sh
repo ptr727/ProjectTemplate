@@ -26,9 +26,11 @@ readonly SUDOERS_FILE="/etc/sudoers.d/90-host-setup-sudo-timestamp"
 readonly SUDO_TIMESTAMP_TIMEOUT=60
 
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
-# The one optional member, powershell, joins the default selection only under --optional.
-readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell)
+readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell op)
 MANAGED_TOOLS=("${TOOLS[@]}")
+
+# Managed tools left out of the default selection unless --optional is given or the tool is named.
+readonly OPTIONAL_TOOLS=(powershell op)
 
 # Package sets.
 # The default set is what a tool needs to be useful.
@@ -169,8 +171,8 @@ usage() {
 Usage: install-tools.sh [options] [tool ...]
 
 Installs the host tools the fleet's repositories expect, from upstream where the distro package
-trails upstream. With no tool named, every managed tool is selected, and the optional tool
-joins it under --optional.
+trails upstream. With no tool named, every managed tool is selected except the optional tools,
+powershell and op, which join it under --optional.
 
 Actions, name one, default --report:
   -r, --report      Report installed and available versions, change nothing
@@ -185,7 +187,7 @@ Options:
   -j, --json        Write the report as JSON rather than a table, for a program to read
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt before changing the host
-  -o, --optional    Include the optional tool and the optional package sets, where a tool has one
+  -o, --optional    Include the optional tools and the optional package sets, where a tool has one
       --repo PATH   Include apt packages declared by PATH/host-tools.json
 
 Versions read as apt versions for an apt-managed tool and as upstream versions for a standalone
@@ -1081,6 +1083,77 @@ powershell_remove_non_apt() {
     run_root rm -rf "${paths[@]}"
 }
 
+# --- op ---
+
+op_source() { printf 'downloads.1password.com'; }
+op_version() { apt_installed_version 1password-cli; }
+op_target() { apt_candidate_version 1password-cli; }
+
+# The repository's 386 and arm trees declare Go architecture names, which apt matches to no dpkg architecture.
+op_arch_supported() {
+    case "$ARCH" in
+    amd64 | arm64 | armhf) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+# 1Password's manual install puts op in /usr/local/bin, ahead of the package's /usr/bin on PATH.
+# A failed ownership query stops the run rather than reading as unowned, since what this prints is removed.
+op_download_path() {
+    local resolved status=0
+    resolved=$(type -P op 2>/dev/null || true)
+    [[ $resolved == /* ]] || return 0
+    dpkg_owns_path "$resolved" || status=$?
+    case "$status" in
+    0) ;;
+    1) printf '%s' "$resolved" ;;
+    *) die "Cannot determine dpkg ownership of $resolved" ;;
+    esac
+}
+
+op_remove_download() {
+    local resolved
+    while true; do
+        resolved=$(op_download_path)
+        [[ -n $resolved ]] || break
+        log "op: removing downloaded copy at $resolved before the apt install"
+        confirm "  Remove $resolved?" || die "Declined, downloaded 1Password CLI left as it is"
+        run_root rm -f "$resolved"
+        [[ $DRY_RUN == true ]] && break
+        hash -r
+    done
+}
+
+# The vendor's optional debsig step is skipped, since apt already checks the package against the signed InRelease.
+# The 1Password desktop app's package writes this same sources file naming its own keyring, and a later run here writes it back.
+op_install() {
+    if ! op_arch_supported; then
+        warn "1Password's repository carries amd64, arm64 and armhf only, skipping op on $ARCH"
+        return 0
+    fi
+
+    ensure_prerequisites
+
+    # The vendor's documented one-line file goes first, since it names a different keyring and apt refuses two Signed-By values for one repository.
+    remove_stale "$SOURCES_DIR/1password.list"
+
+    if install_keyring "https://downloads.1password.com/linux/keys/1password.asc" \
+        "$KEYRING_DIR/1password-archive-keyring.gpg" \
+        "https://downloads.1password.com/linux/debian/$ARCH/dists/stable/InRelease" true; then
+        APT_DIRTY=true
+    fi
+
+    if write_sources "1password" "https://downloads.1password.com/linux/debian/$ARCH" "stable" "main" \
+        "$KEYRING_DIR/1password-archive-keyring.gpg"; then
+        APT_DIRTY=true
+    fi
+
+    # The vendor's keyring goes last, once no sources file this script writes still names it.
+    remove_stale "/usr/share/keyrings/1password-archive-keyring.gpg"
+
+    apt_install 1password-cli
+}
+
 # --- Tool dispatch ---
 
 tool_function() {
@@ -1095,8 +1168,18 @@ tool_configured() {
     case "$1" in
     gh) [[ -f "$SOURCES_DIR/github-cli.sources" ]] ;;
     node) [[ -f "$SOURCES_DIR/nodesource.sources" ]] ;;
+    # No distro carries 1password-cli, so the case this guards is a .deb installed by hand, which apt reads as its own candidate.
+    op) [[ -f "$SOURCES_DIR/1password.sources" ]] ;;
     *) return 0 ;;
     esac
+}
+
+tool_is_optional() {
+    local tool
+    for tool in "${OPTIONAL_TOOLS[@]}"; do
+        [[ $tool == "$1" ]] && return 0
+    done
+    return 1
 }
 
 tool_effective_status() {
@@ -1258,6 +1341,20 @@ tool_note() {
             note "powershell" "Microsoft's repository is not configured, so no package is available yet"
         fi
         ;;
+    op)
+        if ! op_arch_supported; then
+            note "op" "1Password's repository carries no $ARCH build, so --install/--upgrade skip it and leave any copy in place"
+            return 0
+        fi
+        if ! tool_configured op; then
+            note "op" "1Password's repository is not configured, so apt reads no upstream version yet"
+        fi
+        local resolved
+        resolved=$(op_download_path)
+        if [[ -n $resolved ]]; then
+            note "op" "$(hide_home "$resolved") is an unowned downloaded copy and an install or upgrade removes it before apt installs the 1Password CLI"
+        fi
+        ;;
     *) ;;
     esac
 
@@ -1342,7 +1439,7 @@ report() {
 }
 
 # Remove a copy of a managed tool found earlier on PATH than its managed destination, so the managed copy is what PATH resolves to afterward.
-# Ripgrep migrates an unowned download to apt, while jq, uv, and git-restore-mtime install as loose binaries in $BIN_DIR.
+# Ripgrep and op migrate an unowned download to apt, while jq, uv, and git-restore-mtime install as loose binaries in $BIN_DIR.
 tool_unshadow() {
     local tool="$1"
     local -a names=()
@@ -1350,6 +1447,13 @@ tool_unshadow() {
     jq | git-restore-mtime) names=("$tool") ;;
     ripgrep)
         ripgrep_remove_download
+        return 0
+        ;;
+    op)
+        # A host with no build to install keeps the copy it has, since nothing would replace it.
+        if op_arch_supported; then
+            op_remove_download
+        fi
         return 0
         ;;
     uv) names=(uv uvx) ;;
@@ -1418,7 +1522,8 @@ apply_tool() {
     # --upgrade brings $BIN_DIR current regardless, and --install with nothing there yet has nothing to protect.
     # --install with a managed copy already in place leaves it at its version by design.
     # So removing a newer shadow first would downgrade what PATH resolves to.
-    if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
+    # An apt managed tool keeps no managed copy in $BIN_DIR, so a file there under its name is the download its unshadowing removes.
+    if [[ $MODE == "upgrade" || $(tool_mechanism "$tool") != "binary" || ! -x "$BIN_DIR/$tool" ]]; then
         tool_unshadow "$tool"
     elif [[ -n $(tool_shadow_path "$tool") ]]; then
         log "$tool: still shadowed on PATH, --upgrade removes it, --install leaves it to avoid downgrading what's shadowing it"
@@ -1512,8 +1617,8 @@ list_tools() {
             printf '  %-18s apt:%s (repository)\n' "$tool" "${REPO_PACKAGES[$tool]}"
             continue
         fi
-        # The one optional member is marked here, since --list shows the whole registry, and its line says what the default selection leaves out.
-        if [[ $tool == "powershell" ]]; then
+        # An optional tool is marked here, since --list shows the whole registry, and its line says what the default selection leaves out.
+        if tool_is_optional "$tool"; then
             printf '  %-18s %s (optional)\n' "$tool" "$("$(tool_function "$tool" source)")"
         else
             printf '  %-18s %s\n' "$tool" "$("$(tool_function "$tool" source)")"
@@ -1569,7 +1674,7 @@ resolve_selection() {
             local -a filtered=()
             local tool
             for tool in "${SELECTED[@]}"; do
-                [[ $tool == "powershell" ]] || filtered+=("$tool")
+                tool_is_optional "$tool" || filtered+=("$tool")
             done
             SELECTED=("${filtered[@]}")
         fi

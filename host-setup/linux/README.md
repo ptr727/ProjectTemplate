@@ -42,18 +42,20 @@ Each script is LF with a shebang, and its executable bit is tracked in git. A fr
 The Windows registry has one source because `winget` tracks upstream. Here the distro package trails upstream on `gh`, on `node`, and on `uv`, so a tool comes from whichever source keeps up:
 
 - **The distro**, for `git`, `python`, and Ripgrep, where apt's own package is current enough.
-- **An upstream apt repository**, for `gh`, `node`, `docker`, and `powershell`, and for `dotnet` as a fallback, where upstream publishes one.
+- **An upstream apt repository**, for `gh`, `node`, `docker`, `powershell`, and `op`, and for `dotnet` as a fallback, where upstream publishes one.
 - **A released binary into `/usr/local/bin`**, for `jq`, `uv`, and `git-restore-mtime`, where upstream publishes no repository.
 
 No version is written into the script. Each upstream is asked what it carries now, so the script does not go stale between releases. Every step is idempotent, so a keyring or sources file is written only when its content differs. A re-run repairs drift rather than assuming a clean host.
 
 **A keyring is proved, not trusted.** Before a fetched signing key is installed, `gpgv` checks that it signs the repository's own `InRelease` metadata. An upstream that rotates or adds a key breaks a pinned fingerprint list but not this check. A host where the check cannot run stops rather than trusting the download. A released binary is checked against the sha256 list its upstream publishes beside it, for the same reason.
 
-**Keyrings land in `/etc/apt/keyrings`, and sources land as deb822 files in `/etc/apt/sources.list.d`.** A predecessor in the old location or the old one-line format is removed first, so apt never reads the same repository twice.
+**Keyrings land in `/etc/apt/keyrings`, and sources land as deb822 files in `/etc/apt/sources.list.d`.** A predecessor in the old location or the old one-line format is removed, so apt never reads the same repository twice.
 
 ## PATH and Shadowing
 
 `/usr/local/bin` precedes `/usr/bin`, which is why the distro's `jq` can stay installed and stay shadowed. The upstream binary wins without removing a package something else may depend on.
+
+An `rg` or `op` that no package owns, found first on `PATH`, is a download that keeps answering ahead of the apt package. An install or upgrade therefore removes it, after a prompt, before apt installs.
 
 The hazard runs the other way too. A copy of `jq`, `uv`, or `git-restore-mtime` sitting earlier on `PATH` keeps answering after this script installs a newer one. That reads as an upgrade that did not take, so the report names such a shadow. `--upgrade` removes it after a prompt. `--install` removes it only when no managed copy exists yet, since removing a newer shadow would downgrade what `PATH` resolves to. A file a distro package owns is never removed, because deleting it would desync dpkg's database from the filesystem. The remedy named there is the `PATH` order itself. The removal loops, since `PATH` can stack more than one shadow ahead of `/usr/local/bin`. A relative `PATH` entry is never trusted as a shadow at all.
 
@@ -67,7 +69,7 @@ A report changes nothing and reads the apt cache as it stands. An available vers
 
 An install or upgrade collects a tool whose install fails and carries on, so one failure does not strand the rest of the run. A refusal is different and ends the run. An unverifiable keyring, a checksum mismatch, or a declined prompt stops everything, because continuing past one would install something nobody vouched for.
 
-## Docker, node, dotnet, and powershell
+## Docker, node, dotnet, powershell, and op
 
 **Inside a WSL distribution, docker comes only from Docker Desktop's own WSL integration, never from installing `docker-ce`.** A native install would run a second engine beside Desktop's. `--install` and `--upgrade` therefore always skip it there and point at Docker Desktop's settings instead. The skip counts as success only where `docker` already answers, so a run cannot exit clean having found nothing working. On a native host, the conflicting packages Docker's own uninstall list names are removed first. Non-root use (`usermod -aG docker`) is left to the operator, as a group choice rather than a question of presence.
 
@@ -76,6 +78,10 @@ An install or upgrade collects a tool whose install fails and carries on, so one
 **For `dotnet`, the distro feed is the default and Microsoft's feed is the fallback.** The fallback is added only where the distro carries no SDK at all, because mixing the two feeds is what breaks a host. Microsoft's feed carries amd64 only, so any other architecture without a distro SDK is a named skip. The default set is the fleet's SDK line and the newest line the feed carries, one package where the two are the same. The fleet's line is the one a fleet .NET repository's `global.json` `sdk` block selects. A host holding only a newer line builds no repository carrying that block. The script names that line in `DOTNET_FLEET_LINE` rather than reading it from the hub's `catalog/snippets/configs/global.json` baseline, so it still runs fetched on its own. `tests/test_install_tools.py` fails while the two differ, so a TFM move edits both, and the Windows installer's major with them. A feed carrying no package for the fleet's line still gets the newest line, and the run carries on so a stand-up completes. A warning and the report both name the missing line. `--optional` adds every other line, for a host that builds against more than one. During a major move, that is where the old line comes from for a repository not yet moved.
 
 **`powershell` is optional and comes from Microsoft's feed, the same one `dotnet` falls back to.** The distro never carries a package, so there is no distro version to prefer and no mixing concern to weigh. It joins the default selection only under `--optional`, and naming it on the command line selects it either way. Like `dotnet`, the feed carries amd64 only, so any other architecture is a named skip. It is not part of the fleet contract, which is why it stays optional. A repository that needs `pwsh` opts in rather than every host carrying it.
+
+**`op` is optional too and comes from 1Password's own apt repository, as the `1password-cli` package.** No distro carries it, so `unmanaged` here means a package installed by hand with no repository behind it. It joins the default selection only under `--optional`, the same as `powershell`. The repository carries `amd64`, `arm64`, and `armhf` builds, and any other architecture is a named skip that leaves an existing copy alone. The vendor's optional debsig policy step is not taken, since the signed repository is the trust path. 1Password's manual install puts the binary in `/usr/local/bin`, where it would shadow the package's `/usr/bin/op`. So an install or upgrade removes an `op` no package owns, after a prompt, even where the package already reads current.
+
+**The sources file is `1password.sources`, the name the 1Password desktop app's package also writes on each of its installs.** That package rewrites the file to name its own keyring under `/usr/share/keyrings`, and the next run here writes it back. Either way apt reads one source for the repository rather than two that disagree on `Signed-By`, which apt refuses. The vendor's documented one-line `1password.list` is removed first for the same reason. Its keyring under `/usr/share/keyrings` is removed last, once no file this script writes still names it. The package itself adds an `onepassword-cli` group and makes `/usr/bin/op` set-group-ID to it, which its own install script does rather than this one.
 
 ## The Sudo Credential Cache
 

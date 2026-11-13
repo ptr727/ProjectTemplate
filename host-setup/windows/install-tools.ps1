@@ -112,7 +112,8 @@ function usage {
 Usage: install-tools.ps1 [options] [tool ...]
 
 Installs the host tools the fleet's repositories expect, from winget, which is the only source
-every one of them has. With no tool named, every managed tool is selected.
+every one of them has. With no tool named, every managed tool is selected except the optional
+tool, op, which joins it under -Optional.
 
 Actions, name one, default -Report:
   -r, -Report       Report installed and available versions, change nothing
@@ -126,7 +127,7 @@ Options:
   -j, -Json         Write the report as JSON rather than a table, for a program to read
   -n, -DryRun       Print the commands instead of running them
   -y, -Yes          Do not prompt before changing the host
-  -o, -Optional     Include the optional package set, where a tool has one
+  -o, -Optional     Include the optional tool and the optional package sets, where a tool has one
       -Scope        Name a scope, either user or machine, for the copy to act on
       -Repo PATH    Include winget packages declared by PATH\host-tools.json
 
@@ -660,7 +661,11 @@ $TOOLS = @(
     @{ Name = 'docker'; Package = 'Docker.DockerDesktop'; Probe = 'docker'; Optional = @(); Family = '' }
     @{ Name = 'node'; Package = 'OpenJS.NodeJS.LTS'; Probe = 'node'; Optional = @(); Family = 'OpenJS.NodeJS' }
     @{ Name = 'dotnet'; Package = "Microsoft.DotNet.SDK.$DOTNET_MAJOR"; Probe = 'dotnet'; Optional = @("Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 1)", "Microsoft.DotNet.SDK.$($DOTNET_MAJOR - 2)"); Family = '' }
+    @{ Name = 'op'; Package = 'AgileBits.1Password.CLI'; Probe = 'op'; Optional = @(); Family = '' }
 )
+
+# Managed tools left out of the default selection unless -Optional is given or the tool is named, as on Linux.
+$OPTIONAL_TOOLS = @('op')
 
 function Get-Tool {
     param([Parameter(Mandatory)][string]$ToolName)
@@ -1450,7 +1455,8 @@ function Show-List {
     log ($format -f 'TOOL', 'PACKAGE', 'OPTIONAL')
     foreach ($tool in $script:SELECTED) {
         $record = Get-Tool $tool
-        $optional = if ($record.Optional.Count -gt 0) { $record.Optional -join ', ' } else { '-' }
+        # The column names what -Optional adds, which for an optional tool is the tool itself.
+        $optional = if ($script:OPTIONAL_TOOLS -contains $record.Name) { '(optional tool)' } elseif ($record.Optional.Count -gt 0) { $record.Optional -join ', ' } else { '-' }
         log ($format -f $record.Name, $record.Package, $optional)
     }
 }
@@ -1739,7 +1745,11 @@ function Resolve-Mode {
 
 function Resolve-Selection {
     $names = @($script:TOOLS | ForEach-Object { $_.Name })
-    if ($script:WANT_TOOLS.Count -eq 0) { return , $names }
+    if ($script:WANT_TOOLS.Count -eq 0) {
+        # -List shows the whole registry, so a reader sees what the default selection leaves out.
+        if ($script:WITH_OPTIONAL -or $script:MODE -eq 'list') { return , $names }
+        return , @($names | Where-Object { $script:OPTIONAL_TOOLS -notcontains $_ })
+    }
     foreach ($candidate in $script:WANT_TOOLS) {
         if ($names -notcontains $candidate) {
             die "Unknown tool `"$candidate`", -List names the managed tools"
