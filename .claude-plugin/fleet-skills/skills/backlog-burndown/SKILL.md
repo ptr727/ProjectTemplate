@@ -215,9 +215,9 @@ for, and it binds harder than any throughput target.
 - **Genuine duplicates are one group.** Never close an issue during triage on the orchestrator's
   own judgment. Comment to cross-link the pair, and let the fix close both.
 - **Closing keywords go on the promotion pull request**, not the feature pull request, per
-  `branching-and-release-model`. The hub's squash setting copies the body into the commit. So a
-  `Fixes #N` line there closes #N when the promotion brings that commit to main, a closure no
-  promotion body stated. **The feature pull request body instead
+  `branching-and-release-model`. A repository's squash setting can copy the body into the commit,
+  as the hub's does. Then a `Fixes #N` line there closes #N when the promotion brings that commit
+  to main, a closure no promotion body stated. **The feature pull request body instead
   carries a line reading `Closes on promotion: #N`**. It lists every issue that pull request
   actually fixes and nothing it merely mentions. The promotion body is assembled from that line,
   per "The Promotion Boundary". GitHub reads a closing keyword only where the issue reference

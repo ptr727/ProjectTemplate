@@ -76,11 +76,12 @@ rather than guessing from the repo's contents.
   `does not fix #N` and `narrowed rather than closed: #N` closes its issue. Where text names an
   issue it leaves open, keep every keyword away from the reference, as in `#N stays open`. Reading the
   text misses this. So check a promotion PR mechanically after opening it and after each body
-  amendment. Compare the set
+  amendment. Check it again when reporting it ready, since a merge into `develop` moves the range.
+  Compare the set
   `gh pr view <number> --repo <owner>/<repo> --json closingIssuesReferences --jq '[.closingIssuesReferences[].number]'`
   prints with the intended set. Then scan the range's commit messages, since a keyword there closes
   its issue at the promotion merge too:
-  `git log --format=%B origin/main..origin/develop | grep -n -i -E '\b(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+[[:alnum:]_./-]*#[0-9]'`,
+  `git log --format=%B origin/main..origin/develop | grep -n -i -E '\b(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+[[:alnum:]_./:-]*(#|/issues/)[0-9]'`,
   run after `git fetch origin`. Each line it prints is a closure the promotion merge makes
   whatever its body says. Name any unintended one in the promotion PR's ready report.
 - **Neither ruleset requires branches to be up to date before merging.** The reasons differ on
