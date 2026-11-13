@@ -91,7 +91,7 @@ def fidelity_pass(spec):
     spreads = []  # (unit dict, spread dict) for the full table
     promote = []  # intent units that are uniform fleet-wide
     mislabel = []  # verbatim units that diverge non-stale
-    owned = {e["path"] for e in spec["files"].get("baseline", []) if e.get("repoOwnedKeys")}
+    owned = {e["path"] for e in spec["files"]["baseline"] if e.get("repoOwnedKeys")}
 
     for label, fid, ent_ap, sec_ap, down_path, canon_path, extract in check_units(spec):
         unit = {"path": label, "fidelity": fid}
