@@ -1159,7 +1159,7 @@ tool_function() {
 }
 
 # Whether a tool's upstream repository is in place.
-# A tool installed from the distro while its upstream repository is unconfigured reads as current against the distro's own version.
+# A tool installed while its sources file is absent reads as current against whatever apt already has.
 # That is the one thing the report must not say, so it reads as unmanaged instead.
 tool_configured() {
     case "$1" in
