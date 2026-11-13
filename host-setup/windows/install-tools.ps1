@@ -1673,7 +1673,7 @@ function Invoke-ToolApply {
         }
         if ($presence -eq 'unknown') {
             warn "${ToolName}: winget did not answer whether $package is installed, so it is skipped"
-            if ($script:FAILED -notcontains $ToolName) { $script:FAILED += $ToolName }
+            $script:FAILED += $ToolName
             continue
         }
         $started = Get-Date
@@ -1693,7 +1693,7 @@ function Invoke-ToolApply {
                 if ($line) { $executable = Get-PythonLineInterpreter -Line $line }
             }
             Write-InstallFailure -ToolName $ToolName -Package $package -Code $code -Since $started -Probe $record.Probe -Executable $executable
-            if ($script:FAILED -notcontains $ToolName) { $script:FAILED += $ToolName }
+            $script:FAILED += $ToolName
             # Owed regardless of how this returns: Enter-DockerMaintenance stopped Docker Desktop for this attempt, and a failed install is not a reason to leave it down.
             if ($dockerMaintenance) { Exit-DockerMaintenance -Stopped $dockerMaintenance.Stopped }
             return
@@ -1757,7 +1757,7 @@ function Invoke-Apply {
     }
 
     if ($script:FAILED.Count -gt 0) {
-        warn "Failed: $($script:FAILED -join ' ')"
+        warn "Failed: $(@($script:FAILED | Select-Object -Unique) -join ' ')"
         return 1
     }
     return 0

@@ -1238,7 +1238,7 @@ class TestWindowsOptionalDotnetLine(unittest.TestCase):
             "unknown": ({"unknown": "Microsoft.DotNet.SDK.7"}, "FAILED dotnet"),
             "unknown then failed": (
                 {"unknown": "Microsoft.DotNet.SDK.9", "Microsoft.DotNet.SDK.7": 1},
-                "FAILED dotnet",
+                "FAILED dotnet,dotnet",
             ),
             "failed": ({"Microsoft.DotNet.SDK.11": 1}, "FAILED dotnet"),
         }
