@@ -15,10 +15,11 @@ It derives the settings the bots read from their own files and the Copilot rules
 The libraries behind `write` and `check` are imported inside those subcommands.
 So `render`, `facts` and `rulesets` run, and spec/validate.py imports `render`, with the standard library alone.
 
-Trusted inputs, all maintainer-controlled: the registry, `spec/agent-policy.default.json`, the `--checkout` tree and its `origin`, and the target repository's default-branch files that `check` reads.
+Trusted inputs, all maintainer-controlled: the registry, `spec/agent-policy.default.json`, `spec/files.json`, the `repo-config/` ruleset payloads, the `--checkout` tree and its `origin`, and the files `check` reads at `--ref`.
+`configure.sh` pins that ref to the target repository's default branch.
 A trusted file that does not parse fails loudly with a nonzero exit, and the script does not repair it or work around it.
 The script adds no guard for a symlinked write target or an origin on another host.
-It adds none for an inherited `GIT_DIR` or `GIT_CONFIG*`, or for a wrong-shaped bot file read by `check`.
+It adds none for an inherited `GIT_DIR` or `GIT_CONFIG*`, or for a bot file shape beyond the refusals the code already holds.
 GOVERNANCE.md "Trust Boundaries and Hardening Effort" and OPERATIONS.md "Configuration Layout" state the boundary.
 
 Exit codes: 0 ok, 1 a refusal, drift or a missing file, 2 the command could not run.
