@@ -8216,12 +8216,12 @@ class TestDiffScopeReachesAQuotedName(unittest.TestCase):
         self.assertEqual("kept.md", prose_lint.diff_header_path("b/kept.md"))
 
 
-def git_as_gate(root: Path, *args: str) -> str:
-    """Run git in `root` under the gate cases' constructed identity, unsigned, failing on an error."""
+def git_as_gate(root: Path, *args: str, check: bool = True) -> str:
+    """Run git in `root` under the gate cases' constructed identity, unsigned, failing on an error by default."""
     identity = ("-c", "user.email=gate@example.invalid", "-c", "user.name=gate test")
     return subprocess.run(
         ["git", "-C", str(root), *identity, "-c", "commit.gpgsign=false", *args],
-        check=True,
+        check=check,
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -8352,11 +8352,7 @@ class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
         self.git("update-ref", "refs/remotes/origin/main", "main")
         self.git("update-ref", "refs/remotes/origin/develop", "develop")
         self.git("checkout", "-qb", "promote/develop-to-main", "main")
-        subprocess.run(
-            ["git", "-C", str(self.root), "merge", "-q", "origin/develop"],
-            capture_output=True,
-            check=False,
-        )
+        git_as_gate(self.root, "merge", "-q", "origin/develop", check=False)
         self.git("checkout", "--theirs", "ci.yml")
         self.git("add", "ci.yml")
         self.git("commit", "-qm", "take develop's side")

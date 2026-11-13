@@ -529,6 +529,16 @@ class TestCleanupRecognizesAPromotionCutFromTheDefaultBranch(CleanupCase):
                 self.assertFalse(self.deleted())
                 self.assertIn("status=UNREAD", self.out.getvalue())
 
+    def test_a_default_branch_unsafe_in_a_rest_path_stops_at_2_before_any_comparison(self) -> None:
+        """A `#` in the name would cut the compare path short, so the read is refused as unread."""
+        self.wire(
+            self.promotion(baseRefName="release#1"), default="release#1", compares=self.LANDED
+        )
+        self.assertEqual(2, self.run_cleanup())
+        self.assertFalse(self.deleted())
+        self.assertIn("status=UNREAD", self.out.getvalue())
+        self.assertFalse([path for path in self.rest if "/compare/" in path])
+
     def test_the_default_branch_read_live_is_the_promotion_base(self) -> None:
         """A repository whose default branch is not `main` promotes into that branch instead."""
         compares = {f"{CLEANUP_HEAD}...trunk": "identical", f"{DEVELOP_PARENT}...develop": "ahead"}

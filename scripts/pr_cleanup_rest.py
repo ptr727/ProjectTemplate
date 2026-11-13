@@ -31,6 +31,8 @@ def cleanup_rest(path: str, what: str, jq: str = ".") -> object:
 
 def in_history(owner: str, repo: str, branch: str, oid: str) -> bool:
     """Whether commit `oid` is in `branch`'s history, by `pr_review.commit_state`'s comparison."""
+    if not core.safe_ref(branch):
+        raise CleanupUnread(f"the branch {branch!r} holds a character that changes a REST path")
     state = core.commit_state(owner, repo, oid, branch)
     if state == core.UNREAD:
         raise CleanupUnread(f"the comparison of {oid} with {branch} did not answer")
