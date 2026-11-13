@@ -73,6 +73,7 @@ jobs:
         with:
           ref: ${{ matrix.branch }}
           token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       - name: Run resolve-upstream hook step
         id: resolve-upstream

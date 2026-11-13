@@ -43,6 +43,7 @@ jobs:
         with:
           ref: ${{ matrix.target.ref }}
           token: ${{ steps.app-token.outputs.token }}
+          persist-credentials: false
 
       # The SDK step follows the checkout, since it reads the caller's global.json.
       # The caller's global.json selects the SDK line, or the dotnet-sdk action's fallback line where it carries none yet.

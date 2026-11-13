@@ -56,7 +56,7 @@ A workflow whose job graph is identical across repos of a type is reached, not c
 
 ### The Hook Contract
 
-A hook receives the fixed inputs [WORKFLOW.md "Reusable-Task Parameter Contract"][workflow-reusable-task-parameter-contract] gives a leaf today. Those are `ref`, `branch`, `smoke` where relevant, and the NBGV version outputs where a build needs them. It reports back through step outputs and, for a release target, through the existing artifact seam, `release-asset-<branch>-<target>`, which the hub's `github-release` job collects by pattern. The `install-test-deps` hook is an exception, taking `leg` and `directories` inputs and reporting nothing back. The `build-release-asset` hook is another, writing its files into the `output-directory` it receives, on a smoke run too, and leaving the upload to the task. The task accepts only regular files at that directory's top level and refuses a subdirectory, a symlink, or a dot-prefixed name. A package hook also uploads the artifact its publish job consumes: a NuGet hook uploads `nuget-build-<branch>` as well as its `release-asset-*`. A PyPI hook uploads `pypi-build-<branch>` and no release asset at all. A NuGet or PyPI hook has to carry that exact package-artifact name or its publish job finds nothing. A hook may use marketplace actions, which is the reason a hook is a composite action rather than a script. A toolchain setup, a Docker build, or a coverage upload is a `uses:` step, and a shell script cannot carry one. Action pins inside a hook follow the SHA-pinning rule like any other workflow content, and Dependabot bumps them in the repo that carries the hook.
+A hook receives the fixed inputs [WORKFLOW.md "Reusable-Task Parameter Contract"][workflow-reusable-task-parameter-contract] gives a leaf today. Those are `ref`, `branch`, `smoke` where relevant, and the NBGV version outputs where a build needs them. It reports back through step outputs and, for a release target, through the existing artifact seam, `release-asset-<branch>-<target>`, which the hub's `github-release` job collects by pattern. The `install-test-deps` hook is an exception, taking `leg` and `directories` inputs and reporting nothing back. The `build-release-asset` hook is another, writing its files into the `output-directory` it receives, on a smoke run too, and leaving the upload to the task. The task accepts only regular files at that directory's top level and refuses a subdirectory, a symlink, or a dot-prefixed name. A package hook also uploads the artifact its publish job consumes: a NuGet hook uploads `nuget-build-<branch>` as well as its `release-asset-*`. A PyPI hook uploads `pypi-build-<branch>` and no release asset at all. A NuGet or PyPI hook has to carry that exact package-artifact name or its publish job finds nothing. A hook may use marketplace actions, which is the reason a hook is a composite action rather than a script. A toolchain setup, a Docker build, or a coverage upload is a `uses:` step, and a shell script cannot carry one. Action pins inside a hook follow the SHA-pinning rule like any other workflow content, and Dependabot bumps them in the repo that carries the hook. A hook runs with no persisted git credential, since every checkout ahead of a hook sets `persist-credentials: false`. A hook that runs git against the remote therefore passes its own credential to that call.
 
 ### Pinning
 
@@ -345,8 +345,11 @@ jobs:
     steps:
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Filter changed paths step
         id: filter
+        if: github.event_name == 'pull_request'
         uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         with:
           filters: |

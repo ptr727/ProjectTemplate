@@ -175,6 +175,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
+          persist-credentials: false
 
       # A caller's own hook names its archive itself, so the asset name input reaches only the hub default.
       - name: Run caller dotnet-publish hook step
@@ -220,6 +221,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
+          persist-credentials: false
 
       - name: Run caller build-nuget hook step
         if: ${{ hashFiles('.github/actions/build-nuget/action.yml') != '' }}
@@ -263,6 +265,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
+          persist-credentials: false
 
       # A caller hook should declare semver2, though one that does not only draws the runner's unexpected-input warning.
       - name: Run caller build-pypi hook step
@@ -297,6 +300,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
+          persist-credentials: false
 
       - name: Check caller build-release-asset hook step
         env:
@@ -388,6 +392,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.get-version.outputs.GitCommitId }}
+          # Kept, since the Supersede a release the token cannot tag step runs git fetch and git ls-remote against origin.
+          persist-credentials: true
 
       # Collect assets by the release-asset-<branch>-* pattern so this step is target-agnostic.
       # Subset releases by disabling the target, not by editing this job.

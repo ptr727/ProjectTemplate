@@ -113,6 +113,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # Fail fast on a misconfigured environment, before any build, upload, or flip work runs.
       # A silently empty variable or secret would otherwise let the deploy proceed and only surface as a broken site-url output or a late SSH/rsync failure.

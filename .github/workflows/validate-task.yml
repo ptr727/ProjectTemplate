@@ -129,6 +129,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # The fleet doc-lint block, hosted once rather than carried by every repo of every type.
       # An empty markdown-exclude-globs leaves a blank line here, which the action ignores, so the default caller passes nothing extra.
@@ -658,6 +659,8 @@ jobs:
 
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Check caller install-test-deps hook step
         if: ${{ inputs.test-matrix != '' }}
@@ -893,6 +896,8 @@ jobs:
 
       - name: Checkout code step
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # A local composite action resolves at step time from the workspace, which is what makes this fallback expressible at all.
       # It runs the caller's own hook when it carries one, else the hub's no-op default.
