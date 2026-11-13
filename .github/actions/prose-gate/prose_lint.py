@@ -469,9 +469,12 @@ def commit_base(root: Path) -> str:
     A first commit has no HEAD, and the empty tree, hashed in the repository's own object format,
     has nothing.
     The format is read from the config, since a git before 2.29 has no `--show-object-format`.
-    Such a git cannot open a SHA-256 repository, so an unset format is SHA-1.
+    Such a git cannot open a SHA-256 repository, so an unset format is SHA-1. Where git cannot read
+    the repository at all this returns HEAD, so the refusal names the base a commit would use.
     """
     env = tree_env()
+    if git_text("-C", str(root), "rev-parse", "--git-dir", env=env) is None:
+        return "HEAD"
     for ref in ("MERGE_HEAD", "HEAD"):
         if git_text("-C", str(root), "rev-parse", "-q", "--verify", f"{ref}^{{commit}}", env=env):
             return ref
@@ -2229,13 +2232,19 @@ def main(argv: list[str] | None = None) -> int:
         return refuse("error-no-diff", base=a.diff)
     if scope is not None and a.diff_commit and a.diff == "MERGE_HEAD":
         # A merge commit adds only what differs from both parents, so the branch's own lines stay out.
-        # A move counts only where both diffs record it, since the branch alone may have made it.
+        # A move counts only where HEAD lacks the new path too, since the branch alone may have made it.
         our_moves: dict[str, tuple[str, str]] = {}
         ours = changed_lines("HEAD", scan_root, tuple(a.exclude), scan_paths, our_moves)
         if ours is None:
             return refuse("error-no-diff", base="HEAD")
         scope = {k: v & ours[k] for k, v in scope.items() if k in ours}
-        moves = {k: m for k, m in moves.items() if k in our_moves}
+        held = git_env()
+        moves = {
+            k: m
+            for k, m in moves.items()
+            if k in our_moves
+            or git_text("-C", str(scan_root), "cat-file", "-e", f"HEAD:{k}", env=held) is None
+        }
         a.diff = "MERGE_HEAD and HEAD"
     if scope is not None:
         matched = [f for f in files if keys[f] in scope]
@@ -2309,6 +2318,8 @@ def run() -> int | signal.Signals:
     try:
         return main()
     except KeyboardInterrupt:
+        # A SIGTERM arriving now is the same interrupt forwarded, so it no longer unwinds anything.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         signum = signal.Signals(received[-1] if received else signal.SIGINT)
         print(f"prose_lint.py: interrupted by {signum.name}.", file=sys.stderr)
         return signum

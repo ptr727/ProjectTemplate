@@ -198,6 +198,8 @@ def run(argv: list[str]) -> int | signal.Signals:
     try:
         return main(argv)
     except KeyboardInterrupt:
+        # A SIGTERM arriving now is the same interrupt forwarded, so it no longer unwinds anything.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         signum = signal.Signals(received[-1] if received else signal.SIGINT)
         print(f"hub_fetch_run: interrupted by {signum.name}.", file=sys.stderr)
         return signum

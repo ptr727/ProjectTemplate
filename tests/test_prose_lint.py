@@ -8313,7 +8313,7 @@ class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
 
 
 class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
-    """`--diff-commit` diffs a merge against MERGE_HEAD, a commit against HEAD, a first commit whole.
+    """`--diff-commit` diffs a merge against both parents, a commit against HEAD, a first commit whole.
 
     A hook passing `--diff HEAD` read every line a merged-in parent brought as added. So a comment
     another pull request landed failed a merge commit that adds none.
@@ -8334,14 +8334,57 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         )
 
     def write(self, name: str, text: str) -> None:
+        (self.root / name).parent.mkdir(parents=True, exist_ok=True)
         (self.root / name).write_text(text, encoding="utf-8")
 
-    def gate(self, *flags: str) -> tuple[int, str]:
+    def gate(
+        self, *flags: str, check: str = "comment-added", glob: str = "*.py"
+    ) -> tuple[int, str]:
         out, err = io.StringIO(), io.StringIO()
-        paths = sorted(str(p) for p in self.root.glob("*.py"))
+        paths = sorted(str(p) for p in self.root.glob(glob))
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = prose_lint.main(["--check", "comment-added", *flags, "--", *paths])
+            status = prose_lint.main(["--check", check, *flags, "--", *paths])
         return status, out.getvalue() + err.getvalue()
+
+    def moved_doc(self) -> None:
+        """`docs/a.md` links `gone.py`, which `docs/` holds and the top level once held."""
+        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd.\n")
+        self.write("docs/gone.py", "value = 1\n")
+        self.write("gone.py", "value = 1\n")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "base")
+        self.git("rm", "-q", "gone.py")
+        self.git("commit", "-qm", "delete the top-level copy")
+
+    def test_a_merge_leaves_out_a_move_only_the_branch_made(self) -> None:
+        """The branch's own move points the link at the deleted copy, which the merge adds nothing to."""
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.git("mv", "docs/a.md", "a.md")
+        self.git("commit", "-qm", "feature moves the doc")
+        self.git("checkout", "-q", "develop")
+        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd, edited.\n")
+        self.git("commit", "-qam", "develop edits the doc")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(0, status, said)
+
+    def test_a_merge_reads_a_move_its_resolution_makes(self) -> None:
+        """Both diffs record a move the resolution makes, so what it breaks is the merge's own."""
+        self.moved_doc()
+        self.git("checkout", "-qb", "feature")
+        self.write("docs/a.md", "See [it](gone.py).\n\n\n\nEnd, feature.\n")
+        self.git("commit", "-qam", "feature edits the end")
+        self.git("checkout", "-q", "develop")
+        self.write("docs/a.md", "See [it](gone.py), develop.\n\n\n\nEnd.\n")
+        self.git("commit", "-qam", "develop edits the start")
+        self.git("checkout", "-q", "feature")
+        self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
+        self.git("mv", "docs/a.md", "a.md")
+        status, said = self.gate("--diff-commit", check="dead-path", glob="*.md")
+        self.assertEqual(1, status, said)
+        self.assertIn("a.md:1: dead-path", said)
 
     def merge_in_progress(self) -> None:
         """Develop lands a comment, and feature merges it in without committing the merge."""
@@ -8358,7 +8401,7 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
         self.git("checkout", "-q", "feature")
         self.git("merge", "-q", "--no-ff", "--no-commit", "develop")
 
-    def test_a_merge_is_diffed_against_its_merged_in_parent(self) -> None:
+    def test_a_merge_is_diffed_against_both_parents(self) -> None:
         self.merge_in_progress()
         status, said = self.gate("--diff-commit")
         self.assertEqual(0, status, said)

@@ -181,7 +181,7 @@ class HookCase(unittest.TestCase):
         self.assertEqual([], sorted(p.name for p in self.tmp.glob("tmp.*")))
 
 
-class TestTheHookDiffsAMergeAgainstItsMergedInParent(HookCase):
+class TestTheHookDiffsAMergeAgainstBothParents(HookCase):
     """A merge of develop brings in lines the branch never wrote, and the hook must not read them.
 
     Measured against `HEAD`, every line develop gained since the fork reads as added. So a comment
@@ -460,9 +460,7 @@ class TestTheHookCleansUpWhenInterrupted(HookCase):
                 self.assertEqual([], list(self.tmp.iterdir()))
 
 
-class TestTheSnippetDiffsAMergeAgainstItsMergedInParent(
-    TestTheHookDiffsAMergeAgainstItsMergedInParent
-):
+class TestTheSnippetDiffsAMergeAgainstBothParents(TestTheHookDiffsAMergeAgainstBothParents):
     hook = SNIPPET_HOOK
 
 
