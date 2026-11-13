@@ -144,7 +144,7 @@ Capture the source and verify the capture **against the source**. Hold the verif
 
 ## 2. Carry the Baseline Files
 
-After the baseline files are present, apply every applicable whole-tree declaration from the fetched hub checkout. The carry tool resolves the repository through the registry and refuses a shared or dirty target worktree.
+After the baseline files are present, apply every applicable whole-tree declaration from the fetched hub checkout. That checkout is at `main`, or at `develop` while the repo's registry entry has merged there but not yet reached `main`. The carry tool resolves the repository through the registry and refuses a shared or dirty target worktree. It also refuses a `develop` checkout for a repository whose entry has already reached `main`.
 
 ```shell
 uv run --no-project --script scripts/carry.py check "<Repo>" --target /path/to/worktree
