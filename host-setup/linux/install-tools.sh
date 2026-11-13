@@ -1124,6 +1124,8 @@ op_install() {
         return 0
     fi
 
+    local had
+    had=$(op_version)
     ensure_prerequisites
 
     if install_keyring "https://downloads.1password.com/linux/keys/1password.asc" \
@@ -1142,8 +1144,11 @@ op_install() {
     remove_stale "$SOURCES_DIR/1password.list" "/usr/share/keyrings/1password-archive-keyring.gpg"
 
     apt_install 1password-cli || return 1
-    # Removed only once the package is in place, so a failed install leaves the working copy.
-    op_remove_download
+    # Removed only once the package is in place, and under --install only where this run added it.
+    # So a failed install leaves the working copy, and --install never removes a newer one beside an existing package.
+    if [[ -z $had || $MODE == "upgrade" ]]; then
+        op_remove_download
+    fi
 }
 
 # --- Tool dispatch ---
@@ -1160,7 +1165,7 @@ tool_configured() {
     case "$1" in
     gh) [[ -f "$SOURCES_DIR/github-cli.sources" ]] ;;
     node) [[ -f "$SOURCES_DIR/nodesource.sources" ]] ;;
-    # No distro carries 1password-cli, so the case this guards is a .deb installed by hand, which apt reads as its own candidate.
+    # No distro carries 1password-cli, so the cases this guards are the vendor's one-line source and a .deb installed by hand.
     op) [[ -f "$SOURCES_DIR/1password.sources" ]] ;;
     *) return 0 ;;
     esac
@@ -1338,7 +1343,9 @@ tool_note() {
             note "op" "1Password's repository carries no $ARCH build, so --install/--upgrade skip it and leave any copy in place"
             return 0
         fi
-        if ! tool_configured op; then
+        if [[ -f "$SOURCES_DIR/1password.list" ]] && ! tool_configured op; then
+            note "op" "1Password's one-line 1password.list is configured instead of 1password.sources, and an install or upgrade replaces it"
+        elif ! tool_configured op; then
             note "op" "1Password's repository is not configured, so apt reads no upstream version yet"
         fi
         local resolved
@@ -1519,7 +1526,7 @@ apply_tool() {
     # So removing a newer shadow first would downgrade what PATH resolves to.
     if [[ $MODE == "upgrade" || ! -x "$BIN_DIR/$tool" ]]; then
         tool_unshadow "$tool"
-    elif [[ -n $(tool_shadow_path "$tool") ]]; then
+    elif [[ $(tool_mechanism "$tool") == "binary" && -n $(tool_shadow_path "$tool") ]]; then
         log "$tool: still shadowed on PATH, --upgrade removes it, --install leaves it to avoid downgrading what's shadowing it"
     fi
 

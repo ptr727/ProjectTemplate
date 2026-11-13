@@ -398,6 +398,7 @@ install_keyring() { printf 'KEYRING %s\\n' "$*"; return 1; }
 write_sources() { printf 'SOURCES %s\\n' "$*"; return 1; }
 apt_install() { printf 'APT %s\\n' "$*"; }
 op_remove_download() { printf 'REMOVE\\n'; }
+op_version() { :; }
 """
 
     def unowned_copy(self) -> Path:
@@ -447,6 +448,18 @@ if op_install; then exit 0; else exit "$?"; fi"""
         result = self.run_bash(body)
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("REMOVE", result.stdout)
+
+    def test_install_beside_an_existing_package_keeps_the_download(self) -> None:
+        for mode, removed in (("install", False), ("upgrade", True)):
+            with self.subTest(mode=mode):
+                body = f"""{self.RECORDING}
+op_version() {{ printf '2.41.0-1'; }}
+MODE={mode}
+ARCH=amd64
+op_install"""
+                result = self.run_bash(body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual("REMOVE" in result.stdout.splitlines(), removed, result.stdout)
 
     def test_an_architecture_without_a_build_is_skipped_and_changes_nothing(self) -> None:
         result = self.run_bash(f"{self.RECORDING}\nARCH=i386\nop_install")

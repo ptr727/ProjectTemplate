@@ -187,7 +187,7 @@ host-setup\windows\setup-wsl.ps1 -Install Debian -DryRun
 
 Two of those are guards rather than previews, and each prints a refusal rather than a command. They are `upgrade-host.ps1 -Wsl -DryRun` on a host running Docker Desktop, and an `-Upgrade` whose `-Scope` disagrees with the installed copy. A `[dry run]` line from either means the guard sits in the wrong place.
 
-The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of the `shellcheck` step and locally through the invocation in [`GOVERNANCE.md`][governance]. [`tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires is one this registry carries, and that every optional tool is one it carries too. It also asserts that no script here opens with a shebang.
+The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of the `shellcheck` step and locally through the invocation in [`GOVERNANCE.md`][governance]. [`tests/test_bootstrap.py`][test-bootstrap] asserts that every tool the spec requires is one this registry carries, and that every name its `$OPTIONAL_TOOLS` list holds is one too. It also asserts that no script here opens with a shebang.
 
 <!-- Repo -->
 
