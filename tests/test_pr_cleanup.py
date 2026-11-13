@@ -146,8 +146,10 @@ class CleanupCase(unittest.TestCase):
             body: object
             if "/compare/" in path:
                 answer = (compares or {})[path.partition("/compare/")[2]]
-                body = answer if isinstance(answer, Exception) else {"status": answer}
-            elif "/commits/" in path:
+                if isinstance(answer, Exception):
+                    return subprocess.CompletedProcess([], 1, "", "gh: Bad Gateway (HTTP 502)")
+                return subprocess.CompletedProcess([], 0, f"{answer}\n", "")
+            if "/commits/" in path:
                 body = list(parents) if isinstance(parents, tuple) else parents
             elif "/rules/branches/" in path:
                 body = rules
@@ -462,21 +464,27 @@ class TestCleanupRecognizesAPromotionCutFromTheDefaultBranch(CleanupCase):
     """
 
     LANDED: ClassVar[dict[str, object]] = {
-        f"main...{CLEANUP_HEAD}": "behind",
-        f"develop...{DEVELOP_PARENT}": "behind",
+        f"{CLEANUP_HEAD}...main": "ahead",
+        f"{DEVELOP_PARENT}...develop": "ahead",
     }
 
     def promotion(self, **overrides: object) -> dict:
         return cleanup_pr(**{"baseRefName": "main", "headRefName": PROMOTION_BRANCH, **overrides})
+
+    def fresh(self) -> None:
+        """Start a subtest's reads and output afresh, so none of its assertions reads an earlier one's."""
+        self.docs.clear()
+        self.out.seek(0)
+        self.out.truncate(0)
 
     def test_a_merged_promotion_branch_is_deleted(self) -> None:
         self.wire(self.promotion(), compares=self.LANDED)
         self.assertEqual(0, self.run_cleanup())
         self.assertTrue(self.deleted())
         self.assertIn("status=DELETED", self.out.getvalue())
-        self.assertIn(f"repos/o/r/compare/main...{CLEANUP_HEAD}", self.rest)
+        self.assertIn(f"repos/o/r/compare/{CLEANUP_HEAD}...main", self.rest)
         self.assertIn(f"repos/o/r/commits/{CLEANUP_HEAD}", self.rest)
-        self.assertIn(f"repos/o/r/compare/develop...{DEVELOP_PARENT}", self.rest)
+        self.assertIn(f"repos/o/r/compare/{DEVELOP_PARENT}...develop", self.rest)
 
     def test_the_shape_holds_under_any_branch_name(self) -> None:
         """The name decides nothing in either direction, so a differently named one is read too."""
@@ -486,10 +494,10 @@ class TestCleanupRecognizesAPromotionCutFromTheDefaultBranch(CleanupCase):
 
     def test_a_head_landed_by_no_merge_commit_is_refused(self) -> None:
         """A squash into the default branch leaves the head outside its history."""
-        for status in ("ahead", "diverged"):
+        for status in ("behind", "diverged"):
             with self.subTest(status=status):
-                self.docs.clear()
-                self.wire(self.promotion(), compares={f"main...{CLEANUP_HEAD}": status})
+                self.fresh()
+                self.wire(self.promotion(), compares={f"{CLEANUP_HEAD}...main": status})
                 self.assertEqual(1, self.run_cleanup())
                 self.assertFalse(self.deleted())
                 self.assertIn("no merge commit landed it", self.out.getvalue())
@@ -502,7 +510,7 @@ class TestCleanupRecognizesAPromotionCutFromTheDefaultBranch(CleanupCase):
         self.assertIn("has 1 parents, so it merged no develop", self.out.getvalue())
 
     def test_a_second_parent_outside_develop_is_refused(self) -> None:
-        compares = {**self.LANDED, f"develop...{DEVELOP_PARENT}": "diverged"}
+        compares = {**self.LANDED, f"{DEVELOP_PARENT}...develop": "diverged"}
         self.wire(self.promotion(), compares=compares)
         self.assertEqual(1, self.run_cleanup())
         self.assertFalse(self.deleted())
@@ -510,13 +518,12 @@ class TestCleanupRecognizesAPromotionCutFromTheDefaultBranch(CleanupCase):
 
     def test_an_unread_shape_stops_at_2_rather_than_reading_as_a_promotion(self) -> None:
         for compares, parents in (
-            ({f"main...{CLEANUP_HEAD}": RuntimeError("unread")}, (MAIN_PARENT, DEVELOP_PARENT)),
-            ({f"main...{CLEANUP_HEAD}": None}, (MAIN_PARENT, DEVELOP_PARENT)),
+            ({f"{CLEANUP_HEAD}...main": RuntimeError("unread")}, (MAIN_PARENT, DEVELOP_PARENT)),
             (self.LANDED, {"message": "Not Found"}),
             (self.LANDED, (MAIN_PARENT, "not a commit")),
         ):
             with self.subTest(compares=compares, parents=parents):
-                self.docs.clear()
+                self.fresh()
                 self.wire(self.promotion(), compares=compares, parents=parents)
                 self.assertEqual(2, self.run_cleanup())
                 self.assertFalse(self.deleted())
@@ -524,12 +531,11 @@ class TestCleanupRecognizesAPromotionCutFromTheDefaultBranch(CleanupCase):
 
     def test_the_default_branch_read_live_is_the_promotion_base(self) -> None:
         """A repository whose default branch is not `main` promotes into that branch instead."""
-        compares = {f"trunk...{CLEANUP_HEAD}": "identical", f"develop...{DEVELOP_PARENT}": "behind"}
+        compares = {f"{CLEANUP_HEAD}...trunk": "identical", f"{DEVELOP_PARENT}...develop": "ahead"}
         self.wire(self.promotion(baseRefName="trunk"), default="trunk", compares=compares)
         self.assertEqual(0, self.run_cleanup())
         self.assertTrue(self.deleted())
-        self.out.truncate(0)
-        self.docs.clear()
+        self.fresh()
         self.wire(self.promotion(), default="trunk", compares=self.LANDED)
         self.assertEqual(1, self.run_cleanup())
         self.assertFalse(self.deleted())

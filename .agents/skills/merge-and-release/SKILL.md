@@ -200,7 +200,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    failure, an ambiguous run match, a timeout, a failed run, or a hub refresh all still reach
    this step. So does step 2 finding the promotion already merged. The merge already landed
    by then, in step 3 or before step 2 read it. Every part below is required:
-   - The promotion PR's own worktree, where one exists: fetch and prune, remove the worktree, then bring the base
+   - A `develop`-headed promotion PR's own worktree, where one exists: fetch and prune, remove the worktree, then bring the base
      clone to current `develop`. To do so, check `develop` out first only where it sits on another
      branch, and fast-forward it with `git merge --ff-only origin/develop`. Where that checkout
      is needed, removing first, not after, matters. The reason is that the base clone cannot check out `develop`

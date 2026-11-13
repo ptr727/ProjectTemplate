@@ -1,7 +1,7 @@
 """The REST reads `pr_cleanup.py` makes, and the promotion shape it reads with them.
 
-This is a library module and has no command line. Every read here is a GET, retried through
-`pr_review.reread`. A read that does not answer raises `CleanupUnread`, which `cleanup` reports at
+This is a library module and has no command line. Every read here is a GET through `pr_review`'s
+REST helpers. A read that does not answer raises `CleanupUnread`, which `cleanup` reports at
 exit 2 rather than at its refusal code.
 """
 
@@ -30,18 +30,11 @@ def cleanup_rest(path: str, what: str, jq: str = ".") -> object:
 
 
 def in_history(owner: str, repo: str, branch: str, oid: str) -> bool:
-    """Whether commit `oid` is in `branch`'s history, read from GitHub's comparison of the two."""
-    found = cleanup_rest(
-        f"repos/{owner}/{repo}/compare/{branch}...{oid}",
-        f"comparison of {oid} with {branch}",
-        "{status: .status}",
-    )
-    status = found.get("status") if isinstance(found, dict) else None
-    if status not in ("ahead", "behind", "diverged", "identical"):
-        raise CleanupUnread(
-            f"the comparison of {oid} with {branch} returned no status: {found!r}"[:400]
-        )
-    return status in ("behind", "identical")
+    """Whether commit `oid` is in `branch`'s history, by `pr_review.commit_state`'s comparison."""
+    state = core.commit_state(owner, repo, oid, branch)
+    if state == core.UNREAD:
+        raise CleanupUnread(f"the comparison of {oid} with {branch} did not answer")
+    return not state
 
 
 def promotion_refusal(owner: str, repo: str, head: str, default: str) -> str | None:

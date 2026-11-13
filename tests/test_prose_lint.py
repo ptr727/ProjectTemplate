@@ -8322,9 +8322,9 @@ class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
     """A conflicted promotion lands from a branch cut from the default branch that merges develop.
 
     Its head is not `develop`, so the name rule never reaches it. What it is read from is the
-    head's content. Each path the head changes holds its content at the head's merge base with
-    develop or with the default branch. Both of those were reviewed. A name any branch can take
-    decides nothing.
+    head's content. Each line in a path the head changes is in that path at the head's merge base
+    with develop or with the default branch. Both of those were reviewed. A name any branch can
+    take decides nothing.
     """
 
     FACTS: ClassVar[dict[str, str]] = {
@@ -8338,13 +8338,16 @@ class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
         self.git("init", "-q", "-b", "main", str(self.root))
         self.write("ci.yml", "pin: 1\n")
         self.write("kept.txt", "kept\n")
+        self.write("deps.txt", "alpha 1\nbeta\ngamma\ndelta\nomega 1\n")
         self.git("add", "-A")
         self.git("commit", "-qm", "base")
         self.git("checkout", "-qb", "develop")
         self.write("ci.yml", "pin: 3\n# The pin moves with the hub.\n")
+        self.write("deps.txt", "alpha 1\nbeta\ngamma\ndelta\n# Omega follows the hub.\nomega 2\n")
         self.git("commit", "-qam", "develop moves the pin")
         self.git("checkout", "-q", "main")
         self.write("ci.yml", "pin: 2\n")
+        self.write("deps.txt", "alpha 2\nbeta\ngamma\ndelta\nomega 1\n")
         self.git("commit", "-qam", "main moves the pin")
         self.write("main-only.txt", "main only\n")
         self.git("add", "-A")
@@ -8383,6 +8386,14 @@ class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
         self.assertEqual(("0", "stand-down=true"), (code, output), log)
         self.assertIn("a promotion of develop into the default branch: true", log)
 
+    def test_a_file_the_merge_combined_from_both_sides_stands_down(self) -> None:
+        """Each side moved its own hunk, so the merged file matches neither side whole."""
+        merged = self.git("show", "HEAD:deps.txt")
+        for side in ("origin/main", "origin/develop"):
+            self.assertNotEqual(self.git("show", f"{side}:deps.txt"), merged, side)
+        code, output, log = self.stand_down()
+        self.assertEqual(("0", "stand-down=true"), (code, output), log)
+
     def test_the_name_decides_nothing(self) -> None:
         code, output, log = self.stand_down(HEAD_REF="resolve/conflicted-release")
         self.assertEqual(("0", "stand-down=true"), (code, output), log)
@@ -8394,7 +8405,7 @@ class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
         self.git("commit", "-qm", "an unreviewed line")
         code, output, log = self.stand_down()
         self.assertEqual(("0", "stand-down=false"), (code, output), log)
-        self.assertIn("new.py matches neither", log)
+        self.assertIn("new.py holds a line that neither", log)
 
     def test_a_resolution_matching_neither_side_runs_the_rule(self) -> None:
         """A conflict resolved by hand is new content, however small."""
@@ -8402,7 +8413,7 @@ class TestAPromotionCutFromTheDefaultBranchStandsDown(unittest.TestCase):
         self.git("commit", "-qam", "a pin neither side holds")
         code, output, log = self.stand_down()
         self.assertEqual(("0", "stand-down=false"), (code, output), log)
-        self.assertIn("ci.yml matches neither", log)
+        self.assertIn("ci.yml holds a line that neither", log)
 
     def test_a_feature_branch_cut_from_the_default_branch_runs_the_rule(self) -> None:
         self.git("checkout", "-qb", "feature/widget", "main")
