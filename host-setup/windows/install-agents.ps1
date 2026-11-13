@@ -732,7 +732,7 @@ function Get-Tool {
 
 # --- Consolidation ---
 
-# A tool recording a Managed copy keeps only that one, as install-tools.ps1 keeps one copy of each of its tools.
+# A tool recording a Managed copy keeps only that one, as install-tools.sh does on Linux for a copy that shadows its own.
 # Any other copy PATH resolves to ahead of it is removed through whatever owns it, so the managed copy is what PATH reaches.
 
 # The tool's Managed record, or nothing for a tool recording none, read by key since strict mode refuses a missing one.
@@ -779,6 +779,11 @@ function Get-StrayPlan {
         { $_ -in 'npm', 'bun' } {
             if (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
                 $plan.Why = "$Manager is not on PATH, so remove it with $Manager by hand"
+                return $plan
+            }
+            # The path shape only suggests npm, so the npm on PATH must own the files before it is asked to remove them.
+            if ($Manager -eq 'npm' -and -not (Test-NpmOwnership -Path $Path)) {
+                $plan.Why = "its files at $(Hide-Home -Path $Path) are not under the prefix of the npm on PATH, so that npm does not own it, remove it where it was installed"
                 return $plan
             }
             $pkg = Get-OwningNpmPackage -Tool $ToolName -Path $Path -Manager $Manager
@@ -1011,6 +1016,14 @@ function Invoke-ToolUpgrade {
         $rc = Invoke-ConsolidateAndInstall -ToolName $ToolName -Installed (Get-ToolVersion $path)
         if ($rc -eq 1) { return }
         # A stray copy that stays, rc 2, is upgraded where it is, as it was before its tool recorded a managed copy.
+        # An earlier pass may have removed a copy, so the one that stays is read again.
+        if ($rc -eq 2) {
+            $path = Get-ToolPath $ToolName
+            if (-not $path) {
+                log "${ToolName}: not installed, leaving it absent"
+                return
+            }
+        }
         if ($rc -eq 0) {
             # A dry run removed nothing, so PATH still reaches the stray copy and planning an upgrade from it would describe the wrong copy.
             if ($script:DRY_RUN) {
@@ -1107,6 +1120,8 @@ function Invoke-ToolInstall {
             return
         }
         if ((Invoke-ConsolidateAndInstall -ToolName $ToolName -Installed (Get-ToolVersion $path)) -ne 2) { return }
+        # An earlier pass may have removed a copy, so the one that stays is read again.
+        $path = Get-ToolPath $ToolName
     }
     if ($path) {
         log "${ToolName}: already installed at $(Hide-Home $path), leaving it alone, -Upgrade updates it"

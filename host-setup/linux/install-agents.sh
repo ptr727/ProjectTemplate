@@ -886,7 +886,14 @@ upgrade_tool() {
         # A stray copy that stays is upgraded where it is, as it was before its tool recorded a managed copy.
         case $rc in
         0) path=$(tool_managed "$tool") ;;
-        2) ;;
+        # An earlier pass may have removed a copy, so the one that stays is read again.
+        2)
+            path=$(tool_path "$tool")
+            if [[ -z $path ]]; then
+                log "$tool: not installed, leaving it absent"
+                return 0
+            fi
+            ;;
         *) return 0 ;;
         esac
     fi
@@ -963,6 +970,8 @@ install_tool() {
         local rc=0
         consolidate_and_install "$tool" "$(tool_version "$path")" || rc=$?
         ((rc == 2)) || return 0
+        # An earlier pass may have removed a copy, so the one that stays is read again.
+        path=$(tool_path "$tool")
     fi
     if [[ -n $path ]]; then
         log "$tool: already installed at $(hide_home "$path"), leaving it alone, --upgrade updates it"

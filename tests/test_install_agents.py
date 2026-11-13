@@ -213,6 +213,35 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("https://opencode.ai/v2/install", result.stdout)
         self.assertEqual(self.called(), [])
 
+    def test_install_replaces_a_stray_opencode_when_no_managed_copy_is_in_place(self) -> None:
+        self.stray_npm_opencode()
+        self.curl()
+        result = self.run_script("--install", "--yes", "--dry-run", "opencode")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[dry run] npm uninstall -g opencode-ai", result.stdout)
+        self.assertIn("https://opencode.ai/v2/install", result.stdout)
+        self.assertNotIn("already installed", result.stdout)
+
+    def test_a_copy_that_stays_behind_a_removed_one_is_upgraded_where_it_is(self) -> None:
+        # A removable npm copy sits first on PATH, and a copy no manager owns sits behind it.
+        node_modules = self.dir / "lib" / "node_modules"
+        package = node_modules / "opencode-ai" / "bin"
+        package.mkdir(parents=True)
+        (package / "opencode").write_text(STUB.replace("$BANNER", "1.0.0"), encoding="utf-8")
+        (package / "opencode").chmod(0o755)
+        front = self.dir / "front"
+        front.mkdir()
+        (front / "opencode").symlink_to(package / "opencode")
+        (self.dir / "npm_root").write_text(str(node_modules), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        self.stub("opencode", "1.0.0")
+        self.curl()
+        result = self.run_script(
+            "--upgrade", "--yes", "opencode", extra_env={"REMOVES": str(front / "opencode")}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["npm uninstall -g opencode-ai", "opencode upgrade"])
+
     def test_install_leaves_a_stray_opencode_ahead_of_the_managed_copy(self) -> None:
         self.managed_opencode()
         self.stray_npm_opencode()
@@ -912,6 +941,24 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = [c for c in self.recorded() if c.startswith(("npm install", "npm uninstall"))]
         self.assertEqual(calls, ["npm uninstall -g opencode-ai", "npm install -g @opencode/cli"])
+
+    def test_install_replaces_a_stray_opencode_when_no_managed_package_is_in_place(self) -> None:
+        npm_bin = self.stray_npm_opencode("opencode-ai")
+        result = self.run_script("-Install", "-Yes", "-DryRun", "opencode", extra_path=npm_bin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[dry run] npm uninstall -g opencode-ai", result.stdout)
+        self.assertIn("[dry run] npm install -g @opencode/cli", result.stdout)
+        self.assertNotIn("already installed", result.stdout)
+
+    def test_a_shim_outside_the_npm_prefix_is_not_planned_as_an_npm_removal(self) -> None:
+        # A shim naming the package's directory, left by an earlier Node outside the prefix the npm on PATH reports.
+        stale = self.dir / "old-node" / "npm"
+        (self.dir / "npm_prefix").write_text(str(self.dir / "current"), encoding="utf-8")
+        self.own_npm(self.stub("opencode", "1.0.0", stale), self.dir / "current", "opencode-ai")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=stale)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("npm uninstall", " ".join(self.recorded()))
 
     def test_a_stray_opencode_that_stays_is_planned_by_its_own_package_name(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
