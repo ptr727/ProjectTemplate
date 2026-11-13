@@ -3,7 +3,7 @@
   "rules": {
     "charset": { "default": true, "summary": "a non-ASCII character its tier does not permit here" },
     "charset-unknown": { "default": true, "summary": "non-ASCII in no tier, bar a Latin letter and its U+0300-U+036F diacritics" },
-    "semicolon": { "default": true, "summary": "a semicolon in prose, outside a series or labeled pair carrying a comma" },
+    "semicolon": { "default": true, "summary": "a semicolon in prose, outside a series or labeled pair carrying a comma and outside one token" },
     "dash": { "default": true, "summary": "a spaced hyphen joining or interrupting a sentence" },
     "comment-wrap": { "default": true, "summary": "a comment sentence wrapped across lines, or two on one line" },
     "comment-case": { "default": true, "summary": "a comment sentence opening in lowercase" },

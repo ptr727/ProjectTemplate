@@ -593,9 +593,138 @@ class TestCharsetRule(BaitCase):
         self.assertEqual(set(), t2 & t3)
         self.assertEqual(set(), t4 & (t1 | t2 | t3))
 
+    def test_a_markdown_code_span_is_read_as_quoted_data_like_a_fence(self) -> None:
+        """A string quoted verbatim keeps its bytes inside a code span, and outside one it flags.
+
+        The tier-2 case has no figure beside it, so only the span admits it.
+        """
+        rules = {"charset", "charset-unknown"}
+        for quoted, kinds in (
+            ("\u00abr0\u00bb", ["charset-unknown", "charset-unknown"]),
+            ("Issued by Example \u00b7 Jan", ["charset"]),
+            ("left \u2014 right", ["charset"]),
+        ):
+            with self.subTest(quoted=quoted):
+                self.assertEqual([], self.kinds(f"The page printed `{quoted}`.\n", rules))
+                self.assertEqual([], self.kinds(f"```text\n{quoted}\n```\n", rules))
+                self.assertEqual(kinds, self.kinds(f"The page printed {quoted}.\n", rules))
+                self.assertEqual(kinds, self.kinds(f"`ok` then {quoted} then `ok`.\n", rules))
+
+    def test_a_code_span_in_a_table_cell_is_read_as_quoted_data(self) -> None:
+        """A cell's span is blanked within the cell, so the next cell is still read."""
+        rules = {"charset", "charset-unknown"}
+        head = "| a | b |\n| - | - |\n"
+        self.assertEqual([], self.kinds(f"{head}| `\u00ab` | plain |\n", rules))
+        self.assertEqual(["charset-unknown"], self.kinds(f"{head}| `x` | \u00ab |\n", rules))
+
+    def test_a_wrapped_or_double_backtick_span_hides_only_its_own_text(self) -> None:
+        """A span is paired the way Markdown pairs it, so the text after it is still read.
+
+        Pairing backticks one line at a time took a wrapped span's closer for an opener, and hid
+        the prose between it and the next span.
+        """
+        rules = {"charset", "charset-unknown"}
+        dash = "\u2014"
+        for text in (
+            f"See `git remote\nget-url` {dash} then `x`.\n",
+            f"See ``a ` b`` {dash} then `x`.\n",
+            f"See \\` {dash} then `x`.\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset"], self.kinds(text, rules))
+        self.assertEqual([], self.kinds("See `git remote\nget-\u00ab` here.\n", rules))
+        self.assertEqual([], self.kinds("See ``a ` \u00ab`` here.\n", rules))
+
+    def test_a_table_row_is_emptied_once_so_text_between_two_spans_is_read(self) -> None:
+        """Each cell's token maps the whole row, and emptying twice ate the text between spans."""
+        head = "| a | b |\n| --- | --- |\n"
+        self.assertEqual(
+            ["charset-unknown"],
+            self.kinds(f"{head}| `x` \u00ab `y` | z |\n", {"charset", "charset-unknown"}),
+        )
+        self.assertEqual(["semicolon"], self.kinds(f"{head}| `x`; then `y` | z |\n", {"semicolon"}))
+        self.assertEqual(["dash"], self.kinds(f"{head}| `x` - `y` | z |\n", {"dash"}))
+
+    def test_a_backtick_outside_an_inline_token_quotes_nothing(self) -> None:
+        """Front matter and an HTML block hold no code span, so each line there is read whole."""
+        rules = {"charset", "charset-unknown"}
+        for text in (
+            "---\ndescription: ids like `\u00ab`\n---\n\nBody.\n",
+            "<div>\nids like `\u00ab`\n</div>\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(["charset-unknown"], self.kinds(text, rules))
+
+    def test_a_backtick_outside_markdown_quotes_nothing(self) -> None:
+        """Outside Markdown a backtick is structural, so a code line is read whole."""
+        rules = {"charset", "charset-unknown"}
+        self.assertEqual(
+            ["charset-unknown"], self.kinds("#!/bin/sh\n# ids like `\u00ab`\n", rules, "a.sh")
+        )
+
 
 class TestSemicolonRule(BaitCase):
     """The `semicolon` rule on Markdown prose units."""
+
+    def test_a_semicolon_inside_one_token_joins_no_clause(self) -> None:
+        """`TL;DR` holds its semicolon between word characters, so neither fix applies to it."""
+        for text in (
+            "> **TL;DR**: Short summary here.\n",
+            "A plain sentence with TL;DR inside it.\n",
+            "TL;DR, it runs on push, always.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_an_unspaced_semicolon_is_read_as_one_token_but_an_entity_is_not(self) -> None:
+        """The gate reads the token shape, so an unspaced clause break passes as `TL;DR` does.
+
+        An HTML entity's closing semicolon sits between word characters too, and is still reported.
+        """
+        self.assertEqual([], self.kinds("It runs;it stops.\n", {"semicolon"}))
+        for text in ("A word&mdash;another.\n", "A word&#8212;another.\n", "A&#x2014;b.\n"):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+
+    def test_a_wrapped_code_span_hides_no_splice_after_it(self) -> None:
+        """A span is paired as Markdown pairs it, so its closer opens nothing on the next line."""
+        text = "See `git remote\nget-url` then; it runs, then `x`.\n"
+        self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
+        text = "See `git remote\nget-url` then - it runs, then `x`.\n"
+        self.assertEqual(["dash"], self.kinds(text, {"dash"}))
+
+    def test_a_code_span_in_a_label_reads_as_one_word(self) -> None:
+        """A blanked span counts as one label word, so a three-word label keeps its exemption."""
+        for text in (
+            "Inputs: a, b, and c; `out` read paths: d and e.\n",
+            "Inputs: a, b, and c; ``out`` read paths: d and e.\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_a_double_backtick_span_outside_an_inline_token_hides_its_code(self) -> None:
+        """Front matter pairs a span line by line with the same pattern, a backtick run included."""
+        text = "---\ndescription: Run ``a;b c`` or ``a; b`` first.\n---\n\nBody.\n"
+        self.assertEqual([], self.kinds(text, {"semicolon"}))
+
+    def test_a_code_span_outside_an_inline_token_still_hides_its_code(self) -> None:
+        """Front matter and an HTML block hold code the prose rules skip, paired line by line."""
+        for text in (
+            "---\ndescription: Run `a; b` or `c - d` first.\n---\n\nBody.\n",
+            "<details>\n<summary>Run `a; b` or `c - d`</summary>\n</details>\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([], self.kinds(text, {"semicolon", "dash"}))
+
+    def test_a_semicolon_with_a_space_beside_it_is_still_a_splice(self) -> None:
+        """Only a word character on both sides makes one token, so a spaced splice still flags."""
+        for text in (
+            "TL;DR it runs; it stops.\n",
+            "It runs ;it stops.\n",
+            "It runs;\n",
+        ):
+            with self.subTest(text=text.strip()):
+                self.assertEqual(["semicolon"], self.kinds(text, {"semicolon"}))
 
     def test_a_splice_is_flagged(self) -> None:
         self.assertEqual(["semicolon"], self.kinds(f"{SPLICE_BAIT}.\n", {"semicolon"}))
@@ -1060,6 +1189,17 @@ class TestDupwordRule(BaitCase):
             if kind == "dupword"
         ]
         self.assertEqual([], found)
+
+
+class TestSpanPairingInWordRules(BaitCase):
+    """The `dupword` and `spelling` rules read a code span paired as Markdown pairs it."""
+
+    def test_text_after_a_wrapped_double_or_escaped_span_is_read(self) -> None:
+        for rule, word in (("dupword", "word word"), ("spelling", "colour")):
+            for opener in ("See `a\nb`", "See ``a ` b``", "See \\`"):
+                text = f"{opener} {word} then `c`.\n"
+                with self.subTest(rule=rule, text=text):
+                    self.assertEqual([rule], self.kinds(text, {rule}))
 
 
 class TestSpellingRule(BaitCase):
@@ -2723,6 +2863,18 @@ class TestSentenceSplitRule(BaitCase):
             ["sentence-split"],
             self.kinds("A sentence that keeps\ngoing onto the next line.\n", {"sentence-split"}),
         )
+
+    def test_a_wrapped_code_span_continues_no_prose_line(self) -> None:
+        """A span's second line is code, so only the prose line after it reads as a split."""
+        path = self.tmp / "bait.md"
+        path.write_text("See `git remote\nget-url` now and\nthen it ends.\n", encoding="utf-8")
+        found = prose_lint.check_file(path, {"sentence-split"})
+        self.assertEqual([(2, "sentence-split")], [(n, kind) for n, kind, _ in found])
+
+    def test_a_span_wrapped_in_a_blockquote_keeps_the_quote_marker(self) -> None:
+        """The marker is no span content, so the quoted line is still skipped as a quote."""
+        text = "> See `git remote\n> get-url` now and\nthen it ends.\n"
+        self.assertEqual([], self.kinds(text, {"sentence-split"}))
 
     def test_a_finished_sentence_does_not_continue(self) -> None:
         for text in (

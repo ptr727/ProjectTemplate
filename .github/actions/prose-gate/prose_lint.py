@@ -617,9 +617,12 @@ class Line(NamedTuple):
 class Unit(NamedTuple):
     """A run of text one kind of rule reads.
 
-    `source` is every line, and `prose` and `code` the unfenced ones. `paragraph` is a Markdown
-    sentence block. `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a
-    documentation comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
+    `source` is every line, and `prose` and `code` the unfenced ones. `spanless` is the unfenced
+    Markdown lines with each code span's content blanked, front matter and an HTML block read
+    whole. `codeless` blanks a span there too, paired one line at a time since no inline token
+    holds those lines. `paragraph` is a Markdown sentence block. `comment`, `doc`, and `markup`
+    are runs of adjacent comment lines, `doc` a documentation comment and `markup` a Markdown
+    HTML one. `docstring` opens at `column`.
     """
 
     kind: str
@@ -1001,7 +1004,12 @@ BLOCK_PARENTS = (["paragraph_open"], ["th_open"], ["td_open"])
 
 
 def extract_markdown(lines: list[str]) -> Extracted:
-    """Markdown units from markdown-it-py's block line maps, front matter lines read alone."""
+    """Markdown units from markdown-it-py's block line maps, front matter lines read alone.
+
+    Each table cell's inline token maps its whole row. Emptying a span twice is not idempotent, so
+    a row has its code spans emptied once, a cell at a time.
+    A blockquote's markers are kept out of a span wrapped across its lines.
+    """
     matter = front_matter_end(lines)
     code: set[int] = set()
     paragraphs = [
@@ -1010,6 +1018,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
         if line.strip() and not line.strip().startswith("#")
     ]
     markup: list[Line] = []
+    spanless: dict[int, str] = {}
     parents: list[str] = []
     for tok in MARKDOWN.parse("\n".join([""] * matter + lines[matter:])):
         if tok.nesting:
@@ -1029,6 +1038,16 @@ def extract_markdown(lines: list[str]) -> Extracted:
                     paragraphs.append(Unit("paragraph", (Line(n, span),)))
         elif tok.type == "inline":
             markup += inline_comments(tok, lines)
+            if first not in spanless:
+                numbers = range(first, last + 1)
+                texts = [lines[n - 1] for n in numbers]
+                if parents[-1:] in (["th_open"], ["td_open"]):
+                    texts = [by_cell(text, strip_inline_code) for text in texts]
+                else:
+                    heads = [m.group() if (m := QUOTE_PREFIX.match(t)) else "" for t in texts]
+                    body = "\n".join(t[len(h) :] for t, h in zip(texts, heads, strict=True))
+                    texts = [h + t for h, t in zip(heads, strip_inline_code(body).split("\n"))]
+                spanless.update(zip(numbers, texts, strict=True))
             if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
                 paragraphs.append(
@@ -1038,6 +1057,12 @@ def extract_markdown(lines: list[str]) -> Extracted:
     units = [
         Unit("source", tuple(Line(n, t) for n, t in enumerate(lines, 1))),
         *line_units("prose", lines, skip),
+        *line_units("spanless", [spanless.get(n, t) for n, t in enumerate(lines, 1)], skip),
+        *line_units(
+            "codeless",
+            [spanless.get(n, by_cell(t, strip_inline_code)) for n, t in enumerate(lines, 1)],
+            skip,
+        ),
         *paragraphs,
         *blocks("markup", sorted(markup, key=lambda m: m.number)),
     ]
@@ -1050,8 +1075,7 @@ def inline_comments(tok: Token, lines: list[str]) -> list[Line]:
     first, last = (tok.map or [0, 1])[0], (tok.map or [0, 1])[1]
     number, col = first + 1, 0
     # A code span can hold a comment's text, so it is blanked, lengths kept, before the search.
-    blank = lambda m: re.sub(r"[^\n]", " ", m.group()) if m[1] else m.group()
-    seen = re.sub(MARKDOWN_SPAN, blank, "\n".join(lines[first:last])).split("\n")
+    seen = blank_code_spans("\n".join(lines[first:last])).split("\n")
     for child in tok.children or ():
         if child.type == "html_inline" and child.content.startswith("<!--"):
             # The source line is found by the comment's own text, searched on from the last one.
@@ -1145,6 +1169,7 @@ LABEL_COLON = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s+{STRONG_LABEL_TOKEN}(?(inn
 LABEL_WORD = r"[\w`]+(?:[./-][\w`]+)*"
 LABELED_ITEM = re.compile(rf"^\s*[*_]*{LABEL_WORD}(?:\s+{LABEL_WORD}){{0,2}}[*_]*:[*_]*(?:\s|$)")
 LIST_MARKER = re.compile(rf"^\s*{LIST_MARKER_TOKEN}\s")
+JOINED_SEMICOLON = re.compile(r"(?<![&#])\b(\w+);(?=\w)")
 CELL_BREAK = re.compile(r"(?<!\\)\|")
 TABLE_ROW = re.compile(r"^\s*(?:>\s*)*\|")
 # A word-joining character before the repeat keeps "either/or or" from reading as a doubled word.
@@ -1166,7 +1191,8 @@ INDENT_BLOCK = 4
 
 
 def strip_inline_code(s: str) -> str:
-    return re.sub(r"`[^`]*`", "``", s)
+    """The text with each code span emptied, so a span reads as one token of backticks alone."""
+    return blank_code_spans(s, keep_width=False)
 
 
 def strip_quoted(s: str) -> str:
@@ -1207,9 +1233,12 @@ def by_cell(text: str, blank: Callable[[str], str]) -> str:
 
 
 def prose_lines(unit: Unit) -> Iterable[tuple[int, str, str]]:
-    """Each line's number, its text without code spans, and that text without quotations either."""
+    """Each `codeless` line's number, its text, and that text without quotations either.
+
+    The unit has each code span blanked already, paired across a line break as Markdown pairs it.
+    """
     for line in unit.lines:
-        txt = by_cell(line.text, strip_inline_code)
+        txt = line.text
         prose = by_cell(txt, strip_quoted)
         yield line.number, txt, QUOTE_PREFIX.sub(lambda m: " " * len(m.group()), prose, count=1)
 
@@ -1261,17 +1290,27 @@ def charset_findings(lineno: int, line: str) -> list[Finding]:
 
 
 def rule_charset(unit: Unit, ctx: Context) -> list[Finding]:
+    """Each line's non-ASCII judged by tier, read from a `spanless` or a `code` unit.
+
+    A Markdown code span is quoted data, as a fence is, so the `spanless` unit has it blanked.
+    Outside Markdown a backtick is structural, such as a shell command substitution, so a code
+    line is read whole. So are Markdown front matter and an HTML block.
+    """
     return [f for line in unit.lines for f in charset_findings(line.number, line.text)]
 
 
 def rule_semicolon(unit: Unit, ctx: Context) -> list[Finding]:
     """A Markdown semicolon, unless its sentence is a list carrying a comma that needs one.
 
+    A semicolon with a word character on both sides is read as inside one token, as in `TL;DR`,
+    so it is no finding. An HTML entity's closing semicolon is still one.
+
     A table row opening with a pipe is read a cell at a time, split where `row_cells` splits it.
     `prose_lines` blanks each cell on its own and leaves every pipe ending one where it was.
     """
     out: list[Finding] = []
-    for n, _txt, line in prose_lines(unit):
+    for n, _txt, prose in prose_lines(unit):
+        line = JOINED_SEMICOLON.sub(r"\1_", prose)
         pieces = (
             s for cell in row_cells(line) for s in SENTENCE_BREAK.split(LABEL_COLON.sub("", cell))
         )
@@ -1301,11 +1340,10 @@ def unit_texts(unit: Unit, ctx: Context) -> Iterable[tuple[int, str]]:
     for line in unit.lines:
         if line.number in ctx.fenced:
             continue
-        if unit.kind != "prose":
+        if unit.kind != "codeless":
             yield line.number, strip_inline_code(line.text)
             continue
-        text = by_cell(by_cell(line.text, strip_inline_code), strip_quoted)
-        yield line.number, by_cell(text, strip_inline_code)
+        yield line.number, by_cell(line.text, strip_quoted)
 
 
 def rule_dupword(unit: Unit, ctx: Context) -> list[Finding]:
@@ -1713,6 +1751,23 @@ def markdown_span(html_tag: str) -> re.Pattern[str]:
 MARKDOWN_SPAN = markdown_span(HTML_TAG_RE.pattern)
 
 
+def blank_code_spans(text: str, keep_width: bool = True) -> str:
+    """The text with each code span's content blanked, its backticks and line breaks kept.
+
+    A span may wrap lines or open on a run of backticks, and an escaped backtick opens none.
+    Without `keep_width` the content is dropped rather than spaced, so a rule counting words reads
+    the span as one.
+    """
+
+    def blank(m: re.Match[str]) -> str:
+        if not m[1]:
+            return m.group()
+        inner = m.group()[len(m[1]) : -len(m[1])]
+        return m[1] + re.sub(r"[^\n]", " " if keep_width else "", inner) + m[1]
+
+    return MARKDOWN_SPAN.sub(blank, text)
+
+
 def mask_code_and_quotes(text: str, starts: list[int], lengths: list[int]) -> str:
     """The text with code spans and each line's quotations blanked, a closing terminator kept."""
     text = re.sub(CODE_SPAN, lambda m: "`" * len(m.group()), text)
@@ -1973,14 +2028,14 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "issue-ref": (rule_issue_ref, frozenset({"prose", "comment", "doc", "docstring"})),
     "sentence-length": (rule_sentence_length, frozenset({"paragraph", "comment", "docstring"})),
     "home-path": (rule_home_path, frozenset({"source"})),
-    "charset": (rule_charset, frozenset({"prose", "code"})),
-    "charset-unknown": (rule_charset, frozenset({"prose", "code"})),
+    "charset": (rule_charset, frozenset({"spanless", "code"})),
+    "charset-unknown": (rule_charset, frozenset({"spanless", "code"})),
     "dead-path": (rule_dead_path, frozenset({"prose"})),
-    "semicolon": (rule_semicolon, frozenset({"prose"})),
-    "dash": (rule_dash, frozenset({"prose"})),
-    "dupword": (rule_dupword, frozenset({"prose", "comment"})),
-    "spelling": (rule_spelling, frozenset({"prose", "comment"})),
-    "sentence-split": (rule_sentence_split, frozenset({"prose"})),
+    "semicolon": (rule_semicolon, frozenset({"codeless"})),
+    "dash": (rule_dash, frozenset({"codeless"})),
+    "dupword": (rule_dupword, frozenset({"codeless", "comment"})),
+    "spelling": (rule_spelling, frozenset({"codeless", "comment"})),
+    "sentence-split": (rule_sentence_split, frozenset({"codeless"})),
 }
 LINE_ORDERED = frozenset(list(RULE_TABLE)[list(RULE_TABLE).index("home-path") :])
 
@@ -2007,7 +2062,7 @@ def check_file(
         return []
     text = decoded.removeprefix(BOM)
     out = [f for f in charset_findings(1, BOM) if f[1] in rules] if text != decoded else []
-    lex = any(RULE_TABLE[r][1] - {"source", "prose", "code"} for r in rules)
+    lex = any(RULE_TABLE[r][1] - {"source", "prose", "spanless", "codeless", "code"} for r in rules)
     judged, first = at or (path, text.split("\n", 1)[0].rstrip("\r"))
     units, fenced, read_plain = extract(judged, text, lex, first)
     if read_plain and plain is not None:
