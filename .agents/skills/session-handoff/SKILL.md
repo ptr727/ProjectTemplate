@@ -296,13 +296,12 @@ it.
    written, comment those answers onto its issue, with the queue's count and list after them. That
    is because the body keeps the count it was written with, and a resume reads the issue's comments.
 4. **Remove the hub clone** "The Attended Session" step 0 made, where it made one, once no step
-   above still needs `$handoff`. No other step or sweep reaches that clone. From outside it, confirm
-   `git -C <clone> status --porcelain --untracked-files=normal` prints nothing. Then read
-   `git -C <clone> status --porcelain --ignored --untracked-files=normal` and name each ignored
-   entry it lists in the session's closing message. `--porcelain` alone never lists them, and the
-   removal deletes them. The explicit untracked mode keeps a `status.showUntrackedFiles=no`
-   setting from hiding both. Then delete that exact directory. A clone
-   holding uncommitted work is left in place and named in the session's closing message.
+   above still needs `$handoff`. No other step or sweep reaches that clone. From outside it, read
+   `git -C <clone> status --porcelain --ignored --untracked-files=normal`. Any line not starting
+   `!!` is uncommitted work, so the clone is left in place and named in the session's closing
+   message. Otherwise name each `!!` entry in that message, since the removal deletes them, and
+   delete that exact directory. `--porcelain` alone never lists ignored entries. The explicit
+   untracked mode keeps a `status.showUntrackedFiles=no` setting from hiding untracked ones too.
 5. **Save memories last.** Where the host keeps a per-user memory, what goes there is the
    environment-specific nuance "Durable Knowledge and Self-Improvement" leaves to memory. A quirk of
    this machine or this account is one such nuance. What goes there is saved as the session's final
