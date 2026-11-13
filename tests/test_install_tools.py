@@ -389,7 +389,7 @@ class TestLinuxOptionalTools(LinuxFunctionsCase):
 
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
 class TestLinuxOpInstall(LinuxFunctionsCase):
-    """`op` comes from 1Password's own apt repository, and an unowned download is removed first."""
+    """`op` comes from 1Password's own apt repository, and its manual download goes once apt has it."""
 
     RECORDING = """
 ensure_prerequisites() { :; }
@@ -397,16 +397,28 @@ remove_stale() { printf 'STALE %s\\n' "$*"; }
 install_keyring() { printf 'KEYRING %s\\n' "$*"; return 1; }
 write_sources() { printf 'SOURCES %s\\n' "$*"; return 1; }
 apt_install() { printf 'APT %s\\n' "$*"; }
+op_remove_download() { printf 'REMOVE\\n'; }
 """
 
     def unowned_copy(self) -> Path:
-        """A directory holding an executable `op`, standing in for a manual download on PATH."""
+        """A directory holding an executable `op`, standing in for a download on PATH."""
         directory = self.dir / "downloaded"
         directory.mkdir()
         binary = directory / "op"
         binary.write_text("#!/bin/sh\n", encoding="utf-8")
         binary.chmod(0o755)
         return directory
+
+    def removal(self, owned: int, only: str) -> subprocess.CompletedProcess[str]:
+        """Run the shared removal over an `op` first on PATH, under a stubbed ownership answer."""
+        directory = self.unowned_copy()
+        body = (
+            f'PATH="{directory}:$PATH"\n'
+            f"dpkg_owns_path() {{ return {owned}; }}\n"
+            "DRY_RUN=true\n"
+            f'remove_unowned_command op op "1Password CLI" "{only}"'
+        )
+        return self.run_bash(body)
 
     def test_install_registers_the_repository_for_the_host_architecture(self) -> None:
         result = self.run_bash(f"{self.RECORDING}\nARCH=arm64\nop_install")
@@ -421,8 +433,18 @@ apt_install() { printf 'APT %s\\n' "$*"; }
                 f"SOURCES 1password {site}/debian/arm64 stable main {keyring}",
                 "STALE /usr/share/keyrings/1password-archive-keyring.gpg",
                 "APT 1password-cli",
+                "REMOVE",
             ],
         )
+
+    def test_a_failed_install_keeps_the_downloaded_copy(self) -> None:
+        body = f"""{self.RECORDING}
+apt_install() {{ printf 'APT %s\\n' "$*"; return 100; }}
+ARCH=amd64
+if op_install; then exit 0; else exit "$?"; fi"""
+        result = self.run_bash(body)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("REMOVE", result.stdout)
 
     def test_an_architecture_without_a_build_is_skipped_and_changes_nothing(self) -> None:
         result = self.run_bash(f"{self.RECORDING}\nARCH=i386\nop_install")
@@ -430,49 +452,37 @@ apt_install() { printf 'APT %s\\n' "$*"; }
         self.assertEqual(result.stdout, "")
         self.assertIn("skipping op on i386", result.stderr)
 
-    def test_an_unowned_download_is_removed(self) -> None:
-        directory = self.unowned_copy()
-        body = f"""PATH="{directory}:$PATH"
-dpkg_owns_path() {{ return 1; }}
-DRY_RUN=true
-op_remove_download"""
-        result = self.run_bash(body)
+    def test_an_unowned_copy_at_the_one_named_path_is_removed(self) -> None:
+        result = self.removal(1, str(self.dir / "downloaded" / "op"))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(f"[dry run] rm -f {directory}/op", result.stdout)
+        self.assertIn(f"[dry run] rm -f {self.dir}/downloaded/op", result.stdout)
+
+    def test_an_unowned_copy_anywhere_else_is_left_with_a_warning(self) -> None:
+        result = self.removal(1, "/usr/local/bin/op")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("rm -f", result.stdout)
+        self.assertIn("so it stays", result.stderr)
 
     def test_a_copy_dpkg_owns_is_left_alone(self) -> None:
-        directory = self.unowned_copy()
-        body = f"""PATH="{directory}:$PATH"
-dpkg_owns_path() {{ return 0; }}
-DRY_RUN=true
-op_remove_download"""
-        result = self.run_bash(body)
+        result = self.removal(0, "")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
     def test_a_failed_ownership_query_stops_rather_than_removing(self) -> None:
-        directory = self.unowned_copy()
-        body = f"""PATH="{directory}:$PATH"
-dpkg_owns_path() {{ return 2; }}
-DRY_RUN=true
-op_remove_download"""
-        result = self.run_bash(body)
+        result = self.removal(2, "")
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("rm -f", result.stdout)
         self.assertIn("Cannot determine dpkg ownership", result.stderr)
 
-    def test_unshadowing_keeps_the_copy_where_no_build_would_replace_it(self) -> None:
-        directory = self.unowned_copy()
-        body = f"""PATH="{directory}:$PATH"
-dpkg_owns_path() {{ return 1; }}
-DRY_RUN=true
-ARCH=i386
+    def test_unshadowing_waits_for_the_package(self) -> None:
+        body = """op_version() { :; }
+op_remove_download() { printf 'REMOVE\\n'; }
 tool_unshadow op"""
         result = self.run_bash(body)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "")
 
-    def test_install_unshadows_even_where_the_package_reads_current(self) -> None:
+    def test_install_unshadows_before_reading_the_package_current(self) -> None:
         body = """MODE=install
 op_version() { printf '2.42.0-1'; }
 op_target() { printf '2.42.0-1'; }
@@ -497,17 +507,23 @@ tool_effective_status op 2.42.0-1 2.42.0-1"""
         self.assertEqual(result.stdout, "unmanaged")
 
     def test_the_report_names_an_unconfigured_repository_and_an_unowned_copy(self) -> None:
-        body = """tool_configured() { return 1; }
-op_download_path() { printf '/opt/example/bin/op'; }
+        cases = {
+            "/usr/local/bin/op": "is an unowned downloaded copy and an install or upgrade removes it",
+            "/opt/example/bin/op": "belongs to no package and answers ahead of the package's copy",
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                body = f"""tool_configured() {{ return 1; }}
+unowned_command_path() {{ printf '{path}'; }}
 ARCH=amd64
 tool_note op
-printf '%s\\n' "${NOTES[@]}" """
-        result = self.run_bash(body)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        notes = result.stdout.splitlines()
-        self.assertEqual(len(notes), 2, notes)
-        self.assertIn("1Password's repository is not configured", notes[0])
-        self.assertIn("/opt/example/bin/op is an unowned downloaded copy", notes[1])
+printf '%s\\n' "${{NOTES[@]}}" """
+                result = self.run_bash(body)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                notes = result.stdout.splitlines()
+                self.assertEqual(len(notes), 2, notes)
+                self.assertIn("1Password's repository is not configured", notes[0])
+                self.assertIn(f"{path} {expected}", notes[1])
 
     def test_the_configured_repository_is_the_one_install_writes(self) -> None:
         text = LINUX_INSTALLER.read_text(encoding="utf-8")

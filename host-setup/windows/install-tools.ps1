@@ -112,8 +112,8 @@ function usage {
 Usage: install-tools.ps1 [options] [tool ...]
 
 Installs the host tools the fleet's repositories expect, from winget, which is the only source
-every one of them has. With no tool named, every managed tool is selected except the optional
-tool, op, which joins it under -Optional.
+every one of them has. With no tool named, every managed tool is selected except the ones -List
+marks optional, which join it under -Optional.
 
 Actions, name one, default -Report:
   -r, -Report       Report installed and available versions, change nothing
@@ -127,7 +127,7 @@ Options:
   -j, -Json         Write the report as JSON rather than a table, for a program to read
   -n, -DryRun       Print the commands instead of running them
   -y, -Yes          Do not prompt before changing the host
-  -o, -Optional     Include the optional tool and the optional package sets, where a tool has one
+  -o, -Optional     Include the optional tools and the optional package sets, where a tool has one
       -Scope        Name a scope, either user or machine, for the copy to act on
       -Repo PATH    Include winget packages declared by PATH\host-tools.json
 

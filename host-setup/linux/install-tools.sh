@@ -171,8 +171,8 @@ usage() {
 Usage: install-tools.sh [options] [tool ...]
 
 Installs the host tools the fleet's repositories expect, from upstream where the distro package
-trails upstream. With no tool named, every managed tool is selected except the optional tools,
-powershell and op, which join it under --optional.
+trails upstream. With no tool named, every managed tool is selected except the ones --list marks
+optional, which join it under --optional.
 
 Actions, name one, default --report:
   -r, --report      Report installed and available versions, change nothing
@@ -367,6 +367,47 @@ dpkg_owns_path() {
     [[ $canonical_dir == "$dir" ]] && return 1
 
     dpkg-query -S "$canonical_dir/${path##*/}" >/dev/null 2>&1
+}
+
+# Return true when no dpkg package owns a path.
+# A failed ownership query stops the run rather than reading as unowned, since a caller removes what this calls unowned.
+path_is_unowned() {
+    local path="$1" status=0
+    dpkg_owns_path "$path" || status=$?
+    case "$status" in
+    0) return 1 ;;
+    1) return 0 ;;
+    *) die "Cannot determine dpkg ownership of $path" ;;
+    esac
+}
+
+# Where PATH first resolves a command, when no dpkg package owns that file, or empty otherwise.
+unowned_command_path() {
+    local resolved
+    resolved=$(type -P "$1" 2>/dev/null || true)
+    [[ $resolved == /* ]] || return 0
+    if path_is_unowned "$resolved"; then
+        printf '%s' "$resolved"
+    fi
+}
+
+# Remove each downloaded copy of a command that answers ahead of the apt package, after a prompt.
+# A fourth argument limits removal to that one path, and an unowned copy anywhere else is left with a warning.
+remove_unowned_command() {
+    local tool="$1" command="$2" label="$3" only="${4:-}" resolved
+    while true; do
+        resolved=$(unowned_command_path "$command")
+        [[ -n $resolved ]] || break
+        if [[ -n $only && $resolved != "$only" ]]; then
+            warn "$tool: $resolved belongs to no package and is not $only, so it stays and keeps answering ahead of the package"
+            break
+        fi
+        log "$tool: removing downloaded copy at $resolved before the apt install"
+        confirm "  Remove $resolved?" || die "Declined, downloaded $label left as it is"
+        run_root rm -f "$resolved"
+        [[ $DRY_RUN == true ]] && break
+        hash -r
+    done
 }
 
 # Install a package that displaces distro packages, asking apt what it would remove and putting that in front of the operator first.
@@ -673,28 +714,8 @@ ripgrep_source() { printf 'distro'; }
 ripgrep_version() { apt_installed_version ripgrep; }
 ripgrep_target() { apt_candidate_version ripgrep; }
 
-ripgrep_download_path() {
-    local resolved
-    resolved=$(type -P rg 2>/dev/null || true)
-    [[ $resolved == /* ]] || return 0
-    dpkg_owns_path "$resolved" || printf '%s' "$resolved"
-}
-
-ripgrep_remove_download() {
-    local resolved
-    while true; do
-        resolved=$(ripgrep_download_path)
-        [[ -n $resolved ]] || break
-        log "ripgrep: removing downloaded copy at $resolved before the distro package install"
-        confirm "  Remove $resolved?" || die "Declined, downloaded Ripgrep left as it is"
-        run_root rm -f "$resolved"
-        [[ $DRY_RUN == true ]] && break
-        hash -r
-    done
-}
-
 ripgrep_install() {
-    ripgrep_remove_download
+    remove_unowned_command ripgrep rg Ripgrep
     apt_install ripgrep
 }
 
@@ -1026,21 +1047,8 @@ powershell_install() {
     apt_install powershell
 }
 
-# Return true when a pwsh path is not owned by dpkg.
 # The direct-download layout installs /opt/microsoft/powershell/7 and a /usr/local/bin/pwsh symlink.
 # The apt package owns /usr/bin/pwsh instead.
-# Dpkg ownership distinguishes package-managed paths from copies installed by another source.
-# This applies the same ownership test as tool_unshadow to a shadowing copy.
-powershell_path_is_unowned() {
-    local path="$1" status=0
-    dpkg_owns_path "$path" || status=$?
-    case "$status" in
-    0) return 1 ;;
-    1) return 0 ;;
-    *) die "Cannot determine dpkg ownership of $path" ;;
-    esac
-}
-
 powershell_non_apt_paths() {
     local -a paths=()
 
@@ -1048,10 +1056,10 @@ powershell_non_apt_paths() {
     # Remove the whole direct-download tree when no package owns its binary.
     # The tree check uses the binary because dpkg-query -S answers about files.
     # Removing the tree also clears files that the apt package does not carry.
-    if [[ -e /usr/local/bin/pwsh || -L /usr/local/bin/pwsh ]] && powershell_path_is_unowned /usr/local/bin/pwsh; then
+    if [[ -e /usr/local/bin/pwsh || -L /usr/local/bin/pwsh ]] && path_is_unowned /usr/local/bin/pwsh; then
         paths+=(/usr/local/bin/pwsh)
     fi
-    if [[ -d /opt/microsoft/powershell/7 ]] && powershell_path_is_unowned /opt/microsoft/powershell/7/pwsh; then
+    if [[ -d /opt/microsoft/powershell/7 ]] && path_is_unowned /opt/microsoft/powershell/7/pwsh; then
         paths+=(/opt/microsoft/powershell/7)
     fi
 
@@ -1062,7 +1070,7 @@ powershell_non_apt_paths() {
     # This is the same guard used by tool_shadow_path.
     local resolved
     resolved=$(type -P pwsh 2>/dev/null || true)
-    if [[ $resolved == /* ]] && powershell_path_is_unowned "$resolved"; then
+    if [[ $resolved == /* ]] && path_is_unowned "$resolved"; then
         case "$resolved" in
         /usr/local/bin/pwsh | /opt/microsoft/powershell/7/pwsh) ;;
         *) die "Non-apt pwsh at $resolved is outside the known cleanup paths, remove it before installing powershell" ;;
@@ -1098,30 +1106,9 @@ op_arch_supported() {
 }
 
 # 1Password's manual install puts op in /usr/local/bin, ahead of the package's /usr/bin on PATH.
-# A failed ownership query stops the run rather than reading as unowned, since what this prints is removed.
-op_download_path() {
-    local resolved status=0
-    resolved=$(type -P op 2>/dev/null || true)
-    [[ $resolved == /* ]] || return 0
-    dpkg_owns_path "$resolved" || status=$?
-    case "$status" in
-    0) ;;
-    1) printf '%s' "$resolved" ;;
-    *) die "Cannot determine dpkg ownership of $resolved" ;;
-    esac
-}
-
+# Only that copy is removed, since an unowned op elsewhere can be a wrapper or a version manager's shim.
 op_remove_download() {
-    local resolved
-    while true; do
-        resolved=$(op_download_path)
-        [[ -n $resolved ]] || break
-        log "op: removing downloaded copy at $resolved before the apt install"
-        confirm "  Remove $resolved?" || die "Declined, downloaded 1Password CLI left as it is"
-        run_root rm -f "$resolved"
-        [[ $DRY_RUN == true ]] && break
-        hash -r
-    done
+    remove_unowned_command op op "1Password CLI" "$BIN_DIR/op"
 }
 
 # The vendor's optional debsig step is skipped, since apt already checks the package against the signed InRelease.
@@ -1151,7 +1138,9 @@ op_install() {
     # The vendor's keyring goes last, once no sources file this script writes still names it.
     remove_stale "/usr/share/keyrings/1password-archive-keyring.gpg"
 
-    apt_install 1password-cli
+    apt_install 1password-cli || return 1
+    # Removed only once the package is in place, so a failed install leaves the working copy.
+    op_remove_download
 }
 
 # --- Tool dispatch ---
@@ -1274,7 +1263,7 @@ tool_note() {
         ;;
     ripgrep)
         local resolved
-        resolved=$(ripgrep_download_path)
+        resolved=$(unowned_command_path rg)
         if [[ -n $resolved ]]; then
             note "ripgrep" "$(hide_home "$resolved") is an unowned downloaded copy and an install or upgrade removes it before apt installs Ripgrep"
         fi
@@ -1350,9 +1339,11 @@ tool_note() {
             note "op" "1Password's repository is not configured, so apt reads no upstream version yet"
         fi
         local resolved
-        resolved=$(op_download_path)
-        if [[ -n $resolved ]]; then
-            note "op" "$(hide_home "$resolved") is an unowned downloaded copy and an install or upgrade removes it before apt installs the 1Password CLI"
+        resolved=$(unowned_command_path op)
+        if [[ $resolved == "$BIN_DIR/op" ]]; then
+            note "op" "$resolved is an unowned downloaded copy and an install or upgrade removes it once apt has installed the 1Password CLI"
+        elif [[ -n $resolved ]]; then
+            note "op" "$(hide_home "$resolved") belongs to no package and answers ahead of the package's copy, and an install leaves it in place"
         fi
         ;;
     *) ;;
@@ -1446,12 +1437,12 @@ tool_unshadow() {
     case "$tool" in
     jq | git-restore-mtime) names=("$tool") ;;
     ripgrep)
-        ripgrep_remove_download
+        remove_unowned_command ripgrep rg Ripgrep
         return 0
         ;;
     op)
-        # A host with no build to install keeps the copy it has, since nothing would replace it.
-        if op_arch_supported; then
+        # Only beside an installed package, so the copy is never removed before anything replaces it.
+        if [[ -n $(op_version) ]]; then
             op_remove_download
         fi
         return 0
@@ -1555,7 +1546,7 @@ apply_tool() {
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is the distro's until the upstream repository is read, so quoting it here would name the wrong upstream.
-        log "$tool: installed from the distro, moving it to $("$(tool_function "$tool" source)")"
+        log "$tool: installed without its upstream repository, moving it to $("$(tool_function "$tool" source)")"
     else
         log "$tool: ${status}${target:+, upstream carries $target}"
     fi

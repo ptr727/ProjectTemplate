@@ -85,11 +85,11 @@
             "name": "op",
             "required": false,
             "probes": [["op", "--version"]],
-            "pattern": "(?m)^(\\d+(?:\\.\\d+)*)\\s*$",
+            "pattern": "(?m)^(\\d+(?:\\.\\d+)*)(?:[-+][0-9A-Za-z.-]*)?\\s*$",
             "minimum": null,
-            "why": "The 1Password CLI, for a repository that reads its secrets from a 1Password vault rather than for any fleet procedure, which is why it is optional and its absence is skipped. No floor, since no version is known to break a procedure here. The hub manages it rather than leaving it to the repository that needs it, because the Linux source is a third-party apt repository with its own signing key, and a repository's own host-tools.json can name only a package, never a repository or a key. The probe prints the bare version on a line of its own, so the pattern reads a whole line rather than a name the output does not carry.",
+            "why": "The 1Password CLI serves a repository that reads its secrets from a 1Password vault, not a fleet procedure. So it is optional and its absence is skipped. No floor, since no version is known to break a procedure here. The hub manages it rather than the repository that needs it. Its Linux source is a third-party apt repository with its own signing key. A repository's own host-tools.json can name only a package, never a repository or a key. The probe prints the bare version on a line of its own, so the pattern reads a whole line. A pre-release suffix on that line is allowed and left out of the version.",
             "source": {
-                "linux": "1Password's own apt repository at downloads.1password.com, per https://developer.1password.com/docs/cli/get-started/, since no Debian or Ubuntu release packages the CLI. The signing key is checked against the repository's own InRelease rather than pinned, and the vendor's optional debsig policy step is skipped, since the signed repository is the trust path, as it is for every other apt repository here. The repository carries amd64, arm64 and armhf builds, so any other architecture is skipped.",
+                "linux": "1Password's own apt repository at downloads.1password.com, per https://developer.1password.com/docs/cli/get-started/, since no Debian or Ubuntu release packages the CLI. The signing key is checked against the repository's own InRelease rather than pinned. The vendor's optional debsig policy step is skipped, since the signed repository is the trust path here as for every other apt repository. The repository carries amd64, arm64 and armhf builds, so any other architecture is skipped.",
                 "macos": "Homebrew Cask (1password-cli), which tracks upstream releases.",
                 "windows": "winget (AgileBits.1Password.CLI), which tracks upstream releases."
             },

@@ -259,7 +259,9 @@ class TestSpecCoverage(unittest.TestCase):
         )
         self.assertIsNotNone(install)
         body = install.group("body") if install else ""
-        self.assertLess(body.index("ripgrep_remove_download"), body.index("apt_install ripgrep"))
+        self.assertLess(
+            body.index("remove_unowned_command ripgrep rg"), body.index("apt_install ripgrep")
+        )
         self.assertRegex(
             windows,
             r"Name = 'ripgrep'; Package = 'BurntSushi\.ripgrep\.MSVC'; Probe = 'rg'",

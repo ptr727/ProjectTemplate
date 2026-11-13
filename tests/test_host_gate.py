@@ -1123,6 +1123,7 @@ class TestShippedDeclaration(unittest.TestCase):
         The tool serves a repository that keeps its secrets in 1Password rather than a fleet
         procedure. So it is optional and carries no floor, and a host without it is skipped.
         A notice on stderr follows stdout, and a number inside a sentence is not a version line.
+        A pre-release suffix still reads, since an unreadable version fails the gate even here.
         """
         op = {t["name"]: t for t in self.data["tools"]}["op"]
         self.assertIs(op["required"], False)
@@ -1135,6 +1136,7 @@ class TestShippedDeclaration(unittest.TestCase):
 
         self.assertEqual(read("2.42.0\n\n"), "2.42.0")
         self.assertEqual(read("2.42.0\n\nnotice: 2.43.0 is available\n"), "2.42.0")
+        self.assertEqual(read("2.43.0-beta.01\n\n"), "2.43.0")
         self.assertIsNone(read("\n[ERROR] unknown flag in 2.42 syntax\n"))
 
 
