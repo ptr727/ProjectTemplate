@@ -79,9 +79,11 @@ class FakeGh:
             if name in self.tree:
                 text = self.texts.get(name, "x\n").encode()
                 return {"encoding": "base64", "content": base64.b64encode(text).decode()}
-            listing = [{"path": p} for p in sorted(self.tree) if p.startswith(f"{name}/")]
-            if listing:
-                return listing
+            children = {
+                p[len(name) + 1 :].split("/")[0] for p in self.tree if p.startswith(f"{name}/")
+            }
+            if children:
+                return [{"name": c, "path": f"{name}/{c}"} for c in sorted(children)]
             if ok404:
                 return None
         raise AssertionError(f"unexpected gh read: {path}")
@@ -296,7 +298,7 @@ class AuditRepoDevcontainerEcosystemCase(unittest.TestCase):
         )
 
     def test_a_root_devcontainer_file_with_the_ecosystem_is_clean(self) -> None:
-        """The control, showing the file alone is what drew the finding above."""
+        """The control, showing the missing declaration is what drew the finding above."""
         self.assertEqual(self.ecosystem_findings("  - package-ecosystem: devcontainers\n"), [])
 
 

@@ -60,7 +60,8 @@ worktree, since `scripts/` is hub-hosted and no carrier holds it. Then run the a
 `RESYNC.md` section 2. `uv run --no-project --script spec/audit.py <RepoName>` measures the target's ground-truth
 branch, which the registry's `groundTruthBranch` names and which is `main` for every cataloged
 repo today, never `develop`. "Confirm the procedure before starting" already ran that
-invocation after this host gate, so its findings serve here until the target moves. Convergence lands on a ref `main` does not hold yet, so a run that
+invocation after this host gate, so read its findings here. A re-run is still owed before
+acting on one, as below. Convergence lands on a ref `main` does not hold yet, so a run that
 previews in-flight work names that ref: `uv run --no-project --script spec/audit.py --branch <ref> <RepoName>`. Use it
 to check whether a fix landed, since a run against `main` still reports what the in-flight ref
 already fixed. Section 2 carries two further commands that neither of these replaces. A finding is
