@@ -26,7 +26,7 @@ Never leave a signature over a commit committed by another identity, and never l
 
 ## Collateral
 
-Everything anchored to an old hash goes stale when the rewrite lands:
+What is anchored to an old hash goes stale when the rewrite lands, including the following:
 
 - **Tags** move to the re-signed commits through `--tag-name-filter cat` above. A signed tag's signature no longer verifies after the rewrite, so re-create each one with `git tag -f -s` on its new commit.
 - **Remote tags and pull request refs** keep the old commits readable on GitHub. Each moved tag is pushed again, and GitHub keeps every pull request's commits until GitHub Support purges them.
