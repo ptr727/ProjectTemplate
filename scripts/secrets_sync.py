@@ -578,12 +578,13 @@ def malformed_content_tag(item: Item) -> bool:
 def content_time(item: Item) -> datetime.datetime:
     """The time the item's content counts as written, from its one `mtime:<iso>` tag.
 
-    A push sets the tag from the file's mtime, and a retag keeps it, so a mode-only write moves
-    `updated_at` and never this. A forced push sets it past the content it replaced instead, per
-    `forced_time`. An item carrying no such tag, pushed before the tag existed, reads as its
-    `updated_at`, and its next update or retag writes the tag. One whose tag is malformed or
-    repeated reads the same way, which `members` warns about, and a push retags it even where
-    nothing else differs.
+    A create sets the tag from the file's mtime. An update does too where that mtime is strictly
+    newer than the content time it replaces, and takes `forced_time` otherwise. A retag keeps the
+    tag, so a mode-only write moves only `updated_at`. The exception is a retag of a file named
+    with `--overwrite-newer`, which takes `forced_time` too. An item carrying no such tag, pushed
+    before the tag existed, reads as its `updated_at`, and its next update or retag writes the
+    tag. One whose tag is malformed or repeated reads the same way, which `members` warns about,
+    and a push retags it even where nothing else differs.
     """
     return tagged_content_time(item) or item.updated
 
@@ -838,10 +839,8 @@ def push_plans(
                 plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
             continue
         written = content_time(item)
-        content = local.mtime
-        if written > local.mtime and a.overwrite_newer:
-            content = forced_time(written)
-        elif written > local.mtime:
+        content = local.mtime if local.mtime > written else forced_time(written)
+        if written > local.mtime and not a.overwrite_newer:
             if a.paths:
                 raise Refusal(
                     f"{title}: remote {stamp(written)} is newer than local {stamp(local.mtime)},"
@@ -1034,6 +1033,8 @@ def cmd_push(a: argparse.Namespace, op: Op) -> int:
         print(plan_line(plan, mode_or_none(plan.item) if plan.item else None))
     if not op.dry_run:
         confirm(op, a.yes, f"Push {len(plans)} change(s) to {name}?")
+        if not a.yes and any(p.action == "create" for p in plans):
+            refuse_held_elsewhere(op, list_vaults(op), name, plans)
     fresh = vault is None
     if vault is None:
         vault = create_vault(op, a.bucket)
