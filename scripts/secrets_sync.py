@@ -321,13 +321,12 @@ def recheck(op: Op) -> None:
         raise Refusal("the 1Password session ended during the prompt, so nothing was written")
 
 
-def confirm(op: Op, yes: bool, question: str, *, then_op: bool = True) -> None:
+def confirm(op: Op, yes: bool, question: str) -> None:
     if yes:
         return
     if not ask(question):
         raise Refusal("not confirmed, so nothing was written")
-    if then_op:
-        recheck(op)
+    recheck(op)
 
 
 def vault_name(bucket: str) -> str:
@@ -1182,9 +1181,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         return 0
     changes = [p for p in plans if p.action not in {"create", "retime"}]
     if changes:
-        confirm(
-            op, a.yes, f"Replace or re-mode {len(changes)} existing local file(s)?", then_op=False
-        )
+        confirm(op, a.yes, f"Replace or re-mode {len(changes)} existing local file(s)?")
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
         refuse_changed(op, sources[plan.title], plan.title, plan.item)

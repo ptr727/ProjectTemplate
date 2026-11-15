@@ -1407,6 +1407,20 @@ class TestPull(Case):
         self.assertIn("changed remotely after the plan was printed", err)
         self.assertEqual(path.read_bytes(), b"local\n")
 
+    def test_a_session_ended_during_the_pull_prompt_writes_nothing(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha", b"local\n")
+
+        def expire(question: str) -> bool:
+            self.fake.ambient = False
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", expire):
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 1, err)
+        self.assertIn("nothing was written", err)
+        self.assertEqual(path.read_bytes(), b"local\n")
+
     def test_a_failed_timestamp_leaves_the_target_unchanged(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
         path = self.write(".secrets/alpha", b"local\n")
