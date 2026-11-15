@@ -579,11 +579,12 @@ def content_time(item: Item) -> datetime.datetime:
     """The time the item's content counts as written, from its one `mtime:<iso>` tag.
 
     A push sets the tag from the file's mtime, and a retag keeps it, so a mode-only write moves
-    `updated_at` and never this. An update whose file is not strictly newer, a forced one included,
-    sets it past the content it replaced instead, per `forced_time`. An item carrying no such tag, pushed before the tag existed, reads as its
-    `updated_at`, and its next update or retag writes the tag. One whose tag is malformed or
-    repeated reads the same way, which `members` warns about, and a push retags it even where
-    nothing else differs.
+    `updated_at` and never this. Two writes set it past the content it replaced, per
+    `forced_time`. One is an update whose file is not strictly newer. The other is a push naming
+    the file with `--overwrite-newer`, even where the bytes match. An item carrying no such tag, pushed
+    before the tag existed, reads as its `updated_at`, and its next update or retag writes the
+    tag. One whose tag is malformed or repeated reads the same way, which `members` warns about,
+    and a push retags it even where nothing else differs.
     """
     return tagged_content_time(item) or item.updated
 
