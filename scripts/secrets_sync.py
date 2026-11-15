@@ -1080,12 +1080,11 @@ def write_secret(
     The group and mode are set on the open descriptor before the rename, so neither changes in view.
     A group it cannot keep is a refusal, since a service may read the file through that group.
     The file's modification time is set to `written`, the item's content time, so a later push or
-    pull compares the two sides on one clock. Where the platform cannot set it on a descriptor, it
-    is set by path after the rename.
+    pull compares the two sides on one clock. It is set on the closed temporary file before the
+    rename, which keeps it, so a failure leaves the target unchanged on every platform.
     The temporary file is removed in `finally`, which also runs on SIGINT and SIGTERM.
     """
     times = (time.time_ns(), to_ns(written))
-    by_fd = os.utime in os.supports_fd
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=TEMP_PREFIX, suffix=".tmp")
     temp = Path(name)
     try:
@@ -1102,11 +1101,8 @@ def write_secret(
                     ) from exc
             if mode is not None:
                 os.fchmod(handle.fileno(), mode)
-            if by_fd:
-                os.utime(handle.fileno(), ns=times)
+        os.utime(temp, ns=times)
         os.replace(temp, path)
-        if not by_fd:
-            os.utime(path, ns=times)
     finally:
         with contextlib.suppress(FileNotFoundError):
             temp.unlink()
@@ -1145,8 +1141,10 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
     else:
         home = home_dir()
     plans: list[Plan] = []
+    sources: dict[str, Vault] = {}
     for vault, items in selected(op, list_vaults(op), a.bucket):
         for title, item in sorted(items.items()):
+            sources[title] = vault
             local, remote, mode, state = inspect(op, home, vault, title, item)
             path = local_path(home, title)
             written = content_time(item)
@@ -1189,6 +1187,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         )
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
+        refuse_changed(op, sources[plan.title], plan.title, plan.item)
         refuse_changed_locally(plan)
         ensure_parents(home, plan.title)
         assert plan.remote is not None and plan.content is not None
@@ -1395,6 +1394,7 @@ def cmd_selftest(a: argparse.Namespace, op: Op) -> int:
     confirm(op, False, f"Create and delete {name}?")
     results: list[Measured] = []
     vault: Vault | None = None
+    left_behind = False
     scratch = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
     try:
         try:
@@ -1414,6 +1414,7 @@ def cmd_selftest(a: argparse.Namespace, op: Op) -> int:
         if vault is not None:
             deleted = op.probe(["vault", "delete", vault.id])
             if deleted.returncode != 0:
+                left_behind = True
                 report_stderr(deleted.stderr)
                 sys.stderr.write(
                     f"warning: op vault delete failed rc={deleted.returncode}, so delete {name} by hand\n"
@@ -1422,6 +1423,8 @@ def cmd_selftest(a: argparse.Namespace, op: Op) -> int:
             verdict = {True: "holds", False: "FAILS", None: "measured"}[result.holds]
             print(f"  {verdict:<9} {result.name}: {result.detail}")
         shutil.rmtree(scratch)
+    if left_behind:
+        return 2
     return 1 if any(r.holds is False for r in results) else 0
 
 
