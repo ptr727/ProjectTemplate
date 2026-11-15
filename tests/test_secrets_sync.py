@@ -693,6 +693,30 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.item(vid, ".secrets/alpha")["content"], SECRET)
 
+    def test_an_item_changed_remotely_during_the_prompt_is_not_written(self) -> None:
+        for content, mode in ((SECRET, 0o640), (b"local\n", 0o600)):
+            with self.subTest(content=content):
+                fake = FakeOp()
+                vid = fake.add_vault("Secrets alpha")
+                iid = fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+                self.write(".secrets/alpha", content, mode)
+
+                def elsewhere(
+                    question: str, fake: FakeOp = fake, vid: str = vid, iid: str = iid
+                ) -> bool:
+                    fake.items[vid][iid].update(content=b"other\n", updated_at=fake.stamp())
+                    return True
+
+                with (
+                    unittest.mock.patch.object(ss, "run_op", fake),
+                    unittest.mock.patch.object(ss, "ask", elsewhere),
+                ):
+                    code, _, err = self.run_main("push", "--bucket", "alpha")
+                self.assertEqual(code, 1, err)
+                self.assertIn("changed remotely after the plan was printed", err)
+                self.assertEqual(fake.writes(), [])
+                self.assertEqual(fake.items[vid][iid]["tags"], ("mode:0600", f"mtime:{EARLY}"))
+
     def test_a_title_another_bucket_holds_is_refused_before_any_write(self) -> None:
         other = self.vault("beta")
         self.fake.add_item(other, ".secrets/alpha_api_token", SECRET)

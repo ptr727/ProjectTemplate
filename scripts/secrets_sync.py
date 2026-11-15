@@ -938,6 +938,12 @@ def push_one(op: Op, vault: Vault, plan: Plan) -> None:
             verify(op, vault, plan, None)
         return
     assert plan.item is not None
+    if not op.dry_run:
+        current = listed(op, vault, plan.title, "the prompt")
+        if (current.id, current.updated) != (plan.item.id, plan.item.updated):
+            raise Refusal(
+                f"{plan.title} changed remotely after the plan was printed, so it was not written"
+            )
     if plan.action == "update":
         op.call(
             ["document", "edit", plan.item.id, str(plan.path), "--vault", vault.id],
