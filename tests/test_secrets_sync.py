@@ -717,6 +717,51 @@ class TestPush(Case):
                 self.assertEqual(fake.writes(), [])
                 self.assertEqual(fake.items[vid][iid]["tags"], ("mode:0600", f"mtime:{EARLY}"))
 
+    def test_an_item_archived_or_created_during_the_prompt_is_refused(self) -> None:
+        vid = self.vault()
+        iid = self.fake.add_item(vid, ".secrets/held", b"old\n")
+        self.write(".secrets/held")
+        fresh = self.write(".secrets/fresh")
+
+        def archive_held(question: str) -> bool:
+            self.fake.items[vid].pop(iid)
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", archive_held):
+            code, _, err = self.push(str(self.home / ".secrets/held"))
+        self.assertEqual(code, 1, err)
+        self.assertIn("changed remotely", err)
+
+        def create_fresh(question: str) -> bool:
+            self.fake.add_item(vid, ".secrets/FRESH", SECRET)
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", create_fresh):
+            code, _, err = self.push(str(fresh))
+        self.assertEqual(code, 1, err)
+        self.assertIn("changed remotely", err)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_a_tag_write_failing_after_the_content_names_its_recovery(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{EARLY}"))
+        path = self.write(".secrets/alpha")
+        self.fake.fail_before.add(("item", "edit"))
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 2)
+        self.assertIn("push it again by name with --overwrite-newer", err)
+        self.assertEqual(self.item(vid, ".secrets/alpha")["content"], SECRET)
+        self.fake.fail_before.clear()
+        code, out, err = self.push()
+        self.assertEqual(code, 0, err)
+        self.assertIn("same", out)
+        code, _, err = self.push("--overwrite-newer", str(path))
+        self.assertEqual(code, 0, err)
+        mtime = ss.read_local(path).mtime
+        assert mtime is not None
+        want = ss.content_tag(mtime)
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [want])
+
     def test_a_title_another_bucket_holds_is_refused_before_any_write(self) -> None:
         other = self.vault("beta")
         self.fake.add_item(other, ".secrets/alpha_api_token", SECRET)
@@ -1573,6 +1618,22 @@ class TestArchive(Case):
         self.assertEqual(self.fake.writes(), [["item", "delete", iid, "--vault", vid, "--archive"]])
         self.assertEqual([it["title"] for it in self.fake.items[vid].values()], [".secrets/beta"])
         self.assertEqual(len(self.asked), 1)
+
+    def test_an_item_changed_during_the_archive_prompt_is_not_archived(self) -> None:
+        vid = self.vault()
+        iid = self.fake.add_item(vid, ".secrets/alpha", SECRET)
+
+        def elsewhere(question: str) -> bool:
+            self.fake.items[vid][iid].update(content=b"other\n", updated_at=self.fake.stamp())
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", elsewhere):
+            code, _, err = self.run_main(
+                "archive", "--bucket", "alpha", str(self.home / ".secrets/alpha")
+            )
+        self.assertEqual(code, 1, err)
+        self.assertIn("changed remotely", err)
+        self.assertEqual(self.fake.writes(), [])
 
     def test_a_declined_archive_removes_nothing(self) -> None:
         vid = self.vault()

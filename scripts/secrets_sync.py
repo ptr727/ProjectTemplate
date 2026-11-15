@@ -824,12 +824,12 @@ def push_plans(
             continue
         remote = download(op, vault, item)
         if remote == local.data:
-            if mode_or_none(item) == mode and not malformed_content_tag(item):
+            stamping = bool(a.paths) and a.overwrite_newer and content_time(item) != local.mtime
+            if mode_or_none(item) == mode and not malformed_content_tag(item) and not stamping:
                 print(f"  same      {title}")
             else:
-                plans.append(
-                    Plan("retag", title, path, local, item, mode, remote, content_time(item))
-                )
+                kept = local.mtime if stamping else content_time(item)
+                plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
             continue
         written = content_time(item)
         content = local.mtime
@@ -918,8 +918,19 @@ def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
         )
 
 
+def refuse_changed(op: Op, vault: Vault, title: str, item: Item | None) -> None:
+    """Refuse a write whose target another host changed, archived, or created after the plan."""
+    if op.dry_run:
+        return
+    now = {t.casefold(): i for t, i in members(op, vault).items()}.get(title.casefold())
+    seen = None if item is None else (item.id, item.updated)
+    if (None if now is None else (now.id, now.updated)) != seen:
+        raise Refusal(f"{title} changed remotely after the plan was printed, so it was not written")
+
+
 def push_one(op: Op, vault: Vault, plan: Plan) -> None:
     assert plan.mode is not None and plan.content is not None
+    refuse_changed(op, vault, plan.title, plan.item)
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
@@ -938,31 +949,26 @@ def push_one(op: Op, vault: Vault, plan: Plan) -> None:
             verify(op, vault, plan, None)
         return
     assert plan.item is not None
-    if not op.dry_run:
-        current = listed(op, vault, plan.title, "the prompt")
-        if (current.id, current.updated) != (plan.item.id, plan.item.updated):
-            raise Refusal(
-                f"{plan.title} changed remotely after the plan was printed, so it was not written"
-            )
     if plan.action == "update":
         op.call(
             ["document", "edit", plan.item.id, str(plan.path), "--vault", vault.id],
             write=True,
             detail=plan.title,
         )
-    op.call(
-        [
-            "item",
-            "edit",
-            plan.item.id,
-            "--vault",
-            vault.id,
-            "--tags",
-            tags_for(plan.item, plan.mode, plan.content),
-        ],
-        write=True,
-        detail=plan.title,
-    )
+    tags = tags_for(plan.item, plan.mode, plan.content)
+    try:
+        op.call(
+            ["item", "edit", plan.item.id, "--vault", vault.id, "--tags", tags],
+            write=True,
+            detail=plan.title,
+        )
+    except Execution as exc:
+        if plan.action != "update":
+            raise
+        raise Execution(
+            f"{plan.title}: the content was written but its tags were not, so once op answers,"
+            " push it again by name with --overwrite-newer"
+        ) from exc
     if not op.dry_run:
         verify(op, vault, plan, plan.item.id)
 
@@ -1170,6 +1176,7 @@ def cmd_archive(a: argparse.Namespace, op: Op) -> int:
     print(f"Plan for {vault.name}:\n  archive   {title}  remote {stamp(item.updated)}")
     if not op.dry_run:
         confirm(op, a.yes, f"Archive {title} in {vault.name}?")
+    refuse_changed(op, vault, title, item)
     args = ["item", "delete", item.id, "--vault", vault.id, "--archive"]
     try:
         op.call(args, write=True, detail=title)
