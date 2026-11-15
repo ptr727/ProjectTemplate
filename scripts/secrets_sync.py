@@ -152,6 +152,7 @@ class Op:
         self.account = account
         self.dry_run = dry_run
         self.session: dict[str, str] = {}
+        self.warned: set[tuple[str, str]] = set()
 
     def env(self) -> dict[str, str]:
         return {**os.environ, **self.session}
@@ -517,7 +518,8 @@ def members(op: Op, vault: Vault) -> dict[str, Item]:
             raise Refusal(
                 f"{vault.name} holds {other!r} and {item.title!r}, which collide case-insensitively"
             )
-        if malformed_content_tag(item):
+        if malformed_content_tag(item) and (vault.id, item.title) not in op.warned:
+            op.warned.add((vault.id, item.title))
             sys.stderr.write(
                 f"warning: {item.title} carries a malformed or repeated content-time tag,"
                 " so its update time stands in until its next update or retag\n"
@@ -1055,7 +1057,12 @@ def foreign_owner(local: Local) -> bool:
     return local.uid is not None and local.uid != running_uid()
 
 
-VERBS = {"create": "write", "overwrite": "write", "chmod": "re-mode", "retime": "re-time"}
+ACTIONS = {
+    "create": ("write", "wrote"),
+    "overwrite": ("write", "wrote"),
+    "chmod": ("re-mode", "re-moded"),
+    "retime": ("re-time", "re-timed"),
+}
 
 
 def refuse_foreign_owner(path: Path, local: Local) -> None:
@@ -1114,7 +1121,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         print(plan_line(plan, plan.local.mode))
     if op.dry_run:
         for plan in plans:
-            print(f"  would {VERBS[plan.action]}: {plan.path}")
+            print(f"  would {ACTIONS[plan.action][0]}: {plan.path}")
         return 0
     changes = [p for p in plans if p.action not in {"create", "retime"}]
     if changes:
@@ -1138,11 +1145,11 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
             write_secret(plan.path, plan.remote, plan.mode, plan.local.gid, plan.content)
         if plan.path.read_bytes() != plan.remote:
             raise Execution(f"{plan.title} reads back differently from what was written")
-    done = ", ".join(
-        f"{verb} {sum(VERBS[p.action] == verb for p in plans)}"
-        for verb in dict.fromkeys(VERBS[p.action] for p in plans)
-    )
-    print(f"Pulled under {home}: {done} file(s).")
+    done: dict[str, int] = {}
+    for plan in plans:
+        verb = ACTIONS[plan.action][1]
+        done[verb] = done.get(verb, 0) + 1
+    print(f"Under {home}: " + ", ".join(f"{verb} {n} file(s)" for verb, n in done.items()) + ".")
     return 0
 
 
@@ -1186,8 +1193,10 @@ SELFTEST_CONTENT = {
     "crlf": b"alpha-line-one\r\nalpha-line-two\r\n",
     "nul-bytes": b"alpha\x00selftest\x00\xff\x01",
 }
-SELFTEST_STAMP = "mtime:2000-01-02T03:04:05.678901Z"
-SELFTEST_RESTAMP = "mtime:2000-01-03T04:05:06.789012Z"
+SELFTEST_STAMP = content_tag(datetime.datetime(2000, 1, 2, 3, 4, 5, 678901, datetime.UTC))
+SELFTEST_RESTAMP = content_tag(datetime.datetime(2000, 1, 3, 4, 5, 6, 789012, datetime.UTC))
+SELFTEST_MODE = mode_tag(0o600)
+SELFTEST_REMODE = mode_tag(0o640)
 
 
 def listed(op: Op, vault: Vault, title: str, after: str) -> Item:
@@ -1226,7 +1235,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
                 "--title",
                 title,
                 "--tags",
-                f"mode:0600,{SELFTEST_STAMP}",
+                f"{SELFTEST_MODE},{SELFTEST_STAMP}",
             ],
             write=True,
             detail=title,
@@ -1242,12 +1251,20 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "create sets --tags",
-            sorted(first.tags) == ["mode:0600", SELFTEST_STAMP],
+            sorted(first.tags) == [SELFTEST_MODE, SELFTEST_STAMP],
             f"tags read back as {list(first.tags)}",
         )
     )
     op.call(
-        ["item", "edit", first.id, "--vault", vault.id, "--tags", f"mode:0640,{SELFTEST_RESTAMP}"],
+        [
+            "item",
+            "edit",
+            first.id,
+            "--vault",
+            vault.id,
+            "--tags",
+            f"{SELFTEST_REMODE},{SELFTEST_RESTAMP}",
+        ],
         write=True,
         detail=first.title,
     )
@@ -1255,7 +1272,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "item edit --tags replaces",
-            sorted(retagged.tags) == ["mode:0640", SELFTEST_RESTAMP],
+            sorted(retagged.tags) == [SELFTEST_REMODE, SELFTEST_RESTAMP],
             f"tags read back as {list(retagged.tags)}",
         )
     )
@@ -1291,7 +1308,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "document edit keeps the tags",
-            sorted(after.tags) == ["mode:0640", SELFTEST_RESTAMP],
+            sorted(after.tags) == [SELFTEST_REMODE, SELFTEST_RESTAMP],
             f"tags read back as {list(after.tags)}",
         )
     )

@@ -1379,13 +1379,43 @@ class TestContentTime(Case):
         code, out, err = self.run_main("pull", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
         self.assertRegex(out, r"retime\s+\.secrets/alpha")
-        self.assertIn("re-time 1 file(s)", out)
+        self.assertIn("re-timed 1 file(s)", out)
         self.assertNotIn("write", out)
         self.assertEqual(self.asked, [])
         want = ss.to_ns(ss.datetime.datetime.fromisoformat(EARLY))
         self.assertEqual(path.stat().st_mtime_ns, want)
         code, out, _ = self.run_main("pull", "--bucket", "alpha")
         self.assertIn("Nothing to pull", out)
+
+    def test_a_pull_names_each_action_by_what_it_does(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/absent", SECRET)
+        self.fake.add_item(vid, ".secrets/stale", SECRET, updated="2099-01-01T00:00:00Z")
+        self.fake.add_item(vid, ".secrets/moded", SECRET, ("mode:0600",))
+        self.fake.add_item(vid, ".secrets/timed", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.write(".secrets/stale", b"stale\n")
+        self.write(".secrets/moded", mode=0o644)
+        self.write(".secrets/timed")
+        code, out, err = self.run_main("pull", "--bucket", "alpha", "--dry-run")
+        self.assertEqual(code, 0, err)
+        for verb, title in (
+            ("write", "absent"),
+            ("write", "stale"),
+            ("re-mode", "moded"),
+            ("re-time", "timed"),
+        ):
+            self.assertIn(f"would {verb}: {self.home / '.secrets' / title}", out)
+        code, out, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertIn("wrote 2 file(s), re-moded 1 file(s), re-timed 1 file(s).", out)
+
+    def test_a_malformed_tag_warns_once_per_run(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/broken", SECRET, ("mode:0600", "mtime:bogus"))
+        paths = [str(self.write(f".secrets/new_{n}")) for n in range(2)]
+        code, _, err = self.run_main("push", "--bucket", "alpha", *paths)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(err.count("malformed or repeated content-time tag"), 1)
 
     def test_a_forced_update_past_a_future_content_time_still_moves_it_forward(self) -> None:
         vid = self.vault()
