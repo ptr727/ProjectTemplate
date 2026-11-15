@@ -98,6 +98,7 @@ BEFORE_FLAG = {
     "scripts/local_review.py": ("status",),
     "scripts/pr_cleanup.py": ("--repo", "Example/Example", "1"),
     "scripts/pr_review.py": ("--repo", "Example/Example", "status", "1"),
+    "scripts/secrets_sync.py": ("status",),
     "spec/resolve_description.py": ("registry/repos.json", "Example"),
     "spec/resolve_secrets.py": ("scaffold", "--dry-run"),
 }
@@ -171,6 +172,7 @@ RECORDED = (
     "uvx",
     "wsl",
     "fsutil",
+    "op",
 )
 
 HOMES = (
