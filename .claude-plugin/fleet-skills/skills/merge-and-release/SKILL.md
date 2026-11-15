@@ -67,8 +67,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    open, whose `merge=UNKNOWN` never clears, so stop re-reading it. Confirm its `merge_commit=` per
    step 4, run the ready-report comparison below against its `head=`, and report both. Dispatch
    nothing on the chosen scope alone, since whoever merged it may have released it already. Where
-   a release scope was chosen, look, then ask. Confirm the publisher exists as step 5 does, and
-   where it is absent report the missing publisher. Otherwise read the publisher's
+   a release scope was chosen, look, then ask. Confirm the publisher exists as step 5 does. Read it
+   at `<merge-sha>` below rather than at a tip step 4 confirmed, since `main` may have moved past
+   the merge. Where it is absent report the missing publisher. Otherwise read the publisher's
    runs on the merge commit, `gh run list --repo owner/repo --workflow publish-release.yml --commit
    <merge-sha> --json databaseId,event,headBranch,status,conclusion,createdAt`. `<merge-sha>` is
    the full 40-character SHA, `gh pr view [number] --repo owner/repo --json mergeCommit --jq
