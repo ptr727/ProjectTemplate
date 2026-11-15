@@ -892,7 +892,7 @@ def create_vault(op: Op, bucket: str) -> Vault:
     try:
         op.call(["vault", "create", name], write=True, detail="")
     except Execution:
-        if find_vault(list_vaults(op), bucket) is None:
+        if not landed(lambda: find_vault(list_vaults(op), bucket) is not None):
             raise
         sys.stderr.write(
             f"op vault create reported a failure, yet {name} is listed, so it is used as created\n"
@@ -935,16 +935,23 @@ def refuse_changed(op: Op, vault: Vault, title: str, item: Item | None) -> None:
         raise Refusal(f"{title} changed remotely after the plan was printed, so it was not written")
 
 
-def tags_landed(op: Op, vault: Vault, title: str, tags: str) -> bool:
-    """Whether the item carries exactly `tags`, read back after a write that reported a failure.
+def landed(check: typing.Callable[[], bool]) -> bool:
+    """Whether a write that reported a failure landed, read back by `check`.
 
-    A listing that fails too answers no, so the caller reports the write as not landed.
+    A read-back that fails too answers no, so the caller re-raises the write's own error.
     """
     try:
-        landed = members(op, vault).get(title)
+        return check()
     except (Execution, Refusal):
         return False
-    return landed is not None and sorted(landed.tags) == sorted(tags.split(","))
+
+
+def tags_landed(op: Op, vault: Vault, title: str, tags: str) -> bool:
+    def carries() -> bool:
+        item = members(op, vault).get(title)
+        return item is not None and sorted(item.tags) == sorted(tags.split(","))
+
+    return landed(carries)
 
 
 def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
@@ -952,6 +959,10 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
     assert plan.mode is not None and plan.content is not None
     if not fresh:
         refuse_changed(op, vault, plan.title, plan.item)
+    if not op.dry_run and read_local(plan.path) != plan.local:
+        raise Refusal(
+            f"{plan.title} changed locally after the plan was printed, so it was not written"
+        )
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
@@ -961,7 +972,7 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
                 detail=plan.title,
             )
         except Execution:
-            if plan.title not in members(op, vault):
+            if not landed(lambda: plan.title in members(op, vault)):
                 raise
             sys.stderr.write(
                 f"op document create reported a failure, yet {plan.title} is listed, so it is verified\n"
@@ -1210,14 +1221,18 @@ def cmd_archive(a: argparse.Namespace, op: Op) -> int:
     try:
         op.call(args, write=True, detail=title)
     except Execution:
-        landed = members(op, vault).get(title)
-        if landed is not None and landed.id == item.id:
+
+        def gone() -> bool:
+            still = members(op, vault).get(title)
+            return still is None or still.id != item.id
+
+        if not landed(gone):
             raise
         sys.stderr.write(f"op item delete reported a failure, yet {title} is no longer listed\n")
     if op.dry_run:
         return 0
-    landed = members(op, vault).get(title)
-    if landed is not None and landed.id == item.id:
+    still = members(op, vault).get(title)
+    if still is not None and still.id == item.id:
         raise Execution(f"{title} is still listed after op item delete --archive")
     print(f"Archived {title} from {vault.name}.")
     return 0

@@ -816,6 +816,35 @@ class TestPush(Case):
                         code = None
                 self.assertEqual(code, None if case == "interrupt" else 2)
                 self.assertIn(recovery, err.getvalue())
+                if case == "relist-fails":
+                    self.assertIn("op item edit failed", err.getvalue())
+
+    def test_a_retag_whose_tag_write_fails_warns_of_no_lost_content(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.write(".secrets/alpha", mode=0o640)
+        self.fake.fail_before.add(("item", "edit"))
+        code, _, err = self.push()
+        self.assertEqual(code, 2)
+        self.assertNotIn("push it again", err)
+
+    def test_a_file_changed_during_the_push_prompt_is_not_written(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n")
+        path = self.write(".secrets/alpha")
+        fresh = self.write(".secrets/fresh")
+        for target in (path, fresh):
+            with self.subTest(target=target.name):
+
+                def edit(question: str, target: Path = target) -> bool:
+                    target.write_bytes(b"edited-during-prompt\n")
+                    return True
+
+                with unittest.mock.patch.object(ss, "ask", edit):
+                    code, _, err = self.push(str(target))
+                self.assertEqual(code, 1, err)
+                self.assertIn("changed locally after the plan was printed", err)
+                self.assertEqual(self.fake.writes(), [])
 
     def test_a_tag_write_reported_failed_but_landed_is_verified(self) -> None:
         vid = self.vault()
@@ -986,7 +1015,7 @@ class TestPush(Case):
         self.assertEqual(code, 1)
         self.assertIn("case-insensitively", err)
 
-    def test_a_file_changed_after_the_plan_fails_its_read_back(self) -> None:
+    def test_a_file_changed_after_the_plan_into_a_new_vault_is_not_written(self) -> None:
         path = self.write(".secrets/alpha")
 
         def change(question: str) -> bool:
@@ -995,10 +1024,9 @@ class TestPush(Case):
 
         with unittest.mock.patch.object(ss, "ask", change):
             code, _, err = self.push(str(path))
-        self.assertEqual(code, 2)
-        self.assertIn("where the plan read", err)
-        vid = next(iter(self.fake.vaults))
-        self.assertEqual(self.item(vid, ".secrets/alpha")["content"], b"changed\n")
+        self.assertEqual(code, 1)
+        self.assertIn("changed locally after the plan was printed", err)
+        self.assertNotIn(("document", "create"), [key_of(a) for a in self.fake.writes()])
 
     def test_a_vault_create_that_lists_nothing_fails(self) -> None:
         path = self.write(".secrets/alpha")
