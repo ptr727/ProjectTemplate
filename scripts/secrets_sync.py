@@ -52,6 +52,7 @@ MODE_TAG = re.compile(r"mode:([0-7]{3,4})")
 MODE_ARG = re.compile(r"[0-7]{3,4}")
 CONTENT_PREFIX = "mtime:"
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
+MICROSECOND = datetime.timedelta(microseconds=1)
 SESSION_LINE = re.compile(
     r"""\s*(?:export\s+|\$env:)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(["'])([^"'\r\n]+)\2\s*;?\s*"""
 )
@@ -213,8 +214,7 @@ def ask(question: str) -> bool:
 
 
 def refuse_root() -> None:
-    geteuid = getattr(os, "geteuid", None)
-    if geteuid is not None and geteuid() == 0:
+    if running_uid() == 0:
         raise Refusal(
             "this tool does not run as root, since it would write root-owned secret files"
         )
@@ -456,6 +456,12 @@ def list_vaults(op: Op) -> list[Vault]:
     ]
 
 
+def bucket_of(name: str) -> str | None:
+    """The bucket a vault name holds, or None where it is not `Secrets ` and a bucket name."""
+    bucket = name[len(VAULT_PREFIX) :]
+    return bucket if name.startswith(VAULT_PREFIX) and BUCKET.fullmatch(bucket) else None
+
+
 def find_vault(vaults: Sequence[Vault], bucket: str) -> Vault | None:
     """The vault named exactly for `bucket`, refusing where more than one carries the name."""
     name = vault_name(bucket)
@@ -546,7 +552,7 @@ def content_time(item: Item) -> datetime.datetime:
     tags = [t for t in item.tags if t.startswith(CONTENT_PREFIX)]
     if not tags:
         return item.updated
-    remedy = "so push that file by name with --overwrite-newer to replace it"
+    remedy = "so pass --overwrite-newer to push or pull past it"
     if len(tags) > 1:
         raise Refusal(f"{item.title} carries {len(tags)} content-time tags, {remedy}")
     try:
@@ -558,11 +564,15 @@ def content_time(item: Item) -> datetime.datetime:
     return moment
 
 
-def content_or_none(item: Item | None) -> datetime.datetime | None:
+def content_or_updated(item: Item) -> datetime.datetime:
+    """The item's content time, or its `updated_at` where the tag is malformed.
+
+    For a write `--overwrite-newer` forces, and for a display, neither of which may refuse over it.
+    """
     try:
-        return content_time(item) if item is not None else None
+        return content_time(item)
     except Refusal:
-        return None
+        return item.updated
 
 
 def tags_for(item: Item | None, mode: int, content: datetime.datetime) -> str:
@@ -582,7 +592,7 @@ def from_ns(ns: int) -> datetime.datetime:
 
 
 def to_ns(moment: datetime.datetime) -> int:
-    return (moment - EPOCH) // datetime.timedelta(microseconds=1) * 1000
+    return (moment - EPOCH) // MICROSECOND * 1000
 
 
 def download(op: Op, vault: Vault, item: Item) -> bytes:
@@ -681,8 +691,8 @@ def cmd_status(a: argparse.Namespace, op: Op) -> int:
         return 0
     held: set[str] = set()
     for name in sorted({v.name for v in vaults if v.name.startswith(VAULT_PREFIX)}):
-        bucket = name[len(VAULT_PREFIX) :]
-        found = find_vault(vaults, bucket) if BUCKET.fullmatch(bucket) else None
+        bucket = bucket_of(name)
+        found = find_vault(vaults, bucket) if bucket is not None else None
         if found is None:
             print(f"{name}: not a bucket name, skipped")
             continue
@@ -751,7 +761,7 @@ def warn_carriage_return(title: str, data: bytes) -> None:
 
 def plan_line(plan: Plan, was: int | None) -> str:
     """One plan line, its mode shown as `was->now` where the write changes it."""
-    remote = stamp(content_or_none(plan.item))
+    remote = stamp(content_or_updated(plan.item)) if plan.item else "-"
     mode = "-" if plan.mode is None else f"{plan.mode:04o}"
     if was is not None and plan.mode is not None and was != plan.mode:
         mode = f"{was:04o}->{mode}"
@@ -803,11 +813,14 @@ def push_plans(
             if mode_or_none(item) == mode:
                 print(f"  same      {title}")
             else:
-                kept = local.mtime if a.overwrite_newer else content_time(item)
+                kept = content_or_updated(item) if a.overwrite_newer else content_time(item)
                 plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
             continue
-        written = None if a.overwrite_newer else content_time(item)
-        if written is not None and written > local.mtime:
+        written = content_or_updated(item) if a.overwrite_newer else content_time(item)
+        content = local.mtime
+        if written > local.mtime and a.overwrite_newer:
+            content = max(datetime.datetime.now(datetime.UTC), written + MICROSECOND)
+        elif written > local.mtime:
             if a.paths:
                 raise Refusal(
                     f"{title}: remote {stamp(written)} is newer than local {stamp(local.mtime)},"
@@ -818,19 +831,17 @@ def push_plans(
                 " so pass --overwrite-newer to replace it"
             )
             continue
-        plans.append(Plan("update", title, path, local, item, mode, remote, local.mtime))
+        plans.append(Plan("update", title, path, local, item, mode, remote, content))
     return plans
 
 
 def held_elsewhere(op: Op, vaults: Sequence[Vault], name: str) -> dict[str, str]:
     """Each title another bucket's vault holds, folded for case, mapped to that vault's name."""
     held: dict[str, str] = {}
-    for other in vaults:
-        bucket = other.name[len(VAULT_PREFIX) :]
-        if other.name == name or not other.name.startswith(VAULT_PREFIX):
-            continue
-        if not BUCKET.fullmatch(bucket):
-            continue
+    others = {b for v in vaults if (b := bucket_of(v.name)) is not None and v.name != name}
+    for bucket in sorted(others):
+        other = find_vault(vaults, bucket)
+        assert other is not None
         for title in members(op, other):
             held.setdefault(title.casefold(), other.name)
     return held
@@ -1053,7 +1064,12 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
             if state == "same":
                 print(f"  same      {title}")
                 continue
-            written = None if state == "mode-differs" else content_time(item)
+            if state == "mode-differs":
+                written = None
+            elif state == "differs" and not a.overwrite_newer:
+                written = content_time(item)
+            else:
+                written = content_or_updated(item)
             if (
                 state == "differs"
                 and written is not None
@@ -1147,6 +1163,7 @@ SELFTEST_CONTENT = {
     "nul-bytes": b"alpha\x00selftest\x00\xff\x01",
 }
 SELFTEST_STAMP = "mtime:2000-01-02T03:04:05.678901Z"
+SELFTEST_RESTAMP = "mtime:2000-01-03T04:05:06.789012Z"
 
 
 def listed(op: Op, vault: Vault, title: str, after: str) -> Item:
@@ -1206,7 +1223,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         )
     )
     op.call(
-        ["item", "edit", first.id, "--vault", vault.id, "--tags", f"mode:0640,{SELFTEST_STAMP}"],
+        ["item", "edit", first.id, "--vault", vault.id, "--tags", f"mode:0640,{SELFTEST_RESTAMP}"],
         write=True,
         detail=first.title,
     )
@@ -1214,7 +1231,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "item edit --tags replaces",
-            sorted(retagged.tags) == ["mode:0640", SELFTEST_STAMP],
+            sorted(retagged.tags) == ["mode:0640", SELFTEST_RESTAMP],
             f"tags read back as {list(retagged.tags)}",
         )
     )
@@ -1250,7 +1267,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "document edit keeps the tags",
-            sorted(after.tags) == ["mode:0640", SELFTEST_STAMP],
+            sorted(after.tags) == ["mode:0640", SELFTEST_RESTAMP],
             f"tags read back as {list(after.tags)}",
         )
     )

@@ -706,6 +706,8 @@ class TestPush(Case):
 
     def test_a_title_no_other_bucket_holds_is_created(self) -> None:
         self.fake.add_item(self.vault("beta"), ".secrets/beta_api_token", SECRET)
+        stray = self.fake.add_vault("Secrets Not A Bucket")
+        self.fake.add_item(stray, ".secrets/alpha_api_token", SECRET)
         code, _, err = self.push(str(self.write(".secrets/alpha_api_token")))
         self.assertEqual(code, 0, err)
         self.assertIn(("document", "create"), [key_of(a) for a in self.fake.writes()])
@@ -1240,6 +1242,31 @@ class TestContentTime(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0640", f"mtime:{EARLY}"))
 
+    def test_a_forced_retag_keeps_a_valid_content_time(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.stamped(self.write(".secrets/alpha", mode=0o640), LATER)
+        code, _, err = self.run_main("push", "--bucket", "alpha", "--overwrite-newer")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{EARLY}"])
+
+    def test_a_forced_update_reads_as_newer_than_what_it_replaced(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{LATER}"))
+        path = self.stamped(self.write(".secrets/alpha"), EARLY)
+        code, _, err = self.run_main("push", "--bucket", "alpha", "--overwrite-newer", str(path))
+        self.assertEqual(code, 0, err)
+        (tag,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
+        moment = ss.datetime.datetime.fromisoformat(tag[len("mtime:") :])
+        self.assertGreater(moment, ss.datetime.datetime.fromisoformat(LATER))
+        second = self.scratch / "second"
+        second.mkdir(mode=0o700)
+        self.home = second
+        stale = self.stamped(self.write(".secrets/alpha", b"old\n"), LATER)
+        code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(stale.read_bytes(), SECRET)
+
     def test_a_retag_of_an_untagged_item_records_its_update_time(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET, updated="2011-01-01T00:00:00Z")
@@ -1293,6 +1320,25 @@ class TestContentTime(Case):
         code, out, _ = self.run_main("pull", "--bucket", "alpha")
         self.assertEqual(code, 0)
         self.assertIn("Nothing to pull", out)
+
+    def test_a_malformed_content_tag_never_blocks_a_pull_with_nothing_to_compare(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(
+            vid, ".secrets/alpha", SECRET, ("mode:0600", "mtime:bogus"), "2011-01-01T00:00:00Z"
+        )
+        code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        path = self.home / ".secrets/alpha"
+        self.assertEqual(path.read_bytes(), SECRET)
+        want = ss.to_ns(ss.datetime.datetime.fromisoformat("2011-01-01T00:00:00Z"))
+        self.assertEqual(path.stat().st_mtime_ns, want)
+        self.write(".secrets/alpha", b"stale\n")
+        code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("--overwrite-newer", err)
+        code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes", "--overwrite-newer")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(path.read_bytes(), SECRET)
 
     def test_a_malformed_content_tag_is_refused_until_pushed_with_overwrite_newer(self) -> None:
         for tags in (
