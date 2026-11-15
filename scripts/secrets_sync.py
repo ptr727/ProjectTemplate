@@ -511,6 +511,11 @@ def members(op: Op, vault: Vault) -> dict[str, Item]:
             raise Refusal(
                 f"{vault.name} holds {other!r} and {item.title!r}, which collide case-insensitively"
             )
+        if any(t.startswith(CONTENT_PREFIX) for t in item.tags) and not tagged_content_time(item):
+            sys.stderr.write(
+                f"warning: {item.title} carries a malformed or repeated content-time tag,"
+                " so its update time stands in until its next update or retag\n"
+            )
         items[item.title] = item
     return items
 
@@ -542,37 +547,27 @@ def content_tag(moment: datetime.datetime) -> str:
     return CONTENT_PREFIX + moment.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+def tagged_content_time(item: Item) -> datetime.datetime | None:
+    """The moment the item's one well-formed `mtime:<iso>` tag carries, or None."""
+    tags = [t for t in item.tags if t.startswith(CONTENT_PREFIX)]
+    if len(tags) != 1:
+        return None
+    try:
+        moment = datetime.datetime.fromisoformat(tags[0][len(CONTENT_PREFIX) :])
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
 def content_time(item: Item) -> datetime.datetime:
     """When the item's content was last written locally, from its one `mtime:<iso>` tag.
 
     A push sets the tag from the file and a retag keeps it, so a mode-only write moves `updated_at`
     and never this. An item carrying no such tag, pushed before the tag existed, reads as its
-    `updated_at`, and its next push adds the tag.
+    `updated_at`. So does one whose tag is malformed or repeated, which `members` warns about. The
+    item's next update or retag writes one well-formed tag.
     """
-    tags = [t for t in item.tags if t.startswith(CONTENT_PREFIX)]
-    if not tags:
-        return item.updated
-    remedy = "so pass --overwrite-newer to push or pull past it"
-    if len(tags) > 1:
-        raise Refusal(f"{item.title} carries {len(tags)} content-time tags, {remedy}")
-    try:
-        moment = datetime.datetime.fromisoformat(tags[0][len(CONTENT_PREFIX) :])
-    except ValueError:
-        moment = None
-    if moment is None or moment.tzinfo is None:
-        raise Refusal(f"{item.title} carries the malformed content-time tag {tags[0]!r}, {remedy}")
-    return moment
-
-
-def content_or_updated(item: Item) -> datetime.datetime:
-    """The item's content time, or its `updated_at` where the tag is malformed.
-
-    For a write `--overwrite-newer` forces, and for a display, neither of which may refuse over it.
-    """
-    try:
-        return content_time(item)
-    except Refusal:
-        return item.updated
+    return tagged_content_time(item) or item.updated
 
 
 def tags_for(item: Item | None, mode: int, content: datetime.datetime) -> str:
@@ -583,7 +578,7 @@ def tags_for(item: Item | None, mode: int, content: datetime.datetime) -> str:
 
 def running_uid() -> int | None:
     geteuid = getattr(os, "geteuid", None)
-    return None if geteuid is None else int(geteuid())
+    return None if geteuid is None else geteuid()
 
 
 def from_ns(ns: int) -> datetime.datetime:
@@ -761,7 +756,7 @@ def warn_carriage_return(title: str, data: bytes) -> None:
 
 def plan_line(plan: Plan, was: int | None) -> str:
     """One plan line, its mode shown as `was->now` where the write changes it."""
-    remote = stamp(content_or_updated(plan.item)) if plan.item else "-"
+    remote = stamp(content_time(plan.item)) if plan.item else "-"
     mode = "-" if plan.mode is None else f"{plan.mode:04o}"
     if was is not None and plan.mode is not None and was != plan.mode:
         mode = f"{was:04o}->{mode}"
@@ -813,10 +808,11 @@ def push_plans(
             if mode_or_none(item) == mode:
                 print(f"  same      {title}")
             else:
-                kept = content_or_updated(item) if a.overwrite_newer else content_time(item)
-                plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
+                plans.append(
+                    Plan("retag", title, path, local, item, mode, remote, content_time(item))
+                )
             continue
-        written = content_or_updated(item) if a.overwrite_newer else content_time(item)
+        written = content_time(item)
         content = local.mtime
         if written > local.mtime and a.overwrite_newer:
             content = max(datetime.datetime.now(datetime.UTC), written + MICROSECOND)
@@ -1041,8 +1037,7 @@ def refuse_foreign_owner(path: Path, local: Local) -> None:
     An unprivileged user cannot give a file away, so a replaced file would silently become the
     running user's. Off Windows only, since NTFS ownership is not a POSIX uid.
     """
-    uid = running_uid()
-    if local.data is None or local.uid is None or uid is None or local.uid == uid:
+    if local.uid is None or local.uid == running_uid():
         return
     raise Refusal(
         f"{path} is owned by uid {local.uid}, not the running user, so pull cannot replace it"
@@ -1064,12 +1059,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
             if state == "same":
                 print(f"  same      {title}")
                 continue
-            if state == "mode-differs":
-                written = None
-            elif state == "differs" and not a.overwrite_newer:
-                written = content_time(item)
-            else:
-                written = content_or_updated(item)
+            written = None if state == "mode-differs" else content_time(item)
             if (
                 state == "differs"
                 and written is not None

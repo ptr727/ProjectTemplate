@@ -96,6 +96,7 @@ class FakeOp:
         self.signin_token = "constructed-token"
         self.edit_moves_id = False
         self.merge_tags = False
+        self.drop_content_tag = False
         self.archive_noop = False
         self.omit_updated = False
         self.signin_ambient = False
@@ -225,6 +226,8 @@ class FakeOp:
             previous = vault[argv[2]]["tags"]
             if self.merge_tags and isinstance(previous, tuple):
                 tags = (*previous, *tags)
+            if self.drop_content_tag:
+                tags = tuple(t for t in tags if not t.startswith(ss.CONTENT_PREFIX))
             vault[argv[2]].update(tags=tags, updated_at=self.stamp())
             if self.edit_moves_id:
                 vault[f"i{next(self.ids)}"] = vault.pop(argv[2])
@@ -1287,13 +1290,11 @@ class TestContentTime(Case):
         newer = self.stamped(self.write(".secrets/alpha", b"edited-on-second\n"), LATER)
         self.home = first
         os.chmod(path, 0o640)
-        self.assertEqual(self.run_main("push", "--bucket", "alpha")[0], 0)
         vid = next(iter(self.fake.vaults))
-        updated = ss.datetime.datetime.fromisoformat(
-            str(self.item(vid, ".secrets/alpha")["updated_at"])
-        )
-        self.assertGreater(
-            updated, ss.datetime.datetime.fromisoformat(LATER), "the retag moved updated_at"
+        before = self.item(vid, ".secrets/alpha")["updated_at"]
+        self.assertEqual(self.run_main("push", "--bucket", "alpha")[0], 0)
+        self.assertNotEqual(
+            self.item(vid, ".secrets/alpha")["updated_at"], before, "the retag moved updated_at"
         )
         self.home = second
         code, out, err = self.run_main("pull", "--bucket", "alpha", "--yes")
@@ -1321,26 +1322,7 @@ class TestContentTime(Case):
         self.assertEqual(code, 0)
         self.assertIn("Nothing to pull", out)
 
-    def test_a_malformed_content_tag_never_blocks_a_pull_with_nothing_to_compare(self) -> None:
-        vid = self.vault()
-        self.fake.add_item(
-            vid, ".secrets/alpha", SECRET, ("mode:0600", "mtime:bogus"), "2011-01-01T00:00:00Z"
-        )
-        code, _, err = self.run_main("pull", "--bucket", "alpha")
-        self.assertEqual(code, 0, err)
-        path = self.home / ".secrets/alpha"
-        self.assertEqual(path.read_bytes(), SECRET)
-        want = ss.to_ns(ss.datetime.datetime.fromisoformat("2011-01-01T00:00:00Z"))
-        self.assertEqual(path.stat().st_mtime_ns, want)
-        self.write(".secrets/alpha", b"stale\n")
-        code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
-        self.assertEqual(code, 1)
-        self.assertIn("--overwrite-newer", err)
-        code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes", "--overwrite-newer")
-        self.assertEqual(code, 0, err)
-        self.assertEqual(path.read_bytes(), SECRET)
-
-    def test_a_malformed_content_tag_is_refused_until_pushed_with_overwrite_newer(self) -> None:
+    def test_a_malformed_content_tag_reads_as_the_update_time_with_a_warning(self) -> None:
         for tags in (
             ("mode:0600", "mtime:bogus"),
             ("mode:0600", f"mtime:{EARLY}", f"mtime:{LATER}"),
@@ -1348,21 +1330,39 @@ class TestContentTime(Case):
             with self.subTest(tags=tags):
                 fake = FakeOp()
                 vid = fake.add_vault("Secrets alpha")
-                fake.add_item(vid, ".secrets/alpha", b"old\n", tags)
-                path = self.write(".secrets/alpha")
+                fake.add_item(vid, ".secrets/alpha", SECRET, tags, "2011-01-01T00:00:00Z")
+                path = self.home / ".secrets/alpha"
                 with unittest.mock.patch.object(ss, "run_op", fake):
-                    code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
-                    self.assertEqual(code, 1)
-                    self.assertIn("--overwrite-newer", err)
-                    code, _, err = self.run_main("push", "--bucket", "alpha", str(path))
-                    self.assertEqual(code, 1)
-                    self.assertEqual(fake.writes(), [])
-                    code, _, err = self.run_main(
-                        "push", "--bucket", "alpha", "--overwrite-newer", str(path)
-                    )
+                    code, _, err = self.run_main("pull", "--bucket", "alpha")
+                    self.assertEqual(code, 0, err)
+                    self.assertIn("malformed or repeated content-time tag", err)
+                    want = ss.to_ns(ss.datetime.datetime.fromisoformat("2011-01-01T00:00:00Z"))
+                    self.assertEqual(path.stat().st_mtime_ns, want)
+                    os.chmod(path, 0o640)
+                    code, _, err = self.run_main("push", "--bucket", "alpha")
                 self.assertEqual(code, 0, err)
                 only = next(iter(fake.items[vid].values()))
-                self.assertEqual(len(stamps(only["tags"])), 1)
+                self.assertEqual(stamps(only["tags"]), ["mtime:2011-01-01T00:00:00.000000Z"])
+                path.unlink()
+
+    def test_a_forced_update_past_a_future_content_time_still_moves_it_forward(self) -> None:
+        vid = self.vault()
+        future = "2099-01-01T00:00:00.000000Z"
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{future}"))
+        path = self.write(".secrets/alpha")
+        code, _, err = self.run_main("push", "--bucket", "alpha", "--overwrite-newer", str(path))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            stamps(self.item(vid, ".secrets/alpha")["tags"]), ["mtime:2099-01-01T00:00:00.000001Z"]
+        )
+
+    def test_a_content_tag_missing_after_the_write_fails(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode:0600",))
+        self.write(".secrets/alpha")
+        self.fake.drop_content_tag = True
+        code, _, err = self.run_main("push", "--bucket", "alpha")
+        self.assertEqual(code, 2)
+        self.assertIn("mtime:", err)
 
 
 @POSIX_ONLY
