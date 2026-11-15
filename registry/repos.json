@@ -395,13 +395,12 @@
             "workflowModel": "operational",
             "lineEndings": "lf",
             "hasDevelop": true,
-            "pullRequestCheck": false,
-            "publish": [],
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "dispatch-only",
             "pythonDirectories": ["scripts"],
-            "driftNotes": ["Private document repository the maintainer edits directly on develop. Its maintained Python is the scripts tree, which has no root pyproject.toml or uv.lock.", "Anything under an Archive directory is verbatim source material that is never modified, so the repository's own style and Markdown checks skip it. One archived .py file sits outside pythonDirectories for that reason, so the audit's python-directories drift naming it is expected.", "Its pullRequestCheck and publish fields predate the workflows its standup has since added, so its next resync reconciles them."]
+            "driftNotes": ["Private document repository the maintainer edits directly on develop. Its maintained Python is the scripts tree, which has no root pyproject.toml or uv.lock.", "Anything under an Archive directory is verbatim source material that is never modified, so the repository's own style and Markdown checks skip it. One archived .py file sits outside pythonDirectories for that reason, so the audit's python-directories drift naming it is expected."]
         },
         {
             "name": "DiskSpeedTest",
