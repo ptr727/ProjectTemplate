@@ -759,8 +759,30 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         mtime = ss.read_local(path).mtime
         assert mtime is not None
-        want = ss.content_tag(mtime)
-        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [want])
+        (tag,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
+        self.assertGreaterEqual(ss.datetime.datetime.fromisoformat(tag[len("mtime:") :]), mtime)
+
+    def test_a_named_forced_push_never_moves_a_content_time_backward(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(
+            vid, ".secrets/alpha", SECRET, ("mode:0600", "mtime:2099-01-01T00:00:00Z")
+        )
+        path = self.write(".secrets/alpha")
+        code, _, err = self.push("--overwrite-newer", str(path))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            stamps(self.item(vid, ".secrets/alpha")["tags"]), ["mtime:2099-01-01T00:00:00.000001Z"]
+        )
+
+    def test_a_tag_write_reported_failed_but_landed_is_verified(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n")
+        path = self.write(".secrets/alpha")
+        self.fake.fail_after.add(("item", "edit"))
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        self.assertIn("so it is verified", err)
+        self.assertNotIn("push it again", err)
 
     def test_a_title_another_bucket_holds_is_refused_before_any_write(self) -> None:
         other = self.vault("beta")

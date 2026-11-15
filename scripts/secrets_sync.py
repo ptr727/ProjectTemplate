@@ -3,9 +3,10 @@
 
 A bucket is a named set of secret files owned by one project or host. Each bucket is one vault
 named exactly `Secrets <bucket>`, and each file is one Document item in it. An item's title is the
-file's POSIX path relative to the home directory, and its mode rides as a `mode:<octal>` tag. The
-time its content was last written locally rides as an `mtime:<UTC ISO>` tag. Staleness is judged
-by that time, so a mode-only push never reads as newer content.
+file's POSIX path relative to the home directory, and its mode rides as a `mode:<octal>` tag. Its
+content time rides as an `mtime:<UTC ISO>` tag, normally the file's mtime when it was pushed.
+Staleness is judged by that time. A mode-only push keeps it, unless it names the file with
+`--overwrite-newer`, which makes that content the newest.
 
 Nothing is tracked locally. The live comparison between the vault and the home directory is the
 only truth, so no state file can drift from either side. Consumers keep reading the flat files, and
@@ -576,15 +577,21 @@ def malformed_content_tag(item: Item) -> bool:
 
 
 def content_time(item: Item) -> datetime.datetime:
-    """When the item's content was last written locally, from its one `mtime:<iso>` tag.
+    """The time the item's content counts as written, from its one `mtime:<iso>` tag.
 
-    A push sets the tag from the file and a retag keeps it, so a mode-only write moves `updated_at`
-    and never this. An item carrying no such tag, pushed before the tag existed, reads as its
-    `updated_at`. So does one whose tag is malformed or repeated, which `members` warns about. The
-    item's next update or retag writes one well-formed tag, and a push retags it even where nothing
-    else differs.
+    A push sets the tag from the file's mtime, and a retag keeps it, so a mode-only write moves
+    `updated_at` and never this. A forced push sets it past the content it replaced instead, per
+    `forced_time`. An item carrying no such tag, pushed before the tag existed, reads as its
+    `updated_at`, and its next update or retag writes the tag. One whose tag is malformed or
+    repeated reads the same way, which `members` warns about, and a push retags it even where
+    nothing else differs.
     """
     return tagged_content_time(item) or item.updated
+
+
+def forced_time(replaced: datetime.datetime) -> datetime.datetime:
+    """A content time every other host reads as newer than the content it replaces."""
+    return max(datetime.datetime.now(datetime.UTC), replaced + MICROSECOND)
 
 
 def tags_for(item: Item | None, mode: int, content: datetime.datetime) -> str:
@@ -824,17 +831,17 @@ def push_plans(
             continue
         remote = download(op, vault, item)
         if remote == local.data:
-            stamping = bool(a.paths) and a.overwrite_newer and content_time(item) != local.mtime
-            if mode_or_none(item) == mode and not malformed_content_tag(item) and not stamping:
+            forced = bool(a.paths) and a.overwrite_newer
+            if mode_or_none(item) == mode and not malformed_content_tag(item) and not forced:
                 print(f"  same      {title}")
             else:
-                kept = local.mtime if stamping else content_time(item)
+                kept = forced_time(content_time(item)) if forced else content_time(item)
                 plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
             continue
         written = content_time(item)
         content = local.mtime
         if written > local.mtime and a.overwrite_newer:
-            content = max(datetime.datetime.now(datetime.UTC), written + MICROSECOND)
+            content = forced_time(written)
         elif written > local.mtime:
             if a.paths:
                 raise Refusal(
@@ -928,9 +935,11 @@ def refuse_changed(op: Op, vault: Vault, title: str, item: Item | None) -> None:
         raise Refusal(f"{title} changed remotely after the plan was printed, so it was not written")
 
 
-def push_one(op: Op, vault: Vault, plan: Plan) -> None:
+def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
+    """Write one plan, re-checking its target first unless this push just created the vault."""
     assert plan.mode is not None and plan.content is not None
-    refuse_changed(op, vault, plan.title, plan.item)
+    if not fresh:
+        refuse_changed(op, vault, plan.title, plan.item)
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
@@ -963,12 +972,18 @@ def push_one(op: Op, vault: Vault, plan: Plan) -> None:
             detail=plan.title,
         )
     except Execution as exc:
-        if plan.action != "update":
+        landed = members(op, vault).get(plan.title)
+        if landed is not None and sorted(landed.tags) == sorted(tags.split(",")):
+            sys.stderr.write(
+                f"op item edit reported a failure, yet {plan.title} carries its tags, so it is verified\n"
+            )
+        elif plan.action != "update":
             raise
-        raise Execution(
-            f"{plan.title}: the content was written but its tags were not, so once op answers,"
-            " push it again by name with --overwrite-newer"
-        ) from exc
+        else:
+            raise Execution(
+                f"{plan.title}: the content was written but its tags were not, so once op answers,"
+                " push it again by name with --overwrite-newer"
+            ) from exc
     if not op.dry_run:
         verify(op, vault, plan, plan.item.id)
 
@@ -989,11 +1004,12 @@ def cmd_push(a: argparse.Namespace, op: Op) -> int:
         print(plan_line(plan, mode_or_none(plan.item) if plan.item else None))
     if not op.dry_run:
         confirm(op, a.yes, f"Push {len(plans)} change(s) to {name}?")
+    fresh = vault is None
     if vault is None:
         vault = create_vault(op, a.bucket)
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
-        push_one(op, vault, plan)
+        push_one(op, vault, plan, fresh)
     if not op.dry_run:
         print(f"Pushed and read back {len(plans)} item(s).")
     return 0
@@ -1206,10 +1222,10 @@ SELFTEST_CONTENT = {
     "crlf": b"alpha-line-one\r\nalpha-line-two\r\n",
     "nul-bytes": b"alpha\x00selftest\x00\xff\x01",
 }
-SELFTEST_STAMP = content_tag(datetime.datetime(2000, 1, 2, 3, 4, 5, 678901, datetime.UTC))
-SELFTEST_RESTAMP = content_tag(datetime.datetime(2000, 1, 3, 4, 5, 6, 789012, datetime.UTC))
-SELFTEST_MODE = mode_tag(0o600)
-SELFTEST_REMODE = mode_tag(0o640)
+SELFTEST_STAMP = datetime.datetime(2000, 1, 2, 3, 4, 5, 678901, datetime.UTC)
+SELFTEST_RESTAMP = datetime.datetime(2000, 1, 3, 4, 5, 6, 789012, datetime.UTC)
+SELFTEST_TAGS = tags_for(None, 0o600, SELFTEST_STAMP)
+SELFTEST_RETAGS = tags_for(None, 0o640, SELFTEST_RESTAMP)
 
 
 def listed(op: Op, vault: Vault, title: str, after: str) -> Item:
@@ -1248,7 +1264,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
                 "--title",
                 title,
                 "--tags",
-                f"{SELFTEST_MODE},{SELFTEST_STAMP}",
+                SELFTEST_TAGS,
             ],
             write=True,
             detail=title,
@@ -1264,7 +1280,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "create sets --tags",
-            sorted(first.tags) == [SELFTEST_MODE, SELFTEST_STAMP],
+            sorted(first.tags) == sorted(SELFTEST_TAGS.split(",")),
             f"tags read back as {list(first.tags)}",
         )
     )
@@ -1276,7 +1292,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
             "--vault",
             vault.id,
             "--tags",
-            f"{SELFTEST_REMODE},{SELFTEST_RESTAMP}",
+            SELFTEST_RETAGS,
         ],
         write=True,
         detail=first.title,
@@ -1285,7 +1301,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "item edit --tags replaces",
-            sorted(retagged.tags) == [SELFTEST_REMODE, SELFTEST_RESTAMP],
+            sorted(retagged.tags) == sorted(SELFTEST_RETAGS.split(",")),
             f"tags read back as {list(retagged.tags)}",
         )
     )
@@ -1321,7 +1337,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "document edit keeps the tags",
-            sorted(after.tags) == [SELFTEST_REMODE, SELFTEST_RESTAMP],
+            sorted(after.tags) == sorted(SELFTEST_RETAGS.split(",")),
             f"tags read back as {list(after.tags)}",
         )
     )
