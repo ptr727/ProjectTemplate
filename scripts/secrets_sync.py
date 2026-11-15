@@ -838,10 +838,8 @@ def push_plans(
                 plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
             continue
         written = content_time(item)
-        content = local.mtime
-        if written > local.mtime and a.overwrite_newer:
-            content = forced_time(written)
-        elif written > local.mtime:
+        content = local.mtime if local.mtime > written else forced_time(written)
+        if written > local.mtime and not a.overwrite_newer:
             if a.paths:
                 raise Refusal(
                     f"{title}: remote {stamp(written)} is newer than local {stamp(local.mtime)},"
@@ -1034,6 +1032,7 @@ def cmd_push(a: argparse.Namespace, op: Op) -> int:
         print(plan_line(plan, mode_or_none(plan.item) if plan.item else None))
     if not op.dry_run:
         confirm(op, a.yes, f"Push {len(plans)} change(s) to {name}?")
+        refuse_held_elsewhere(op, list_vaults(op), name, plans)
     fresh = vault is None
     if vault is None:
         vault = create_vault(op, a.bucket)

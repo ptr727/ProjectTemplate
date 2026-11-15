@@ -942,6 +942,33 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.run_main("status", "--bucket", "beta")[0], 1)
 
+    def test_a_title_another_bucket_takes_during_the_prompt_is_refused(self) -> None:
+        beta = self.vault("beta")
+        path = self.write(".secrets/alpha_api_token")
+
+        def elsewhere(question: str) -> bool:
+            self.fake.add_item(beta, ".secrets/alpha_api_token", SECRET)
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", elsewhere):
+            code, _, err = self.push(str(path))
+        self.assertEqual(code, 1, err)
+        self.assertIn("already held by Secrets beta", err)
+        self.assertEqual(self.fake.writes(), [])
+
+    def test_an_update_at_the_same_content_time_still_moves_it_forward(self) -> None:
+        vid = self.vault()
+        tag = "2010-01-01T00:00:00.000000Z"
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{tag}"))
+        path = self.write(".secrets/alpha")
+        ns = ss.to_ns(ss.datetime.datetime.fromisoformat(tag))
+        os.utime(path, ns=(ns, ns))
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        (after,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
+        moved = ss.datetime.datetime.fromisoformat(after[len("mtime:") :])
+        self.assertGreater(moved, ss.datetime.datetime.fromisoformat(tag))
+
     def test_a_title_no_other_bucket_holds_is_created(self) -> None:
         self.fake.add_item(self.vault("beta"), ".secrets/beta_api_token", SECRET)
         stray = self.fake.add_vault("Secrets Not A Bucket")
