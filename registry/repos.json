@@ -236,8 +236,8 @@
             "publish": [],
             "requiredSecrets": ["KICADLIBRARY_READ_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["EDA/KiCad PCB design that checks out the private ptr727/KiCadLibrary submodule in CI with KICADLIBRARY_READ_TOKEN, so a Dependabot-triggered run needs the Dependabot copy too.", "Planned: a two-phase github-release source release like KiCadLibrary's, a dependabot.yml, and the python type once its scripts and their tests land. Its resync writes each into this entry when it lands, and CODECOV_TOKEN, kept in both stores for those tests, reads as unclaimed until then."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["EDA/KiCad PCB design that checks out the private ptr727/KiCadLibrary submodule in CI with KICADLIBRARY_READ_TOKEN, so a Dependabot-triggered run needs the Dependabot copy too.", "Planned: a dispatch-only source release publisher (ptr727/EspDinIoT#29), a dependabot.yml, and the python type once its scripts and their tests land. Its resync writes each into this entry when it lands, and CODECOV_TOKEN, kept in both stores for those tests, reads as unclaimed until then."]
         },
         {
             "name": "ESPHome-Config",
@@ -277,15 +277,15 @@
             "shortName": "devkitc",
             "url": "https://github.com/ptr727/DevKitCIoT",
             "description": "ESP32-DevKitC IoT controller board with a PSU, AC relay, dry contact inputs, and temperature sensor.",
-            "status": "cataloged",
+            "status": "archived",
             "types": ["eda"],
             "groundTruthBranch": "main",
             "hasDevelop": true,
             "publish": [],
             "requiredSecrets": [],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM), with no release pipeline.", "Its project-local lib/ is a frozen copy of the KiCadLibrary 2.0.0 release parts, which later KiCadLibrary releases do not update."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["KiCad PCB design and fabrication data (Gerbers, BOM), archived on GitHub with no release pipeline, so it never took the source release every cataloged repository owes.", "Its project-local lib/ is a frozen copy of the KiCadLibrary 2.0.0 release parts, which later KiCadLibrary releases do not update."]
         },
         {
             "name": "PhotoCleaner",
@@ -325,8 +325,8 @@
             "publish": [],
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
-            "driftNotes": ["Work-in-progress: pre-CI (no .github/workflows, no version.json, no repo-config). main+develop both exist."]
+            "releaseTrigger": "dispatch-only",
+            "driftNotes": ["Work-in-progress: no version.json and no repo-config. main+develop both exist.", "It carries no publish-release.yml yet, owed per ptr727/AudioCleaner#27."]
         },
         {
             "name": "Vantage-Config",
@@ -399,9 +399,9 @@
             "publish": [],
             "requiredSecrets": ["CODECOV_TOKEN"],
             "consumerModel": "pull",
-            "releaseTrigger": "none",
+            "releaseTrigger": "dispatch-only",
             "pythonDirectories": ["scripts"],
-            "driftNotes": ["Private document repository the maintainer edits directly on develop. Its maintained Python is the scripts tree, which has no root pyproject.toml or uv.lock.", "Anything under an Archive directory is verbatim source material that is never modified, so the repository's own style and Markdown checks skip it. One archived .py file sits outside pythonDirectories for that reason, so the audit's python-directories drift naming it is expected.", "It carries no workflows today, so pullRequestCheck is false, publish is empty, and releaseTrigger is none. Its standup updates each field when the workflow it describes lands."]
+            "driftNotes": ["Private document repository the maintainer edits directly on develop. Its maintained Python is the scripts tree, which has no root pyproject.toml or uv.lock.", "Anything under an Archive directory is verbatim source material that is never modified, so the repository's own style and Markdown checks skip it. One archived .py file sits outside pythonDirectories for that reason, so the audit's python-directories drift naming it is expected.", "Its pullRequestCheck and publish fields predate the workflows its standup has since added, so its next resync reconciles them."]
         },
         {
             "name": "DiskSpeedTest",

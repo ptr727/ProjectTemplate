@@ -1471,6 +1471,31 @@ class RegistryEntryGateCase(unittest.TestCase):
         # An override of None drops the key, which is how a case declares a field absent rather than declared null.
         return {k: v for k, v in base.items() if v is not None}
 
+    def test_the_retired_none_release_trigger_is_refused(self) -> None:
+        for trigger in ("two-phase", "dispatch-only", "none"):
+            with self.subTest(trigger=trigger):
+                output = self.run_against(
+                    self.entry(
+                        status="cataloged",
+                        classificationPending=None,
+                        types=["python"],
+                        consumerModel="push",
+                        releaseTrigger=trigger,
+                    )
+                )
+                refusal = f"Fixture: releaseTrigger '{trigger}' invalid (expected one of two-phase, dispatch-only)"
+                if trigger == "none":
+                    self.assertIn(refusal, output)
+                else:
+                    self.assertNotIn("releaseTrigger", output)
+
+    def test_the_retired_none_default_release_trigger_is_refused(self) -> None:
+        output = self.run_against(self.entry(), defaults={"releaseTrigger": "none"})
+        self.assertIn(
+            "defaults.releaseTrigger 'none' invalid (expected one of two-phase, dispatch-only)",
+            output,
+        )
+
     def test_a_types_value_that_is_not_a_list_of_strings_is_refused(self) -> None:
         for value in ({"python": 1}, 5, "python", ["python", 3]):
             with self.subTest(value=value):
