@@ -23,7 +23,7 @@
         }
     },
     "$defs": {
-        "releaseTrigger": { "enum": ["two-phase", "dispatch-only", "none"] },
+        "releaseTrigger": { "enum": ["two-phase", "dispatch-only"] },
         "workflowModel": { "enum": ["release", "operational"] },
         "lineEndings": { "enum": ["lf", "crlf"] },
         "mechanism": { "enum": ["oidc", "static-secret", "none"] },

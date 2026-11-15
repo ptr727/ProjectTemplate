@@ -112,7 +112,7 @@ you wire `_version.py` to something that increments (the usual options are `hatc
 version.json bridge, or manual bumps), no new PyPI versions land. Publishing with
 `skip-existing: true` keeps a stuck placeholder version from failing the run.
 
-**Source-only repos** (no PyPI publish, with a source-release on dispatch or no release at all) do
-not need `_version.py`. Keep a static `version` in `pyproject.toml` `[project]`, or let the
-release pipeline's version source (e.g. NBGV plus `version.json`) own the tag. There is no publish
+**Source-only repos** (no PyPI publish, with a source release on dispatch) do
+not need `_version.py`. The release pipeline's version source, NBGV plus `version.json`, owns the
+tag. A static `version` in `pyproject.toml` `[project]` does not replace it. There is no publish
 step to guard, so `skip-existing` does not apply.

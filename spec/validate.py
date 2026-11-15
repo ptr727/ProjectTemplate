@@ -32,7 +32,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Scope-selector vocabularies, per spec/scope-model.md, kept in sync with the $defs in registry/repos.schema.json.
 # The four namespaces, meaning project types plus these three, must stay disjoint so a flat appliesTo token set in spec/files.json is unambiguous.
 WORKFLOW_MODELS = ("release", "operational")
-RELEASE_TRIGGERS = ("two-phase", "dispatch-only", "none")
+RELEASE_TRIGGERS = ("two-phase", "dispatch-only")
 CONSUMER_MODELS = ("push", "pull")
 # The deployment-branch-policy forms a repo's `environments` entry may declare, kept in sync with the $defs in registry/repos.schema.json.
 # This is not a scope selector: it names no audit scope and selects nothing in spec/files.json, so it sits outside the disjointness rule above.

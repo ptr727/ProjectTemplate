@@ -67,8 +67,9 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    open, whose `merge=UNKNOWN` never clears, so stop re-reading it. Confirm its `merge_commit=` per
    step 4, run the ready-report comparison below against its `head=`, and report both. Dispatch
    nothing on the chosen scope alone, since whoever merged it may have released it already. Where
-   a release scope was chosen, look, then ask. Read this repo's `releaseTrigger` as step 5 does,
-   and where it reads `none` report that no release is configured. Otherwise read the publisher's
+   a release scope was chosen, look, then ask. Confirm the publisher exists as step 5 does. Read it
+   at `<merge-sha>` below rather than at a tip step 4 confirmed, since `main` may have moved past
+   the merge. Where it is absent report the missing publisher. Otherwise read the publisher's
    runs on the merge commit, `gh run list --repo owner/repo --workflow publish-release.yml --commit
    <merge-sha> --json databaseId,event,headBranch,status,conclusion,createdAt`. `<merge-sha>` is
    the full 40-character SHA, `gh pr view [number] --repo owner/repo --json mergeCommit --jq
@@ -112,20 +113,13 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    refuses the merge if the head moved past that SHA. Never `--delete-branch`, the promotion
    PR's head is `develop`.
 4. Confirm the merge landed, `mergedAt` set, `main`'s tip matching the merge commit.
-5. When the chosen scope includes a release, first bring the hub checkout used for this procedure
-   current, `git fetch origin main`. Then read this repo's `releaseTrigger` from that fetched tip
-   rather than a possibly-stale working tree copy. That matters when the target repo is the hub itself
-   and this exact promotion changed its own registry entry. Select the one matching entry
-   explicitly, falling back to the registry's own default when that entry sets no
-   `releaseTrigger` of its own. Stop and report rather than guessing when selection is not
-   exactly one match. On a non-1 count exit non-zero rather than returning empty with success. An
-   ambiguous or missing match must fail loud, not read as an empty value still safe to act on: `git
-   show origin/main:registry/repos.json | jq -r --arg name '<repo-name>' '(.repos | map(select(.name
-   == $name))) as $m | if ($m | length) == 1 then ($m[0].releaseTrigger // .defaults.releaseTrigger)
-   else error("expected exactly one registry entry for \($name), got \($m | length)") end'`. Two
-   cases, `none` versus anything else. When it
-   reads `none`, report that no
-   release is configured, dispatch and run-correlation (step 6) do not apply. Otherwise, dispatch
+5. When the chosen scope includes a release, confirm the publisher exists on `main`'s tip from
+   step 4. Every fleet repository releases, so its `releaseTrigger` selects no case here. Read
+   `gh api "repos/owner/repo/contents/.github/workflows/publish-release.yml?ref=<main-sha>" --jq
+   .path`, `<main-sha>` being the full SHA step 4 confirmed. An answer naming the path means the
+   publisher exists. An HTTP 404 means it is absent. That repository owes a publisher the audit
+   reports as drift, so report it, and dispatch and run-correlation (step 6) do not apply. Any
+   other failure is reported with its output, never read as either answer. Where it exists, dispatch
    explicitly, `gh workflow run publish-release.yml --ref main --repo owner/repo`, or `--ref
    develop` only when the maintainer explicitly asked for a prerelease dispatch instead.
 6. Correlate the specific run this dispatch produced rather than assuming the newest one is it.
