@@ -48,9 +48,9 @@ from types import FrameType
 
 VAULT_PREFIX = "Secrets "
 BUCKET = re.compile(r"[a-z0-9-]+")
-MODE_TAG = re.compile(r"mode:([0-7]{3,4})")
-MODE_ARG = re.compile(r"[0-7]{3,4}")
 MODE_PREFIX = "mode:"
+MODE_TAG = re.compile(re.escape(MODE_PREFIX) + r"([0-7]{3,4})")
+MODE_ARG = re.compile(r"[0-7]{3,4}")
 CONTENT_PREFIX = "mtime:"
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
 MICROSECOND = datetime.timedelta(microseconds=1)
@@ -579,7 +579,8 @@ def content_time(item: Item) -> datetime.datetime:
     A push sets the tag from the file and a retag keeps it, so a mode-only write moves `updated_at`
     and never this. An item carrying no such tag, pushed before the tag existed, reads as its
     `updated_at`. So does one whose tag is malformed or repeated, which `members` warns about. The
-    item's next push retags it, even where nothing else differs, writing one well-formed tag.
+    item's next update or retag writes one well-formed tag, and a push retags it even where nothing
+    else differs.
     """
     return tagged_content_time(item) or item.updated
 
@@ -1054,6 +1055,9 @@ def foreign_owner(local: Local) -> bool:
     return local.uid is not None and local.uid != running_uid()
 
 
+VERBS = {"create": "write", "overwrite": "write", "chmod": "re-mode", "retime": "re-time"}
+
+
 def refuse_foreign_owner(path: Path, local: Local) -> None:
     """Refuse to replace or re-mode a file another user owns.
 
@@ -1110,7 +1114,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         print(plan_line(plan, plan.local.mode))
     if op.dry_run:
         for plan in plans:
-            print(f"  would write: {plan.path}")
+            print(f"  would {VERBS[plan.action]}: {plan.path}")
         return 0
     changes = [p for p in plans if p.action not in {"create", "retime"}]
     if changes:
@@ -1134,7 +1138,11 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
             write_secret(plan.path, plan.remote, plan.mode, plan.local.gid, plan.content)
         if plan.path.read_bytes() != plan.remote:
             raise Execution(f"{plan.title} reads back differently from what was written")
-    print(f"Wrote {len(plans)} file(s) under {home}.")
+    done = ", ".join(
+        f"{verb} {sum(VERBS[p.action] == verb for p in plans)}"
+        for verb in dict.fromkeys(VERBS[p.action] for p in plans)
+    )
+    print(f"Pulled under {home}: {done} file(s).")
     return 0
 
 

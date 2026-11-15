@@ -1379,6 +1379,8 @@ class TestContentTime(Case):
         code, out, err = self.run_main("pull", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
         self.assertRegex(out, r"retime\s+\.secrets/alpha")
+        self.assertIn("re-time 1 file(s)", out)
+        self.assertNotIn("write", out)
         self.assertEqual(self.asked, [])
         want = ss.to_ns(ss.datetime.datetime.fromisoformat(EARLY))
         self.assertEqual(path.stat().st_mtime_ns, want)
