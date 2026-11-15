@@ -1392,6 +1392,48 @@ class TestPull(Case):
         self.assertEqual(self.run_main("pull", "--bucket", "alpha", "--yes")[0], 0)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_an_item_changed_remotely_during_the_pull_prompt_is_not_written(self) -> None:
+        vid = self.vault()
+        iid = self.fake.add_item(vid, ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha", b"local\n")
+
+        def elsewhere(question: str) -> bool:
+            self.fake.items[vid][iid].update(content=b"other\n", updated_at=self.fake.stamp())
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", elsewhere):
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 1, err)
+        self.assertIn("changed remotely after the plan was printed", err)
+        self.assertEqual(path.read_bytes(), b"local\n")
+
+    def test_a_session_ended_during_the_pull_prompt_writes_nothing(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha", b"local\n")
+
+        def expire(question: str) -> bool:
+            self.fake.ambient = False
+            return True
+
+        with unittest.mock.patch.object(ss, "ask", expire):
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 1, err)
+        self.assertIn("nothing was written", err)
+        self.assertEqual(path.read_bytes(), b"local\n")
+
+    def test_a_failed_timestamp_leaves_the_target_unchanged(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha", b"local\n")
+
+        def refuse(target: object, *args: object, **kwargs: object) -> None:
+            raise PermissionError(1, "Operation not permitted")
+
+        with unittest.mock.patch.object(ss.os, "utime", refuse):
+            code, _, _ = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(path.read_bytes(), b"local\n")
+        self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["alpha"])
+
     def test_a_file_written_during_the_prompt_is_not_replaced(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET)
@@ -1926,9 +1968,10 @@ class TestSelftest(Case):
     def test_a_failed_vault_delete_says_to_delete_it_by_hand(self) -> None:
         self.fake.fail_before.add(("vault", "delete"))
         with unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)):
-            code, _, err = self.run_main("selftest")
-        self.assertEqual(code, 0)
+            code, out, err = self.run_main("selftest")
+        self.assertEqual(code, 2)
         self.assertIn("by hand", err)
+        self.assertIn("holds", out)
         self.assertEqual(len(self.fake.vaults), 1)
 
     def test_the_vault_is_deleted_even_when_the_scratch_removal_fails(self) -> None:
