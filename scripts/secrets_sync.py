@@ -579,8 +579,8 @@ def content_time(item: Item) -> datetime.datetime:
     """The time the item's content counts as written, from its one `mtime:<iso>` tag.
 
     A push sets the tag from the file's mtime, and a retag keeps it, so a mode-only write moves
-    `updated_at` and never this. A forced push sets it past the content it replaced instead, per
-    `forced_time`. An item carrying no such tag, pushed before the tag existed, reads as its
+    `updated_at` and never this. An update whose file is not strictly newer, a forced one included,
+    sets it past the content it replaced instead, per `forced_time`. An item carrying no such tag, pushed before the tag existed, reads as its
     `updated_at`, and its next update or retag writes the tag. One whose tag is malformed or
     repeated reads the same way, which `members` warns about, and a push retags it even where
     nothing else differs.
@@ -1032,7 +1032,8 @@ def cmd_push(a: argparse.Namespace, op: Op) -> int:
         print(plan_line(plan, mode_or_none(plan.item) if plan.item else None))
     if not op.dry_run:
         confirm(op, a.yes, f"Push {len(plans)} change(s) to {name}?")
-        refuse_held_elsewhere(op, list_vaults(op), name, plans)
+        if not a.yes and any(p.action == "create" for p in plans):
+            refuse_held_elsewhere(op, list_vaults(op), name, plans)
     fresh = vault is None
     if vault is None:
         vault = create_vault(op, a.bucket)

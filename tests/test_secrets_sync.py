@@ -956,19 +956,6 @@ class TestPush(Case):
         self.assertIn("already held by Secrets beta", err)
         self.assertEqual(self.fake.writes(), [])
 
-    def test_an_update_at_the_same_content_time_still_moves_it_forward(self) -> None:
-        vid = self.vault()
-        tag = "2010-01-01T00:00:00.000000Z"
-        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{tag}"))
-        path = self.write(".secrets/alpha")
-        ns = ss.to_ns(ss.datetime.datetime.fromisoformat(tag))
-        os.utime(path, ns=(ns, ns))
-        code, _, err = self.push(str(path))
-        self.assertEqual(code, 0, err)
-        (after,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
-        moved = ss.datetime.datetime.fromisoformat(after[len("mtime:") :])
-        self.assertGreater(moved, ss.datetime.datetime.fromisoformat(tag))
-
     def test_a_title_no_other_bucket_holds_is_created(self) -> None:
         self.fake.add_item(self.vault("beta"), ".secrets/beta_api_token", SECRET)
         stray = self.fake.add_vault("Secrets Not A Bucket")
@@ -1539,6 +1526,16 @@ class TestContentTime(Case):
         code, _, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
         self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{LATER}"])
+
+    def test_an_update_at_the_same_content_time_still_moves_it_forward(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{EARLY}"))
+        path = self.stamped(self.write(".secrets/alpha"), EARLY)
+        code, _, err = self.run_main("push", "--bucket", "alpha", str(path))
+        self.assertEqual(code, 0, err)
+        (after,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
+        moved = ss.datetime.datetime.fromisoformat(after[len("mtime:") :])
+        self.assertGreater(moved, ss.datetime.datetime.fromisoformat(EARLY))
 
     def test_a_retag_keeps_the_content_time(self) -> None:
         vid = self.vault()
