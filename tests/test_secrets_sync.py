@@ -58,6 +58,18 @@ def opt(argv: Sequence[str], flag: str) -> str:
     return argv[list(argv).index(flag) + 1]
 
 
+def unstamped(tags: object) -> tuple[str, ...]:
+    """The tags other than the content-time tag, which a push sets from the file's mtime."""
+    assert isinstance(tags, tuple)
+    return tuple(t for t in tags if not t.startswith(ss.CONTENT_PREFIX))
+
+
+def stamps(tags: object) -> list[str]:
+    """The content-time tags alone."""
+    assert isinstance(tags, tuple)
+    return [t for t in tags if t.startswith(ss.CONTENT_PREFIX)]
+
+
 def key_of(argv: Sequence[str]) -> tuple[str, ...]:
     return (argv[0],) if argv[0] in {"whoami", "signin", "signout"} else tuple(argv[:2])
 
@@ -629,7 +641,7 @@ class TestPush(Case):
         vid = next(iter(self.fake.vaults))
         item = self.item(vid, ".secrets/alpha_api_token")
         self.assertEqual(item["content"], SECRET)
-        self.assertEqual(item["tags"], ("mode:0640",))
+        self.assertEqual(unstamped(item["tags"]), ("mode:0640",))
         self.assertEqual(len(self.asked), 1)
         self.assertIn(("document", "get"), self.fake.keys())
         self.assert_quiet(out, err)
@@ -645,7 +657,7 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(list(self.fake.items[vid]), [iid])
         self.assertEqual(self.fake.items[vid][iid]["content"], SECRET)
-        self.assertEqual(self.fake.items[vid][iid]["tags"], ("keep-me", "mode:0640"))
+        self.assertEqual(unstamped(self.fake.items[vid][iid]["tags"]), ("keep-me", "mode:0640"))
         edit = [argv for argv in self.fake.writes() if key_of(argv) == ("document", "edit")]
         self.assertEqual(edit[0][2], iid)
         self.assert_quiet(out, err)
@@ -678,6 +690,26 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(self.item(vid, ".secrets/alpha")["content"], SECRET)
 
+    def test_a_title_another_bucket_holds_is_refused_before_any_write(self) -> None:
+        other = self.vault("beta")
+        self.fake.add_item(other, ".secrets/alpha_api_token", SECRET)
+        self.fake.add_vault("Secrets Not A Bucket")
+        for title in (".secrets/alpha_api_token", ".secrets/ALPHA_API_TOKEN"):
+            with self.subTest(title=title):
+                path = self.write(title)
+                code, _, err = self.push(str(path))
+                self.assertEqual(code, 1, err)
+                self.assertIn("already held by Secrets beta", err)
+                self.assertIn("archive it there", err)
+                self.assertEqual(self.fake.writes(), [])
+                path.unlink()
+
+    def test_a_title_no_other_bucket_holds_is_created(self) -> None:
+        self.fake.add_item(self.vault("beta"), ".secrets/beta_api_token", SECRET)
+        code, _, err = self.push(str(self.write(".secrets/alpha_api_token")))
+        self.assertEqual(code, 0, err)
+        self.assertIn(("document", "create"), [key_of(a) for a in self.fake.writes()])
+
     def test_only_a_differing_mode_is_a_retag(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600",))
@@ -685,7 +717,7 @@ class TestPush(Case):
         code, _, err = self.push()
         self.assertEqual(code, 0, err)
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("item", "edit")])
-        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0640",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0640",))
 
     def test_a_mode_only_change_is_planned_without_a_time_check(self) -> None:
         vid = self.vault()
@@ -698,7 +730,7 @@ class TestPush(Case):
         self.assertRegex(out, r"retag\s+\.secrets/alpha")
         self.assertEqual(len(self.asked), 1)
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("item", "edit")])
-        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0644",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0644",))
 
     def test_a_malformed_tag_on_an_existing_item_needs_mode(self) -> None:
         vid = self.vault()
@@ -713,7 +745,7 @@ class TestPush(Case):
         self.assertIn("name the files", err)
         code, _, err = self.push("--mode", "0600", str(self.home / ".secrets/alpha"))
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0600",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0600",))
 
     def test_a_plan_shows_a_mode_the_write_changes(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode:0600",))
@@ -841,7 +873,7 @@ class TestPush(Case):
         self.fake.merge_tags = True
         code, _, err = self.push()
         self.assertEqual(code, 2)
-        self.assertIn("mode tags", err)
+        self.assertIn("after the write", err)
 
     def test_a_vault_create_that_reports_failure_but_landed_is_used(self) -> None:
         path = self.write(".secrets/alpha")
@@ -946,7 +978,8 @@ class TestWindowsModes(Case):
         code, _, err = self.run_main("push", "--bucket", "alpha", "--mode", "0640", str(path))
         self.assertEqual(code, 0, err)
         self.assertEqual(
-            self.item(next(iter(self.fake.vaults)), ".secrets/alpha")["tags"], ("mode:0640",)
+            unstamped(self.item(next(iter(self.fake.vaults)), ".secrets/alpha")["tags"]),
+            ("mode:0640",),
         )
 
     def test_an_update_keeps_the_existing_tag(self) -> None:
@@ -955,7 +988,7 @@ class TestWindowsModes(Case):
         self.write(".secrets/alpha")
         code, _, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0640",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0640",))
 
     def test_a_pull_ignores_the_tag(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:bogus",))
@@ -1165,13 +1198,162 @@ class TestPull(Case):
     def test_a_read_back_that_differs_from_what_was_written_fails(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET)
 
-        def short_write(path: Path, data: bytes, mode: int | None, group: int | None) -> None:
+        def short_write(
+            path: Path, data: bytes, mode: int | None, group: int | None, written: object
+        ) -> None:
             path.write_bytes(data[:-1])
 
         with unittest.mock.patch.object(ss, "write_secret", short_write):
             code, _, err = self.run_main("pull", "--bucket", "alpha")
         self.assertEqual(code, 2)
         self.assertIn("reads back differently", err)
+
+
+EARLY = "2010-01-01T00:00:00.000000Z"
+LATER = "2010-02-01T00:00:00.000000Z"
+
+
+@POSIX_ONLY
+class TestContentTime(Case):
+    """Staleness is judged by the content-time tag, so a retag never reads as newer content."""
+
+    def stamped(self, path: Path, moment: str) -> Path:
+        ns = ss.to_ns(ss.datetime.datetime.fromisoformat(moment))
+        os.utime(path, ns=(ns, ns))
+        return path
+
+    def test_a_create_and_an_update_tag_the_file_mtime(self) -> None:
+        path = self.stamped(self.write(".secrets/alpha"), EARLY)
+        self.assertEqual(self.run_main("push", "--bucket", "alpha", str(path))[0], 0)
+        vid = next(iter(self.fake.vaults))
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{EARLY}"])
+        self.stamped(self.write(".secrets/alpha", b"rotated\n"), LATER)
+        code, _, err = self.run_main("push", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{LATER}"])
+
+    def test_a_retag_keeps_the_content_time(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.write(".secrets/alpha", mode=0o640)
+        code, _, err = self.run_main("push", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0640", f"mtime:{EARLY}"))
+
+    def test_a_retag_of_an_untagged_item_records_its_update_time(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, updated="2011-01-01T00:00:00Z")
+        self.write(".secrets/alpha", mode=0o640)
+        self.assertEqual(self.run_main("push", "--bucket", "alpha")[0], 0)
+        self.assertEqual(
+            self.item(vid, ".secrets/alpha")["tags"],
+            ("mode:0640", "mtime:2011-01-01T00:00:00.000000Z"),
+        )
+
+    def test_a_retag_on_one_host_does_not_overwrite_a_newer_copy_on_another(self) -> None:
+        first = self.home
+        path = self.stamped(self.write(".secrets/alpha"), EARLY)
+        self.assertEqual(self.run_main("push", "--bucket", "alpha", str(path))[0], 0)
+        second = self.scratch / "second"
+        second.mkdir(mode=0o700)
+        self.home = second
+        newer = self.stamped(self.write(".secrets/alpha", b"edited-on-second\n"), LATER)
+        self.home = first
+        os.chmod(path, 0o640)
+        self.assertEqual(self.run_main("push", "--bucket", "alpha")[0], 0)
+        vid = next(iter(self.fake.vaults))
+        updated = ss.datetime.datetime.fromisoformat(
+            str(self.item(vid, ".secrets/alpha")["updated_at"])
+        )
+        self.assertGreater(
+            updated, ss.datetime.datetime.fromisoformat(LATER), "the retag moved updated_at"
+        )
+        self.home = second
+        code, out, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out, r"skip\s+\.secrets/alpha  local .* is newer")
+        self.assertEqual(newer.read_bytes(), b"edited-on-second\n")
+        code, _, err = self.run_main("push", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.item(vid, ".secrets/alpha")["content"], b"edited-on-second\n")
+
+    def test_a_pull_sets_the_file_mtime_to_the_content_time(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/tagged", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.fake.add_item(vid, ".secrets/untagged", SECRET, updated="2011-01-01T00:00:00Z")
+        code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        for title, moment in (
+            (".secrets/tagged", EARLY),
+            (".secrets/untagged", "2011-01-01T00:00:00Z"),
+        ):
+            with self.subTest(title=title):
+                want = ss.to_ns(ss.datetime.datetime.fromisoformat(moment))
+                self.assertEqual((self.home / title).stat().st_mtime_ns, want)
+        code, out, _ = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 0)
+        self.assertIn("Nothing to pull", out)
+
+    def test_a_malformed_content_tag_is_refused_until_pushed_with_overwrite_newer(self) -> None:
+        for tags in (
+            ("mode:0600", "mtime:bogus"),
+            ("mode:0600", f"mtime:{EARLY}", f"mtime:{LATER}"),
+        ):
+            with self.subTest(tags=tags):
+                fake = FakeOp()
+                vid = fake.add_vault("Secrets alpha")
+                fake.add_item(vid, ".secrets/alpha", b"old\n", tags)
+                path = self.write(".secrets/alpha")
+                with unittest.mock.patch.object(ss, "run_op", fake):
+                    code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+                    self.assertEqual(code, 1)
+                    self.assertIn("--overwrite-newer", err)
+                    code, _, err = self.run_main("push", "--bucket", "alpha", str(path))
+                    self.assertEqual(code, 1)
+                    self.assertEqual(fake.writes(), [])
+                    code, _, err = self.run_main(
+                        "push", "--bucket", "alpha", "--overwrite-newer", str(path)
+                    )
+                self.assertEqual(code, 0, err)
+                only = next(iter(fake.items[vid].values()))
+                self.assertEqual(len(stamps(only["tags"])), 1)
+
+
+@POSIX_ONLY
+class TestOwnership(Case):
+    """A pull refuses to replace a file another uid owns, since the owner cannot be kept."""
+
+    def other_uid(self) -> unittest.mock._patch[object]:
+        return unittest.mock.patch.object(ss.os, "geteuid", lambda: os.getuid() + 1, create=True)
+
+    def test_a_file_another_user_owns_is_refused_and_left_alone(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
+        path = self.write(".secrets/alpha", b"local\n")
+        with self.other_uid():
+            code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn(f"owned by uid {os.getuid()}, not the running user", err)
+        self.assertEqual(path.read_bytes(), b"local\n")
+        self.assertEqual(self.asked, [])
+
+    def test_a_mode_change_on_a_file_another_user_owns_is_refused(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:0600",))
+        path = self.write(".secrets/alpha", mode=0o644)
+        with self.other_uid():
+            code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("owned by uid", err)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+
+    def test_a_new_file_and_an_identical_one_need_no_owner_check(self) -> None:
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", SECRET)
+        self.fake.add_item(vid, ".secrets/beta", SECRET)
+        self.write(".secrets/alpha")
+        with self.other_uid():
+            code, _, err = self.run_main("pull", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.home / ".secrets/beta").read_bytes(), SECRET)
 
 
 @POSIX_ONLY
