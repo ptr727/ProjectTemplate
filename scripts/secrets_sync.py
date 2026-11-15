@@ -578,10 +578,10 @@ def malformed_content_tag(item: Item) -> bool:
 def content_time(item: Item) -> datetime.datetime:
     """The time the item's content counts as written, from its one `mtime:<iso>` tag.
 
-    A push sets the tag from the file's mtime, and a retag keeps it, so a mode-only write moves
-    `updated_at` and never this. Two writes set it past the content it replaced, per
-    `forced_time`. One is an update whose file is not strictly newer. The other is the one retag
-    that does not keep it, of a file named with `--overwrite-newer` whose bytes match. An item carrying no such tag, pushed
+    A create sets the tag from the file's mtime. An update does too where that mtime is strictly
+    newer than the content time it replaces, and takes `forced_time` otherwise. A retag keeps the
+    tag, so a mode-only write moves only `updated_at`. The exception is a retag of a file named
+    with `--overwrite-newer`, which takes `forced_time` too. An item carrying no such tag, pushed
     before the tag existed, reads as its `updated_at`, and its next update or retag writes the
     tag. One whose tag is malformed or repeated reads the same way, which `members` warns about,
     and a push retags it even where nothing else differs.
