@@ -826,6 +826,7 @@ class TestPush(Case):
         self.fake.fail_before.add(("item", "edit"))
         code, _, err = self.push()
         self.assertEqual(code, 2)
+        self.assertIn("op item edit failed", err)
         self.assertNotIn("push it again", err)
 
     def test_a_file_changed_during_the_push_prompt_is_not_written(self) -> None:
@@ -845,6 +846,51 @@ class TestPush(Case):
                 self.assertEqual(code, 1, err)
                 self.assertIn("changed locally after the plan was printed", err)
                 self.assertEqual(self.fake.writes(), [])
+
+    def test_a_read_back_that_fails_too_reports_the_write_s_own_error(self) -> None:
+        for write, listing, argv in (
+            (("vault", "create"), ("vault", "list"), ("push", "--bucket", "alpha", "new")),
+            (("document", "create"), ("item", "list"), ("push", "--bucket", "alpha", "new")),
+            (
+                ("item", "delete"),
+                ("item", "list"),
+                ("archive", "--bucket", "alpha", "--yes", "held"),
+            ),
+        ):
+            with self.subTest(write=write):
+                fake = FakeOp()
+                if write != ("vault", "create"):
+                    vid = fake.add_vault("Secrets alpha")
+                    fake.add_item(vid, ".secrets/held", SECRET)
+                path = self.write(".secrets/new")
+                fake.fail_after.add(write)
+                plain = fake.dispatch
+
+                def failing(
+                    key: tuple[str, ...],
+                    argv: list[str],
+                    env: Mapping[str, str],
+                    fake: FakeOp = fake,
+                    plain: object = plain,
+                    write: tuple[str, ...] = write,
+                    listing: tuple[str, ...] = listing,
+                ) -> ss.Outcome:
+                    if key == write:
+                        fake.fail_before.add(listing)
+                    assert callable(plain)
+                    result = plain(key, argv, env)
+                    assert isinstance(result, ss.Outcome)
+                    return result
+
+                fake.dispatch = failing  # type: ignore[method-assign]
+                named = [
+                    str(self.home / ".secrets" / a) if a in {"new", "held"} else a for a in argv
+                ]
+                with unittest.mock.patch.object(ss, "run_op", fake):
+                    code, _, err = self.run_main(*named)
+                self.assertEqual(code, 2, err)
+                self.assertIn(f"op {' '.join(write)} failed", err)
+                path.unlink()
 
     def test_a_tag_write_reported_failed_but_landed_is_verified(self) -> None:
         vid = self.vault()

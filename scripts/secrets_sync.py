@@ -925,6 +925,14 @@ def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
         )
 
 
+def refuse_changed_locally(plan: Plan) -> None:
+    """Refuse a write whose local file changed after the plan read it."""
+    if read_local(plan.path) != plan.local:
+        raise Refusal(
+            f"{plan.title} changed locally after the plan was printed, so it was not written"
+        )
+
+
 def refuse_changed(op: Op, vault: Vault, title: str, item: Item | None) -> None:
     """Refuse a write whose target another host changed, archived, or created after the plan."""
     if op.dry_run:
@@ -938,11 +946,12 @@ def refuse_changed(op: Op, vault: Vault, title: str, item: Item | None) -> None:
 def landed(check: typing.Callable[[], bool]) -> bool:
     """Whether a write that reported a failure landed, read back by `check`.
 
-    A read-back that fails too answers no, so the caller re-raises the write's own error.
+    A read-back whose `op` call fails too answers no, so the caller re-raises the write's own
+    error. A read-back that answers with a refusal raises it, since that state is the news.
     """
     try:
         return check()
-    except (Execution, Refusal):
+    except Execution:
         return False
 
 
@@ -959,10 +968,8 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
     assert plan.mode is not None and plan.content is not None
     if not fresh:
         refuse_changed(op, vault, plan.title, plan.item)
-    if not op.dry_run and read_local(plan.path) != plan.local:
-        raise Refusal(
-            f"{plan.title} changed locally after the plan was printed, so it was not written"
-        )
+    if not op.dry_run:
+        refuse_changed_locally(plan)
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
@@ -1182,10 +1189,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         )
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
-        if read_local(plan.path) != plan.local:
-            raise Refusal(
-                f"{plan.title} changed locally after the plan was printed, so it was not written"
-            )
+        refuse_changed_locally(plan)
         ensure_parents(home, plan.title)
         assert plan.remote is not None and plan.content is not None
         if plan.action in {"chmod", "retime"}:
@@ -1217,22 +1221,21 @@ def cmd_archive(a: argparse.Namespace, op: Op) -> int:
     if not op.dry_run:
         confirm(op, a.yes, f"Archive {title} in {vault.name}?")
     refuse_changed(op, vault, title, item)
+
+    def gone() -> bool:
+        still = members(op, vault).get(title)
+        return still is None or still.id != item.id
+
     args = ["item", "delete", item.id, "--vault", vault.id, "--archive"]
     try:
         op.call(args, write=True, detail=title)
     except Execution:
-
-        def gone() -> bool:
-            still = members(op, vault).get(title)
-            return still is None or still.id != item.id
-
         if not landed(gone):
             raise
         sys.stderr.write(f"op item delete reported a failure, yet {title} is no longer listed\n")
     if op.dry_run:
         return 0
-    still = members(op, vault).get(title)
-    if still is not None and still.id == item.id:
+    if not gone():
         raise Execution(f"{title} is still listed after op item delete --archive")
     print(f"Archived {title} from {vault.name}.")
     return 0
