@@ -254,7 +254,8 @@ build-profile conventions, and `references/profiles.md` for the lint-only `unitt
 
 Published packages use `_version.py` with `__version__ = "0.0.0"` as a placeholder. Wire
 `hatch-vcs` or equivalent to increment, publish with `skip-existing: true`. Source-only repos use
-a static `version` in `[project]` with no `_version.py`. See `references/profiles.md` for details.
+a static `version` in `[project]` with no `_version.py`, and NBGV plus `version.json` own their
+release tag. See `references/profiles.md` for details.
 
 ## Linter cleanliness
 

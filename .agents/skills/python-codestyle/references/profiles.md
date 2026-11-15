@@ -21,7 +21,8 @@ review. The axes that commonly vary:
   together in one resolve, per `SKILL.md` "Local development loop".
 - **Versioning / publishing**: a published package or a source-only repo (see Versioning below).
   A published package has `_version.py` plus a version source, `uv build`, and a PyPI publish step.
-  A source-only repo has a static `version` and no publish step.
+  A source-only repo has a static `version` and no PyPI publish step, and NBGV plus `version.json`
+  own its release tag.
 
 ## Two profiles: full specification
 
