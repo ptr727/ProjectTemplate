@@ -935,6 +935,18 @@ def refuse_changed(op: Op, vault: Vault, title: str, item: Item | None) -> None:
         raise Refusal(f"{title} changed remotely after the plan was printed, so it was not written")
 
 
+def tags_landed(op: Op, vault: Vault, title: str, tags: str) -> bool:
+    """Whether the item carries exactly `tags`, read back after a write that reported a failure.
+
+    A listing that fails too answers no, so the caller reports the write as not landed.
+    """
+    try:
+        landed = members(op, vault).get(title)
+    except (Execution, Refusal):
+        return False
+    return landed is not None and sorted(landed.tags) == sorted(tags.split(","))
+
+
 def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
     """Write one plan, re-checking its target first unless this push just created the vault."""
     assert plan.mode is not None and plan.content is not None
@@ -958,32 +970,33 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
             verify(op, vault, plan, None)
         return
     assert plan.item is not None
-    if plan.action == "update":
-        op.call(
-            ["document", "edit", plan.item.id, str(plan.path), "--vault", vault.id],
-            write=True,
-            detail=plan.title,
-        )
     tags = tags_for(plan.item, plan.mode, plan.content)
     try:
-        op.call(
-            ["item", "edit", plan.item.id, "--vault", vault.id, "--tags", tags],
-            write=True,
-            detail=plan.title,
-        )
-    except Execution as exc:
-        landed = members(op, vault).get(plan.title)
-        if landed is not None and sorted(landed.tags) == sorted(tags.split(",")):
+        if plan.action == "update":
+            op.call(
+                ["document", "edit", plan.item.id, str(plan.path), "--vault", vault.id],
+                write=True,
+                detail=plan.title,
+            )
+        try:
+            op.call(
+                ["item", "edit", plan.item.id, "--vault", vault.id, "--tags", tags],
+                write=True,
+                detail=plan.title,
+            )
+        except Execution:
+            if not tags_landed(op, vault, plan.title, tags):
+                raise
             sys.stderr.write(
                 f"op item edit reported a failure, yet {plan.title} carries its tags, so it is verified\n"
             )
-        elif plan.action != "update":
-            raise
-        else:
-            raise Execution(
-                f"{plan.title}: the content was written but its tags were not, so once op answers,"
-                " push it again by name with --overwrite-newer"
-            ) from exc
+    except BaseException:
+        if plan.action == "update":
+            sys.stderr.write(
+                f"warning: {plan.title} may hold its new content without its new tags, so once op"
+                " answers, push it again by name with --overwrite-newer\n"
+            )
+        raise
     if not op.dry_run:
         verify(op, vault, plan, plan.item.id)
 

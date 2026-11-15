@@ -774,6 +774,49 @@ class TestPush(Case):
             stamps(self.item(vid, ".secrets/alpha")["tags"]), ["mtime:2099-01-01T00:00:00.000001Z"]
         )
 
+    def test_every_way_an_update_can_stop_midway_names_its_recovery(self) -> None:
+        recovery = "push it again by name with --overwrite-newer"
+        for case in ("document-edit-landed", "relist-fails", "interrupt"):
+            with self.subTest(case=case):
+                fake = FakeOp()
+                vid = fake.add_vault("Secrets alpha")
+                fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{EARLY}"))
+                path = self.write(".secrets/alpha")
+                if case == "document-edit-landed":
+                    fake.fail_after.add(("document", "edit"))
+                elif case == "interrupt":
+                    fake.raise_on[("item", "edit")] = KeyboardInterrupt()
+                else:
+                    plain = fake.dispatch
+
+                    def failing(
+                        key: tuple[str, ...],
+                        argv: list[str],
+                        env: Mapping[str, str],
+                        fake: FakeOp = fake,
+                        plain: object = plain,
+                    ) -> ss.Outcome:
+                        if key == ("document", "edit"):
+                            fake.fail_before.update({("item", "edit"), ("item", "list")})
+                        assert callable(plain)
+                        result = plain(key, argv, env)
+                        assert isinstance(result, ss.Outcome)
+                        return result
+
+                    fake.dispatch = failing  # type: ignore[method-assign]
+                err = io.StringIO()
+                with (
+                    unittest.mock.patch.object(ss, "run_op", fake),
+                    unittest.mock.patch.object(sys, "stderr", err),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    try:
+                        code = ss.main(["push", "--bucket", "alpha", str(path)])
+                    except KeyboardInterrupt:
+                        code = None
+                self.assertEqual(code, None if case == "interrupt" else 2)
+                self.assertIn(recovery, err.getvalue())
+
     def test_a_tag_write_reported_failed_but_landed_is_verified(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", b"old\n")
