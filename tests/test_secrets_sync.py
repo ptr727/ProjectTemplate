@@ -892,6 +892,23 @@ class TestPush(Case):
                 self.assertIn(f"op {' '.join(write)} failed", err)
                 path.unlink()
 
+    def test_a_read_back_that_refuses_surfaces_its_refusal(self) -> None:
+        vid = self.vault()
+        path = self.write(".secrets/new")
+        self.fake.fail_after.add(("document", "create"))
+        plain = self.fake.dispatch
+
+        def colliding(key: tuple[str, ...], argv: list[str], env: Mapping[str, str]) -> ss.Outcome:
+            result = plain(key, argv, env)
+            if key == ("document", "create"):
+                self.fake.add_item(vid, ".secrets/NEW", SECRET)
+            return result
+
+        self.fake.dispatch = colliding  # type: ignore[method-assign]
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 1, err)
+        self.assertIn("collide case-insensitively", err)
+
     def test_a_tag_write_reported_failed_but_landed_is_verified(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", b"old\n")
