@@ -3,7 +3,10 @@
 
 A bucket is a named set of secret files owned by one project or host. Each bucket is one vault
 named exactly `Secrets <bucket>`, and each file is one Document item in it. An item's title is the
-file's POSIX path relative to the home directory, and its mode rides as a `mode:<octal>` tag.
+file's POSIX path relative to the home directory, and its mode rides as a `mode:<octal>` tag. Its
+content time rides as an `mtime:<UTC ISO>` tag, normally the file's mtime when it was pushed.
+Staleness is judged by that time. A mode-only push keeps it, unless it names the file with
+`--overwrite-newer`, which makes that content the newest.
 
 Nothing is tracked locally. The live comparison between the vault and the home directory is the
 only truth, so no state file can drift from either side. Consumers keep reading the flat files, and
@@ -46,8 +49,12 @@ from types import FrameType
 
 VAULT_PREFIX = "Secrets "
 BUCKET = re.compile(r"[a-z0-9-]+")
-MODE_TAG = re.compile(r"mode:([0-7]{3,4})")
+MODE_PREFIX = "mode:"
+MODE_TAG = re.compile(re.escape(MODE_PREFIX) + r"([0-7]{3,4})")
 MODE_ARG = re.compile(r"[0-7]{3,4}")
+CONTENT_PREFIX = "mtime:"
+EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
+MICROSECOND = datetime.timedelta(microseconds=1)
 SESSION_LINE = re.compile(
     r"""\s*(?:export\s+|\$env:)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(["'])([^"'\r\n]+)\2\s*;?\s*"""
 )
@@ -146,6 +153,7 @@ class Op:
         self.account = account
         self.dry_run = dry_run
         self.session: dict[str, str] = {}
+        self.warned: set[tuple[str, str]] = set()
 
     def env(self) -> dict[str, str]:
         return {**os.environ, **self.session}
@@ -209,8 +217,7 @@ def ask(question: str) -> bool:
 
 
 def refuse_root() -> None:
-    geteuid = getattr(os, "geteuid", None)
-    if geteuid is not None and geteuid() == 0:
+    if running_uid() == 0:
         raise Refusal(
             "this tool does not run as root, since it would write root-owned secret files"
         )
@@ -430,6 +437,7 @@ class Local:
     mode: int | None
     mtime: datetime.datetime | None
     gid: int | None = None
+    uid: int | None = None
 
 
 def rows(data: object, what: str, fields: Sequence[str]) -> list[dict[str, object]]:
@@ -449,6 +457,12 @@ def list_vaults(op: Op) -> list[Vault]:
     return [
         Vault(str(r["id"]), str(r["name"])) for r in rows(data, "op vault list", ("id", "name"))
     ]
+
+
+def bucket_of(name: str) -> str | None:
+    """The bucket a vault name holds, or None where it is not `Secrets ` and a bucket name."""
+    bucket = name[len(VAULT_PREFIX) :]
+    return bucket if name.startswith(VAULT_PREFIX) and BUCKET.fullmatch(bucket) else None
 
 
 def find_vault(vaults: Sequence[Vault], bucket: str) -> Vault | None:
@@ -482,15 +496,20 @@ def parse_item(row: dict[str, object]) -> Item:
     return Item(str(row["id"]), str(row["title"]), tuple(tags), moment)
 
 
-def members(op: Op, vault: Vault) -> dict[str, Item]:
-    """The vault's Document items by title, refusing an unsafe, duplicated, or case-colliding title."""
+def list_items(op: Op, vault: Vault) -> list[dict[str, object]]:
+    """The vault's Document item rows, each carrying a string id and title."""
     data = op.json(
         ["item", "list", "--vault", vault.id, "--categories", "Document", "--format", "json"],
         detail=vault.name,
     )
+    return rows(data, "op item list", ("id", "title"))
+
+
+def members(op: Op, vault: Vault) -> dict[str, Item]:
+    """The vault's Document items by title, refusing an unsafe, duplicated, or case-colliding title."""
     items: dict[str, Item] = {}
     folded: dict[str, str] = {}
-    for row in rows(data, "op item list", ("id", "title")):
+    for row in list_items(op, vault):
         item = parse_item(row)
         validate_title(item.title)
         if item.title in items:
@@ -500,13 +519,23 @@ def members(op: Op, vault: Vault) -> dict[str, Item]:
             raise Refusal(
                 f"{vault.name} holds {other!r} and {item.title!r}, which collide case-insensitively"
             )
+        if malformed_content_tag(item) and (vault.id, item.title) not in op.warned:
+            op.warned.add((vault.id, item.title))
+            sys.stderr.write(
+                f"warning: {item.title} carries a malformed or repeated content-time tag,"
+                " so its update time stands in until its next update or retag\n"
+            )
         items[item.title] = item
     return items
 
 
+def tags_with(item: Item, prefix: str) -> list[str]:
+    return [t for t in item.tags if t.startswith(prefix)]
+
+
 def mode_of(item: Item) -> int:
     """The mode an item's one `mode:<octal>` tag carries, refusing a missing or malformed tag."""
-    tags = [t for t in item.tags if t.startswith("mode:")]
+    tags = tags_with(item, MODE_PREFIX)
     if len(tags) != 1:
         raise Refusal(f"{item.title} carries {len(tags)} mode tag(s) where exactly one is required")
     match = MODE_TAG.fullmatch(tags[0])
@@ -524,13 +553,67 @@ def mode_or_none(item: Item) -> int | None:
 
 
 def mode_tag(mode: int) -> str:
-    return f"mode:{mode:04o}"
+    return f"{MODE_PREFIX}{mode:04o}"
 
 
-def tags_with_mode(item: Item | None, mode: int) -> str:
-    """The item's other tags plus the one mode tag, as the full list `--tags` replaces."""
-    kept = [t for t in (item.tags if item else ()) if not t.startswith("mode:")]
-    return ",".join([*kept, mode_tag(mode)])
+def content_tag(moment: datetime.datetime) -> str:
+    return CONTENT_PREFIX + moment.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def tagged_content_time(item: Item) -> datetime.datetime | None:
+    """The moment the item's one well-formed `mtime:<iso>` tag carries, or None."""
+    tags = tags_with(item, CONTENT_PREFIX)
+    if len(tags) != 1:
+        return None
+    try:
+        moment = datetime.datetime.fromisoformat(tags[0][len(CONTENT_PREFIX) :])
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def malformed_content_tag(item: Item) -> bool:
+    return bool(tags_with(item, CONTENT_PREFIX)) and tagged_content_time(item) is None
+
+
+def content_time(item: Item) -> datetime.datetime:
+    """The time the item's content counts as written, from its one `mtime:<iso>` tag.
+
+    A push sets the tag from the file's mtime, and a retag keeps it, so a mode-only write moves
+    `updated_at` and never this. A forced push sets it past the content it replaced instead, per
+    `forced_time`. An item carrying no such tag, pushed before the tag existed, reads as its
+    `updated_at`, and its next update or retag writes the tag. One whose tag is malformed or
+    repeated reads the same way, which `members` warns about, and a push retags it even where
+    nothing else differs.
+    """
+    return tagged_content_time(item) or item.updated
+
+
+def forced_time(replaced: datetime.datetime) -> datetime.datetime:
+    """A content time every other host reads as newer than the content it replaces."""
+    return max(datetime.datetime.now(datetime.UTC), replaced + MICROSECOND)
+
+
+def tags_for(item: Item | None, mode: int, content: datetime.datetime) -> str:
+    """The item's other tags plus one mode tag and one content-time tag, the full list `--tags` replaces."""
+    kept = [
+        t for t in (item.tags if item else ()) if not t.startswith((MODE_PREFIX, CONTENT_PREFIX))
+    ]
+    return ",".join([*kept, mode_tag(mode), content_tag(content)])
+
+
+def running_uid() -> int | None:
+    geteuid = getattr(os, "geteuid", None)
+    return None if geteuid is None else geteuid()
+
+
+def from_ns(ns: int) -> datetime.datetime:
+    """A file time in nanoseconds as an aware UTC moment, exact to the microsecond."""
+    return EPOCH + datetime.timedelta(microseconds=ns // 1000)
+
+
+def to_ns(moment: datetime.datetime) -> int:
+    return (moment - EPOCH) // MICROSECOND * 1000
 
 
 def download(op: Op, vault: Vault, item: Item) -> bytes:
@@ -547,8 +630,13 @@ def read_local(path: Path) -> Local:
         return Local(None, None, None)
     except OSError as exc:
         raise Refusal(f"{path} cannot be read: {exc.strerror or type(exc).__name__}") from exc
-    moment = datetime.datetime.fromtimestamp(st.st_mtime, tz=datetime.UTC)
-    return Local(data, stat.S_IMODE(st.st_mode), moment, None if IS_WINDOWS else st.st_gid)
+    return Local(
+        data,
+        stat.S_IMODE(st.st_mode),
+        from_ns(st.st_mtime_ns),
+        None if IS_WINDOWS else st.st_gid,
+        None if IS_WINDOWS else st.st_uid,
+    )
 
 
 def selected(
@@ -624,8 +712,8 @@ def cmd_status(a: argparse.Namespace, op: Op) -> int:
         return 0
     held: set[str] = set()
     for name in sorted({v.name for v in vaults if v.name.startswith(VAULT_PREFIX)}):
-        bucket = name[len(VAULT_PREFIX) :]
-        found = find_vault(vaults, bucket) if BUCKET.fullmatch(bucket) else None
+        bucket = bucket_of(name)
+        found = find_vault(vaults, bucket) if bucket is not None else None
         if found is None:
             print(f"{name}: not a bucket name, skipped")
             continue
@@ -655,6 +743,7 @@ class Plan:
     item: Item | None
     mode: int | None
     remote: bytes | None = None
+    content: datetime.datetime | None = None
 
 
 def push_mode(local: Local, item: Item | None, override: int | None) -> int:
@@ -693,7 +782,7 @@ def warn_carriage_return(title: str, data: bytes) -> None:
 
 def plan_line(plan: Plan, was: int | None) -> str:
     """One plan line, its mode shown as `was->now` where the write changes it."""
-    remote = stamp(plan.item.updated) if plan.item else "-"
+    remote = stamp(content_time(plan.item)) if plan.item else "-"
     mode = "-" if plan.mode is None else f"{plan.mode:04o}"
     if was is not None and plan.mode is not None and was != plan.mode:
         mode = f"{was:04o}->{mode}"
@@ -736,30 +825,65 @@ def push_plans(
         warn_carriage_return(title, local.data)
         item = items.get(title)
         mode = push_mode(local, item, override)
+        assert local.mtime is not None
         if item is None or vault is None:
-            plans.append(Plan("create", title, path, local, None, mode))
+            plans.append(Plan("create", title, path, local, None, mode, content=local.mtime))
             continue
         remote = download(op, vault, item)
         if remote == local.data:
-            if mode_or_none(item) == mode:
+            forced = bool(a.paths) and a.overwrite_newer
+            if mode_or_none(item) == mode and not malformed_content_tag(item) and not forced:
                 print(f"  same      {title}")
             else:
-                plans.append(Plan("retag", title, path, local, item, mode, remote))
+                kept = forced_time(content_time(item)) if forced else content_time(item)
+                plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
             continue
-        assert local.mtime is not None
-        if item.updated > local.mtime and not a.overwrite_newer:
+        written = content_time(item)
+        content = local.mtime
+        if written > local.mtime and a.overwrite_newer:
+            content = forced_time(written)
+        elif written > local.mtime:
             if a.paths:
                 raise Refusal(
-                    f"{title}: remote {stamp(item.updated)} is newer than local {stamp(local.mtime)},"
+                    f"{title}: remote {stamp(written)} is newer than local {stamp(local.mtime)},"
                     " so pass --overwrite-newer to replace it"
                 )
             print(
-                f"  skip      {title}  remote {stamp(item.updated)} is newer than local {stamp(local.mtime)},"
+                f"  skip      {title}  remote {stamp(written)} is newer than local {stamp(local.mtime)},"
                 " so pass --overwrite-newer to replace it"
             )
             continue
-        plans.append(Plan("update", title, path, local, item, mode, remote))
+        plans.append(Plan("update", title, path, local, item, mode, remote, content))
     return plans
+
+
+def held_elsewhere(op: Op, vaults: Sequence[Vault], name: str) -> dict[str, str]:
+    """Each title another bucket's vault holds, folded for case, mapped to that vault's name.
+
+    Titles are read as listed, without `members`' checks, so a fault inside an unrelated bucket
+    never blocks a push to this one. A pull or status of that bucket still refuses it.
+    """
+    held: dict[str, str] = {}
+    for other in vaults:
+        if other.name == name or bucket_of(other.name) is None:
+            continue
+        for row in list_items(op, other):
+            held.setdefault(str(row["title"]).casefold(), other.name)
+    return held
+
+
+def refuse_held_elsewhere(op: Op, vaults: Sequence[Vault], name: str, plans: list[Plan]) -> None:
+    """Refuse a create whose title another bucket holds, since two copies of one file drift apart."""
+    creates = [p for p in plans if p.action == "create"]
+    if not creates:
+        return
+    held = held_elsewhere(op, vaults, name)
+    for plan in creates:
+        other = held.get(plan.title.casefold())
+        if other is not None:
+            raise Refusal(
+                f"{plan.title} is already held by {other}, so archive it there before pushing it to {name}"
+            )
 
 
 def create_vault(op: Op, bucket: str) -> Vault:
@@ -768,7 +892,7 @@ def create_vault(op: Op, bucket: str) -> Vault:
     try:
         op.call(["vault", "create", name], write=True, detail="")
     except Execution:
-        if find_vault(list_vaults(op), bucket) is None:
+        if not landed(lambda: find_vault(list_vaults(op), bucket) is not None):
             raise
         sys.stderr.write(
             f"op vault create reported a failure, yet {name} is listed, so it is used as created\n"
@@ -786,12 +910,14 @@ def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
     item = listed(op, vault, plan.title, "the write")
     if expected_id is not None and item.id != expected_id:
         raise Execution(f"{plan.title} is listed as a different item after an in-place edit")
-    assert plan.mode is not None
-    tags = [t for t in item.tags if t.startswith("mode:")]
-    if tags != [mode_tag(plan.mode)]:
-        raise Execution(
-            f"{plan.title} carries mode tags {tags} after the write, not [{mode_tag(plan.mode)!r}]"
-        )
+    assert plan.mode is not None and plan.content is not None
+    for prefix, want in (
+        (MODE_PREFIX, mode_tag(plan.mode)),
+        (CONTENT_PREFIX, content_tag(plan.content)),
+    ):
+        tags = tags_with(item, prefix)
+        if tags != [want]:
+            raise Execution(f"{plan.title} carries tags {tags} after the write, not [{want!r}]")
     data = download(op, vault, item)
     if data != plan.local.data:
         raise Execution(
@@ -799,16 +925,61 @@ def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
         )
 
 
-def push_one(op: Op, vault: Vault, plan: Plan) -> None:
-    assert plan.mode is not None
+def refuse_changed_locally(plan: Plan) -> None:
+    """Refuse a write whose local file changed after the plan read it."""
+    if read_local(plan.path) != plan.local:
+        raise Refusal(
+            f"{plan.title} changed locally after the plan was printed, so it was not written"
+        )
+
+
+def refuse_changed(op: Op, vault: Vault, title: str, item: Item | None) -> None:
+    """Refuse a write whose target another host changed, archived, or created after the plan."""
+    if op.dry_run:
+        return
+    now = {t.casefold(): i for t, i in members(op, vault).items()}.get(title.casefold())
+    seen = None if item is None else (item.id, item.updated)
+    if (None if now is None else (now.id, now.updated)) != seen:
+        raise Refusal(f"{title} changed remotely after the plan was printed, so it was not written")
+
+
+def landed(check: typing.Callable[[], bool]) -> bool:
+    """Whether a write that reported a failure landed, read back by `check`.
+
+    A read-back whose `op` call fails too answers no, so the caller re-raises the write's own
+    error. A read-back that answers with a refusal raises it, since that state is the news.
+    """
+    try:
+        return check()
+    except Execution:
+        return False
+
+
+def tags_landed(op: Op, vault: Vault, title: str, tags: str) -> bool:
+    def carries() -> bool:
+        item = members(op, vault).get(title)
+        return item is not None and sorted(item.tags) == sorted(tags.split(","))
+
+    return landed(carries)
+
+
+def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
+    """Write one plan, re-checking its target first unless this push just created the vault."""
+    assert plan.mode is not None and plan.content is not None
+    if not fresh:
+        refuse_changed(op, vault, plan.title, plan.item)
+    if not op.dry_run:
+        refuse_changed_locally(plan)
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
             op.call(
-                [*args, "--tags", tags_with_mode(None, plan.mode)], write=True, detail=plan.title
+                [*args, "--tags", tags_for(None, plan.mode, plan.content)],
+                write=True,
+                detail=plan.title,
             )
         except Execution:
-            if plan.title not in members(op, vault):
+            if not landed(lambda: plan.title in members(op, vault)):
                 raise
             sys.stderr.write(
                 f"op document create reported a failure, yet {plan.title} is listed, so it is verified\n"
@@ -817,48 +988,59 @@ def push_one(op: Op, vault: Vault, plan: Plan) -> None:
             verify(op, vault, plan, None)
         return
     assert plan.item is not None
-    if plan.action == "update":
-        op.call(
-            ["document", "edit", plan.item.id, str(plan.path), "--vault", vault.id],
-            write=True,
-            detail=plan.title,
-        )
-    op.call(
-        [
-            "item",
-            "edit",
-            plan.item.id,
-            "--vault",
-            vault.id,
-            "--tags",
-            tags_with_mode(plan.item, plan.mode),
-        ],
-        write=True,
-        detail=plan.title,
-    )
+    tags = tags_for(plan.item, plan.mode, plan.content)
+    try:
+        if plan.action == "update":
+            op.call(
+                ["document", "edit", plan.item.id, str(plan.path), "--vault", vault.id],
+                write=True,
+                detail=plan.title,
+            )
+        try:
+            op.call(
+                ["item", "edit", plan.item.id, "--vault", vault.id, "--tags", tags],
+                write=True,
+                detail=plan.title,
+            )
+        except Execution:
+            if not tags_landed(op, vault, plan.title, tags):
+                raise
+            sys.stderr.write(
+                f"op item edit reported a failure, yet {plan.title} carries its tags, so it is verified\n"
+            )
+    except BaseException:
+        if plan.action == "update":
+            sys.stderr.write(
+                f"warning: {plan.title} may hold its new content without its new tags, so once op"
+                " answers, push it again by name with --overwrite-newer\n"
+            )
+        raise
     if not op.dry_run:
         verify(op, vault, plan, plan.item.id)
 
 
 def cmd_push(a: argparse.Namespace, op: Op) -> int:
     home = home_dir()
-    vault = find_vault(list_vaults(op), a.bucket)
+    vaults = list_vaults(op)
+    vault = find_vault(vaults, a.bucket)
     items = members(op, vault) if vault else {}
     plans = push_plans(a, op, home, vault, items)
     if not plans:
         print("Nothing to push.")
         return 0
     name = vault_name(a.bucket)
+    refuse_held_elsewhere(op, vaults, name, plans)
     print(f"Plan for {name}{'' if vault else ', a vault this push creates'}:")
     for plan in plans:
         print(plan_line(plan, mode_or_none(plan.item) if plan.item else None))
     if not op.dry_run:
         confirm(op, a.yes, f"Push {len(plans)} change(s) to {name}?")
+    fresh = vault is None
     if vault is None:
         vault = create_vault(op, a.bucket)
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
-        push_one(op, vault, plan)
+        push_one(op, vault, plan, fresh)
     if not op.dry_run:
         print(f"Pushed and read back {len(plans)} item(s).")
     return 0
@@ -890,13 +1072,20 @@ def ensure_parents(home: Path, title: str) -> None:
             os.mkdir(current, 0o700)
 
 
-def write_secret(path: Path, data: bytes, mode: int | None, group: int | None) -> None:
+def write_secret(
+    path: Path, data: bytes, mode: int | None, group: int | None, written: datetime.datetime
+) -> None:
     """Write through a temporary file created exclusively at 0600 beside `path`, then rename it over.
 
     The group and mode are set on the open descriptor before the rename, so neither changes in view.
     A group it cannot keep is a refusal, since a service may read the file through that group.
+    The file's modification time is set to `written`, the item's content time, so a later push or
+    pull compares the two sides on one clock. Where the platform cannot set it on a descriptor, it
+    is set by path after the rename.
     The temporary file is removed in `finally`, which also runs on SIGINT and SIGTERM.
     """
+    times = (time.time_ns(), to_ns(written))
+    by_fd = os.utime in os.supports_fd
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=TEMP_PREFIX, suffix=".tmp")
     temp = Path(name)
     try:
@@ -913,10 +1102,40 @@ def write_secret(path: Path, data: bytes, mode: int | None, group: int | None) -
                     ) from exc
             if mode is not None:
                 os.fchmod(handle.fileno(), mode)
+            if by_fd:
+                os.utime(handle.fileno(), ns=times)
         os.replace(temp, path)
+        if not by_fd:
+            os.utime(path, ns=times)
     finally:
         with contextlib.suppress(FileNotFoundError):
             temp.unlink()
+
+
+def foreign_owner(local: Local) -> bool:
+    return local.uid is not None and local.uid != running_uid()
+
+
+ACTIONS = {
+    "create": ("write", "wrote"),
+    "overwrite": ("write", "wrote"),
+    "chmod": ("re-mode", "re-moded"),
+    "retime": ("re-time", "re-timed"),
+}
+
+
+def refuse_foreign_owner(path: Path, local: Local) -> None:
+    """Refuse to replace or re-mode a file another user owns.
+
+    An unprivileged user cannot give a file away, so a replaced file would silently become the
+    running user's. Off Windows only, since NTFS ownership is not a POSIX uid.
+    """
+    if not foreign_owner(local):
+        return
+    raise Refusal(
+        f"{path} is owned by uid {local.uid}, not the running user, so pull cannot replace it"
+        " without changing its owner"
+    )
 
 
 def cmd_pull(a: argparse.Namespace, op: Op) -> int:
@@ -930,24 +1149,29 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         for title, item in sorted(items.items()):
             local, remote, mode, state = inspect(op, home, vault, title, item)
             path = local_path(home, title)
-            if state == "same":
+            written = content_time(item)
+            if state == "same" and (local.mtime == written or foreign_owner(local)):
                 print(f"  same      {title}")
                 continue
             if (
                 state == "differs"
                 and local.mtime
-                and local.mtime > item.updated
+                and local.mtime > written
                 and not a.overwrite_newer
             ):
                 print(
-                    f"  skip      {title}  local {stamp(local.mtime)} is newer than remote {stamp(item.updated)},"
+                    f"  skip      {title}  local {stamp(local.mtime)} is newer than remote {stamp(written)},"
                     " so pass --overwrite-newer to replace it"
                 )
                 continue
-            action = {"only-remote": "create", "differs": "overwrite", "mode-differs": "chmod"}[
-                state
-            ]
-            plans.append(Plan(action, title, path, local, item, mode, remote))
+            refuse_foreign_owner(path, local)
+            action = {
+                "same": "retime",
+                "only-remote": "create",
+                "differs": "overwrite",
+                "mode-differs": "chmod",
+            }[state]
+            plans.append(Plan(action, title, path, local, item, mode, remote, written))
     if not plans:
         print("Nothing to pull.")
         return 0
@@ -956,29 +1180,32 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         print(plan_line(plan, plan.local.mode))
     if op.dry_run:
         for plan in plans:
-            print(f"  would write: {plan.path}")
+            print(f"  would {ACTIONS[plan.action][0]}: {plan.path}")
         return 0
-    changes = [p for p in plans if p.action != "create"]
+    changes = [p for p in plans if p.action not in {"create", "retime"}]
     if changes:
         confirm(
             op, a.yes, f"Replace or re-mode {len(changes)} existing local file(s)?", then_op=False
         )
     for index, plan in enumerate(plans, 1):
         sys.stderr.write(f"[{index}/{len(plans)}] {plan.action} {plan.title}\n")
-        if read_local(plan.path) != plan.local:
-            raise Refusal(
-                f"{plan.title} changed locally after the plan was printed, so it was not written"
-            )
+        refuse_changed_locally(plan)
         ensure_parents(home, plan.title)
-        assert plan.remote is not None
-        if plan.action == "chmod":
-            assert plan.mode is not None
-            os.chmod(plan.path, plan.mode)
+        assert plan.remote is not None and plan.content is not None
+        if plan.action in {"chmod", "retime"}:
+            if plan.action == "chmod":
+                assert plan.mode is not None
+                os.chmod(plan.path, plan.mode)
+            os.utime(plan.path, ns=(time.time_ns(), to_ns(plan.content)))
         else:
-            write_secret(plan.path, plan.remote, plan.mode, plan.local.gid)
+            write_secret(plan.path, plan.remote, plan.mode, plan.local.gid, plan.content)
         if plan.path.read_bytes() != plan.remote:
             raise Execution(f"{plan.title} reads back differently from what was written")
-    print(f"Wrote {len(plans)} file(s) under {home}.")
+    done: dict[str, int] = {}
+    for plan in plans:
+        verb = ACTIONS[plan.action][1]
+        done[verb] = done.get(verb, 0) + 1
+    print(f"Under {home}: " + ", ".join(f"{verb} {n} file(s)" for verb, n in done.items()) + ".")
     return 0
 
 
@@ -993,18 +1220,22 @@ def cmd_archive(a: argparse.Namespace, op: Op) -> int:
     print(f"Plan for {vault.name}:\n  archive   {title}  remote {stamp(item.updated)}")
     if not op.dry_run:
         confirm(op, a.yes, f"Archive {title} in {vault.name}?")
+    refuse_changed(op, vault, title, item)
+
+    def gone() -> bool:
+        still = members(op, vault).get(title)
+        return still is None or still.id != item.id
+
     args = ["item", "delete", item.id, "--vault", vault.id, "--archive"]
     try:
         op.call(args, write=True, detail=title)
     except Execution:
-        landed = members(op, vault).get(title)
-        if landed is not None and landed.id == item.id:
+        if not landed(gone):
             raise
         sys.stderr.write(f"op item delete reported a failure, yet {title} is no longer listed\n")
     if op.dry_run:
         return 0
-    landed = members(op, vault).get(title)
-    if landed is not None and landed.id == item.id:
+    if not gone():
         raise Execution(f"{title} is still listed after op item delete --archive")
     print(f"Archived {title} from {vault.name}.")
     return 0
@@ -1022,6 +1253,10 @@ SELFTEST_CONTENT = {
     "crlf": b"alpha-line-one\r\nalpha-line-two\r\n",
     "nul-bytes": b"alpha\x00selftest\x00\xff\x01",
 }
+SELFTEST_STAMP = datetime.datetime(2000, 1, 2, 3, 4, 5, 678901, datetime.UTC)
+SELFTEST_RESTAMP = datetime.datetime(2000, 1, 3, 4, 5, 6, 789012, datetime.UTC)
+SELFTEST_TAGS = tags_for(None, 0o600, SELFTEST_STAMP)
+SELFTEST_RETAGS = tags_for(None, 0o640, SELFTEST_RESTAMP)
 
 
 def listed(op: Op, vault: Vault, title: str, after: str) -> Item:
@@ -1060,7 +1295,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
                 "--title",
                 title,
                 "--tags",
-                "mode:0600",
+                SELFTEST_TAGS,
             ],
             write=True,
             detail=title,
@@ -1076,12 +1311,20 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "create sets --tags",
-            first.tags == ("mode:0600",),
+            sorted(first.tags) == sorted(SELFTEST_TAGS.split(",")),
             f"tags read back as {list(first.tags)}",
         )
     )
     op.call(
-        ["item", "edit", first.id, "--vault", vault.id, "--tags", "mode:0640"],
+        [
+            "item",
+            "edit",
+            first.id,
+            "--vault",
+            vault.id,
+            "--tags",
+            SELFTEST_RETAGS,
+        ],
         write=True,
         detail=first.title,
     )
@@ -1089,7 +1332,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "item edit --tags replaces",
-            retagged.tags == ("mode:0640",),
+            sorted(retagged.tags) == sorted(SELFTEST_RETAGS.split(",")),
             f"tags read back as {list(retagged.tags)}",
         )
     )
@@ -1125,7 +1368,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "document edit keeps the tags",
-            after.tags == ("mode:0640",),
+            sorted(after.tags) == sorted(SELFTEST_RETAGS.split(",")),
             f"tags read back as {list(after.tags)}",
         )
     )
