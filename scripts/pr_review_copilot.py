@@ -75,6 +75,7 @@ BADGE = re.compile(
     r"</picture>",
     re.DOTALL | re.IGNORECASE,
 )
+QUOTED = re.compile(r"^\s*(?:>\s?)+")
 SPOT = re.compile(r"(?P<path>.+):L?(?P<start>\d+)(?:\s*[-\u2013]\s*L?(?P<end>\d+))?")
 EXCUSED = ("ADDED", "MODIFIED", "RENAMED", "DELETED")
 # A count longer than this is an identifier rather than anything a review states.
@@ -222,6 +223,16 @@ def plain(text: str) -> str:
 def matched(patterns: list[re.Pattern[str]], text: str) -> re.Match[str] | None:
     """The first pattern that matches the whole of `text`."""
     return next((m for p in patterns if (m := p.fullmatch(text))), None)
+
+
+def spelled(vocab: dict, name: str) -> tuple[str, re.Match[str]] | None:
+    """The section kind a label is spelled as, with the spelling's match, or None."""
+    return next(((k, m) for k, ps in vocab["sections"].items() if (m := matched(ps, name))), None)
+
+
+def unquoted(lines: list[str]) -> str:
+    """Source lines as a person reads them, quote markers and blank lines dropped."""
+    return "\n".join(ln.rstrip() for raw in lines if (ln := plain(QUOTED.sub("", raw))).strip())
 
 
 def total(counts: Iterable[int | None]) -> int | None:
@@ -442,16 +453,19 @@ def _read(
     counted: list[tuple[int, int]] = []
     opens: list[int | None] = []
     entries = linked = 0
+    for head in [] if vet else headed(tokens, found, vocab, lines):
+        claimed.append((head.start, head.end))
+        counted.append((head.start, head.end))
+        content = unquoted(lines[head.start + 1 : head.end])
+        findings = count_of(head.match, label(head.title))
+        sections.append(Section(head.kind, findings, head.title, content))
     for node in found:
         end = node.end if node.end is not None else len(lines)
         if any(a <= node.start < b for a, b in claimed):
             continue
         summary = node.summary or ""
         name = label(summary)
-        kind, match = next(
-            ((k, m) for k, ps in vocab["sections"].items() if (m := matched(ps, name))),
-            ("", None),
-        )
+        kind, match = spelled(vocab, name) or ("", None)
         if match is None:
             if vet and node.parent is None:
                 opaque.append((node.start, end + 1))
@@ -468,11 +482,7 @@ def _read(
         if kind == "vetted" or any(p.search(summary) for p in vocab["closed_badges"]):
             continue
         count = count_of(match, name)
-        content = "\n".join(
-            ln.rstrip()
-            for raw in lines[node.body : end]
-            if (ln := plain(re.sub(r"^\s*(?:>\s?)+", "", raw))).strip()
-        )
+        content = unquoted(lines[node.body : end])
         sections.append(Section(kind, count, " ".join(plain(summary).split()), content))
         if kind == "open":
             opens.append(count)
@@ -510,7 +520,7 @@ def _read(
             is_label(tokens[n + 1])
             or bool(vocab["effort"].fullmatch(label(said)))
             or any(p.match(said) for p in vocab["coverage_prose"])
-            or any(matched(ps, label(said)) for ps in vocab["sections"].values())
+            or spelled(vocab, label(said)) is not None
         )
 
     stops = sorted(
@@ -539,12 +549,7 @@ def _read(
                 level = effort_match.group("default") or effort_match.group("level")
                 effort = level.lower()
                 effort_source = "default" if effort_match.group("default") else "explicit"
-            elif not inside(token) and (
-                found_kind := next(
-                    ((k, m) for k, ps in vocab["sections"].items() if (m := matched(ps, name))),
-                    None,
-                )
-            ):
+            elif not inside(token) and (found_kind := spelled(vocab, name)):
                 if found_kind[0] == "open":
                     opens.append(count_of(found_kind[1], name))
             elif (listing := matched(vocab["finding_lists"], name)) and (
@@ -576,7 +581,7 @@ def _read(
         ):
             heads, rows = cells
             table = (table or []) + [p for row in rows if row for p in paths(row[0])]
-            column, kind = next(
+            column, column_head = next(
                 (
                     (n, m)
                     for n, head in enumerate(heads)
@@ -585,8 +590,8 @@ def _read(
                 (0, None),
             )
             marker = vocab["table_finding_marker"]
-            by_marker = kind is not None and kind.groupdict().get("notes") is not None
-            for row in rows if kind is not None else []:
+            by_marker = column_head is not None and column_head.groupdict().get("notes") is not None
+            for row in rows if column_head is not None else []:
                 text = " ".join(inline_text(row[column]).split()) if len(row) > column else ""
                 marks = len(marker.findall(text))
                 if by_marker and marks:
@@ -647,6 +652,58 @@ def _read(
         notes=tuple(dict.fromkeys(notes)),
         unplaced=tuple(dict.fromkeys(unplaced)),
     )
+
+
+class Headed(NamedTuple):
+    """One section a paragraph heads: its kind, matched spelling, title, and source line range."""
+
+    kind: str
+    match: re.Match[str]
+    title: str
+    start: int
+    end: int
+
+
+def headed(
+    tokens: list[Token], found: list[_Details], vocab: dict, lines: list[str]
+) -> list[Headed]:
+    """Each section a paragraph of its own heads, with the `<details>` run following it.
+
+    A paragraph spelled as an `open` section is left to the paragraph pass, which counts it, and one
+    spelled as `vetted` heads nothing. Any other kind heads the `<details>` siblings following it
+    as its findings. Only blank lines at the paragraph's own quote depth may separate them. So the
+    run ends at any other line, which a closing quote is, or at a sibling spelled as a section of
+    its own. A reader vetting its layout does not call this, so an unknown `<details>` stays a note
+    rather than a finding.
+    """
+    out: list[Headed] = []
+    for n, token in enumerate(tokens[:-1]):
+        if token.type != "paragraph_open" or token.map is None:
+            continue
+        title = " ".join(inline_text(tokens[n + 1]).split())
+        heading = spelled(vocab, label(title))
+        if heading is None or heading[0] in ("open", "vetted"):
+            continue
+        start, end = token.map
+        depth = depth_of(lines[start])
+        outer = next((d for d in reversed(found) if d.start < start <= (d.end or start)), None)
+        for node in (d for d in found if d.parent is outer and d.start >= end):
+            gap = lines[end : node.start + 1]
+            if any(depth_of(ln) != depth for ln in gap) or any(
+                QUOTED.sub("", ln).strip() for ln in lines[end : node.start]
+            ):
+                break
+            if spelled(vocab, label(node.summary or "")) is not None:
+                break
+            end = node.end + 1 if node.end is not None else len(lines)
+        out.append(Headed(*heading, title, start, end))
+    return out
+
+
+def depth_of(line: str) -> int:
+    """How many quote markers open a source line."""
+    m = QUOTED.match(line)
+    return m.group(0).count(">") if m else 0
 
 
 def span(tokens: list[Token], start: int, stops: list[int]) -> tuple[int, int]:
@@ -749,7 +806,7 @@ def items_after(tokens: list[Token], start: int, lines: list[str]) -> list[Item]
             break
         if token.type == "list_item_open" and token.level == level:
             a, b = token.map or (0, 0)
-            said = " ".join(plain(re.sub(r"^\s*(?:>\s?)+", "", ln)) for ln in lines[a:b])
+            said = " ".join(plain(QUOTED.sub("", ln)) for ln in lines[a:b])
             text = re.sub(r"^(?:[-*+]|\d+[.)])\s*", "", " ".join(said.split()))
             spans = []
             items.append(Item(text, ()))

@@ -126,6 +126,7 @@ SHORT_NAME_PINS = {
     "LanguageTags": "languagetags",
     "aiopurpleair": "aiopurpleair",
     "homeassistant-purpleair": "hapurpleair",
+    "homeassistant-vantage-diagnostics": "havantagediag",
     "Financial-Modeling": "finmod",
     "PlexCleaner": "plexcleaner",
     "ESPHome-NonRoot": "esphomenonroot",
