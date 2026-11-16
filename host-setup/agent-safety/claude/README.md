@@ -145,6 +145,19 @@ the hook's own launcher.
 Run the installer rather than hand-copying this block on a host where the two might differ.
 The `uv run --no-project --script` rule beside it matches the spelling the fleet's skills print.
 
+A matching allow rule decides a call before auto mode's classifier runs, but it matches only the
+command text as written. Claude Code strips a fixed set of wrappers, such as `timeout`, and a
+built-in set of known-safe environment assignments before matching. Nothing else is stripped. So a
+call carrying any other leading assignment, such as a uv cache variable, is not matched. Neither is
+one with a flag added after `uv run`. A script named by an absolute path or a shell variable is
+unmatched too. So is a compound command with any part that neither a rule nor Claude Code's
+read-only check passes, a `cd` being one the check passes. The classifier then judges the whole
+command, and its default rules refuse a merge no human has approved. The `autoMode.allow` entry below is no fallback for that case. It
+allows the call where a skill the session follows prescribes it, and the classifier cannot see which
+skill a session follows. So `drive-pr` and `merge-and-release` run `merge` and `cleanup` alone, spelled
+exactly as the rule is, after a `cd` into the hub checkout. The
+`backlog-burndown` worker brief quotes that spelling.
+
 ```json
 {
   "env": {

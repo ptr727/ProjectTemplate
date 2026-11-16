@@ -402,6 +402,12 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   the override moves is the two cleanup halves `drive-pr` runs after it, the worktree procedure
   and the verify-then-delete of the merged remote branch. It moves **both** rather than only the
   first. "Cleanup Is the Orchestrator's" below, in this same section, says why and what it covers.
+- **The brief quotes the `merge` command in `drive-pr` step 4's exact spelling**, without
+  `--cleanup` or `--checkout`. It says to run that command as a call of its own with nothing added. The
+  host-safety installer's allow rule matches only that text. A worker applying a habit of its own,
+  such as a cache variable or a status echo, leaves the rule unmatched. Its merge then goes to the
+  auto-mode classifier, which refuses a merge no human has approved. That refusal then waits on a
+  dialog with the maintainer.
 - **A worker that cannot dispatch a subagent hands back its worktree path, target, and digest.**
   The brief says so per `local-strict-review` "Running It", and says the orchestrator can continue the same worker after recording.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
