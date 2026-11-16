@@ -158,9 +158,12 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    around, and it hands the maintainer no command to run instead.
    A harness refusing the `merge` call itself is a refused write
    rather than a gate refusal. That happens on a machine with no allow rule for it, or under
-   another provider. Raise it as a blocked decision per `GOVERNANCE.md` "Repository Boundaries and
-   Write Safety". Name the maintainer's routes, adding the permission rule or running the command
-   themselves. Once the merge is
+   another provider. It also happens on Claude Code for a call the rule does not match, per
+   `pr-review-conduct` "Expected review loop". Raise it as a blocked decision per `GOVERNANCE.md`
+   "Repository Boundaries and Write Safety". Name the maintainer's routes. One is adding the
+   permission rule where it is missing. Another is the change that paragraph names, a hub checkout
+   inside the session's working directories or a writable uv cache. The last is running the
+   command themselves. Once the merge is
    confirmed, `--cleanup` runs repo-worktree's post-merge cleanup,
    `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
    and its exit is the command's. It deletes the remote branch, then removes the task's worktree and local branch.
