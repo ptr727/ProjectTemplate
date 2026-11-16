@@ -74,7 +74,7 @@ Working them is out of this skill's scope, and a fleet-wide backlog sweep is a d
 
 ## The Round
 
-A round is the unit. Each one runs these steps in order.
+A round is the unit. Each one runs these steps, step 6 repeating as each worker ends.
 
 1. **Rank** every open issue, per "Ranking".
 2. **Group** the top of that ranking, per "Grouping and File Claims".
@@ -90,10 +90,9 @@ A round is the unit. Each one runs these steps in order.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
    the worktree, local branch, and remote branch of a group that merged or was abandoned, per
-   "Dispatching a Worker". Then form and verify the next group per steps 2 and 3, from the issues
-   of this round's ranking not yet dispatched. Dispatch it into the freed slot. A worker resuming a stopped or parked group
-   also waits for a freed slot. A
-   refill draws only from this round's ranking, so an issue filed mid-round waits for step 8. The
+   "Dispatching a Worker". Then run steps 1 to 3 afresh for one group, and dispatch it into the
+   freed slot. A fresh run reads each issue's live state, so it never takes work a merge already
+   finished. A worker resuming a stopped or parked group also waits for a freed slot. The
    round moves to step 7 once no worker is in flight and no group can be dispatched.
 7. **Promote**, per "The Promotion Boundary".
 8. **Re-rank from scratch**. Whenever a promotion pull request is still waiting on the maintainer,
@@ -309,11 +308,11 @@ for, and it binds harder than any throughput target.
   needing a file outside its claim stops and reports rather than editing it. A file may sit on a
   branch no claim comment covers, or on one whose set is unknown. Then the worker is stopped for
   the maintainer per "Raising a Blocked Question". Where no branch holds the file, the orchestrator
-  verifies that as it verifies a prediction. It then extends the claim comment at once. A grown
+  verifies that as it verifies a prediction. It then extends the claim comment. A grown
   set failing the tier test in "Choosing the Worker's Model Tier" under a worker below `frontier`
   stops the group there. One passing it lets the worker continue, unless the agent-safety hold
   below applies. That is the ordinary path for a doc describing the group's own change, and it is
-  answered at once rather than at a round boundary. Where another group holds the file, the need
+  answered without waiting for a round boundary. Where another group holds the file, the need
   is a conflict. The orchestrator decides which group keeps the file and tells the loser what to do
   rather than leaving it to choose. The loser narrows its change to drop that file, parks until
   the holder merges, or abandons its branch per "Cleanup Is the Orchestrator's". Some losers need
@@ -333,9 +332,9 @@ for, and it binds harder than any throughput target.
   drifts from the real claim it exists to report. A group told to abandon its branch keeps its claim
   comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
   Orchestrator's".
-- **Cap each group at three issues and four predicted files.** A round's slowest group has been
-  its widest, and refilling a freed slot shortens the idle time around that tail but not the tail
-  itself. Where the ranking would form a wider group, its lower-ranked issues wait for a later
+- **Cap each group at three issues and four predicted files.** A wide group draws the most review
+  passes and sets the round's tail. A refill shortens the idle time around that tail but not the
+  tail itself. Where the ranking would form a wider group, its lower-ranked issues wait for a later
   group, which a refill can dispatch once this one merges. Genuine duplicates count as one issue,
   and an issue holding nothing but a question counts as none. A file a generator writes from
   another in the set does not count. An issue predicting more than
@@ -508,7 +507,7 @@ That delete refuses only where the branch has moved off the tip the is-ancestor 
 Where `git config --get-regexp '^branch\.<exact-branch>\.'` prints anything, `git config --remove-section branch.<exact-branch>` then removes the tracking `git branch -d` would have removed.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Where the branch was never pushed, the orchestrator records the release once both succeed.
-It edits the group's claim comment, and the issue returns to the next round's ranking.
+It edits the group's claim comment, and the issue returns to the ranking.
 Where it was pushed, the orchestrator also deletes the remote branch, since `cleanup` needs a merged pull request to read.
 That is the one remote delete this skill types by hand.
 The delete runs only where two more checks hold.
@@ -518,7 +517,7 @@ And no open pull request uses the branch as its head or its base.
 The delete is `git push origin --delete <exact-branch>`, an outward-facing write bound by `GOVERNANCE.md` "Repository Boundaries and Write Safety".
 So it names the exact branch, takes every identifier from a live read, and keeps its output unsuppressed.
 The orchestrator then reads the ref back with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, and only its exit `2`, no matching ref, confirms the delete.
-Only after that confirmation is the release recorded on the claim comment, and the issue then returns to the next round's ranking.
+Only after that confirmation is the release recorded on the claim comment, and the issue then returns to the ranking.
 Where any check fails or the delete is not confirmed, the claim is kept and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
 That stop is per "Raising a Blocked Question", since past that point removal discards work.
@@ -601,7 +600,7 @@ A worktree is judged clean or dirty by `repo-worktree` "Listing and Cleanup"'s h
 That procedure confirms the branch carries no commit that is not already on develop before anything is removed. A worker that
 committed its fix and then died leaves a clean tree standing over commits develop has never seen.
 So that check is what separates the two. It holds, and once that procedure releases the claim,
-the issue returns to the next round's ranking to be dispatched on a new branch. It
+the issue returns to the ranking to be dispatched on a new branch. It
 fails, and the branch holds the dead worker's work. So the worktree alone is retired, per
 "Cleanup Is the Orchestrator's". The branch, its claim, and any pull request it heads stay
 standing. A fresh worker is then dispatched on that same branch to finish the drive, in the dead
@@ -868,11 +867,11 @@ subagents and holds only what they return.
    per step 8, and returns those counts with the plan. Its brief names when the run began. The
    first planner reads the set awaiting promotion then and returns it, and later briefs carry it.
    It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
-   the claim comment of each group dispatched now. It holds back each issue "Needs the Maintainer" names. Where one turns on an
+   each claim comment. It holds back each issue "Needs the Maintainer" names. Where one turns on an
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
    `decision`. It comments the question there, unless the issue already carries the label. It
-   returns the round plan: each group's issues, branch, claimed files, and tier, in rank order.
-   The plan marks the groups dispatched now, then lists each held-back issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
+   returns the round plan: each group's issues, branch, claimed files, and tier, then each held-back
+   issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
    refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a tree clean by
@@ -881,7 +880,7 @@ subagents and holds only what they return.
    instead. Leave a dirty tree, or a clone failing those checks, exactly as it stands. Keep its
    group parked, and name it in the report. Only the
    maintainer disposes of another task's uncommitted work.
-3. **Dispatch the group workers** the plan marks, per "Dispatching a Worker", each brief built
+3. **Dispatch the group workers** per "Dispatching a Worker", each brief built
    from the group's line. Each brief also states the park duty below and the comment rule above.
    A group worker drives to develop and ends there, whatever the scope.
 4. **Collect each worker's one-line outcome**, bounding the wait per "Bounding the Wait on a
@@ -889,11 +888,9 @@ subagents and holds only what they return.
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
-   planner scoped to the next claim-free group from this round's plan, rather than a fresh step 1.
-   Its brief carries the plan's undispatched group lines in rank order. It verifies the first whose
-   files are free, records its claim comment, and returns its line, or returns that none is free.
-   One refill planner runs at a time. It re-reads the claims after recording its own, and releases
-   its claim where another now collides with it. Then dispatch that group's worker per steps 2 and 3.
+   planner that runs step 1 for one group, without the net-flow count. One refill planner runs at
+   a time. A grown set a worker reports while one runs is adjudicated once it returns, so every
+   claim is written from a current read. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
@@ -1026,8 +1023,9 @@ The run ends at the first of these, each an ending of its own:
   allowance, a refused push or merge, and a read the planner cannot make.
 - The session ends.
 
-Every ending but the session's own first collects each worker still in flight. It cleans up each
-such group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. The final message is the report "Ending the Run" describes, with every held-back issue under the
+Every ending but the session's own and a dispatch failure first collects each worker still in
+flight. It cleans up each such group per "The Lean Orchestrator" steps 4 and 5, and refills no
+slot. A run ended by a dispatch failure names each worker still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
