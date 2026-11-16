@@ -145,6 +145,17 @@ the hook's own launcher.
 Run the installer rather than hand-copying this block on a host where the two might differ.
 The `uv run --no-project --script` rule beside it matches the spelling the fleet's skills print.
 
+A matching allow rule decides a call before auto mode's classifier runs, but it matches only the
+command text as written. Claude Code strips a fixed set of wrappers, such as `timeout`, and a
+built-in set of known-safe environment assignments before matching. A call carrying any other
+leading assignment, such as a uv cache variable, is not matched. Neither is one with a flag added
+between `uv run` and the script. A script named by an absolute path or a shell variable is
+unmatched too. So is a compound command with any part that neither a rule nor Claude Code's
+read-only check passes. A `cd` inside the session's working directories is one the check passes. The classifier then judges the whole
+command, and its default rules refuse a merge no human has approved. The `autoMode.allow` entry
+below did not override those refusals in practice. So `pr-review-conduct` "Expected review loop"
+states the one spelling that matches.
+
 ```json
 {
   "env": {
