@@ -266,12 +266,8 @@ for, and it binds harder than any throughput target.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
   this round. In flight covers the files changed by every open **feature** pull request on this
   repository. It also covers the claim comments of every group still holding a branch, parked
-  groups from earlier rounds included. It covers too the claim of each group whose dispatch is
-  pending. A worker creates its branch only when it runs `git worktree add`. So a dispatch stays
-  pending until one of the branch reads below lists that branch, or until its worker ends. The
-  orchestrator reads which dispatches are pending from its own record of what it dispatched. A
-  claim comment whose branch no read lists cannot say, since a merged group's cleanup leaves
-  its claim reading exactly like a pending one.
+  groups from earlier rounds included. A group's branch exists from the moment its claim does,
+  per "Dispatching a Worker", so no read misses a worker that has yet to attach it.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
   `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
@@ -349,8 +345,9 @@ for, and it binds harder than any throughput target.
   another in the set does not count. An issue predicting more than
   four files on its own forms a group by itself.
 - **Limit the round's dispatch to four workers at once and eight groups in all**, whatever the
-  grouping allows. A group counts once, however many workers it takes, so the eight-group limit
-  never holds back a stopped group resuming. A promotion fix counts toward neither limit.
+  grouping allows. A group counts once in a round, however many workers it takes. So a group
+  resuming in the round it stopped in takes no second place among the eight. One resuming in a
+  later round counts there. A promotion fix counts toward neither limit.
 
 ## Bounding a Prose Group
 
@@ -404,8 +401,13 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **A worker that cannot dispatch a subagent hands back its worktree path, target, and digest.**
   The brief says so per `local-strict-review` "Running It", and says the orchestrator can continue the same worker after recording.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
-  it before dispatch. The worker still creates its own worktree, on that named branch rather than
-  one of its choosing. That is because a claim naming a branch nobody used points at nothing.
+  it before dispatch. The seat recording a new group's claim creates that branch right after,
+  with `git -C <base-clone> branch --no-track <name> refs/remotes/origin/develop`. A branch that
+  exists as soon as its claim does is one the branch reads in "Grouping and File Claims" list
+  before its worker starts. `--no-track` keeps a push from defaulting to `develop`. The worker
+  still creates its own worktree, attaching that branch with `git worktree add <path> <name>` and
+  no `-b`, or switching to it in a standalone clone. The brief says so, since a worker following
+  `drive-pr` alone creates a branch afresh. A claim naming a branch nobody used points at nothing.
   A brief dispatching an issue returned to the ranking names a new branch.
   A branch a claim comment names for the first time is one no pull request on the repository has
   used as its head. That is checked with `gh pr list --head <name> --state all` before the
@@ -709,8 +711,8 @@ the issues it fixes in a `Closes on promotion:` line in its own commit message, 
    yields by having that pull request wait, its branch untouched. It also yields by the promotion
    fix taking the file, since the two must not be in flight on one file at once. Once the fix
    lands, that pull request waits untouched until the next round dispatches. Reconciling its content is the
-   next round's worker's job rather than the orchestrator's, which opens no branch and edits
-   nothing. The orchestrator retires that group's worktree, the branch and its pull request left
+   next round's worker's job rather than the orchestrator's, which opens no branch of its own and
+   edits nothing. The orchestrator retires that group's worktree, the branch and its pull request left
    standing. That is the worktree-only disposition "Cleanup Is the Orchestrator's" separates out,
    and the retire-then-dispatch shape "Raising a Blocked Question" uses. That next round
    dispatches a fresh worker on that same branch. That worker is briefed either to merge develop in
@@ -898,7 +900,7 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. One refill planner runs at
-   a time, and none starts while a dispatch is pending, as "Grouping and File Claims" bounds it. While one runs, a grown set a worker reports and a group's cleanup
+   a time, and none starts while a dispatch is pending. While one runs, a grown set a worker reports and a group's cleanup
    each wait for it to return. So every claim is written from a current read. Then dispatch each group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
@@ -1034,8 +1036,11 @@ The run ends at the first of these, each an ending of its own:
 
 Every ending but the session's own and a dispatch failure first collects each worker still in
 flight. It cleans up each such group per "The Lean Orchestrator" steps 4 and 5, and refills no
-slot. A refill planner still running is waited for. Then each claim the run recorded on a branch
-no worker has created is released per "Grouping and File Claims". A run ended by a dispatch failure names each worker and any refill planner still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
+slot. A refill planner still running is waited for. Then every ending but the session's own
+releases, per "Grouping and File Claims", each claim the run recorded for a group whose worker
+never started. It removes that group's branch as "Cleanup Is the Orchestrator's" removes an
+abandoned group's. A dispatch-failure ending
+keeps the claim of the failed dispatch where the error leaves unclear whether it started. A run ended by a dispatch failure names that claim, each worker, and any refill planner still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
