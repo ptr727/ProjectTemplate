@@ -1471,6 +1471,31 @@ class RegistryEntryGateCase(unittest.TestCase):
         # An override of None drops the key, which is how a case declares a field absent rather than declared null.
         return {k: v for k, v in base.items() if v is not None}
 
+    def test_the_retired_none_release_trigger_is_refused(self) -> None:
+        for trigger in ("two-phase", "dispatch-only", "none"):
+            with self.subTest(trigger=trigger):
+                output = self.run_against(
+                    self.entry(
+                        status="cataloged",
+                        classificationPending=None,
+                        types=["python"],
+                        consumerModel="push",
+                        releaseTrigger=trigger,
+                    )
+                )
+                refusal = f"Fixture: releaseTrigger '{trigger}' invalid (expected one of two-phase, dispatch-only)"
+                if trigger == "none":
+                    self.assertIn(refusal, output)
+                else:
+                    self.assertNotIn("releaseTrigger", output)
+
+    def test_the_retired_none_default_release_trigger_is_refused(self) -> None:
+        output = self.run_against(self.entry(), defaults={"releaseTrigger": "none"})
+        self.assertIn(
+            "defaults.releaseTrigger 'none' invalid (expected one of two-phase, dispatch-only)",
+            output,
+        )
+
     def test_a_types_value_that_is_not_a_list_of_strings_is_refused(self) -> None:
         for value in ({"python": 1}, 5, "python", ["python", 3]):
             with self.subTest(value=value):
@@ -2131,6 +2156,18 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
         ):
             with self.subTest(pattern=pattern):
                 self.assertEqual(pattern, constant)
+
+    def test_the_schema_enums_equal_the_validator_vocabularies(self) -> None:
+        """Each enum the schema states for a selector or policy field is the tuple validate.py checks against.
+
+        An editor admitting a value the gate refuses is the drift this class exists to stop. So a retired value, such
+        as the `none` release trigger, cannot return in one file alone.
+        """
+        defs = self.schema["$defs"]
+        self.assertEqual(defs["releaseTrigger"]["enum"], list(validate.RELEASE_TRIGGERS))
+        self.assertEqual(defs["workflowModel"]["enum"], list(validate.WORKFLOW_MODELS))
+        self.assertEqual(defs["branchPolicy"]["enum"], list(validate.BRANCH_POLICIES))
+        self.assertEqual(self.props["consumerModel"]["enum"], list(validate.CONSUMER_MODELS))
 
     def test_the_schema_declares_no_retired_key(self) -> None:
         """configLayout was retired rather than wired, and the gate's unknown-key check reads this list.
