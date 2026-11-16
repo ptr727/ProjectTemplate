@@ -93,6 +93,23 @@
             ]
         },
         {
+            "name": "homeassistant-vantage-diagnostics",
+            "shortName": "havantagediag",
+            "url": "https://github.com/ptr727/homeassistant-vantage-diagnostics",
+            "status": "cataloged",
+            "types": ["python", "homeassistant"],
+            "groundTruthBranch": "main",
+            "hasDevelop": true,
+            "publish": [{ "target": "github-release", "mechanism": "none" }],
+            "requiredSecrets": ["CODECOV_TOKEN"],
+            "consumerModel": "push",
+            "releaseTrigger": "dispatch-only",
+            "pythonDirectories": ["."],
+            "driftNotes": [
+                "Standing up: both branches hold only the signed empty root commit until the standup pull request merges, modelled on homeassistant-purpleair's shape."
+            ]
+        },
+        {
             "name": "Financial-Modeling",
             "shortName": "finmod",
             "url": "https://github.com/ptr727/Financial-Modeling",
