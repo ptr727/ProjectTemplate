@@ -106,7 +106,7 @@
             "releaseTrigger": "dispatch-only",
             "pythonDirectories": ["."],
             "driftNotes": [
-                "Standing up: both branches hold only the signed empty root commit until the standup pull request merges, modelled on homeassistant-purpleair's shape."
+                "Standup pending: develop holds only the signed empty root commit until the standup pull request merges, and main until that work is promoted."
             ]
         },
         {
