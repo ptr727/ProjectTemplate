@@ -77,8 +77,7 @@ Working them is out of this skill's scope, and a fleet-wide backlog sweep is a d
 A round is the unit. Each one runs these steps in order.
 
 1. **Rank** every open issue, per "Ranking".
-2. **Group** the top of that ranking, as many groups as the round cap in "Grouping and File
-   Claims" admits.
+2. **Group** the top of that ranking, per "Grouping and File Claims".
 3. **Verify** each group's predicted file set against everything in flight before dispatching
    it. A group whose files are already claimed waits for a refill that finds them free, or for
    the next round.
@@ -90,11 +89,13 @@ A round is the unit. Each one runs these steps in order.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
    the worktree, local branch, and remote branch of a group that merged or was abandoned, per
-   "Dispatching a Worker". Then verify the next ranked group per step 3, and dispatch it into the
-   freed slot. A refill draws only from this round's ranking, so an issue filed mid-round waits
-   for step 8. The round moves to step 7 once no worker is in flight and no group can be
-   dispatched. That is when every ranked group is dispatched or claim-blocked, or the round cap is
-   reached.
+   "Dispatching a Worker". Then form and verify the next group from this round's ranking per
+   steps 2 and 3, and dispatch it into the freed slot. A group resuming within the round, once its
+   question is answered or its holder merges, takes the next freed slot ahead of a new group. A
+   refill draws only from this round's ranking, so an issue filed mid-round waits for step 8. The
+   round moves to step 7 once no worker is in flight and no group can be dispatched. That is when
+   no ranked issue left forms a claim-free group, or the dispatch limit in "Grouping and File
+   Claims" is reached.
 7. **Promote**, per "The Promotion Boundary".
 8. **Re-rank from scratch**. Whenever a promotion pull request is still waiting on the maintainer,
    the next round prepares under the freeze "The Promotion Boundary" describes. Under that freeze
@@ -218,7 +219,8 @@ Group so that **no file is claimed by two live groups at once.** This is the rul
 for, and it binds harder than any throughput target.
 
 - **Group by the files a fix will touch**, not by the issues' subject matter. Two issues that read
-  as unrelated but both edit a shared governance file are one group. Two issues that read as near
+  as unrelated but both edit a shared governance file share a group. Where the group cap below
+  splits them, they run one after the other. Two issues that read as near
   duplicates but touch different files are two groups.
 - **Genuine duplicates are one group.** Never close an issue during triage on the orchestrator's
   own judgment. Comment to cross-link the pair, and let the fix close both.
@@ -236,7 +238,7 @@ for, and it binds harder than any throughput target.
   that behavior. That is the doc, the manifest entry, or the rule sentence `GOVERNANCE.md`
   "Verification Discipline" makes the change's own to fix. Find them by searching the tree for
   the identifier, flag, check name, or rule phrase the fix changes, rather than by guessing which
-  docs apply. Two groups needing one such file are one group, per the first bullet. A predicted
+  docs apply. A predicted
   edit lands before the first push, where it costs no extra CI run or hosted review.
 - **Record every claim on the issue itself**, as a comment naming the predicted file set **and the
   branch that holds it**, before dispatching. The comment opens with `**Backlog burndown claim`
@@ -340,7 +342,8 @@ for, and it binds harder than any throughput target.
   which a refill can dispatch once this one merges. Genuine duplicates count as one issue, and a
   file a generator writes from another in the set does not count. An issue predicting more than
   four files on its own forms a group by itself.
-- **Cap the round at four workers at once and eight groups in all**, whatever the grouping allows.
+- **Limit the round's dispatch to four workers at once and eight groups in all**, whatever the
+  grouping allows. A group counts once, however many workers it takes.
 
 ## Bounding a Prose Group
 
@@ -578,7 +581,8 @@ is met here. A worker
 reports merged, parked, stopped, or handed back for review. A worker that reports nothing at all needs a bound.
 Its silence looks exactly like slowness, and dying mid-drive is ordinary here.
 
-The bound is a state read rather than a clock. When the other workers in the round have reported,
+The bound is a state read rather than a clock. Wait until every other worker dispatched no later than
+the silent one has reported. Then
 read the silent worker's branch and pull request directly, with `git log` on that branch and
 `gh pr view <branch>`. Pass the branch as that command's positional argument, since a
 bare `gh pr view` resolves the pull request of whatever branch the caller is standing on. It never
@@ -643,7 +647,7 @@ rather than a decision.
   clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
   one branch. It is retired per "Cleanup Is the Orchestrator's", once its tip equals the remote
-  tip. Only then dispatch. This is the
+  tip. Only then dispatch, into a slot per "The Round" step 6. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
@@ -887,9 +891,9 @@ subagents and holds only what they return.
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
-   planner scoped to the next claim-free group from this round's plan, rather than a fresh step 1.
-   It verifies that group's claims, records its claim comment, and returns its line, or returns
-   that no planned group is claim-free. Then dispatch that group's worker per step 3.
+   planner scoped to the next claim-free group from this round's ranking, rather than a fresh
+   step 1. It forms and verifies that group, records its claim comment, and returns its line, or
+   returns that no ranked issue left forms one. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
