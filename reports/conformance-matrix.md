@@ -16,7 +16,7 @@ The primary shapes are stood up as whole repos. The **composable targets** (`nug
 | `csharp` + `docker` | - | not-tested | - | |
 | `csharp` + `python` | PlexCleaner | not-tested | 2026-08-15 | First mixed-language shape (#339). Python is a stdlib-only `uvx` **scripts** profile subtree (`RegressionTests/`): no `uv.lock`, `pyproject.toml` lint/type config only, mypy checker, `python.uvlock.pinned` + `python.coverage.codecov` N/A, and `codecov.yml` stays required for the C# side. Both language rule-sets apply (CODESTYLE.md "Two profiles"). **The 2026-08-15 run is the first to judge the `python` checks**, since the 2026-07-04 one predated the type declaration and graded the repo as `csharp` + `console` + `docker` alone. The repo is operational: every mechanized check passes, and the two workflow divergences still standing (no `changes` paths-filter, a dispatch guard that skips rather than failing fast) are letter misses whose intent holds. Its two open drift items are prose and configuration rather than pipeline, and the pass also settled the two `investigate` gap dispositions the whole fleet was carrying. |
 | `homeassistant` | - | not-tested | - | Standalone-config conventions (home-assistant/core), scored by the `ha.*` checks. |
-| `eda` | - | not-tested | - | Data-zip release, pull consumer. |
+| `eda` | - | not-tested | - | A part library releases a data zip for a pull consumer. A board releases its fabrication outputs once its pipeline generates them. |
 | `upstream-wrapper` | - | not-tested | - | Tag from a committed state file, not SemVer2. |
 | `codegen` | - | not-tested | - | Deterministic matrix over both branches. |
 | `docs` | ProjectTemplate | not-tested | - | Governance hub, and CI is lint-only. |
