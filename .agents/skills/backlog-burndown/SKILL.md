@@ -77,16 +77,24 @@ Working them is out of this skill's scope, and a fleet-wide backlog sweep is a d
 A round is the unit. Each one runs these steps in order.
 
 1. **Rank** every open issue, per "Ranking".
-2. **Group** the top of that ranking, per "Grouping and File Claims".
+2. **Group** the top of that ranking, as many groups as the round cap in "Grouping and File
+   Claims" admits.
 3. **Verify** each group's predicted file set against everything in flight before dispatching
-   anything. A group whose files are already claimed waits for the next round.
-4. **Dispatch** at most four workers, one per group, per "Dispatching a Worker".
+   it. A group whose files are already claimed waits for a refill that finds them free, or for
+   the next round.
+4. **Dispatch** at most four workers at once, one per group, per "Dispatching a Worker".
 5. **Collect** each worker's outcome: merged to develop, stopped on a maintainer-only question,
    parked behind another group's file claim, handed back for review, or abandoned.
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
-6. **Clean up** the worktrees, local branches, and remote branches of every group that has
-   merged or been abandoned, per "Dispatching a Worker".
+6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
+   A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
+   the worktree, local branch, and remote branch of a group that merged or was abandoned, per
+   "Dispatching a Worker". Then verify the next ranked group per step 3, and dispatch it into the
+   freed slot. A refill draws only from this round's ranking, so an issue filed mid-round waits
+   for step 8. The round moves to step 7 once no worker is in flight and no group can be
+   dispatched. That is when every ranked group is dispatched or claim-blocked, or the round cap is
+   reached.
 7. **Promote**, per "The Promotion Boundary".
 8. **Re-rank from scratch**. Whenever a promotion pull request is still waiting on the maintainer,
    the next round prepares under the freeze "The Promotion Boundary" describes. Under that freeze
@@ -282,8 +290,8 @@ for, and it binds harder than any throughput target.
   open promotion pull request from that enumeration.** Its diff is all of
   `origin/main..origin/develop`, so counting it claims nearly every file any earlier round touched.
   A round run during the freeze would then defer every group it formed. A predicted claim that
-  collides with a real one is a group deferred to the next round, never one dispatched hoping the
-  overlap stays small.
+  collides with a real one is a group deferred to a later refill or the next round. It is never
+  one dispatched hoping the overlap stays small.
 - **A branch no claim comment covers still has to yield a file set.** The maintainer's own
   worktree and a hand-driven task's branch are enumerated above and carry no claim comment. So
   reading only the comments records them as holding nothing. That is the collision this section
@@ -325,13 +333,22 @@ for, and it binds harder than any throughput target.
   drifts from the real claim it exists to report. A group told to abandon its branch keeps its claim
   comment unchanged, since cleanup decides whether that claim is released, per "Cleanup Is the
   Orchestrator's".
-- **Cap the round at four workers**, whatever the grouping allows.
+- **Cap each group at three issues and four predicted files.** A round's slowest group has been
+  its widest, and refilling a freed slot shortens the idle time around that tail but not the tail
+  itself. Where the ranking would form a wider group, split it
+  where the halves claim disjoint files. Otherwise its lower-ranked issues wait for a later group,
+  which a refill can dispatch once this one merges. Genuine duplicates count as one issue, and a
+  file a generator writes from another in the set does not count. An issue predicting more than
+  four files on its own forms a group by itself.
+- **Cap the round at four workers at once and eight groups in all**, whatever the grouping allows.
 
 ## Bounding a Prose Group
 
 A group whose files are prose-heavy Markdown bloats in a way a code group does not. It needs its
 own bound stated in the worker's brief.
 
+- **The group's scope is capped** per "Grouping and File Claims", which forms the group before
+  any brief is written.
 - **The change reaches the units the issue names and the units it puts in disagreement.** A unit
   stating the rule or behavior the change altered is this change's to fix wherever it sits in this repository, per
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
@@ -427,7 +444,8 @@ that concurrently mutate one shared checkout, which `GOVERNANCE.md` "Repository 
 Write Safety" forbids.
 
 So the whole procedure moves to the orchestrator.
-It runs the procedure against the base clone at the round's cleanup step, while no worker is live in a tree it touches.
+It runs the procedure against the base clone as each group's worker ends, per "The Round" step 6.
+It runs it while no worker is live in a tree it touches.
 It carries the remote half of `drive-pr`'s post-merge cleanup too.
 For a merged group both halves are one command, `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`.
 It is run from a hub checkout once for each merged group, `<base-clone>` being the repository's primary clone.
@@ -505,7 +523,7 @@ Where a confirmation fails for an abandoned group, cleanup stops there and the g
 That stop is per "Raising a Blocked Question", since past that point removal discards work.
 A dead worker's clean tree whose branch fails the check is retired alone instead, per "Bounding the Wait on a Worker".
 Where a pushed branch still heads or bases an open pull request, what goes to the maintainer names that pull request.
-A worker still live, a promotion fix included, keeps its worktree until the next round's cleanup step.
+A worker still live, a promotion fix included, keeps its worktree until it ends and its group's cleanup runs.
 
 **A standalone clone holds its branch alone**, since the base clone does not register it. So the
 base-clone commands above do not reach it, and deleting the clone deletes its local branch too.
@@ -848,11 +866,11 @@ subagents and holds only what they return.
    per step 8, and returns those counts with the plan. Its brief names when the run began. The
    first planner reads the set awaiting promotion then and returns it, and later briefs carry it.
    It ranks per "Ranking", groups and verifies claims per "Grouping and File Claims", and records
-   each claim comment. It holds back each issue "Needs the Maintainer" names. Where one turns on an
+   the claim comment of each group dispatched now. It holds back each issue "Needs the Maintainer" names. Where one turns on an
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
    `decision`. It comments the question there, unless the issue already carries the label. It
-   returns the round plan: each group's issues, branch, claimed files, and tier, then each held-back
-   issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
+   returns the round plan: each group's issues, branch, claimed files, and tier, in rank order.
+   The plan marks the groups dispatched now, then lists each held-back issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
    refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a tree clean by
@@ -861,14 +879,18 @@ subagents and holds only what they return.
    instead. Leave a dirty tree, or a clone failing those checks, exactly as it stands. Keep its
    group parked, and name it in the report. Only the
    maintainer disposes of another task's uncommitted work.
-3. **Dispatch the group workers** per "Dispatching a Worker", each brief built from the group's
-   line. Each brief also states the park duty below and the comment rule above. A group worker
-   drives to develop and ends there, whatever the scope.
+3. **Dispatch the group workers** the plan marks, per "Dispatching a Worker", each brief built
+   from the group's line. Each brief also states the park duty below and the comment rule above.
+   A group worker drives to develop and ends there, whatever the scope.
 4. **Collect each worker's one-line outcome**, bounding the wait per "Bounding the Wait on a
    Worker". A worker that hands back for review is continued per "The Round" step 5. Dispatch the
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
-   The orchestrator reads only the reviewer's findings and the record's exit.
-5. **Clean up** per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
+   The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
+   frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
+   planner scoped to the next claim-free group from this round's plan, rather than a fresh step 1.
+   It verifies that group's claims, records its claim comment, and returns its line, or returns
+   that no planned group is claim-free. Then dispatch that group's worker per step 3.
+5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
 7. **Record the round's report** in working notes, per "Run State", and start the next round.
