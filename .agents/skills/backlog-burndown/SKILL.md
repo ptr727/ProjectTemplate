@@ -90,13 +90,11 @@ A round is the unit. Each one runs these steps in order.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
    the worktree, local branch, and remote branch of a group that merged or was abandoned, per
-   "Dispatching a Worker". Then form and verify the next group from this round's ranking per
-   steps 2 and 3, and dispatch it into the freed slot. A worker resuming a stopped or parked group
+   "Dispatching a Worker". Then form and verify the next group per steps 2 and 3, from the issues
+   of this round's ranking not yet dispatched. Dispatch it into the freed slot. A worker resuming a stopped or parked group
    also waits for a freed slot. A
    refill draws only from this round's ranking, so an issue filed mid-round waits for step 8. The
-   round moves to step 7 once no worker is in flight and no group can be dispatched. That is when
-   no ranked issue left forms a claim-free group, or the dispatch limit in "Grouping and File
-   Claims" is reached.
+   round moves to step 7 once no worker is in flight and no group can be dispatched.
 7. **Promote**, per "The Promotion Boundary".
 8. **Re-rank from scratch**. Whenever a promotion pull request is still waiting on the maintainer,
    the next round prepares under the freeze "The Promotion Boundary" describes. Under that freeze
@@ -220,8 +218,7 @@ Group so that **no file is claimed by two live groups at once.** This is the rul
 for, and it binds harder than any throughput target.
 
 - **Group by the files a fix will touch**, not by the issues' subject matter. Two issues that read
-  as unrelated but both edit a shared governance file share a group. Where the group cap below
-  splits them, they run one after the other. Two issues that read as near
+  as unrelated but both edit a shared governance file share a group, up to the group cap below. Two issues that read as near
   duplicates but touch different files are two groups.
 - **Genuine duplicates are one group.** Never close an issue during triage on the orchestrator's
   own judgment. Comment to cross-link the pair, and let the fix close both.
@@ -338,10 +335,10 @@ for, and it binds harder than any throughput target.
   Orchestrator's".
 - **Cap each group at three issues and four predicted files.** A round's slowest group has been
   its widest, and refilling a freed slot shortens the idle time around that tail but not the tail
-  itself. Where the ranking would form a wider group, split it
-  where the halves claim disjoint files. Otherwise its lower-ranked issues wait for a later group,
-  which a refill can dispatch once this one merges. Genuine duplicates count as one issue, and a
-  file a generator writes from another in the set does not count. An issue predicting more than
+  itself. Where the ranking would form a wider group, its lower-ranked issues wait for a later
+  group, which a refill can dispatch once this one merges. Genuine duplicates count as one issue,
+  and an issue holding nothing but a question counts as none. A file a generator writes from
+  another in the set does not count. An issue predicting more than
   four files on its own forms a group by itself.
 - **Limit the round's dispatch to four workers at once and eight groups in all**, whatever the
   grouping allows. A group counts once, however many workers it takes.
@@ -583,7 +580,7 @@ reports merged, parked, stopped, or handed back for review. A worker that report
 Its silence looks exactly like slowness, and dying mid-drive is ordinary here.
 
 The bound is a state read rather than a clock. Wait until every other worker dispatched no later than
-the silent one has reported. Then
+the silent one has reported or is confirmed gone, as below. Then
 read the silent worker's branch and pull request directly, with `git log` on that branch and
 `gh pr view <branch>`. Pass the branch as that command's positional argument, since a
 bare `gh pr view` resolves the pull request of whatever branch the caller is standing on. It never
@@ -893,9 +890,9 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner scoped to the next claim-free group from this round's ranking, rather than a fresh
-   step 1. It forms and verifies that group, records its claim comment, and returns its line, or
-   returns that no ranked issue left forms one. One refill planner runs at a time, so two never
-   claim from the same reading of the claims. Then dispatch that group's worker per steps 2 and 3.
+   step 1. Its brief names the issues this round already dispatched, which it skips. It forms and verifies that group, records its claim comment, and returns its line, or
+   returns that no ranked issue left forms one. One refill planner runs at a time, and the orchestrator extends no
+   claim while it runs, so no two claims come from the same reading. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
