@@ -91,9 +91,10 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    Clean up the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then, while the round is under step 4's limit, run steps 1 to 3
-   afresh for the freed slot and dispatch the group they form. Refilling stops once step 7
+   afresh for the free slots and dispatch the group they form. Refilling stops once step 7
    starts. From then, and under the freeze, "The Promotion Boundary" step 6 says what may be
-   dispatched. A worker resuming a stopped or parked group also waits for a freed slot. The
+   dispatched. In an attended run, a free slot goes first to a stopped group whose question is
+   answered. The
    round moves to step 7 once no worker is in flight and no group can be dispatched. A round
    prepared under the freeze first waits for that merge, per step 8.
 7. **Promote**, per "The Promotion Boundary".
@@ -263,8 +264,8 @@ for, and it binds harder than any throughput target.
   bullet a read of durable state rather than of the orchestrator's memory.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
   this round. In flight covers the files changed by every open **feature** pull request on this
-  repository. It also covers the claim comments of every group still holding a branch, parked
-  groups from earlier rounds included.
+  repository. It also covers every unreleased claim comment, whether or not its branch exists
+  yet, parked groups from earlier rounds included.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
   `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
@@ -350,8 +351,7 @@ for, and it binds harder than any throughput target.
 A group whose files are prose-heavy Markdown bloats in a way a code group does not. It needs its
 own bound stated in the worker's brief.
 
-- **The group's scope is capped** per "Grouping and File Claims", which forms the group before
-  any brief is written.
+- **The group's scope is capped** per "Grouping and File Claims", and the brief names that cap.
 - **The change reaches the units the issue names and the units it puts in disagreement.** A unit
   stating the rule or behavior the change altered is this change's to fix wherever it sits in this repository, per
   `GOVERNANCE.md` "Verification Discipline". Its edit is the smallest one that makes it true again.
@@ -891,7 +891,7 @@ subagents and holds only what they return.
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
-   planner that runs orchestrator step 1 for the freed slot, without the net-flow count. One refill planner runs at
+   planner that runs orchestrator step 1 for the free slots, without the net-flow count. One refill planner runs at
    a time. While one runs, a grown set a worker reports and a group's cleanup
    each wait for it to return. So every claim is written from a current read. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
@@ -1029,7 +1029,7 @@ The run ends at the first of these, each an ending of its own:
 Every ending but the session's own and a dispatch failure first collects each worker still in
 flight. It cleans up each such group per "The Lean Orchestrator" steps 4 and 5, and refills no
 slot. A refill planner still running is waited for, and each claim it recorded on a branch no
-worker has created is released per "Grouping and File Claims". A run ended by a dispatch failure names each worker still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
+worker has created is released per "Grouping and File Claims". A run ended by a dispatch failure names each worker and any refill planner still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
