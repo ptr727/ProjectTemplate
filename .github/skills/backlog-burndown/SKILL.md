@@ -403,9 +403,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   and the verify-then-delete of the merged remote branch. It moves **both** rather than only the
   first. "Cleanup Is the Orchestrator's" below, in this same section, says why and what it covers.
 - **The brief quotes the `merge` command in `drive-pr` step 4's exact spelling**, without
-  `--cleanup` or `--checkout`. It also quotes whole the paragraph in `pr-review-conduct` "Expected review loop"
-  on spelling a `scripts/pr_review.py` call. A worker composing the call its own way, with a cache
-  variable for one, sends its merge to the auto-mode classifier. That classifier refuses a merge no
+  `--cleanup` or `--checkout`. It also quotes, whole, the paragraph in `pr-review-conduct` "Expected review loop"
+  on spelling a `scripts/pr_review.py` call. A worker that writes the call another way, adding a
+  cache variable for one, sends its merge to the auto-mode classifier. That classifier refuses a merge no
   human has approved.
 - **A worker that cannot dispatch a subagent hands back its worktree path, target, and digest.**
   The brief says so per `local-strict-review` "Running It", and says the orchestrator can continue the same worker after recording.
