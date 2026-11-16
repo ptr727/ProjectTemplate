@@ -1221,16 +1221,19 @@ def cr_outside_diff_body(count: int = 1, path: str = "a.py", finding: str = "Off
     )
 
 
-def cr_outside_diff_bold_body(count: int = 1, finding: str = "Off by one.") -> str:
+def cr_outside_diff_bold_body(
+    count: int = 1, finding: str = "Off by one.", tight: bool = False
+) -> str:
+    gap = "" if tight else "> \n"
     each = "".join(
         "> <details>\n"
         f"> <summary><strong>Major</strong> \u00b7 {finding} \u00b7 <code>a.py:1{n}</code></summary>\n"
-        "> \n"
+        f"{gap}"
         f"> `a.py:1{n}`\n"
         f"> **{finding}**\n"
-        "> \n"
+        f"{gap}"
         "> </details>\n"
-        "> \n"
+        f"{gap}"
         for n in range(count)
     )
     return (
@@ -2940,6 +2943,25 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertEqual("Outside diff range comments (2)", section.title)
         self.assertIn("a.py:11", section.text)
         self.assertNotIn("Not a finding.", section.text)
+
+    def test_a_bold_line_section_reads_findings_sharing_one_html_block(self) -> None:
+        reading = pr_review_copilot.read(cr_outside_diff_bold_body(3, tight=True), "coderabbit")
+        (section,) = reading.sections
+        self.assertEqual(3, section.findings)
+        for n in range(3):
+            self.assertIn(f"a.py:1{n}", section.text)
+
+    def test_a_vetting_reader_still_flags_a_details_run_after_a_bold_line(self) -> None:
+        body = (
+            "<!-- ccr-overview-v2 -->\n\n**Previously missed (1)**\n\n"
+            "<details>\n<summary>New section (3)</summary>\n\nThree.\n</details>\n"
+        )
+        reading = pr_review_copilot.read(body, "copilot")
+        self.assertEqual((), reading.sections)
+        self.assertIn(
+            "a collapsed section this reader has no spelling for: `new section (3)`",
+            reading.notes,
+        )
 
     def test_a_bold_line_section_ends_at_a_block_inside_its_quote(self) -> None:
         body = cr_outside_diff_bold_body() + (

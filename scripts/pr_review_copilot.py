@@ -453,7 +453,7 @@ def _read(
     counted: list[tuple[int, int]] = []
     opens: list[int | None] = []
     entries = linked = 0
-    for head in headed(tokens, found, vocab):
+    for head in [] if vet else headed(tokens, found, vocab, lines):
         claimed.append((head.start, head.end))
         counted.append((head.start, head.end))
         content = unquoted(lines[head.start + 1 : head.end])
@@ -664,13 +664,16 @@ class Headed(NamedTuple):
     end: int
 
 
-def headed(tokens: list[Token], found: list[_Details], vocab: dict) -> list[Headed]:
+def headed(
+    tokens: list[Token], found: list[_Details], vocab: dict, lines: list[str]
+) -> list[Headed]:
     """Each section a paragraph of its own heads, with the `<details>` run following it.
 
     A paragraph spelled as an `open` or `vetted` section is left to the paragraph pass, which counts
-    it. Any other kind heads the `<details>` elements following it at its own level, as its findings.
-    So the section ends at the first block outside them, at one spelled as a section of its own, or
-    where its container closes.
+    it. Any other kind heads the `<details>` siblings following it as its findings. Only blank lines
+    at the paragraph's own quote depth may separate them. So the run ends at any other line, which a
+    closing quote is, or at a sibling spelled as a section of its own. A reader vetting its layout
+    does not call this, so an unknown `<details>` stays a note rather than a finding.
     """
     out: list[Headed] = []
     for n, token in enumerate(tokens[:-1]):
@@ -681,21 +684,25 @@ def headed(tokens: list[Token], found: list[_Details], vocab: dict) -> list[Head
         if heading is None or heading[0] in ("open", "vetted"):
             continue
         start, end = token.map
-        for after in tokens[n + 3 :]:
-            if after.level < token.level:
+        depth = depth_of(lines[start])
+        outer = next((d for d in reversed(found) if d.start < start <= (d.end or start)), None)
+        for node in (d for d in found if d.parent is outer and d.start >= end):
+            gap = lines[end : node.start + 1]
+            if any(depth_of(ln) != depth for ln in gap) or any(
+                QUOTED.sub("", ln).strip() for ln in lines[end : node.start]
+            ):
                 break
-            if after.map is None:
-                continue
-            line = after.map[0]
-            node = next(
-                (d for d in found if start <= d.start <= line <= (d.end if d.end else line)),
-                None,
-            )
-            if node is None or spelled(vocab, label(node.summary or "")) is not None:
+            if spelled(vocab, label(node.summary or "")) is not None:
                 break
-            end = max(end, (node.end if node.end else line) + 1)
+            end = node.end + 1 if node.end is not None else len(lines)
         out.append(Headed(*heading, title, start, end))
     return out
+
+
+def depth_of(line: str) -> int:
+    """How many quote markers open a source line."""
+    m = QUOTED.match(line)
+    return m.group(0).count(">") if m else 0
 
 
 def span(tokens: list[Token], start: int, stops: list[int]) -> tuple[int, int]:
