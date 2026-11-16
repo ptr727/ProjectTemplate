@@ -670,10 +670,11 @@ def headed(
     """Each section a paragraph of its own heads, with the `<details>` run following it.
 
     A paragraph spelled as an `open` section is left to the paragraph pass, which counts it, and one
-    spelled as `vetted` heads nothing. Any other kind heads the `<details>` siblings following it as its findings. Only blank lines
-    at the paragraph's own quote depth may separate them. So the run ends at any other line, which a
-    closing quote is, or at a sibling spelled as a section of its own. A reader vetting its layout
-    does not call this, so an unknown `<details>` stays a note rather than a finding.
+    spelled as `vetted` heads nothing. Any other kind heads the `<details>` siblings following it
+    as its findings. Only blank lines at the paragraph's own quote depth may separate them. So the
+    run ends at any other line, which a closing quote is, or at a sibling spelled as a section of
+    its own. A reader vetting its layout does not call this, so an unknown `<details>` stays a note
+    rather than a finding.
     """
     out: list[Headed] = []
     for n, token in enumerate(tokens[:-1]):
