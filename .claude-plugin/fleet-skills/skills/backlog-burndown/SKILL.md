@@ -267,7 +267,8 @@ for, and it binds harder than any throughput target.
   this round. In flight covers the files changed by every open **feature** pull request on this
   repository. It also covers the claim comments of every group still holding a branch, parked
   groups from earlier rounds included. It covers too the claim of each group dispatched whose
-  worker has not yet ended. A worker creates its branch only once it runs. The orchestrator reads
+  worker has not yet ended. A worker creates its branch only once it runs. A worker handed back
+  for review has not ended, since the same worker is continued. The orchestrator reads
   that set from the assignments and outcomes its working notes hold, per "Run State", and a
   refill planner's brief carries it. A claim comment alone cannot say, since a merged group's cleanup
   leaves its claim reading like one whose worker has yet to start.
@@ -1038,10 +1039,13 @@ The run ends at the first of these, each an ending of its own:
 Every ending but the session's own first drops any dispatch retry still waiting. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. A refill planner still
-running is waited for. Then each claim the run recorded on a branch none of the reads in
-"Grouping and File Claims" lists is released per that section. A run ended by a dispatch failure
-releases no claim, since a planner may still be writing them and the failed dispatch may have
-started. Its final message names each claim the run recorded on such a branch, marking the failed dispatch's own as one that may have started. It also names each worker and any refill planner still in flight. The final message is the report "Ending the Run" describes, with every held-back issue under the
+running is waited for. Then each claim the run recorded for a group no worker has ever run on is
+released per "Grouping and File Claims". A run ended by a dispatch failure releases no claim,
+since a planner may still be writing them and a dispatched worker may be live. Its final message
+names each claim the run recorded for a group whose worker has not ended. It says for each whether
+that worker is in flight, never started, or, for the failed dispatch, may have started. It also
+names each worker and any refill planner still in flight. Every ending but the session's own
+names each planner that ended returning nothing, since the claims it wrote are unknown. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
