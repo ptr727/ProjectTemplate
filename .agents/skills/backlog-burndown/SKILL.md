@@ -81,7 +81,8 @@ A round is the unit. Each one runs these steps in order.
 3. **Verify** each group's predicted file set against everything in flight before dispatching
    it. A group whose files are already claimed waits for a refill that finds them free, or for
    the next round.
-4. **Dispatch** at most four workers at once, one per group, per "Dispatching a Worker".
+4. **Dispatch** one worker per group, up to the dispatch limit in "Grouping and File Claims", per
+   "Dispatching a Worker".
 5. **Collect** each worker's outcome: merged to develop, stopped on a maintainer-only question,
    parked behind another group's file claim, handed back for review, or abandoned.
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
@@ -90,8 +91,8 @@ A round is the unit. Each one runs these steps in order.
    A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
    the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then form and verify the next group from this round's ranking per
-   steps 2 and 3, and dispatch it into the freed slot. A group resuming within the round, once its
-   question is answered or its holder merges, takes the next freed slot ahead of a new group. A
+   steps 2 and 3, and dispatch it into the freed slot. A worker resuming a stopped or parked group
+   also waits for a freed slot. A
    refill draws only from this round's ranking, so an issue filed mid-round waits for step 8. The
    round moves to step 7 once no worker is in flight and no group can be dispatched. That is when
    no ranked issue left forms a claim-free group, or the dispatch limit in "Grouping and File
@@ -280,8 +281,8 @@ for, and it binds harder than any throughput target.
   the web interface. A plain fetch leaves that ref in `git branch -r` to defer valid groups
   forever. Stop and report a failed fetch rather than reading `git branch -r` anyway, per
   `GOVERNANCE.md` "Verification Discipline" on what a local clone answers for. Here the scan would
-  miss a branch pushed since the last successful fetch and keep one deleted since it. The round
-  stops there and reports, rather than dispatching against a stale answer. Stopping rather than
+  miss a branch pushed since the last successful fetch and keep one deleted since it. Dispatch
+  stops there and the failure is reported, rather than dispatching against a stale answer. Stopping rather than
   deferring is what the cleanup and promotion steps need too, since both read the same remote.
   Those three enumerate the branches, with one gap. A branch in the standalone clone
   `repo-worktree` allows as a fallback is reached only once it is pushed. That is because
@@ -893,7 +894,8 @@ subagents and holds only what they return.
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner scoped to the next claim-free group from this round's ranking, rather than a fresh
    step 1. It forms and verifies that group, records its claim comment, and returns its line, or
-   returns that no ranked issue left forms one. Then dispatch that group's worker per steps 2 and 3.
+   returns that no ranked issue left forms one. One refill planner runs at a time, so two never
+   claim from the same reading of the claims. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
