@@ -266,9 +266,10 @@ for, and it binds harder than any throughput target.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
   this round. In flight covers the files changed by every open **feature** pull request on this
   repository. It also covers the claim comments of every group still holding a branch, parked
-  groups from earlier rounds included. It covers too the claim of each group dispatched whose
-  worker has not yet ended. A worker creates its branch only once it runs. A worker handed back
-  for review has not ended, since the same worker is continued. The orchestrator reads
+  groups from earlier rounds included. It covers too the claim of each group dispatched that has
+  not merged or been abandoned. A worker creates its branch only once it runs, and a stopped
+  group keeps its claim per "Raising a Blocked Question" even before it has a branch. The
+  orchestrator reads
   that set from the assignments and outcomes its working notes hold, per "Run State", and a
   refill planner's brief carries it. A claim comment alone cannot say, since a merged group's cleanup
   leaves its claim reading like one whose worker has yet to start.
@@ -900,8 +901,8 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. Its brief
-   names each group this round dispatched, with its claimed files, marking each whose worker has
-   not yet ended. One refill planner runs at
+   names each group this round dispatched, with its claimed files, marking each not yet merged or
+   abandoned. One refill planner runs at
    a time, and none starts while a dispatch is pending. While one runs, a grown set a worker reports and a group's cleanup
    each wait for it to return. So every claim is written from a current read. Then dispatch each group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
@@ -1037,7 +1038,8 @@ The run ends at the first of these, each an ending of its own:
 - The session ends.
 
 Every ending but the session's own first drops every waiting dispatch retry and stops its timer.
-The one kept is a reviewer's retry in an ending that collects, since collecting its worker needs it. Every ending but
+The one kept is a reviewer's retry in an ending that collects, since collecting its worker needs it.
+Where that retry fails, the ending names its worker as uncollected and goes on. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. Such an ending also waits
 for a refill planner still running. An ending releases no claim it did not clean up. "Grouping and File Claims"
