@@ -889,10 +889,11 @@ subagents and holds only what they return.
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
-   planner scoped to the next claim-free group from this round's ranking, rather than a fresh
-   step 1. Its brief names the issues this round already dispatched, which it skips. It forms and verifies that group, records its claim comment, and returns its line, or
-   returns that no ranked issue left forms one. One refill planner runs at a time, and the orchestrator extends no
-   claim while it runs, so no two claims come from the same reading. Then dispatch that group's worker per steps 2 and 3.
+   planner scoped to the next claim-free group from this round's plan, rather than a fresh step 1.
+   Its brief carries the plan's undispatched group lines in rank order. It verifies the first whose
+   files are free, records its claim comment, and returns its line, or returns that none is free.
+   One refill planner runs at a time. It re-reads the claims after recording its own, and releases
+   its claim where another now collides with it. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
@@ -1025,7 +1026,8 @@ The run ends at the first of these, each an ending of its own:
   allowance, a refused push or merge, and a read the planner cannot make.
 - The session ends.
 
-The final message is the report "Ending the Run" describes, with every held-back issue under the
+Every ending but the session's own first collects each worker still in flight. It cleans up each
+such group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
