@@ -2941,6 +2941,25 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn("a.py:11", section.text)
         self.assertNotIn("Not a finding.", section.text)
 
+    def test_a_bold_line_section_ends_at_a_block_inside_its_quote(self) -> None:
+        body = cr_outside_diff_bold_body() + (
+            "> Not a finding either.\n> \n"
+            "> <details>\n> <summary>Review details</summary>\n> \n> Nor this.\n> </details>\n"
+        )
+        (section,) = pr_review_copilot.read(body, "coderabbit").sections
+        self.assertIn("Off by one.", section.text)
+        self.assertNotIn("Nor this.", section.text)
+
+    def test_a_bold_line_section_leaves_a_spelled_neighbour_its_own_count(self) -> None:
+        body = (
+            "**Previously missed (1)**\n\n"
+            "<details>\n<summary>Guard the write.</summary>\n\nIt races.\n</details>\n"
+            "<details>\n<summary>Comments suppressed due to low confidence (2)</summary>\n\n"
+            "Two nits.\n</details>\n"
+        )
+        counts = pr_review_copilot.read(body, "copilot").counts
+        self.assertEqual((1, 2), (counts["previously_missed"], counts["suppressed"]))
+
     def test_qodo_s_open_findings_are_read_from_its_findings_comment(self) -> None:
         def qodo(badge: str) -> dict:
             text = (
