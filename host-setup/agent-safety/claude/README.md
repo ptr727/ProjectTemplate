@@ -151,7 +151,7 @@ built-in set of known-safe environment assignments before matching. A call carry
 leading assignment, such as a uv cache variable, is not matched. Neither is one with a flag added
 between `uv run` and the script. A script named by an absolute path or a shell variable is
 unmatched too. So is a compound command with any part that neither a rule nor Claude Code's
-read-only check passes, a `cd` being one the check passes. The classifier then judges the whole
+read-only check passes. A `cd` inside the session's working directories is one the check passes. The classifier then judges the whole
 command, and its default rules refuse a merge no human has approved. The `autoMode.allow` entry
 below did not override those refusals in practice. So `pr-review-conduct` "Expected review loop"
 states the one spelling that matches.

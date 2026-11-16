@@ -317,7 +317,8 @@ is never carried into a downstream repository.
 
 On Claude Code, the host-safety installer's allow rule runs a `scripts/pr_review.py` call without
 the auto-mode classifier only where the call matches the rule's text. So run each such command as a
-call of its own, spelled as printed here, optionally behind `cd <hub-checkout> &&`. A leading
+call of its own, spelled as printed here. Where the hub checkout sits inside the session's working
+directories, a `cd <hub-checkout> &&` prefix keeps the match. A `cd` elsewhere may not. A leading
 variable assignment leaves the rule unmatched unless Claude Code counts that variable as known-safe.
 So does a flag between `uv run` and the script, or a script named by an absolute path or a shell
 variable. The classifier then judges the call, and its default rules refuse a merge no human has
