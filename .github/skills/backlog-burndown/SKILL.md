@@ -1036,8 +1036,8 @@ The run ends at the first of these, each an ending of its own:
   allowance, a refused push or merge, and a read the planner cannot make.
 - The session ends.
 
-Every ending but the session's own first drops any waiting retry of a group worker's or a planner's
-dispatch, and stops its timer. A reviewer's retry stays, since collecting its worker needs it. Every ending but
+Every ending but the session's own first drops every waiting dispatch retry and stops its timer.
+The one kept is a reviewer's retry in an ending that collects, since collecting its worker needs it. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. Such an ending also waits
 for a refill planner still running. An ending releases no claim it did not clean up. "Grouping and File Claims"
