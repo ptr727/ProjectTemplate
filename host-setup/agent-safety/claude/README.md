@@ -152,10 +152,9 @@ leading assignment, such as a uv cache variable, is not matched. Neither is one 
 between `uv run` and the script. A script named by an absolute path or a shell variable is
 unmatched too. So is a compound command with any part that neither a rule nor Claude Code's
 read-only check passes, a `cd` being one the check passes. The classifier then judges the whole
-command, and its default rules refuse a merge no human has approved. The `autoMode.allow` entry below is no fallback for that case. It
-allows the call where a skill the session follows prescribes it, and the classifier cannot see which
-skill a session follows. So `pr-review-conduct` "Expected review loop" states the one spelling that
-matches, and the skills running `merge` or `cleanup` point there.
+command, and its default rules refuse a merge no human has approved. The `autoMode.allow` entry
+below did not override those refusals in practice. So `pr-review-conduct` "Expected review loop"
+states the one spelling that matches.
 
 ```json
 {
