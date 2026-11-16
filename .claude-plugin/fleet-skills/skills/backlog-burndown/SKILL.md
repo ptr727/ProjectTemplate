@@ -79,11 +79,11 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
 1. **Rank** every open issue, per "Ranking".
 2. **Group** the top of that ranking, per "Grouping and File Claims", until each free slot holds a
    group that passes step 3. A slot is free only while both dispatch limits in "Grouping and File
-   Claims" leave room.
+   Claims" leave room for the group taking it.
 3. **Verify** each group's predicted file set against everything in flight before dispatching
    it. A group whose files are already claimed waits for a refill that finds them free, or for
    the next round.
-4. **Dispatch** one worker per group, up to the dispatch limit in "Grouping and File Claims", per
+4. **Dispatch** one worker per group, within the dispatch limits in "Grouping and File Claims", per
    "Dispatching a Worker".
 5. **Collect** each worker's outcome: merged to develop, stopped on a maintainer-only question,
    parked behind another group's file claim, handed back for review, or abandoned.
@@ -91,8 +91,8 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    The orchestrator records a handed-back pass and continues the same worker.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    Clean up the worktree, local branch, and remote branch of a group that merged or was abandoned, per
-   "Dispatching a Worker". Then, while the round is under step 4's limit, run steps 1 to 3
-   afresh for the free slots and dispatch the groups they form. Refilling stops once step 7
+   "Dispatching a Worker". Then run steps 1 to 3 afresh for the free slots and dispatch the
+   groups they form. Refilling stops once step 7
    starts. From then, and under the freeze, "The Promotion Boundary" step 6 says what may be
    dispatched. In an attended run, a free slot goes first to a stopped group whose question is
    answered. The
@@ -266,7 +266,12 @@ for, and it binds harder than any throughput target.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
   this round. In flight covers the files changed by every open **feature** pull request on this
   repository. It also covers the claim comments of every group still holding a branch, parked
-  groups from earlier rounds included.
+  groups from earlier rounds included. It covers too the claim of each group whose dispatch is
+  pending. A worker creates its branch only when it runs `git worktree add`. So a dispatch stays
+  pending until one of the branch reads below lists that branch, or until its worker ends. The
+  orchestrator reads which dispatches are pending from its own record of what it dispatched. A
+  claim comment whose branch no read lists cannot say, since a merged group's cleanup leaves
+  its claim reading exactly like a pending one.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
   `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
@@ -344,8 +349,8 @@ for, and it binds harder than any throughput target.
   another in the set does not count. An issue predicting more than
   four files on its own forms a group by itself.
 - **Limit the round's dispatch to four workers at once and eight groups in all**, whatever the
-  grouping allows. A group counts once, however many workers it takes, and a promotion fix
-  counts toward neither limit.
+  grouping allows. A group counts once, however many workers it takes, so the eight-group limit
+  never holds back a stopped group resuming. A promotion fix counts toward neither limit.
 
 ## Bounding a Prose Group
 
@@ -893,7 +898,7 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. One refill planner runs at
-   a time, and none starts while a dispatch is pending. While one runs, a grown set a worker reports and a group's cleanup
+   a time, and none starts while a dispatch is pending, as "Grouping and File Claims" bounds it. While one runs, a grown set a worker reports and a group's cleanup
    each wait for it to return. So every claim is written from a current read. Then dispatch each group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
@@ -1029,8 +1034,8 @@ The run ends at the first of these, each an ending of its own:
 
 Every ending but the session's own and a dispatch failure first collects each worker still in
 flight. It cleans up each such group per "The Lean Orchestrator" steps 4 and 5, and refills no
-slot. A refill planner still running is waited for, and each claim it recorded on a branch no
-worker has created is released per "Grouping and File Claims". A run ended by a dispatch failure names each worker and any refill planner still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
+slot. A refill planner still running is waited for. Then each claim the run recorded on a branch
+no worker has created is released per "Grouping and File Claims". A run ended by a dispatch failure names each worker and any refill planner still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
