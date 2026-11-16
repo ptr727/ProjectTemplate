@@ -78,7 +78,8 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
 
 1. **Rank** every open issue, per "Ranking".
 2. **Group** the top of that ranking, per "Grouping and File Claims", until each free slot holds a
-   group that passes step 3.
+   group that passes step 3. A slot is free only while both dispatch limits in "Grouping and File
+   Claims" leave room.
 3. **Verify** each group's predicted file set against everything in flight before dispatching
    it. A group whose files are already claimed waits for a refill that finds them free, or for
    the next round.
@@ -892,7 +893,7 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. One refill planner runs at
-   a time. While one runs, a grown set a worker reports and a group's cleanup
+   a time, and none starts while a dispatch is pending. While one runs, a grown set a worker reports and a group's cleanup
    each wait for it to return. So every claim is written from a current read. Then dispatch each group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
@@ -1019,7 +1020,7 @@ group's pull request merges, the worker ends the track with `close`, per `sessio
 
 The run ends at the first of these, each an ending of its own:
 
-- A round's opening re-rank finds nothing it can act on.
+- A round's opening ranking finds nothing it can act on.
 - The round cap is reached.
 - A dispatch fails, per "A Dispatch That Fails".
 - A condition every later round would meet. Examples are a missing label, an exhausted reviewer
@@ -1057,7 +1058,7 @@ it. An ending that cannot dispatch a promotion worker the run owes is named too.
 
 The run ends at one of the points below, and they are different endings.
 
-- **The backlog is worked out**, meaning a round's opening re-rank finds no open issue this skill can act on.
+- **The backlog is worked out**, meaning a round's opening ranking finds no open issue this skill can act on.
   That differs from zero open issues, since a backlog of nothing but maintainer questions and
   issues whose blockers still stand is a finished run. Report it as finished, with the questions
   put to the maintainer.
