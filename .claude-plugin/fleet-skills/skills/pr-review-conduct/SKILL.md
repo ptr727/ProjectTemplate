@@ -323,8 +323,8 @@ So does a flag between `uv run` and the script, or a script named by an absolute
 variable. The classifier then judges the call, and its default rules refuse a merge no human has
 approved. So the spelling is owed on the first call. A call refused anyway is a refused write
 under `GOVERNANCE.md` "Repository Boundaries and Write Safety", reported rather than re-spelled.
-On Claude Code, where the executor restricts uv's cache writes, the cache variable that needs is
-such an assignment. A merge there is reported to the maintainer as a blocked merge rather than run.
+On Claude Code, where the executor restricts uv's cache writes, the cache variable that restriction
+needs is such an assignment. A merge there is reported to the maintainer as a blocked merge rather than run.
 
 Run `local-strict-review` against the branch's current diff before every push this loop makes. The pass is owed before the push that opens the pull request in step 1 and each one after it. It is owed whatever finding a push answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about. So a re-push of a tree a recorded pass already covers needs no second pass. That is because the receipt is keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps the receipt only while the merge base holds. Rebasing onto a target that has moved retires the receipt although no file changed. That push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads. The hub's own `pre-push` hook is one, and a repository has none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around. That skill's refusal table says what each refusal means and what clears it.
 
