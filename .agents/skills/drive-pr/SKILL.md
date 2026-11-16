@@ -218,9 +218,9 @@ maintainer when".
 A finding that committed text holds observed data takes outcome 4's observed-data bullet,
 whatever its class, ahead of every other outcome. That applies once the data is confirmed as
 observed. A value the repository constructed is disproved under outcome 2 instead. So is a
-value outside the rule's scope, such as a date, an amount, or a balance. `GOVERNANCE.md`
-"Representative Data in Agent-Authored Text" bounds only names, other personal details, and
-account identifiers.
+value outside the rule's scope, such as a date, an amount, a balance, or a private-range IP
+address. `GOVERNANCE.md` "Representative Data in Agent-Authored Text" bounds only what its first
+bullet calls identifying data.
 
 1. **Real, so fix it, and fix the class rather than the instance.** A reviewer samples rather
    than enumerates, so sweep for the finding's siblings before replying. Fix each one sitting
