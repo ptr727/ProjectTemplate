@@ -444,8 +444,18 @@ class TestUnmetItems(MergeCase):
         qodo = fixtures.comment(
             login=fixtures.pr_review_rounds.QODO_LOGIN, body=fixtures.qodo_review_body()
         )
+        bold = fixtures.review(
+            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,
+            body=fixtures.cr_outside_diff_bold_body(),
+            rid="PRR_bold",
+        )
         for label, pr, want in (
             ("open thread", self.clean(threads=[fixtures.thread("T1")]), "THREADS_UNRESOLVED 1"),
+            (
+                "outside diff, bold line",
+                fixtures.payload([fixtures.review(body=self.CLEAN), bold], files=["a.py"]),
+                "UNTHREADED_FINDINGS the digest reads cr_outside_diff=1",
+            ),
             (
                 "blocked",
                 self.clean(merge="BLOCKED"),
@@ -571,10 +581,21 @@ class TestUnmetItems(MergeCase):
         odd = "## Pull request overview\n\nThe change is narrow.\n"
         noted = fixtures.review(oid=fixtures.OLD, body=odd, rid="PRR_odd")
         unthreaded = fixtures.review(body=fixtures.overview_v2())
+        bold = fixtures.review(
+            login=fixtures.pr_review_rounds.CODERABBIT_LOGIN,
+            body=fixtures.cr_outside_diff_bold_body(),
+            rid="PRR_bold",
+        )
         for label, reviews, comments, kinds in (
             (
                 "outside diff",
                 [fixtures.review(body=self.CLEAN), coderabbit],
+                [],
+                ("cr_outside_diff",),
+            ),
+            (
+                "outside diff, bold line",
+                [fixtures.review(body=self.CLEAN), bold],
                 [],
                 ("cr_outside_diff",),
             ),

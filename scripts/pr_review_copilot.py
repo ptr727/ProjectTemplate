@@ -442,6 +442,16 @@ def _read(
     counted: list[tuple[int, int]] = []
     opens: list[int | None] = []
     entries = linked = 0
+    for head in headed(tokens, found, vocab):
+        claimed.append((head.start, head.end))
+        counted.append((head.start, head.end))
+        content = "\n".join(
+            ln.rstrip()
+            for raw in lines[head.start + 1 : head.end]
+            if (ln := plain(re.sub(r"^\s*(?:>\s?)+", "", raw))).strip()
+        )
+        findings = count_of(head.match, label(head.title))
+        sections.append(Section(head.kind, findings, head.title, content))
     for node in found:
         end = node.end if node.end is not None else len(lines)
         if any(a <= node.start < b for a, b in claimed):
@@ -647,6 +657,52 @@ def _read(
         notes=tuple(dict.fromkeys(notes)),
         unplaced=tuple(dict.fromkeys(unplaced)),
     )
+
+
+class Headed(NamedTuple):
+    """One section a paragraph heads: its kind, matched spelling, title, and source line range."""
+
+    kind: str
+    match: re.Match[str]
+    title: str
+    start: int
+    end: int
+
+
+def headed(tokens: list[Token], found: list[_Details], vocab: dict) -> list[Headed]:
+    """Each section a paragraph of its own heads, with the `<details>` run following it.
+
+    A paragraph spelled as an `open` or `vetted` section is left to the paragraph pass, which counts
+    it. Any other kind heads the `<details>` elements following it at its own level, as its findings.
+    So the section ends at the first block outside them, or where its container closes.
+    """
+    out: list[Headed] = []
+    for n, token in enumerate(tokens[:-1]):
+        if token.type != "paragraph_open" or token.map is None:
+            continue
+        title = " ".join(inline_text(tokens[n + 1]).split())
+        kind, match = next(
+            ((k, m) for k, ps in vocab["sections"].items() if (m := matched(ps, label(title)))),
+            ("", None),
+        )
+        if match is None or kind in ("open", "vetted"):
+            continue
+        start, end = token.map
+        for after in tokens[n + 3 :]:
+            if after.level < token.level:
+                break
+            if after.map is None:
+                continue
+            line = after.map[0]
+            node = next(
+                (d for d in found if start <= d.start <= line <= (d.end if d.end else line)),
+                None,
+            )
+            if node is None:
+                break
+            end = max(end, (node.end if node.end else line) + 1, after.map[1])
+        out.append(Headed(kind, match, title, start, end))
+    return out
 
 
 def span(tokens: list[Token], start: int, stops: list[int]) -> tuple[int, int]:

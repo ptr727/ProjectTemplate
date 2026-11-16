@@ -44,6 +44,7 @@ import pr_review
 import pr_review_answers
 import pr_review_check_lines
 import pr_review_checks
+import pr_review_copilot
 import pr_review_rounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
@@ -1217,6 +1218,30 @@ def cr_outside_diff_body(count: int = 1, path: str = "a.py", finding: str = "Off
         "> </blockquote></details>\n"
         "> \n"
         "> </blockquote></details>\n"
+    )
+
+
+def cr_outside_diff_bold_body(count: int = 1, finding: str = "Off by one.") -> str:
+    each = "".join(
+        "> <details>\n"
+        f"> <summary><strong>Major</strong> \u00b7 {finding} \u00b7 <code>a.py:1{n}</code></summary>\n"
+        "> \n"
+        f"> `a.py:1{n}`\n"
+        f"> **{finding}**\n"
+        "> \n"
+        "> </details>\n"
+        "> \n"
+        for n in range(count)
+    )
+    return (
+        f"{OVERVIEW}\n"
+        "> [!CAUTION]\n"
+        "> Some comments are outside the diff and can't be posted inline due to platform "
+        "limitations.\n"
+        "> \n"
+        f"> **Outside diff range comments ({count})**\n"
+        "> \n"
+        f"{each}"
     )
 
 
@@ -2886,18 +2911,35 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertIn("a finding count this reader cannot believe", out)
 
     def test_coderabbit_s_outside_diff_findings_are_its_own_field(self) -> None:
-        cr = {
-            "author": {"login": pr_review_rounds.CODERABBIT_LOGIN},
-            "state": "COMMENTED",
-            "commit": {"oid": HEAD},
-            "body": cr_outside_diff_body(count=2),
-            "submittedAt": LATE,
-        }
-        self.assertEqual(0, self.status(payload([review(), cr], files=["a.py"])))
-        out = self.out.getvalue()
-        self.assertIn("cr_outside_diff=2 (on_head=2 earlier=0)", out)
-        self.assertIn("CODERABBIT OUTSIDE-DIFF (on head)", out)
-        self.assertNotIn("previously_missed=", out)
+        for shape, body in (
+            ("summary", cr_outside_diff_body(count=2)),
+            ("bold line", cr_outside_diff_bold_body(count=2)),
+        ):
+            with self.subTest(shape):
+                self.out.seek(0)
+                self.out.truncate()
+                cr = {
+                    "author": {"login": pr_review_rounds.CODERABBIT_LOGIN},
+                    "state": "COMMENTED",
+                    "commit": {"oid": HEAD},
+                    "body": body,
+                    "submittedAt": LATE,
+                }
+                self.assertEqual(0, self.status(payload([review(), cr], files=["a.py"])))
+                out = self.out.getvalue()
+                self.assertIn("cr_outside_diff=2 (on_head=2 earlier=0)", out)
+                self.assertIn("CODERABBIT OUTSIDE-DIFF (on head)", out)
+                self.assertIn("Off by one.", out)
+                self.assertNotIn("previously_missed=", out)
+
+    def test_a_bold_line_section_holds_only_the_details_run_following_it(self) -> None:
+        after = "\n<details>\n<summary>Review details</summary>\n\nNot a finding.\n</details>\n"
+        reading = pr_review_copilot.read(cr_outside_diff_bold_body(count=2) + after, "coderabbit")
+        (section,) = reading.sections
+        self.assertEqual(("previously_missed", 2), (section.kind, section.findings))
+        self.assertEqual("Outside diff range comments (2)", section.title)
+        self.assertIn("a.py:11", section.text)
+        self.assertNotIn("Not a finding.", section.text)
 
     def test_qodo_s_open_findings_are_read_from_its_findings_comment(self) -> None:
         def qodo(badge: str) -> dict:
