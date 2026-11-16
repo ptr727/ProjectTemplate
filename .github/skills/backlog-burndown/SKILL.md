@@ -267,9 +267,9 @@ for, and it binds harder than any throughput target.
   this round. In flight covers the files changed by every open **feature** pull request on this
   repository. It also covers the claim comments of every group still holding a branch, parked
   groups from earlier rounds included. It covers too the claim of each group dispatched whose
-  outcome line is not yet written. A worker creates its branch only once it runs. The
-  orchestrator reads that set from the round plans and outcome lines it holds, and a refill
-  planner's brief carries it. A claim comment alone cannot say, since a merged group's cleanup
+  worker has not yet ended. A worker creates its branch only once it runs. The orchestrator reads
+  that set from the assignments and outcomes its working notes hold, per "Run State", and a
+  refill planner's brief carries it. A claim comment alone cannot say, since a merged group's cleanup
   leaves its claim reading like one whose worker has yet to start.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
@@ -880,7 +880,8 @@ subagents and holds only what they return.
    undetermined outcome, a settled decision, or an unrequested rule, the planner files it as
    `decision`. It comments the question there, unless the issue already carries the label. It
    returns the round plan: each group's issues, branch, claimed files, and tier, then each held-back
-   issue with its reason. It also names each `deferred` issue it lifted. A promotion fix comes first, and a group resuming parked work names the
+   issue with its reason. It also names each `deferred` issue it lifted. A planner stopping short of
+   a plan still returns each claim comment it wrote. A promotion fix comes first, and a group resuming parked work names the
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
    refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a tree clean by
@@ -898,7 +899,8 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. Its brief
-   names each group dispatched whose outcome line is not yet written, with its claimed files. One refill planner runs at
+   names each group this round dispatched, with its claimed files, marking each whose worker has
+   not yet ended. One refill planner runs at
    a time, and none starts while a dispatch is pending. While one runs, a grown set a worker reports and a group's cleanup
    each wait for it to return. So every claim is written from a current read. Then dispatch each group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
@@ -1033,13 +1035,13 @@ The run ends at the first of these, each an ending of its own:
   allowance, a refused push or merge, and a read the planner cannot make.
 - The session ends.
 
-Every ending but the session's own and a dispatch failure first collects each worker still in
-flight. It cleans up each such group per "The Lean Orchestrator" steps 4 and 5, and refills no
-slot. A refill planner still running is waited for. Then each claim the run recorded for a group
-whose worker never started is released per "Grouping and File Claims". Every ending but the
-session's own drops any dispatch retry still waiting. A run ended by a dispatch failure releases
-no claim, since a planner may still be writing them and the failed dispatch may have started. Its
-final message names each claim recorded for a group whose worker never started, each worker, and any refill planner still in flight. The final message is the report "Ending the Run" describes, with every held-back issue under the
+Every ending but the session's own first drops any dispatch retry still waiting. Every ending but
+the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
+group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. A refill planner still
+running is waited for. Then each claim the run recorded on a branch none of the reads in
+"Grouping and File Claims" lists is released per that section. A run ended by a dispatch failure
+releases no claim, since a planner may still be writing them and the failed dispatch may have
+started. Its final message names each claim the run recorded on such a branch, marking the failed dispatch's own as one that may have started. It also names each worker and any refill planner still in flight. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
@@ -1052,7 +1054,7 @@ it. An ending that cannot dispatch a promotion worker the run owes is named too.
 ## Run State
 
 - **Working notes outside the repository hold the round**: the ranking, the working groups, the
-  tier choices, and the worker assignments. A scratch file the harness gives a session serves
+  tier choices, the worker assignments, and the outcomes. A scratch file the harness gives a session serves
   where there is one. Any note kept out of the tree serves where there is not. It is the
   in-flight session state `GOVERNANCE.md` "Durable Knowledge and Self-Improvement" describes, and
   nothing about it is committed.
