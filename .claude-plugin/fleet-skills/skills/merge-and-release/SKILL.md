@@ -235,10 +235,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      delete. `64` is a target under an owner other than the hub checkout's own `origin`, or an
      unreadable `origin`. A registry refusal is a `1`. It runs under the host-safety
      installer's `Bash(uv run --no-project --script scripts/pr_review.py:*)` allow rule, which is what lets auto mode
-     complete it. The rule matches only the bare spelling, as a call of its own after
-     `cd <hub-checkout> && `. A leading variable assignment or an added flag leaves the rule
-     unmatched. So does a script named by a path or a variable, or a pipe after it. The auto-mode
-     classifier then judges the delete instead.
+     complete it. That holds where the call, or the `--sweep` call below, is
+     spelled as `pr-review-conduct` "Expected review loop" says.
      It also refuses while another open pull request in the repository has the branch as its head or base, naming each.
      Where this seat cannot run `cleanup`, report the cleanup to the maintainer instead of running its steps by hand. That report names the pull request number and `--repo`.
      No direct `git push origin --delete`, ref API delete, `git worktree remove`, or `git branch -D` runs on a feature branch from this skill. That is because `cleanup` is the one place holding the checks.

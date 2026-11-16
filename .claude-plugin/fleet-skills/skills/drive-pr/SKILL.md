@@ -114,14 +114,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 4. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
-   primary clone. Run it as a Bash call of its own, `cd <hub-checkout> && ` followed by the
-   command exactly as spelled here, and nothing after it. On Claude Code the host-safety
-   installer's allow rule matches that text alone. A leading variable assignment, such as a uv
-   cache variable, leaves the rule unmatched. So does an added flag such as `-q`. So does a
-   script named by an absolute path or a shell variable, or a pipe or a status echo after it. The auto-mode
-   classifier then judges the merge instead, and it refuses a merge no human has approved. The
-   tool reports the exit itself, and the output is read whole, so neither addition gains
-   anything. It reads the Merge Gate's mechanically readable items in code, through `wait`'s
+   primary clone. Spell it as `pr-review-conduct` "Expected review loop" says, or on Claude Code the auto-mode
+   classifier judges the merge and refuses it. It reads the Merge Gate's mechanically readable items in code, through `wait`'s
    own decision and a fresh read after it. It merges nothing while one reads unmet. The items no
    code reads stay this seat's per pr-review-conduct's Merge Gate. A finding the pull request's
    body lists is one. A no-thread finding on an earlier round is one too, since `FINDINGS WITH NO
@@ -183,8 +177,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    answer or a delete it could not confirm. `64` is a target under an owner other than the hub
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
    under the host-safety installer's `Bash(uv run --no-project --script scripts/pr_review.py:*)` allow rule,
-   which is what lets auto mode complete it. The rule matches only the bare spelling, run as a
-   call of its own the way step 4 runs `merge`.
+   which is what lets auto mode complete it. That holds where the call is
+   spelled as `pr-review-conduct` "Expected review loop" says.
    It also refuses while another open pull request in the repository has the branch as its head or base.
    It names each, since the delete would close or retarget it.
    Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand.

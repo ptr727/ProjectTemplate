@@ -255,7 +255,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   session changed a tree in between. The refusal's output then names what was already deleted. Any exit
   other than `0` stops and is reported as it stands rather than finished by hand. The raw
   `git worktree remove`, `git branch -D`, and remote delete it replaces are not on the host-safety
-  permission allowlist, and the command is. It forwards to `scripts/pr_cleanup.py`, and
+  permission allowlist, and the command is, spelled as `pr-review-conduct` "Expected review loop" says. It forwards to `scripts/pr_cleanup.py`, and
   `scripts/README.md` "`pr_cleanup.py`" in the hub holds the full contract. A conflicted
   promotion's branch, cut from `main` and merging `develop`, takes the same command, run on its
   pull request into `main`.
