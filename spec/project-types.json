@@ -83,7 +83,7 @@
         "eda": {
             "detect": ["*.kicad_pcb", "*.kicad_sym", "*.kicad_mod", "*.kicad_sch", "*.pretty"],
             "checks": [
-                { "id": "eda.release.zip", "verdict": "intent", "assert": "Distribution is a GitHub release, with no package or image registry. A part library attaches a data zip pulled into a local EDA install (pull consumer). A board attaches the fabrication outputs its pipeline generates. A board whose pipeline generates none attaches nothing, and its release is the tag plus the auto source zip.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
+                { "id": "eda.release.zip", "verdict": "intent", "assert": "Distribution is a GitHub release, with no package or image registry. A part library attaches a data zip pulled into a local EDA install (pull consumer). A board attaches the fabrication outputs its pipeline generates. A board whose pipeline generates none attaches no file target and takes the no-asset release shape of D4.3.", "workflowRef": "WORKFLOW.md#d4---release--publish" },
                 { "id": "eda.validation", "verdict": "intent", "assert": "CI runs EDA-specific validation (e.g. kicad-cli ERC/DRC or library linting) - the design-data analogue of the code linters.", "intentRef": "WORKFLOW.md#6-per-project-type-test-walkthroughs" },
                 { "id": "eda.build.deterministic", "verdict": "intent", "assert": "Any build-time artifact generation (gerbers, drill, BOM) and version injection is deterministic from the design inputs; aspirational for data-only repos not yet building artifacts.", "workflowRef": "WORKFLOW.md#d3---versioning-and-classification" }
             ]
