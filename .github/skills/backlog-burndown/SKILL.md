@@ -402,6 +402,11 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   the override moves is the two cleanup halves `drive-pr` runs after it, the worktree procedure
   and the verify-then-delete of the merged remote branch. It moves **both** rather than only the
   first. "Cleanup Is the Orchestrator's" below, in this same section, says why and what it covers.
+- **The brief quotes the `merge` command in `drive-pr` step 4's exact spelling**, without
+  `--cleanup` or `--checkout`. It also quotes, whole, the paragraph in `pr-review-conduct` "Expected review loop"
+  on spelling a `scripts/pr_review.py` call. A worker that writes the call another way, adding a
+  cache variable for one, sends its merge to the auto-mode classifier. That classifier refuses a merge no
+  human has approved.
 - **A worker that cannot dispatch a subagent hands back its worktree path, target, and digest.**
   The brief says so per `local-strict-review` "Running It", and says the orchestrator can continue the same worker after recording.
 - **The brief names the branch the worker will use**, which is what lets the claim comment record
@@ -458,6 +463,7 @@ It runs the procedure against the base clone as each group's worker ends, per "T
 It runs it while no worker is live in a tree it touches.
 It carries the remote half of `drive-pr`'s post-merge cleanup too.
 For a merged group both halves are one command, `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`.
+Spell it as `pr-review-conduct` "Expected review loop" says.
 It is run from a hub checkout once for each merged group, `<base-clone>` being the repository's primary clone.
 It deletes the remote branch, then removes the group's worktree and local branch, per `repo-worktree` "Listing and Cleanup", which also says what its exit leaves to do.
 Taking that step from the worker without naming a new owner would leave a live remote branch behind every group.
