@@ -91,7 +91,7 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    Clean up the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then, while the round is under step 4's limit, run steps 1 to 3
-   afresh for the free slots and dispatch the group they form. Refilling stops once step 7
+   afresh for the free slots and dispatch the groups they form. Refilling stops once step 7
    starts. From then, and under the freeze, "The Promotion Boundary" step 6 says what may be
    dispatched. In an attended run, a free slot goes first to a stopped group whose question is
    answered. The
@@ -264,8 +264,8 @@ for, and it binds harder than any throughput target.
   bullet a read of durable state rather than of the orchestrator's memory.
 - **Verify the prediction before dispatching**, against everything in flight, which is wider than
   this round. In flight covers the files changed by every open **feature** pull request on this
-  repository. It also covers every unreleased claim comment, whether or not its branch exists
-  yet, parked groups from earlier rounds included.
+  repository. It also covers the claim comments of every group still holding a branch, parked
+  groups from earlier rounds included.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
   `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
@@ -893,7 +893,7 @@ subagents and holds only what they return.
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. One refill planner runs at
    a time. While one runs, a grown set a worker reports and a group's cleanup
-   each wait for it to return. So every claim is written from a current read. Then dispatch that group's worker per steps 2 and 3.
+   each wait for it to return. So every claim is written from a current read. Then dispatch each group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
