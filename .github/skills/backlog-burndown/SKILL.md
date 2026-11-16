@@ -89,13 +89,11 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
-   A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
-   the worktree, local branch, and remote branch of a group that merged or was abandoned, per
+   Clean up the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then, while the round is under step 4's limit, run steps 1 to 3
    afresh for the freed slot and dispatch the group they form. Refilling stops once step 7
    starts. From then, and under the freeze, "The Promotion Boundary" step 6 says what may be
-   dispatched. A fresh run reads each issue's live state, so it never takes work a merge already
-   finished. A worker resuming a stopped or parked group also waits for a freed slot. The
+   dispatched. A worker resuming a stopped or parked group also waits for a freed slot. The
    round moves to step 7 once no worker is in flight and no group can be dispatched. A round
    prepared under the freeze first waits for that merge, per step 8.
 7. **Promote**, per "The Promotion Boundary".
@@ -894,8 +892,8 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the freed slot, without the net-flow count. One refill planner runs at
-   a time. A grown set a worker reports while one runs is adjudicated once it returns, so every
-   claim is written from a current read. Then dispatch that group's worker per steps 2 and 3.
+   a time. While one runs, a grown set a worker reports and a group's cleanup
+   each wait for it to return. So every claim is written from a current read. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
    status line are all the orchestrator reads.
 6. **Promote** per "Promoting" below.
