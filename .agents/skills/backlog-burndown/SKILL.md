@@ -92,8 +92,8 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
    the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then, while the round is under step 4's limit, run steps 1 to 3
-   afresh for the freed slot and dispatch the group they form. Under the freeze "The Promotion
-   Boundary" describes, a worker ending is only cleaned up. A fresh run reads each issue's live state, so it never takes work a merge already
+   afresh for the freed slot and dispatch the group they form. Under the freeze, "The Promotion
+   Boundary" step 6 says what may be dispatched. A fresh run reads each issue's live state, so it never takes work a merge already
    finished. A worker resuming a stopped or parked group also waits for a freed slot. The
    round moves to step 7 once no worker is in flight and no group can be dispatched.
 7. **Promote**, per "The Promotion Boundary".
@@ -1027,7 +1027,8 @@ The run ends at the first of these, each an ending of its own:
 
 Every ending but the session's own and a dispatch failure first collects each worker still in
 flight. It cleans up each such group per "The Lean Orchestrator" steps 4 and 5, and refills no
-slot. A run ended by a dispatch failure names each worker still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
+slot. A refill planner still running is waited for, and each claim it recorded is released per
+"Grouping and File Claims". A run ended by a dispatch failure names each worker still in flight in its final message. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
