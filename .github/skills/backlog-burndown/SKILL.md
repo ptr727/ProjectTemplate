@@ -91,8 +91,9 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    A worker ends when its group merged, parked, was abandoned, or stopped on a question. Clean up
    the worktree, local branch, and remote branch of a group that merged or was abandoned, per
-   "Dispatching a Worker". Then run steps 1 to 3 afresh for the freed slot, and dispatch the
-   group they form. A fresh run reads each issue's live state, so it never takes work a merge already
+   "Dispatching a Worker". Then, while the round is under step 4's limit, run steps 1 to 3
+   afresh for the freed slot and dispatch the group they form. Under the freeze "The Promotion
+   Boundary" describes, a worker ending is only cleaned up. A fresh run reads each issue's live state, so it never takes work a merge already
    finished. A worker resuming a stopped or parked group also waits for a freed slot. The
    round moves to step 7 once no worker is in flight and no group can be dispatched.
 7. **Promote**, per "The Promotion Boundary".
@@ -889,7 +890,7 @@ subagents and holds only what they return.
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
-   planner that runs step 1 for the freed slot, without the net-flow count. One refill planner runs at
+   planner that runs orchestrator step 1 for the freed slot, without the net-flow count. One refill planner runs at
    a time. A grown set a worker reports while one runs is adjudicated once it returns, so every
    claim is written from a current read. Then dispatch that group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
@@ -1054,7 +1055,7 @@ it. An ending that cannot dispatch a promotion worker the run owes is named too.
 
 The run ends at one of the points below, and they are different endings.
 
-- **The backlog is worked out**, meaning a full re-rank finds no open issue this skill can act on.
+- **The backlog is worked out**, meaning a round's opening re-rank finds no open issue this skill can act on.
   That differs from zero open issues, since a backlog of nothing but maintainer questions and
   issues whose blockers still stand is a finished run. Report it as finished, with the questions
   put to the maintainer.
