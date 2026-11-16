@@ -1039,13 +1039,12 @@ The run ends at the first of these, each an ending of its own:
 Every ending but the session's own first drops any dispatch retry still waiting. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. A refill planner still
-running is waited for. Then each claim the run recorded for a group no worker has ever run on is
-released per "Grouping and File Claims". A run ended by a dispatch failure releases no claim,
-since a planner may still be writing them and a dispatched worker may be live. Its final message
-names each claim the run recorded for a group whose worker has not ended. It says for each whether
-that worker is in flight, never started, or, for the failed dispatch, may have started. It also
-names each worker and any refill planner still in flight. Every ending but the session's own
-names each planner that ended returning nothing, since the claims it wrote are unknown. The final message is the report "Ending the Run" describes, with every held-back issue under the
+running is waited for. An ending releases no claim it did not clean up. "Grouping and File Claims"
+counts no claim in flight that has neither a branch nor a live worker. Every ending but
+the session's own names each claim the run recorded for a group with no outcome. It also names
+each planner that ended returning nothing, since the claims it wrote are unknown. A run ended by a
+dispatch failure names each worker and any refill planner still in flight. It marks the failed
+dispatch's group as one that may have started. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
