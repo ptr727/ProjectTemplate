@@ -134,6 +134,9 @@ is first on PATH, and act on the managed package once none is. Where npm cannot 
 prefix, only an npm copy whose shim names opencode-ai is told from the managed package, and any
 other npm copy is handled as any npm copy is.
 
+claude carries a fleet floor, 2.1.281. -Report notes a copy below it, and -Upgrade or -Install
+fails that tool where its updater or installer leaves it below.
+
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
@@ -271,6 +274,61 @@ function Get-ToolVersion {
     $result = Invoke-Captured -Command $Path -Arguments @('--version') -TimeoutSec $script:READ_TIMEOUT
     if ($result.Output -match '([0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*)') { return $Matches[1] }
     return ''
+}
+
+# Read by key, since strict mode refuses a missing one.
+function Get-ToolMinimum {
+    param([string]$ToolName)
+    $tool = Get-Tool $ToolName
+    if ($tool -and $tool.ContainsKey('Minimum')) { return $tool.Minimum }
+    return ''
+}
+
+# A suffix such as a prerelease tag is ignored, so 2.1.281-beta reads as 2.1.281.
+function Test-VersionBelow {
+    param([string]$Have, [string]$Want)
+    $a = @(($Have -replace '[^0-9.].*$', '') -split '\.')
+    $b = @(($Want -replace '[^0-9.].*$', '') -split '\.')
+    for ($i = 0; $i -lt 3; $i++) {
+        $x = if ($i -lt $a.Count -and $a[$i]) { [long]$a[$i] } else { 0 }
+        $y = if ($i -lt $b.Count -and $b[$i]) { [long]$b[$i] } else { 0 }
+        if ($x -lt $y) { return $true }
+        if ($x -gt $y) { return $false }
+    }
+    return $false
+}
+
+function Add-FloorNote {
+    param([string]$ToolName, [string]$Installed, [bool]$Upgrades)
+    $minimum = Get-ToolMinimum $ToolName
+    if (-not $minimum) { return }
+    if (-not $Installed) {
+        note $ToolName "its version could not be read, so it is not known to meet the fleet floor $minimum"
+    } elseif (Test-VersionBelow -Have $Installed -Want $minimum) {
+        if ($Upgrades) {
+            note $ToolName "at $Installed, below the fleet floor $minimum, -Upgrade updates it"
+        } else {
+            note $ToolName "at $Installed, below the fleet floor $minimum, which -Upgrade does not fix here, per the note above"
+        }
+    }
+}
+
+# An updater that exits cleanly and leaves the tool below its floor has not done what the run needed, so the run fails.
+# A version unreadable afterwards is warned about rather than failed, as an unreadable one is everywhere else here.
+function Test-Floor {
+    param([string]$ToolName)
+    if ($script:DRY_RUN) { return }
+    $minimum = Get-ToolMinimum $ToolName
+    if (-not $minimum) { return }
+    $path = Get-ToolPath $ToolName
+    if (-not $path) { return }
+    $now = Get-ToolVersion $path
+    if (-not $now) {
+        warn "${ToolName}: its version could not be read after the run, so it is not known to meet the fleet floor $minimum"
+    } elseif (Test-VersionBelow -Have $now -Want $minimum) {
+        warn "${ToolName}: at $now after the run, still below the fleet floor $minimum"
+        $script:FAILED.Add($ToolName)
+    }
 }
 
 # The npm registry name of a tool, which npm and bun both install from, or nothing where none is recorded.
@@ -709,6 +767,9 @@ $TOOLS = @(
     @{
         Name    = 'claude'
         Source  = 'https://claude.ai/install.ps1'
+        # The fleet's rules load from AGENTS.md, which every Claude Code session reads natively from 2.1.281.
+        # Below it, a session on Amazon Bedrock or with telemetry off reads CLAUDE.md alone.
+        Minimum = '2.1.281'
         Upgrade = { Invoke-Step -Command 'claude' -Arguments @('update') }
         Install = { Invoke-Installer -Url 'https://claude.ai/install.ps1' }
     }
@@ -857,6 +918,7 @@ function Show-Report {
             # The post step runs after the self-updater and after a manager upgrade alike, so the notes about it do too.
             # A manager that does not run leaves the post step unrun, so the notes would promise what -Upgrade does not do.
             if ($tool -eq 'herdr' -and $upgrades) { Add-HerdrNote }
+            Add-FloorNote -ToolName $tool -Installed $installed -Upgrades $upgrades
             $restart = Get-RestartPending $tool
         }
         $shown = if ($path) { Hide-Home $path } else { $null }
@@ -964,6 +1026,7 @@ function Invoke-ToolUpgrade {
         return
     }
     Add-VersionChange -ToolName $ToolName -Installed $installed
+    Test-Floor $ToolName
 
     if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
@@ -1000,6 +1063,7 @@ function Invoke-ManagerUpgrade {
         return
     }
     Add-VersionChange -ToolName $ToolName -Installed $Installed
+    Test-Floor $ToolName
     if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
 
@@ -1032,6 +1096,7 @@ function Invoke-ToolInstall {
     $now = Get-ToolVersion $path
     $after = if ($now) { $now } else { '-' }
     $script:CHANGED.Add("$ToolName - -> $after")
+    Test-Floor $ToolName
 }
 
 function Invoke-Apply {

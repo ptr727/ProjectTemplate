@@ -253,7 +253,7 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(self.called(), ["curl https://opencode.ai/v2/install"])
 
     def test_upgrade_drives_only_the_tools_present(self) -> None:
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.stub("claude", "2.1.300 (Claude Code)")
         self.stub("cswap", "cswap 0.27.1")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -350,7 +350,7 @@ class TestInstallAgents(unittest.TestCase):
             encoding="utf-8",
         )
         failing.chmod(0o755)
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.stub("claude", "2.1.300 (Claude Code)")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 3)
         self.assertIn("codex: npm failed to upgrade it", result.stderr)
@@ -383,7 +383,7 @@ class TestInstallAgents(unittest.TestCase):
         )
         self.stub(
             "claude",
-            "2.0.0",
+            "2.1.300",
             where=self.dir / "opt" / "homebrew" / "Caskroom" / "claude-code" / "2.0.0",
         )
         self.stub("brew", "Homebrew 4.0.0")
@@ -396,7 +396,7 @@ class TestInstallAgents(unittest.TestCase):
     def test_an_npm_global_under_a_mise_node_is_npms_and_not_mises(self) -> None:
         root = self.dir / "mise" / "installs" / "node" / "20.1.0" / "lib" / "node_modules"
         self.stub(
-            "claude", "2.1.0 (Claude Code)", where=root / "@anthropic-ai" / "claude-code" / "bin"
+            "claude", "2.1.300 (Claude Code)", where=root / "@anthropic-ai" / "claude-code" / "bin"
         )
         (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
         self.stub("npm", "npm 10.0.0")
@@ -768,6 +768,94 @@ class TestInstallAgents(unittest.TestCase):
             },
         )
 
+    def test_the_report_notes_a_claude_below_its_floor(self) -> None:
+        self.stub("claude", "2.1.280 (Claude Code)")
+        self.assertEqual(
+            self.report()["claude"]["notes"],
+            ["at 2.1.280, below the fleet floor 2.1.281, --upgrade updates it"],
+        )
+
+    def test_the_report_says_nothing_of_a_claude_at_its_floor(self) -> None:
+        self.stub("claude", "2.1.281 (Claude Code)")
+        self.assertEqual(self.report()["claude"]["notes"], [])
+
+    def test_the_report_says_upgrade_does_not_fix_a_floor_it_will_not_run(self) -> None:
+        root = self.dir / "lib" / "node_modules"
+        self.stub("claude", "2.1.0 (Claude Code)", where=root / "claude-fork" / "bin")
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        notes = self.report()["claude"]["notes"]
+        self.assertIn(
+            "at 2.1.0, below the fleet floor 2.1.281, which --upgrade does not fix here, per the note above",
+            notes,
+        )
+
+    def test_an_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
+        self.stub("claude", "2.1.0 (Claude Code)")
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn(
+            "claude: at 2.1.0 after the run, still below the fleet floor 2.1.281", result.stderr
+        )
+        self.assertEqual(self.called(), ["claude update"])
+
+    def test_an_upgrade_that_lifts_claude_past_its_floor_passes(self) -> None:
+        stub = self.bin / "claude"
+        stub.write_text(RELOCATING_STUB, encoding="utf-8")
+        stub.chmod(0o755)
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("fleet floor", result.stderr)
+
+    def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
+        self.stub("claude", "2.1.0 (Claude Code)")
+        result = self.run_script("--upgrade", "--dry-run", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[dry run] claude update", result.stdout)
+
+    def test_an_install_that_lands_below_the_floor_fails(self) -> None:
+        self.curl()
+        (self.dir / "installer.sh").write_text(
+            f'#!/bin/bash\nprintf \'#!/bin/bash\\nprintf "2.1.0 (Claude Code)\\\\n"\\n\' >"{self.bin}/claude"\n'
+            f'chmod +x "{self.bin}/claude"\n',
+            encoding="utf-8",
+        )
+        result = self.run_script("--install", "--yes", "claude")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("claude - -> 2.1.0", result.stdout)
+        self.assertIn("still below the fleet floor 2.1.281", result.stderr)
+
+    def test_version_below_compares_three_numbers_and_ignores_a_suffix(self) -> None:
+        lines = SCRIPT.read_text(encoding="utf-8").rstrip("\n").split("\n")
+        functions = self.dir / "functions.sh"
+        functions.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+        for have, want, below in [
+            ("2.1.280", "2.1.281", True),
+            ("2.1.281", "2.1.281", False),
+            ("2.1.281-beta.1", "2.1.281", False),
+            ("2.1.1000", "2.1.281", False),
+            ("2.0.999", "2.1.281", True),
+            ("3.0.0", "2.1.281", False),
+            ("2.1.09", "2.1.10", True),
+        ]:
+            with self.subTest(have=have, want=want):
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        f'source "{functions}"\nversion_below "$1" "$2"\n',
+                        "bash",
+                        have,
+                        want,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0 if below else 1, result.stderr)
+
     def test_refusals(self) -> None:
         for arguments, message in [
             (("--upgrade", "--json"), "applies only to --report"),
@@ -1006,7 +1094,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertEqual(writes, [])
 
     def test_upgrade_drives_only_present_tools(self) -> None:
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.stub("claude", "2.1.300 (Claude Code)")
         self.stub("herdr", "herdr 0.9.0")
         result = self.run_script("-Upgrade", "-Yes")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1084,7 +1172,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
             encoding="utf-8",
         )
         failing.chmod(0o755)
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.stub("claude", "2.1.300 (Claude Code)")
         result = self.run_script("-Upgrade", "-Yes", extra_path=npm_bin)
         self.assertEqual(result.returncode, 3)
         self.assertIn("npm failed to upgrade it", result.stderr)
@@ -1441,6 +1529,39 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIs(herdr["restart_pending"], True)
         self.assertEqual(herdr["path"], "%USERPROFILE%/.local/bin/herdr")
         self.assertTrue(any("previous binary" in n for n in herdr["notes"]))
+
+    def claude_notes(self) -> list[str]:
+        result = self.run_script("-Json", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["tools"][0]["notes"]
+
+    def test_the_report_notes_a_claude_below_its_floor(self) -> None:
+        self.stub("claude", "2.1.280 (Claude Code)")
+        self.assertEqual(
+            self.claude_notes(),
+            ["at 2.1.280, below the fleet floor 2.1.281, -Upgrade updates it"],
+        )
+
+    def test_the_report_compares_the_floor_by_number(self) -> None:
+        for banner in ("2.1.281 (Claude Code)", "2.1.1000 (Claude Code)", "2.1.281-beta.1"):
+            with self.subTest(banner=banner):
+                self.stub("claude", banner)
+                self.assertEqual(self.claude_notes(), [])
+
+    def test_an_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
+        self.stub("claude", "2.1.0 (Claude Code)")
+        result = self.run_script("-Upgrade", "-Yes", "claude")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn(
+            "claude: at 2.1.0 after the run, still below the fleet floor 2.1.281", result.stderr
+        )
+        self.assertIn("claude update", self.recorded())
+
+    def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
+        self.stub("claude", "2.1.0 (Claude Code)")
+        result = self.run_script("-Upgrade", "-DryRun", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[dry run] claude update", result.stdout)
 
     def test_upgrade_reports_the_version_now_first_on_path(self) -> None:
         stub = self.bin / "claude"

@@ -180,6 +180,9 @@ opencode-ai among them, is reported with the command that removes it and is neve
 --upgrade and --install leave opencode alone while one is first on PATH, and act on the managed
 copy once none is.
 
+claude carries a fleet floor, 2.1.281. --report notes a copy below it, and --upgrade or --install
+fails that tool where its updater or installer leaves it below.
+
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
@@ -258,6 +261,60 @@ tool_version() {
     local path="$1" out
     out=$(timeout 30 "$path" --version 2>/dev/null </dev/null) || true
     [[ $out =~ ([0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*) ]] && printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+}
+
+tool_minimum() {
+    local fn
+    fn=$(tool_function "$1" minimum)
+    declare -F "$fn" >/dev/null || return 0
+    "$fn"
+}
+
+# A suffix such as a prerelease tag is ignored, so 2.1.281-beta reads as 2.1.281.
+version_below() {
+    local -a have want
+    local i
+    IFS=. read -r -a have <<<"${1%%[!0-9.]*}"
+    IFS=. read -r -a want <<<"${2%%[!0-9.]*}"
+    for ((i = 0; i < 3; i++)); do
+        ((10#${have[i]:-0} < 10#${want[i]:-0})) && return 0
+        ((10#${have[i]:-0} > 10#${want[i]:-0})) && return 1
+    done
+    return 1
+}
+
+floor_note() {
+    local tool="$1" installed="$2" upgrades="$3" minimum
+    minimum=$(tool_minimum "$tool")
+    [[ -n $minimum ]] || return 0
+    if [[ -z $installed ]]; then
+        note "$tool" "its version could not be read, so it is not known to meet the fleet floor $minimum"
+    elif version_below "$installed" "$minimum"; then
+        if [[ $upgrades == true ]]; then
+            note "$tool" "at $installed, below the fleet floor $minimum, --upgrade updates it"
+        else
+            note "$tool" "at $installed, below the fleet floor $minimum, which --upgrade does not fix here, per the note above"
+        fi
+    fi
+}
+
+# An updater that exits cleanly and leaves the tool below its floor has not done what the run needed, so the run fails.
+# A version unreadable afterwards is warned about rather than failed, as an unreadable one is everywhere else here.
+check_floor() {
+    local tool="$1" path now minimum
+    [[ $DRY_RUN == false ]] || return 0
+    minimum=$(tool_minimum "$tool")
+    [[ -n $minimum ]] || return 0
+    path=$(tool_path "$tool")
+    [[ -n $path ]] || return 0
+    now=$(tool_version "$path")
+    if [[ -z $now ]]; then
+        warn "$tool: its version could not be read after the run, so it is not known to meet the fleet floor $minimum"
+    elif version_below "$now" "$minimum"; then
+        warn "$tool: at $now after the run, still below the fleet floor $minimum"
+        FAILED+=("$tool")
+    fi
     return 0
 }
 
@@ -617,6 +674,11 @@ stray_fixup() {
 # --- claude ---
 
 claude_source() { printf 'https://claude.ai/install.sh'; }
+
+# The fleet's rules load from AGENTS.md, which every Claude Code session reads natively from 2.1.281.
+# Below it, a session on Amazon Bedrock or with telemetry off reads CLAUDE.md alone.
+claude_minimum() { printf '2.1.281'; }
+
 claude_upgrade() { run claude update; }
 claude_install() { run_installer "$(claude_source)" bash; }
 
@@ -762,6 +824,7 @@ report() {
             if [[ $tool == "herdr" && $upgrades == true ]]; then
                 herdr_note
             fi
+            floor_note "$tool" "$installed" "$upgrades"
             restart=$(restart_pending_json "$tool")
         fi
         if [[ $JSON_OUTPUT == false ]]; then
@@ -840,6 +903,7 @@ upgrade_tool() {
         return 0
     fi
     record_change "$tool" "$installed"
+    check_floor "$tool"
 
     [[ $tool != "herdr" ]] || herdr_after_upgrade
 }
@@ -875,6 +939,7 @@ manager_upgrade() {
         return 0
     fi
     record_change "$tool" "$installed"
+    check_floor "$tool"
     [[ $tool != "herdr" ]] || herdr_after_upgrade
 }
 
@@ -905,6 +970,7 @@ install_tool() {
     fi
     now=$(tool_version "$path")
     CHANGED+=("$tool - -> ${now:--}")
+    check_floor "$tool"
 }
 
 apply() {
