@@ -9,6 +9,7 @@ import inspect
 import io
 import json
 import locale
+import os
 import pathlib
 import re
 import subprocess
@@ -23,6 +24,7 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
 import audit
 import audit_markdown
+import workflow_reuse
 from git_env import git_location_cleared
 
 _LOCATION = contextlib.ExitStack()
@@ -1002,6 +1004,26 @@ class GitRepoCase(unittest.TestCase):
             self.run_git(path, *cmd[1:])
         return path
 
+    def seed_hub(self, root: pathlib.Path) -> str:
+        """Copy the files `audit.main` loads into root, returning a cataloged entry's name."""
+        for rel in (
+            "registry/repos.json",
+            "repo-config/settings.json",
+            "spec/secrets.json",
+            "spec/files.json",
+            "spec/project-types.json",
+            "spec/readme-sections.json",
+            "spec/third-party-tools.json",
+            "spec/divergences.json",
+        ):
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_bytes((audit.ROOT / rel).read_bytes())
+        return next(
+            r["name"]
+            for r in audit.load("registry/repos.json")["repos"]
+            if r.get("status") == "cataloged"
+        )
+
 
 class GitRevisionsCase(GitRepoCase):
     """Holds _git_revisions against temporary git repositories."""
@@ -1089,9 +1111,9 @@ class GitRevisionsCase(GitRepoCase):
         self.run_git(root, "commit", "-q", "-m", "develop-only change")
         with mock.patch.object(audit, "ROOT", root):
             audit._git_revisions.cache_clear()
-            audit._hub_main_rev.cache_clear()
+            audit._hub_main_fetch.cache_clear()
             self.addCleanup(audit._git_revisions.cache_clear)
-            self.addCleanup(audit._hub_main_rev.cache_clear)
+            self.addCleanup(audit._hub_main_fetch.cache_clear)
             revisions = audit._git_revisions(rel)
         self.assertEqual(
             [text for _, _, text in revisions],
@@ -1715,19 +1737,7 @@ class ShallowCloneCase(GitRepoCase):
         tmp_path = self.make_dir()
         hub_dir = tmp_path / "hub"
         hub_dir.mkdir()
-        rels = (
-            "registry/repos.json",
-            "repo-config/settings.json",
-            "spec/secrets.json",
-            "spec/files.json",
-            "spec/project-types.json",
-            "spec/readme-sections.json",
-            "spec/third-party-tools.json",
-            "spec/divergences.json",
-        )
-        for rel in rels:
-            (hub_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-            (hub_dir / rel).write_bytes((audit.ROOT / rel).read_bytes())
+        name = self.seed_hub(hub_dir)
         for cmd in (
             *GIT_IDENTITY,
             ["git", "add", "."],
@@ -1740,11 +1750,6 @@ class ShallowCloneCase(GitRepoCase):
             ["git", "clone", "-q", "--depth", "1", hub_dir.as_uri(), str(shallow_hub)],
             check=True,
             capture_output=True,
-        )
-        name = next(
-            r["name"]
-            for r in audit.load("registry/repos.json")["repos"]
-            if r.get("status") == "cataloged"
         )
 
         def history_read_only(entry, spec, branch=None):
@@ -1762,6 +1767,8 @@ class ShallowCloneCase(GitRepoCase):
                 with self.subTest(label):
                     audit._require_full_history.cache_clear()
                     audit._git_revisions.cache_clear()
+                    audit._hub_main_fetch.cache_clear()
+                    self.addCleanup(audit._hub_main_fetch.cache_clear)
                     out, err = io.StringIO(), io.StringIO()
                     try:
                         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -1779,6 +1786,130 @@ class ShallowCloneCase(GitRepoCase):
                     self.assertTrue(
                         good, f"shallow-clone refusal, public {label} path (code {code})"
                     )
+
+
+class HubStampCase(GitRepoCase):
+    """Holds the run stamp to the commits the run read, the checkout's HEAD and the fetched main."""
+
+    def make_hub(self) -> tuple[pathlib.Path, pathlib.Path]:
+        upstream = self.make_repo("-b", "main")
+        self.name = self.seed_hub(upstream)
+        self.run_git(upstream, "add", ".")
+        self.run_git(upstream, "commit", "-q", "-m", "one")
+        checkout = self.make_dir() / "hub"
+        subprocess.run(
+            ["git", "clone", "-q", str(upstream), str(checkout)], check=True, capture_output=True
+        )
+        return upstream, checkout
+
+    def short(self, root: pathlib.Path, rev: str) -> str:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", rev],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        ).stdout.strip()
+
+    def stamps(self, checkout: pathlib.Path) -> tuple[str, str]:
+        outputs = []
+        with (
+            mock.patch.object(audit, "ROOT", checkout),
+            mock.patch.object(audit, "audit_repo", lambda entry, spec, branch=None: ([], "")),
+        ):
+            for argv in ([self.name], ["--issue", self.name]):
+                audit._hub_main_fetch.cache_clear()
+                self.addCleanup(audit._hub_main_fetch.cache_clear)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                    audit.main(argv)
+                outputs.append(out.getvalue())
+        return outputs[0], outputs[1]
+
+    def test_stamp_names_fetched_main_where_head_trails_it(self) -> None:
+        upstream, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        self.run_git(upstream, "commit", "-q", "--allow-empty", "-m", "two")
+        main = self.short(upstream, "HEAD")
+        sweep, issue = self.stamps(checkout)
+        want = f"| hub {head} | main {main}"
+        self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp names the fetched main")
+        self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp names the fetched main")
+
+    def test_stamp_names_head_alone_at_fetched_main(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        sweep, issue = self.stamps(checkout)
+        self.assertIn(f"| hub {head}\n", sweep, "hub stamp: sweep run stamp at main")
+        self.assertIn(f"| hub {head}`", issue, "hub stamp: issue body run stamp at main")
+        self.assertNotIn("| main ", sweep + issue, "hub stamp: no main field at main")
+
+    def test_stamp_marks_uncommitted_changes_dirty(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        registry = checkout / "registry" / "repos.json"
+        registry.write_bytes(registry.read_bytes() + b"\n")
+        sweep, issue = self.stamps(checkout)
+        want = f"| hub {head}-dirty | main {head}"
+        self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp marks a dirty tree")
+        self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp marks a dirty tree")
+
+    def test_dirty_suffix_reads_only_the_audited_paths(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        (checkout / "notes.txt").write_text("outside the audited paths\n", encoding="utf-8")
+        sweep, _ = self.stamps(checkout)
+        self.assertIn(f"| hub {head}\n", sweep, "hub stamp: a change outside the reads")
+        (checkout / "spec" / "extra.json").write_text("{}\n", encoding="utf-8")
+        sweep, _ = self.stamps(checkout)
+        self.assertIn(f"| hub {head}-dirty | main {head}\n", sweep, "hub stamp: untracked read")
+
+    def test_workflow_reuse_stamp_reads_its_own_paths(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        with mock.patch.object(audit, "ROOT", checkout):
+            (checkout / "repo-config" / "extra.json").write_text("{}\n", encoding="utf-8")
+            self.assertEqual(head, workflow_reuse.hub_sha(), "workflow_reuse stamp: unread path")
+            (checkout / "spec" / "extra.py").write_text("\n", encoding="utf-8")
+            self.assertEqual(
+                f"{head}-dirty", workflow_reuse.hub_sha(), "workflow_reuse stamp: code"
+            )
+
+    def test_issue_usage_error_fetches_nothing(self) -> None:
+        names = [
+            r["name"]
+            for r in audit.load("registry/repos.json")["repos"]
+            if r.get("status") == "cataloged"
+        ][:2]
+        with (
+            mock.patch.object(audit, "hub_stamp") as stamp,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = audit.main(["--issue", *names])
+        self.assertEqual((2, 0), (code, stamp.call_count), "hub stamp: --issue usage error")
+
+    def test_stamp_says_main_unknown_where_the_fetch_fails(self) -> None:
+        upstream, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        self.run_git(checkout, "remote", "remove", "origin")
+        sweep, issue = self.stamps(checkout)
+        want = f"| hub {head} | main unknown"
+        self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp with no fetch")
+        self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp with no fetch")
+        self.run_git(checkout, "remote", "add", "origin", str(upstream))
+        with mock.patch.object(audit, "ROOT", checkout), self.assertRaises(RuntimeError):
+            audit._hub_main_rev()
+
+    def test_stamp_names_both_fields_outside_a_checkout(self) -> None:
+        root = self.make_dir()
+        with (
+            mock.patch.object(audit, "ROOT", root),
+            mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(root.parent)}),
+        ):
+            audit._hub_main_fetch.cache_clear()
+            self.addCleanup(audit._hub_main_fetch.cache_clear)
+            self.assertEqual("unknown | main unknown", audit.hub_stamp(), "hub stamp: no checkout")
 
 
 class ParseArgsCase(unittest.TestCase):

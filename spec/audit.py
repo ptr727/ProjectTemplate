@@ -1612,8 +1612,8 @@ def _require_full_history(root):
 
 
 @functools.cache
-def _hub_main_rev():
-    """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA."""
+def _hub_main_fetch():
+    """`(sha, error)` for the hub's own `main`, fetched fresh from `origin` once per run."""
     fetch = subprocess.run(
         ["git", "fetch", "-q", "origin", "main"],
         cwd=ROOT,
@@ -1623,7 +1623,7 @@ def _hub_main_rev():
         check=False,
     )
     if fetch.returncode != 0:
-        raise RuntimeError(f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}")
+        return None, f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}"
     resolved = subprocess.run(
         ["git", "rev-parse", "FETCH_HEAD"],
         cwd=ROOT,
@@ -1633,8 +1633,63 @@ def _hub_main_rev():
         check=False,
     )
     if resolved.returncode != 0 or not resolved.stdout.strip():
-        raise RuntimeError(f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}")
-    return resolved.stdout.strip()
+        return None, f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}"
+    return resolved.stdout.strip(), None
+
+
+def _hub_main_rev():
+    """The hub's own `main` as a commit SHA, raising on every read once its fetch failed.
+
+    The failure is cached with the result, so a retry never reads a `main` the run stamp called unknown.
+    """
+    sha, error = _hub_main_fetch()
+    if error:
+        raise RuntimeError(error)
+    return sha
+
+
+def short_rev(rev):
+    """The hub's abbreviated SHA for `rev`, or "unknown" where git cannot resolve it."""
+    r = subprocess.run(
+        ["git", "rev-parse", "--short", rev],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
+
+
+# The working-tree paths this audit reads, so a change anywhere else leaves its stamp clean.
+AUDIT_READS = ("registry", "repo-config", "scripts", "spec")
+
+
+def hub_head(paths=AUDIT_READS):
+    """The checkout's short HEAD, with a `-dirty` suffix where the working tree under `paths` differs from it."""
+    head = short_rev("HEAD")
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", *paths],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return f"{head}-dirty" if head != "unknown" and status.stdout.strip() else head
+
+
+def hub_stamp():
+    """The run stamp's hub field, `hub_head()`, then `| main <sha>` where `_hub_main_rev()` differs from it.
+
+    The canonicals, their history, and the tracked paths come from `main`, and every other read comes from the working tree.
+    """
+    head = hub_head()
+    try:
+        main = short_rev(_hub_main_rev())
+    except RuntimeError:
+        main = "unknown"
+    return head if main == head != "unknown" else f"{head} | main {main}"
 
 
 @functools.cache
@@ -2815,21 +2870,12 @@ def main(argv=None):
             return 2
 
     run_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hub = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=ROOT,
-        check=False,
-    )
-    hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
-
     if issue_mode:
         if len(repos) != 1:
             print("--issue takes exactly one cataloged repo", file=sys.stderr)
             return 2
         entry = repos[0]
+        hub_sha = hub_stamp()
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
         except ShallowCloneError as e:
@@ -2852,7 +2898,7 @@ def main(argv=None):
         return 0
 
     override = f" | branch override {a.branch}" if a.branch else ""
-    print(f"audit run {run_utc} | hub {hub_sha}{override}")
+    print(f"audit run {run_utc} | hub {hub_stamp()}{override}")
     _, from_remote = hub_name()
     if not from_remote:
         print(
