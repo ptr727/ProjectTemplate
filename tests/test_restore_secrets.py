@@ -70,6 +70,12 @@ class Case(unittest.TestCase):
         return self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
 
 
+skip_as_root = unittest.skipIf(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    "the script refuses root before it reaches the sync",
+)
+
+
 @unittest.skipUnless(os.name == "posix", "runs the Linux script under a PATH of symlinked stubs")
 class TestLinuxScript(Case):
     script = SH
@@ -101,11 +107,13 @@ class TestLinuxScript(Case):
             env={"PATH": str(self.bin), "HOME": str(self.root / "home"), "SYNC_LOG": str(self.log)},
         )
 
+    @skip_as_root
     def test_it_pulls_exactly_the_named_buckets(self) -> None:
         result = self.run_script("--bucket", "alpha", "--bucket", "beta-2")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), ["pull --bucket alpha --bucket beta-2"])
 
+    @skip_as_root
     def test_yes_and_dry_run_pass_through(self) -> None:
         result = self.run_script("--bucket", "alpha", "--yes", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -155,12 +163,14 @@ class TestLinuxScript(Case):
         self.assertIn("the sync refuses root", result.stderr)
         self.assertEqual(self.calls(), [])
 
+    @skip_as_root
     def test_a_missing_op_is_named_with_its_remedy(self) -> None:
         result = self.run_script("--bucket", "alpha", with_op=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("install-tools.sh --install op", result.stderr)
         self.assertEqual(self.calls(), [])
 
+    @skip_as_root
     def test_a_dry_run_without_op_prints_the_command_and_succeeds(self) -> None:
         result = self.run_script("--bucket", "alpha", "--dry-run", with_op=False)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -168,6 +178,7 @@ class TestLinuxScript(Case):
         self.assertIn("pull --bucket alpha --dry-run", result.stdout)
         self.assertEqual(self.calls(), [])
 
+    @skip_as_root
     def test_an_interpreter_older_than_the_sync_needs_is_named(self) -> None:
         (self.bin / "python3").unlink()
         self.stub("python3", STUB_OLD_PYTHON)
@@ -176,12 +187,14 @@ class TestLinuxScript(Case):
         self.assertIn("Python 3.11 or newer not found", result.stderr)
         self.assertEqual(self.calls(), [])
 
+    @skip_as_root
     def test_a_tree_without_the_sync_is_named(self) -> None:
         (self.tree / "scripts" / "secrets_sync.py").unlink()
         result = self.run_script("--bucket", "alpha")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("carries no scripts/secrets_sync.py", result.stderr)
 
+    @skip_as_root
     def test_the_sync_exit_status_is_the_script_exit_status(self) -> None:
         (self.tree / "scripts" / "secrets_sync.py").write_text(
             "raise SystemExit(2)\n", encoding="utf-8"

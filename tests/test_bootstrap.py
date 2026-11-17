@@ -2204,8 +2204,15 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         args: tuple[str, ...] = ("alpha,beta",),
         fail_step: str = "",
         root: bool = False,
+        reaches_restore: bool = True,
     ) -> subprocess.CompletedProcess[str]:
-        """Runs the loader with the tools that matter to a restore recording their whole argument list."""
+        """Runs the loader with the tools that matter to a restore recording their whole argument list.
+
+        bootstrap.sh refuses `--secrets` as root once it has parsed its arguments. A case refused before
+        that check, or given no `--secrets`, passes `reaches_restore=False`, so a root runner still runs it.
+        """
+        if reaches_restore and not root and hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("bootstrap.sh refuses --secrets as root, so the case would fail")
         self.build_tarball(
             (
                 "install-agents.sh",
@@ -2284,7 +2291,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         )
 
     def test_a_stand_up_without_secrets_runs_no_restore(self) -> None:
-        result = self.secrets_run(action="--host", args=())
+        result = self.secrets_run(action="--host", args=(), reaches_restore=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("restore-secrets.sh", " ".join(self.agents_steps()))
 
@@ -2305,7 +2312,9 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     def test_secrets_beside_any_other_action_is_refused_before_anything_runs(self) -> None:
         for action in ("--report", "--upgrade", "--tools", "--github", "--skills", "--sudo"):
             with self.subTest(action=action):
-                result = self.secrets_run(action=action, args=("--secrets", "alpha"))
+                result = self.secrets_run(
+                    action=action, args=("--secrets", "alpha"), reaches_restore=False
+                )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("--secrets runs alone or with --host or --dev", result.stderr)
                 self.assertEqual(self.steps(), [])
@@ -2314,7 +2323,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     def test_secrets_with_a_bad_bucket_name_is_refused_before_anything_runs(self) -> None:
         for given in ("Alpha", "a_b", "-x", "alpha,-x", "a b", "alpha/beta", "al.pha"):
             with self.subTest(given=given):
-                result = self.secrets_run(args=(given,))
+                result = self.secrets_run(args=(given,), reaches_restore=False)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("lowercase letters, digits, and hyphens", result.stderr)
                 self.assertEqual(self.steps(), [])
@@ -2323,11 +2332,11 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     def test_secrets_with_no_buckets_is_refused_before_anything_runs(self) -> None:
         for given in ("", ",", ",,"):
             with self.subTest(given=given):
-                result = self.secrets_run(args=(given,))
+                result = self.secrets_run(args=(given,), reaches_restore=False)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("--secrets takes the buckets to restore", result.stderr)
                 self.assertEqual(self.steps(), [])
-        result = self.secrets_run(args=())
+        result = self.secrets_run(args=(), reaches_restore=False)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--secrets takes the buckets to restore", result.stderr)
         self.assertEqual(self.steps(), [])

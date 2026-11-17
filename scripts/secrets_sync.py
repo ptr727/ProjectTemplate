@@ -260,6 +260,10 @@ def session(op: Op) -> Iterator[None]:
     """
     accounts = count_accounts(op.json(["account", "list", "--format", "json"]))
     if accounts == 0:
+        if op.dry_run:
+            raise Refusal(
+                "no 1Password account is configured, and a dry run adds none, so run 'op account add' first"
+            )
         accounts = bootstrap_account(op)
     if accounts > 1 and not op.account:
         raise Refusal(f"{accounts} 1Password accounts are configured, so name one with --account")
