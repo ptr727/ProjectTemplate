@@ -2932,14 +2932,20 @@ class GroundTruthCase(unittest.TestCase):
 
     def test_matches_hub_history_ignores_line_endings_and_nothing_else(self) -> None:
         """A retired copy changed only in an action pin was still changed, so it does not match."""
-        past = "jobs:\n  a:\n    steps:\n      - uses: actions/checkout@aaaa\n"
+        old_pin, new_pin = "a" * 40, "b" * 40
+        past = f"jobs:\n  a:\n    steps:\n      - uses: actions/checkout@{old_pin}\n"
         with mock.patch.object(audit, "git_file_history", lambda rel_path: [past]):
             cases = [
                 ("the revision itself", past, True),
                 ("the revision with CRLF line endings", past.replace("\n", "\r\n"), True),
-                ("a copy with another action pin", past.replace("@aaaa", "@bbbb"), False),
+                ("a copy with another action pin", past.replace(old_pin, new_pin), False),
                 ("a copy that could not be read", None, False),
             ]
+            self.assertEqual(
+                audit.content_hash(cases[2][1]),
+                audit.content_hash(past),
+                "the pin mask must apply here, or this case would not test it",
+            )
             for label, copy, want in cases:
                 with self.subTest(label):
                     self.assertIs(audit.matches_hub_history(copy, "w.yml"), want)
