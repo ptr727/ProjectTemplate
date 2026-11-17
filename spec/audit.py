@@ -143,6 +143,16 @@ def hub_only_paths(spec, rev=None):
     return hub_tracked(rev) - excluded
 
 
+def retired_paths(spec):
+    """The ledger's `retire` paths, owed a deletion downstream whether or not the hub still tracks them."""
+    return {path for path, (kind, _) in gap_dispositions(spec).items() if kind == "retire"}
+
+
+def deletion_candidates(spec, rev=None):
+    """Paths a downstream copy converges on by deletion: the hub-hosted set and every path the ledger retires."""
+    return hub_only_paths(spec, rev) | retired_paths(spec)
+
+
 def gap_dispositions(spec):
     """The curated ledger's manifest-gap dispositions, as path -> (disposition, reason)."""
     out = {}
@@ -2497,7 +2507,7 @@ def _tree_file_findings(source_path, target_path, entries):
 
 
 def check_hubonly_carried(run):
-    """A path the hub tracks and the manifest omits is hub-hosted, so a downstream copy converges by deletion."""
+    """A hub-hosted path, or one the ledger retires, converges downstream by deletion rather than by a re-vendor."""
     if run.tree is None:
         return [
             (
@@ -2507,9 +2517,8 @@ def check_hubonly_carried(run):
         ]
     disp = gap_dispositions(run.spec)
     hosted = hub_only_paths(run.spec)
-    retired = {path for path, (kind, _) in disp.items() if kind == "retire"}
     findings = []
-    for path in sorted(run.tree & (hosted | retired)):
+    for path in sorted(run.tree & (hosted | retired_paths(run.spec))):
         kind = disp.get(path, ("", ""))[0]
         if kind == "accepted":
             continue

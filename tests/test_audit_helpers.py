@@ -2916,6 +2916,20 @@ class GroundTruthCase(unittest.TestCase):
             f"gap disposition parsing -> {got_disp}",
         )
 
+    def test_deletion_candidates_add_retired_paths_the_hub_no_longer_tracks(self) -> None:
+        spec = {
+            "files": {"baseline": [{"path": "kept.md"}]},
+            "divergences": {
+                "gaps": [
+                    {"path": "gone.md", "disposition": "retire", "reason": "r"},
+                    {"path": "theirs.md", "disposition": "accepted", "reason": "r"},
+                ]
+            },
+        }
+        with mock.patch.object(audit, "hub_tracked", lambda rev=None: {"kept.md", "hosted.sh"}):
+            got = audit.deletion_candidates(spec)
+        self.assertEqual(got, {"hosted.sh", "gone.md"}, f"deletion candidates -> {got}")
+
     def test_repo_tree_returns_none_unless_whole(self) -> None:
         head = {"commit": {"commit": {"tree": {"sha": "deadbeef"}}}}
         with mock.patch.object(

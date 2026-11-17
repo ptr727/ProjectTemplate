@@ -159,7 +159,9 @@ def fidelity_pass(spec):
 
 
 def manifest_gap_pass(spec):
-    """Hub-tracked, manifest-undeclared files, mapped to every cataloged repo that carries one.
+    """Files a downstream copy owes a deletion, mapped to every cataloged repo that carries one.
+
+    Those are the hub-tracked files the manifest leaves undeclared, and every path the ledger retires.
 
     Read fleet-wide rather than against a single reference adopter. A gap is a repo-by-repo fact, so one
     adopter answers only for its own tree. A file five repos carry and that adopter does not was invisible.
@@ -168,7 +170,7 @@ def manifest_gap_pass(spec):
     A repo whose tree cannot be read in full is reported rather than skipped. The reason is that an unread
     tree contributes no gaps and reads exactly like a repo that carries none.
     """
-    hub_only = audit.hub_only_paths(spec)
+    hub_only = audit.deletion_candidates(spec)
     gaps, unreadable = {}, []
     for entry in spec["registry"]["repos"]:
         if entry.get("status") != "cataloged" or entry.get("name") == audit.hub_repo_name():
@@ -395,6 +397,7 @@ def main(argv=()):
     spec = {
         "registry": audit.load("registry/repos.json"),
         "files": audit.load("spec/files.json"),
+        "divergences": load_ledger(),
     }
     spreads, promote, mislabel = fidelity_pass(spec)
     gaps, unreadable = manifest_gap_pass(spec)

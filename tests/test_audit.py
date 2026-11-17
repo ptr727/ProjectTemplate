@@ -341,6 +341,22 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
             hub_only,
         )
 
+    def test_a_retired_path_the_hub_still_hosts_is_reported_as_hosted(self) -> None:
+        """The control for the case above, a retire path the hub tracks, which names the hub's copy."""
+        findings, _ = run_audit(
+            CARRIED | {".codecov.yml", "repo-config/configure.sh"},
+            hub=self.HUB | frozenset({"repo-config/configure.sh"}),
+        )
+
+        hub_only = self.hub_only_findings(findings)
+        self.assertEqual(
+            [t for t in hub_only if "repo-config/configure.sh" in t],
+            [
+                "hub-only: delete this repo's repo-config/configure.sh - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            ],
+            hub_only,
+        )
+
     def test_the_rendered_reviewer_configs_are_not_reported(self) -> None:
         """The hub renders these per repository and repo-config/configure.sh check judges them."""
         rendered = {".coderabbit.yaml", ".github/agent-policy.json", ".pr_agent.toml"}
