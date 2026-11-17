@@ -325,7 +325,8 @@ function Add-FloorNote {
     }
 }
 
-# An updater that exits cleanly and leaves the tool below its floor has not done what the run needed, so the run fails.
+# An updater, package manager, or installer that exits cleanly and leaves the tool below its floor has not done what the run needed.
+# So the run fails.
 # A version unreadable afterwards is warned about rather than failed, as an unreadable one is everywhere else here.
 function Test-Floor {
     param([string]$ToolName, [string]$Now)

@@ -879,7 +879,9 @@ class TestInstallAgents(unittest.TestCase):
                     check=False,
                     timeout=30,
                 )
+                # A crash under set -e also exits 1, so an empty stderr is what tells "not below" from it.
                 self.assertEqual(result.returncode, 0 if below else 1, result.stderr)
+                self.assertEqual(result.stderr, "")
 
     def test_refusals(self) -> None:
         for arguments, message in [

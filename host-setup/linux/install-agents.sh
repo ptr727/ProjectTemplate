@@ -313,7 +313,8 @@ floor_note() {
     fi
 }
 
-# An updater that exits cleanly and leaves the tool below its floor has not done what the run needed, so the run fails.
+# An updater, package manager, or installer that exits cleanly and leaves the tool below its floor has not done what the run needed.
+# So the run fails.
 # A version unreadable afterwards is warned about rather than failed, as an unreadable one is everywhere else here.
 check_floor() {
     local tool="$1" now="$2" minimum
