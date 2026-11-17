@@ -328,21 +328,20 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
             any(text.startswith("hub-only: tools/hub_tool.py ") for text in hub_only), hub_only
         )
 
-    def retired_claude_md_findings(self, matches_history: bool) -> list[str]:
-        """The hub-only findings for a carried CLAUDE.md, its history match answered as given.
-
-        The fake tree reports every blob's SHA as "0", so the check must ask about that copy at that path.
-        """
-        history = mock.Mock(return_value=matches_history)
-        with mock.patch.object(audit, "git_blob_in_file_history", history):
-            findings, _ = run_audit(CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB)
-        history.assert_called_once_with("CLAUDE.md", "0")
+    def retired_claude_md_findings(self, copy: str) -> list[str]:
+        """The hub-only findings for a carried CLAUDE.md holding `copy`, against one LF hub revision."""
+        history = mock.Mock(return_value=["@AGENTS.md\n"])
+        with mock.patch.object(audit, "git_file_history", history):
+            findings, _ = run_audit(
+                CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB, texts={"CLAUDE.md": copy}
+            )
+        history.assert_called_once_with("CLAUDE.md")
         return [t for t in self.hub_only_findings(findings) if "CLAUDE.md" in t]
 
     def test_a_retired_copy_matching_a_past_hub_version_is_deleted(self) -> None:
-        """The ledger's retire disposition names the path where the hub's own tree no longer can."""
+        """A CRLF copy of an LF hub revision still matches, as the verbatim stale check holds."""
         self.assertEqual(
-            self.retired_claude_md_findings(True),
+            self.retired_claude_md_findings("@AGENTS.md\r\n"),
             [
                 "hub-only: delete this repo's CLAUDE.md - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
             ],
@@ -351,7 +350,7 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
     def test_a_retired_copy_matching_no_past_hub_version_goes_to_the_maintainer(self) -> None:
         """A copy the repository changed is never reported as one to delete."""
         self.assertEqual(
-            self.retired_claude_md_findings(False),
+            self.retired_claude_md_findings("@AGENTS.md\nOur own rule.\n"),
             [
                 "hub-only: CLAUDE.md - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
             ],

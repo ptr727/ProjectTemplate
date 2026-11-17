@@ -1562,6 +1562,13 @@ def content_hash(text):
     return _hash_normalized(normalize(text))
 
 
+def matches_hub_history(down_text, rel_path):
+    """Whether a downstream copy matches any past hub revision of rel_path, line endings aside."""
+    return down_text is not None and content_hash(down_text) in {
+        content_hash(past) for past in git_file_history(rel_path)
+    }
+
+
 def classify_verbatim(down_text, canon_text, past_texts):
     """None if the copy matches the current canonical, 'stale' if it matches a past hub revision, else 'modified'."""
     dh = content_hash(down_text)
@@ -2527,7 +2534,7 @@ def check_hubonly_carried(run):
         if kind == "retire":
             if path in hub_tracked(None):
                 text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
-            elif git_blob_in_file_history(path, run.entries[path]):
+            elif matches_hub_history(run.read_text(path), path):
                 text = f"hub-only: delete this repo's {path} - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
             else:
                 text = f"hub-only: {path} - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
