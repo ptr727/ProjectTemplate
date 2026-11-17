@@ -2529,7 +2529,7 @@ def check_hubonly_carried(run):
             if path in hosted:
                 text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
             else:
-                text = f"hub-only: delete this repo's {path} - the fleet retired it, no repo carries it, and nothing replaces it (spec/divergences.json 'gaps' records why)"
+                text = f"hub-only: delete this repo's {path} - the fleet retired it, no repo carries it, and nothing replaces it (read its spec/divergences.json 'gaps' reason before deleting)"
         elif kind:
             text = f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging"
         else:
@@ -2722,10 +2722,10 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
             "Divergences from the hub canonical. A `verbatim:` file or section re-vendors the current hub copy "
             "byte-for-byte (a `section` re-vendors just that one `## heading` block). An `interface:` item must "
             "honor the named workflow contract. A stale-but-present copy is re-vendored. A `hub-only:` item reading "
-            "`delete this repo's` is the opposite remedy, so the copy here is deleted, and the hub's copy is "
-            "reached instead only where the item says the hub hosts it. Any other `hub-only:` item is triaged "
-            "per AUDIT.md before anything is deleted. A genuinely repo-specific difference is judged by meaning "
-            "per AUDIT.md."
+            "`delete this repo's` is the opposite remedy, so the copy here is deleted once its ledger reason is "
+            "read, and the hub's copy is reached instead only where the item says the hub hosts it. Any other "
+            "`hub-only:` item is triaged per AUDIT.md before anything is deleted. A genuinely repo-specific "
+            "difference is judged by meaning per AUDIT.md."
         )
         w("")
         for t in drift:

@@ -336,7 +336,7 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
         self.assertEqual(
             [t for t in hub_only if t.startswith("hub-only: delete this repo's CLAUDE.md ")],
             [
-                "hub-only: delete this repo's CLAUDE.md - the fleet retired it, no repo carries it, and nothing replaces it (spec/divergences.json 'gaps' records why)"
+                "hub-only: delete this repo's CLAUDE.md - the fleet retired it, no repo carries it, and nothing replaces it (read its spec/divergences.json 'gaps' reason before deleting)"
             ],
             hub_only,
         )
