@@ -19,6 +19,7 @@ permissions: {}
 jobs:
 
   # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, per D1.6.
+  # A repo keeping its pytest legs in a tracked file names that file in a test-matrix-file input here.
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@63cf1c9436876d55889260ce43d3900da2fd9b47 # 2.0.1166
