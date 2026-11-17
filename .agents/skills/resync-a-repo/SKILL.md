@@ -92,8 +92,8 @@ section 3 describes.
    read with `git log -p -- CLAUDE.md` in a hub checkout, is the repository's own. Move it to the
    topical doc `spec/section-model.md` names for what it is. The removal is swept tree-wide, per RESYNC.md section 4, before the deletion
    counts as done.
-3. **Verbatim re-vendors** for everything the probe in step 1 cleared. A
-   finding classified modified rather than stale gets its diff read before being overwritten.
+3. **Verbatim re-vendors** for every verbatim finding, the four instruction files only once step 1's
+   probe cleared them. A finding classified modified rather than stale gets its diff read before being overwritten.
    The reason is that it may be an improvement the hub should adopt instead of a mistake to erase.
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.
