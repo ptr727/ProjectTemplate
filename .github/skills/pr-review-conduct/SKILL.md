@@ -316,8 +316,9 @@ Run every `scripts/pr_review.py` command below from a hub checkout. The script i
 is never carried into a downstream repository.
 
 On Claude Code, the host-safety installer's allow rule runs a `scripts/pr_review.py` call without
-the auto-mode classifier only where the call matches the rule's text. So run each such command as a
-call of its own, spelled as printed here. Where the hub checkout sits inside the session's working
+the auto-mode classifier only where the call matches the rule's text. This paragraph covers every
+`scripts/pr_review.py` call a fleet skill prints, in this skill or another. So run each one as a
+call of its own, spelled as the skill prints it. Where the hub checkout sits inside the session's working
 directories, a `cd <hub-checkout> &&` prefix keeps the match. A `cd` elsewhere may not. A leading
 variable assignment leaves the rule unmatched unless Claude Code counts that variable as known-safe.
 So does a flag between `uv run` and the script, or a script named by an absolute path or a shell
@@ -325,7 +326,12 @@ variable. The classifier then judges the call, and its default rules refuse a me
 approved. So the spelling is owed on the first call. A call refused anyway is a refused write
 under `GOVERNANCE.md` "Repository Boundaries and Write Safety", reported rather than re-spelled.
 On Claude Code, where the executor restricts uv's cache writes, the cache variable that restriction
-needs is such an assignment. A merge there is reported to the maintainer as a blocked merge rather than run.
+needs is such an assignment. Unless Claude Code counts it as known-safe, every call there reaches the
+classifier. A call that merges or deletes is then reported to the maintainer as a blocked write
+rather than run. Those calls are `merge`, `cleanup <number>`, and `cleanup --sweep --apply`. Each is
+an irreversible step under `GOVERNANCE.md` "Communicating with the User", and a classifier verdict
+does not authorize one. Any other call there runs, and one the classifier refuses is the refused
+write above.
 
 Run `local-strict-review` against the branch's current diff before every push this loop makes. The pass is owed before the push that opens the pull request in step 1 and each one after it. It is owed whatever finding a push answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about. So a re-push of a tree a recorded pass already covers needs no second pass. That is because the receipt is keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps the receipt only while the merge base holds. Rebasing onto a target that has moved retires the receipt although no file changed. That push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads. The hub's own `pre-push` hook is one, and a repository has none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around. That skill's refusal table says what each refusal means and what clears it.
 

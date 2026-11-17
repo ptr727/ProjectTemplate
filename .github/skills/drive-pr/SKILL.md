@@ -114,8 +114,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 4. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
-   primary clone. Spell it as `pr-review-conduct` "Expected review loop" says, or on Claude Code the auto-mode
-   classifier judges the merge and refuses it. It reads the Merge Gate's mechanically readable items in code, through `wait`'s
+   primary clone. Spell every `scripts/pr_review.py` call this skill prints as `pr-review-conduct`
+   "Expected review loop" says. `merge` reads the Merge Gate's mechanically readable items in code, through `wait`'s
    own decision and a fresh read after it. It merges nothing while one reads unmet. The items no
    code reads stay this seat's per pr-review-conduct's Merge Gate. A finding the pull request's
    body lists is one. A no-thread finding on an earlier round is one too, since `FINDINGS WITH NO
@@ -178,10 +178,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    ran. Exit `0` is done, the branch deleted or already gone. Any other exit stops and reports rather
    than deleting by hand. `1` is a refusal, a moved tip among them. `2` is a read that did not
    answer or a delete it could not confirm. `64` is a target under an owner other than the hub
-   checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`. It runs
-   under the host-safety installer's `Bash(uv run --no-project --script scripts/pr_review.py:*)` allow rule,
-   which is what lets auto mode complete it. That holds where the call is
-   spelled as `pr-review-conduct` "Expected review loop" says.
+   checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`.
    It also refuses while another open pull request in the repository has the branch as its head or base.
    It names each, since the delete would close or retarget it.
    Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand.

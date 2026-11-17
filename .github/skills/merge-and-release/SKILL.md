@@ -62,7 +62,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
 2. Record the promotion's live head, `gh pr view [number] --repo owner/repo --json headRefOid
    --jq .headRefOid`. Then, from a hub checkout, `scripts/` is not carried into downstream repos,
    run `uv run --no-project --script scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
-   pr-review-conduct Merge Gate. Stop and report exactly what is missing rather than merging on a
+   pr-review-conduct Merge Gate. Spell every `scripts/pr_review.py` call this skill prints as
+   `pr-review-conduct` "Expected review loop" says. Stop and report exactly what is missing rather than merging on a
    partial gate. A digest carrying `state=MERGED` is a promotion merged since step 1 found it
    open, whose `merge=UNKNOWN` never clears, so stop re-reading it. Confirm its `merge_commit=` per
    step 4, run the ready-report comparison below against its `head=`, and report both. Dispatch
@@ -233,10 +234,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      says what a refusal after it and a `base=kept` line each leave to do. Exit `0` is done, and
      any other exit stops and reports. `1` is a refusal, and `2` is an unanswered read or an unconfirmed
      delete. `64` is a target under an owner other than the hub checkout's own `origin`, or an
-     unreadable `origin`. A registry refusal is a `1`. It runs under the host-safety
-     installer's `Bash(uv run --no-project --script scripts/pr_review.py:*)` allow rule, which is what lets auto mode
-     complete it. That holds where the call, or the `--sweep` call below, is
-     spelled as `pr-review-conduct` "Expected review loop" says.
+     unreadable `origin`. A registry refusal is a `1`.
      It also refuses while another open pull request in the repository has the branch as its head or base, naming each.
      Where this seat cannot run `cleanup`, report the cleanup to the maintainer instead of running its steps by hand. That report names the pull request number and `--repo`.
      No direct `git push origin --delete`, ref API delete, `git worktree remove`, or `git branch -D` runs on a feature branch from this skill. That is because `cleanup` is the one place holding the checks.
