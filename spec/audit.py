@@ -143,6 +143,19 @@ def hub_only_paths(spec, rev=None):
     return hub_tracked(rev) - excluded
 
 
+def retired_paths(spec):
+    """The ledger's `retire` paths, owed a deletion downstream whether or not the hub still tracks them."""
+    return {path for path, (kind, _) in gap_dispositions(spec).items() if kind == "retire"}
+
+
+def deletion_candidates(spec, rev=None):
+    """Paths a downstream copy may owe a deletion: the hub-hosted set and every path the ledger retires.
+
+    A hit is a candidate rather than a verdict, since only its `retire` disposition asserts the deletion.
+    """
+    return hub_only_paths(spec, rev) | retired_paths(spec)
+
+
 def gap_dispositions(spec):
     """The curated ledger's manifest-gap dispositions, as path -> (disposition, reason)."""
     out = {}
@@ -1549,6 +1562,13 @@ def content_hash(text):
     return _hash_normalized(normalize(text))
 
 
+def matches_hub_history(down_text, rel_path):
+    """Whether a downstream copy matches any past hub revision of rel_path, line endings aside."""
+    return down_text is not None and content_hash(down_text) in {
+        content_hash(past) for past in git_file_history(rel_path)
+    }
+
+
 def classify_verbatim(down_text, canon_text, past_texts):
     """None if the copy matches the current canonical, 'stale' if it matches a past hub revision, else 'modified'."""
     dh = content_hash(down_text)
@@ -2497,7 +2517,7 @@ def _tree_file_findings(source_path, target_path, entries):
 
 
 def check_hubonly_carried(run):
-    """A path the hub tracks and the manifest omits is hub-hosted, so a downstream copy converges by deletion."""
+    """A hub-hosted path, or one the ledger retires, converges downstream by deletion rather than by a re-vendor."""
     if run.tree is None:
         return [
             (
@@ -2507,12 +2527,17 @@ def check_hubonly_carried(run):
         ]
     disp = gap_dispositions(run.spec)
     findings = []
-    for path in sorted(run.tree & hub_only_paths(run.spec)):
+    for path in sorted(run.tree & deletion_candidates(run.spec)):
         kind = disp.get(path, ("", ""))[0]
         if kind == "accepted":
             continue
         if kind == "retire":
-            text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            if path in hub_tracked(None):
+                text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            elif matches_hub_history(run.read_text(path), path):
+                text = f"hub-only: delete this repo's {path} - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
+            else:
+                text = f"hub-only: {path} - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
         elif kind:
             text = f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging"
         else:
@@ -2704,9 +2729,11 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         w(
             "Divergences from the hub canonical. A `verbatim:` file or section re-vendors the current hub copy "
             "byte-for-byte (a `section` re-vendors just that one `## heading` block). An `interface:` item must "
-            "honor the named workflow contract. A stale-but-present copy is re-vendored. A `hub-only:` item is the "
-            "opposite remedy, a file the hub hosts rather than carries, so the copy here is deleted and the hub's "
-            "is reached instead. A genuinely repo-specific difference is judged by meaning per AUDIT.md."
+            "honor the named workflow contract. A stale-but-present copy is re-vendored. A `hub-only:` item reading "
+            "`delete this repo's` is the opposite remedy, so the copy here is deleted once its ledger reason is "
+            "read, and the hub's copy is reached instead only where the item says the hub hosts it. Any other "
+            "`hub-only:` item is triaged per AUDIT.md before anything is deleted. A genuinely repo-specific "
+            "difference is judged by meaning per AUDIT.md."
         )
         w("")
         for t in drift:

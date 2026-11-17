@@ -328,6 +328,50 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
             any(text.startswith("hub-only: tools/hub_tool.py ") for text in hub_only), hub_only
         )
 
+    def retired_claude_md_findings(self, copy: str) -> list[str]:
+        """The hub-only findings for a carried CLAUDE.md holding `copy`, against one LF hub revision."""
+        history = mock.Mock(return_value=["@AGENTS.md\n"])
+        with mock.patch.object(audit, "git_file_history", history):
+            findings, _ = run_audit(
+                CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB, texts={"CLAUDE.md": copy}
+            )
+        history.assert_called_once_with("CLAUDE.md")
+        return [t for t in self.hub_only_findings(findings) if "CLAUDE.md" in t]
+
+    def test_a_retired_copy_matching_a_past_hub_version_is_deleted(self) -> None:
+        """A CRLF copy of an LF hub revision still matches, as the verbatim stale check holds."""
+        self.assertEqual(
+            self.retired_claude_md_findings("@AGENTS.md\r\n"),
+            [
+                "hub-only: delete this repo's CLAUDE.md - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
+            ],
+        )
+
+    def test_a_retired_copy_matching_no_past_hub_version_goes_to_the_maintainer(self) -> None:
+        """A copy the repository changed is never reported as one to delete."""
+        self.assertEqual(
+            self.retired_claude_md_findings("@AGENTS.md\nOur own rule.\n"),
+            [
+                "hub-only: CLAUDE.md - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
+            ],
+        )
+
+    def test_a_retired_path_the_hub_still_hosts_is_reported_as_hosted(self) -> None:
+        """The control for the case above, a retire path the hub tracks, which names the hub's copy."""
+        findings, _ = run_audit(
+            CARRIED | {".codecov.yml", "repo-config/configure.sh"},
+            hub=self.HUB | frozenset({"repo-config/configure.sh"}),
+        )
+
+        hub_only = self.hub_only_findings(findings)
+        self.assertEqual(
+            [t for t in hub_only if "repo-config/configure.sh" in t],
+            [
+                "hub-only: delete this repo's repo-config/configure.sh - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            ],
+            hub_only,
+        )
+
     def test_the_rendered_reviewer_configs_are_not_reported(self) -> None:
         """The hub renders these per repository and repo-config/configure.sh check judges them."""
         rendered = {".coderabbit.yaml", ".github/agent-policy.json", ".pr_agent.toml"}

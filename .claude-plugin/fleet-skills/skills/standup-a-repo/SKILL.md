@@ -58,15 +58,13 @@ maintainer can supply what section 0A lists.
    audit finding naming paths `develop` is behind on calls for a re-level of `develop` before
    the conversion, per STANDUP.md section 1A. So does a hand comparison
    showing `main` content `develop` lacks, for a finding too large to classify or a path changed
-   on both branches. Then carry `CLAUDE.md`,
+   on both branches. Then carry
    `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, `WORKFLOW.md` and `AUDIT.md`, adapted rather
    than cloned for the ones that describe a repo, plus `.markdownlint-cli2.jsonc` and
    `cspell.json`. A downstream `AUDIT.md` is the short, repository-scoped form that says how the
    repository reaches the hub for its audit and configuration check. Write it from
    `catalog/snippets/configs/AUDIT.md`, filling each placeholder `spec/files.json` declares for it.
-   `CLAUDE.md` is the fixed, verbatim `@AGENTS.md`-import file that gets
-   `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from
-   `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured.
+   No `CLAUDE.md` is carried, since Claude Code reads `AGENTS.md` itself.
    Read `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules before writing any repo
    content of your own, the same window-closes shape as signing in step 1.
 

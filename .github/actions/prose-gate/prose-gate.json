@@ -114,7 +114,7 @@
       ".github/workflows/check-upstream-version-task.yml", ".github/workflows/deploy-site-task.yml", ".github/workflows/get-version-task.yml",
       ".github/workflows/publish-docker-readme-task.yml", ".github/workflows/publish-plan-task.yml",
       ".github/workflows/run-codegen-pull-request-task.yml", ".github/workflows/validate-task.yml",
-      "repo-config/README.md", "repo-config/configure.sh", "repo-config/develop.json", "repo-config/labels.json",
+      "CLAUDE.md", "repo-config/README.md", "repo-config/configure.sh", "repo-config/develop.json", "repo-config/labels.json",
       "repo-config/main.json", "repo-config/operational/develop.json", "repo-config/settings.json", "spec/secrets.json"
     ],
     "tool_directives": [
