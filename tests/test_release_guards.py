@@ -1896,10 +1896,11 @@ gh() {
         (workspace / "ci/dupes.json").write_text(json.dumps(dupes, indent=2), encoding="utf-8")
         (workspace / "ci/broken.json").write_text('[{"label": "a"', encoding="utf-8")
 
+        temp = root / "runner-temp"
+        temp.mkdir()
+
         def step(script: Path, **env: str) -> tuple[int, str, str]:
-            temp = root / "runner-temp"
-            shutil.rmtree(temp, ignore_errors=True)
-            temp.mkdir()
+            """Run one step's script, keeping runner-temp, since the build step reads what the check left there."""
             output = root / "output"
             output.write_text("", encoding="utf-8")
             result = run(
@@ -1907,7 +1908,6 @@ gh() {
                 cwd=workspace,
                 env={
                     **os.environ,
-                    "GITHUB_WORKSPACE": str(workspace),
                     "RUNNER_TEMP": str(temp),
                     "GITHUB_OUTPUT": str(output),
                     "TEST_MATRIX": "",
@@ -1926,30 +1926,13 @@ gh() {
             """The matrix the build step writes after a passing check, with the check's legs output."""
             status, log, output = step(check, **env)
             self.assertEqual(0, status, log)
-            temp = root / "runner-temp"
-            result = run(
-                [bash_or_skip(), str(build)],
-                cwd=workspace,
-                env={
-                    **os.environ,
-                    "RUNNER_TEMP": str(temp),
-                    "GITHUB_OUTPUT": str(root / "build-output"),
-                    "LEGS": output.removeprefix("legs=").strip(),
-                    "PYTHON_VERSIONS": '["3.13"]',
-                },
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-            )
-            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-            line = (root / "build-output").read_text(encoding="utf-8")
-            (root / "build-output").unlink()
+            status, log, line = step(build, LEGS=output.removeprefix("legs=").strip())
+            self.assertEqual(0, status, log)
             return json.loads(line.removeprefix("matrix="))
 
-        # The file and the inline value of the same legs build the same matrix, and neither runs the interpreter legs.
+        # Each input builds the legs it holds, the inline one differing so a stale resolved file cannot pass for it.
         self.assertEqual({"include": legs}, built(TEST_MATRIX_FILE="ci/legs.json"))
-        self.assertEqual({"include": legs}, built(TEST_MATRIX=json.dumps(legs)))
+        self.assertEqual({"include": legs[::-1]}, built(TEST_MATRIX=json.dumps(legs[::-1])))
         self.assertEqual({"python-version": ["3.13"]}, built())
 
         refused = {

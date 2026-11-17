@@ -34,7 +34,7 @@ on:
         default: ''
       # Read by the test-matrix job's Validate test-matrix input step, which holds it to test-matrix's own rules.
       test-matrix-file:
-        description: Repository-relative path of a tracked file whose content is a test-matrix value, for a caller whose legs are written by a tool rather than in its workflow. The legs and the hook behave exactly as with test-matrix. Set at most one of this and test-matrix. A path naming no file in the checked-out tree, or a file whose content test-matrix would refuse, fails the run with an error naming the path.
+        description: Repository-relative path of a tracked file whose content is a test-matrix value. It suits a caller whose legs are written by a tool rather than in its workflow. The legs and the hook behave exactly as with test-matrix. Set at most one of this and test-matrix. A path naming no file in the checked-out tree fails the run with an error naming the path. So does a file whose content test-matrix would refuse.
         required: false
         type: string
         default: ''
