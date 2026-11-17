@@ -366,7 +366,8 @@ class TestSession(Case):
 
     def test_a_dry_run_with_no_account_is_refused_without_adding_one(self) -> None:
         self.fake.accounts = 0
-        code, _, err = self.run_main("pull", "--bucket", "alpha", "--dry-run")
+        with unittest.mock.patch.object(ss.os, "geteuid", lambda: 1000, create=True):
+            code, _, err = self.run_main("pull", "--bucket", "alpha", "--dry-run")
         self.assertEqual(code, 1)
         self.assertIn("op account add", err)
         self.assertNotIn(("account", "add"), self.fake.keys())
