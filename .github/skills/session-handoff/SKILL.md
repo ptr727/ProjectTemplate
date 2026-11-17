@@ -159,7 +159,7 @@ per-section rule broke several sections earlier. Neither is the rule.
 Sections 7 and 8 are what the chain exists for, and they are also the most likely to be padded.
 
 A handoff issue outlives the session that wrote it, and is readable by everyone who can read the
-repository. On a public one that is everyone. So it quotes no data observed in the maintainer's
+repository. On a public one that is everyone. So it quotes no identifying data observed in the maintainer's
 environment, per `GOVERNANCE.md` "Representative Data in Agent-Authored Text". That rule binds on a
 private repository exactly as it does on a public one, and the visibility only changes who the
 audience is. The routine case here is an absolute home path, since a handoff naturally wants to
