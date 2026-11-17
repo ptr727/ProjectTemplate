@@ -569,6 +569,34 @@ class TestTitles(Case):
         self.assertIn("both", err)
         self.assertFalse((self.home / ".secrets").exists())
 
+    def test_two_host_buckets_in_one_pull_are_refused_naming_both(self) -> None:
+        self.fake.add_item(self.vault("host-alpha"), ".ssh/id_ed25519", SECRET)
+        self.fake.add_item(self.vault("host-beta"), ".ssh/id_ed25519", SECRET)
+        code, _, err = self.run_main("pull", "--bucket", "host-alpha", "--bucket", "host-beta")
+        self.assertEqual(code, 1)
+        self.assertIn("Secrets host-alpha", err)
+        self.assertIn("Secrets host-beta", err)
+        self.assertFalse((self.home / ".ssh").exists())
+
+    def test_a_host_bucket_and_a_shared_bucket_sharing_a_title_are_refused_in_a_pull(self) -> None:
+        self.fake.add_item(self.vault("alpha"), ".ssh/id_ed25519", SECRET)
+        self.fake.add_item(self.vault("host-alpha"), ".ssh/id_ed25519", SECRET)
+        for order in (("alpha", "host-alpha"), ("host-alpha", "alpha")):
+            with self.subTest(order=order):
+                code, _, err = self.run_main("pull", "--bucket", order[0], "--bucket", order[1])
+                self.assertEqual(code, 1)
+                self.assertIn("both", err)
+
+    def test_status_reports_a_title_several_host_buckets_hold_without_a_conflict(self) -> None:
+        self.fake.add_item(self.vault("host-alpha"), ".ssh/id_ed25519", SECRET)
+        self.fake.add_item(self.vault("host-beta"), ".ssh/id_ed25519", SECRET)
+        for argv in (("status",), ("status", "--bucket", "host-alpha", "--bucket", "host-beta")):
+            with self.subTest(argv=argv):
+                code, out, err = self.run_main(*argv)
+                self.assertEqual(code, 0, err)
+                self.assertIn("Secrets host-alpha:", out)
+                self.assertIn("Secrets host-beta:", out)
+
     def test_a_path_outside_the_home_is_refused(self) -> None:
         outside = self.scratch / "outside"
         outside.write_bytes(SECRET)
@@ -955,6 +983,28 @@ class TestPush(Case):
         self.assertEqual(code, 1, err)
         self.assertIn("already held by Secrets beta", err)
         self.assertEqual(self.fake.writes(), [])
+
+    def test_a_host_bucket_takes_a_title_another_host_bucket_holds(self) -> None:
+        self.fake.add_item(self.vault("host-alpha"), ".ssh/id_ed25519", SECRET)
+        path = self.write(".ssh/id_ed25519", b"other host key\n")
+        code, _, err = self.push("--bucket", "host-beta", "--mode", "0600", str(path))
+        self.assertEqual(code, 0, err)
+        self.assertIn(("document", "create"), [key_of(a) for a in self.fake.writes()])
+
+    def test_a_host_bucket_and_a_shared_bucket_collide_in_each_direction(self) -> None:
+        self.fake.add_item(self.vault("alpha"), ".ssh/id_ed25519", SECRET)
+        self.fake.add_item(self.vault("host-alpha"), ".ssh/config", SECRET)
+        cases = (
+            ("host-beta", ".ssh/id_ed25519", "Secrets alpha"),
+            ("beta", ".ssh/config", "Secrets host-alpha"),
+        )
+        for bucket, title, holder in cases:
+            with self.subTest(bucket=bucket):
+                path = self.write(title)
+                code, _, err = self.push("--bucket", bucket, "--mode", "0600", str(path))
+                self.assertEqual(code, 1, err)
+                self.assertIn(f"already held by {holder}", err)
+                self.assertEqual(self.fake.writes(), [])
 
     def test_a_title_no_other_bucket_holds_is_created(self) -> None:
         self.fake.add_item(self.vault("beta"), ".secrets/beta_api_token", SECRET)
