@@ -1418,6 +1418,91 @@ class TestRegistration(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("permission rule", r.stdout)
 
+    def test_the_instruction_files_setting_is_written_under_both_plugin_ids(self):
+        """A version before 2.1.285 reads only the older ID, so writing the newer alone sets nothing there."""
+        r = self.install()
+        configs = self._settings()["pluginConfigs"]
+        self.assertEqual(
+            {
+                p: configs[p]["options"]["instructionFiles"]
+                for p in install.INSTRUCTION_FILES_PLUGINS
+            },
+            dict.fromkeys(install.INSTRUCTION_FILES_PLUGINS, "claude-md-and-agents-md"),
+        )
+        self.assertIn("instructionFiles claude-md-and-agents-md: set", r.stdout)
+        again = self.install()
+        self.assertIn("instructionFiles claude-md-and-agents-md: already current", again.stdout)
+
+    def test_the_instruction_files_setting_keeps_the_plugins_other_entries(self):
+        self.home.mkdir(parents=True)
+        self._write(
+            {
+                "pluginConfigs": {
+                    "agents-md@builtin": {"options": {"instructionFiles": "claude-md", "x": 1}},
+                    "other@builtin": {"options": {"y": 2}},
+                }
+            }
+        )
+        r = self.install()
+        configs = self._settings()["pluginConfigs"]
+        self.assertEqual(
+            configs["agents-md@builtin"]["options"],
+            {"instructionFiles": "claude-md-and-agents-md", "x": 1},
+        )
+        self.assertEqual(configs["other@builtin"], {"options": {"y": 2}})
+        self.assertIn("changed from 'claude-md'", r.stdout)
+
+    def test_a_changed_instruction_files_setting_reports_stale(self):
+        for plugin in install.INSTRUCTION_FILES_PLUGINS:
+            with self.subTest(plugin=plugin):
+                self.install()
+                data = self._settings()
+                data["pluginConfigs"][plugin]["options"]["instructionFiles"] = "claude-md"
+                self._write(data)
+                r = run(self.home, "--report")
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn(f"pluginConfigs.{plugin}.options.instructionFiles is", r.stdout)
+
+    def test_a_misshapen_plugin_configs_is_refused_and_left_unchanged(self):
+        for shape in (
+            {"pluginConfigs": []},
+            {"pluginConfigs": {"agents-md@builtin": "x"}},
+            {"pluginConfigs": {"cc-plugin-agents-md@builtin": {"options": None}}},
+        ):
+            with self.subTest(shape=shape):
+                self.home.mkdir(parents=True, exist_ok=True)
+                self._write(shape)
+                r = run(self.home)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("is required", r.stderr)
+                self.assertEqual(self._settings(), shape)
+
+    def test_a_host_installed_before_the_setting_reports_it_absent(self):
+        """Every host the kit already reached has no pluginConfigs, so this is the first report each one prints."""
+        self.install()
+        data = self._settings()
+        del data["pluginConfigs"]
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        for plugin in install.INSTRUCTION_FILES_PLUGINS:
+            self.assertIn(
+                f"pluginConfigs.{plugin}.options.instructionFiles is absent rather than "
+                "claude-md-and-agents-md",
+                r.stdout,
+            )
+
+    def test_a_misshapen_plugin_configs_reports_the_refusal_rather_than_an_absence(self):
+        self.install()
+        data = self._settings()
+        data["pluginConfigs"]["agents-md@builtin"]["options"] = "x"
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("pluginConfigs.agents-md@builtin.options` as str", r.stdout)
+        self.assertIn("a re-run refuses the file", r.stdout)
+        self.assertNotIn("is absent rather than", r.stdout)
+
     def test_a_duplicated_hook_registration_reports_stale(self):
         self.install()
         data = self._settings()

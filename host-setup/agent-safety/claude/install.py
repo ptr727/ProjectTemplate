@@ -5,7 +5,8 @@ Deploys the PreToolUse write guard, the PreToolUse model-tier guard with its tie
 SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the hooks in the
 user settings.json. On a host with a systemd user manager it also sets the prefix in that file's
 `env`. It merges the permission rules this kit owns into the same file. It merges the `autoMode`
-rules this kit owns there too, each found by its tag. It renders the user
+rules this kit owns there too, each found by its tag. It sets the AGENTS.md plugin to read
+CLAUDE.md and AGENTS.md both. It renders the user
 CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is self-tested
 before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
@@ -284,6 +285,22 @@ MANAGED_PERMISSIONS = [
         "Bash(uv run --no-project --script scripts/pr_review.py:*)",
     ),
 ]
+
+# Claude Code reads AGENTS.md only where no CLAUDE.md, .claude/CLAUDE.md, or CLAUDE.local.md sits at or above the working directory.
+# This setting makes it read both, so a stray CLAUDE.local.md cannot silently stop the fleet's rules loading.
+# It is read from user, --settings, or managed settings alone and never from a project's, so the host is where it is set.
+# Claude Code before 2.1.285 reads the older plugin ID and ignores the newer one, and 2.1.285 on reads either.
+# Both carry the one value, so no version from the fleet floor of 2.1.281 up meets a conflict, whichever ID it prefers.
+INSTRUCTION_FILES_PLUGINS = ("agents-md@builtin", "cc-plugin-agents-md@builtin")
+INSTRUCTION_FILES = "claude-md-and-agents-md"
+INSTRUCTION_FILES_SHAPE = (
+    ("pluginConfigs", dict),
+    *(
+        (f"pluginConfigs/{plugin}{tail}", dict)
+        for plugin in INSTRUCTION_FILES_PLUGINS
+        for tail in ("", "/options")
+    ),
+)
 
 # Claude Code reads `autoMode` from user or managed settings alone, so a host-wide block nobody owns can carry one repository's rules.
 # The kit owns an entry by this leading tag rather than by its text, so a reworded rule still replaces the version before it.
@@ -1408,6 +1425,25 @@ def registration_problems(claude_home):
     for _, rule in MANAGED_PERMISSIONS:
         if not isinstance(allow, list) or rule not in allow:
             out.append(f"the permission rule {rule} is absent from settings.json")
+    misshapen = [
+        (path, held, want)
+        for path, want in INSTRUCTION_FILES_SHAPE
+        if (held := at(data, path)) is not MISSING and not isinstance(held, want)
+    ]
+    for path, held, want in misshapen[:1]:
+        out.append(
+            f"settings.json has `{path.replace('/', '.')}` as {type(held).__name__} where "
+            f"{want.__name__} is required, so the instructionFiles setting cannot be read and a "
+            "re-run refuses the file"
+        )
+    for plugin in INSTRUCTION_FILES_PLUGINS if not misshapen else ():
+        held = at(data, f"pluginConfigs/{plugin}/options/instructionFiles")
+        if held != INSTRUCTION_FILES:
+            why = "is absent" if held is MISSING else f"is {held!r}"
+            out.append(
+                f"pluginConfigs.{plugin}.options.instructionFiles {why} rather than "
+                f"{INSTRUCTION_FILES}, so a CLAUDE.local.md stops AGENTS.md loading"
+            )
     misshape = auto_mode_misshape(data)
     if misshape is not None:
         where, held, want = misshape
@@ -1868,6 +1904,7 @@ def main():
         ("permissions", dict),
         ("permissions/allow", list),
         ("env", dict),
+        *INSTRUCTION_FILES_SHAPE,
     ):
         held = at(data, path)
         # An explicit null is present rather than absent, and `setdefault` hands back the null it found.
@@ -1976,6 +2013,23 @@ def main():
         else:
             action = "already current"
         done.append(f"permission {rule}: {action}")
+
+    # Step 3b writes the instruction-files setting under each plugin ID, owned whole so a re-run restores it.
+    for plugin in INSTRUCTION_FILES_PLUGINS:
+        options = (
+            data.setdefault("pluginConfigs", {}).setdefault(plugin, {}).setdefault("options", {})
+        )
+        held = options.get("instructionFiles")
+        options["instructionFiles"] = INSTRUCTION_FILES
+        if held == INSTRUCTION_FILES:
+            action = "already current"
+        elif held is None:
+            action = "set"
+        else:
+            action = f"changed from {held!r}"
+        done.append(
+            f"pluginConfigs.{plugin}.options.instructionFiles {INSTRUCTION_FILES}: {action}"
+        )
 
     # 4. The autoMode rules, stripped by their tag and appended again.
     # A list the kit creates splices in the built-ins, and a list that exists is made to lead with the splice.
