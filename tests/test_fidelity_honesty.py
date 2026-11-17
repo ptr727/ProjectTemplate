@@ -111,6 +111,10 @@ class ManifestGapPassCase(unittest.TestCase):
         self.assertEqual(gaps, {"gone.md": ["Fixture"], "hosted.sh": ["Fixture"]})
         self.assertEqual(unreadable, [])
 
+    def test_the_spec_main_reads_carries_the_ledger_retired_paths(self) -> None:
+        """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
+        self.assertIn("CLAUDE.md", audit.retired_paths(fidelity_honesty.load_spec()))
+
 
 if __name__ == "__main__":
     unittest.main()

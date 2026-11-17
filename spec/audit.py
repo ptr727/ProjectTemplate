@@ -2521,13 +2521,15 @@ def check_hubonly_carried(run):
     disp = gap_dispositions(run.spec)
     hosted = hub_only_paths(run.spec)
     findings = []
-    for path in sorted(run.tree & (hosted | retired_paths(run.spec))):
+    for path in sorted(run.tree & deletion_candidates(run.spec)):
         kind = disp.get(path, ("", ""))[0]
         if kind == "accepted":
             continue
         if kind == "retire":
-            why = "the hub hosts it" if path in hosted else "the fleet retired it"
-            text = f"hub-only: delete this repo's {path} - {why} and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            if path in hosted:
+                text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            else:
+                text = f"hub-only: delete this repo's {path} - the fleet retired it, no repo carries it, and nothing replaces it (spec/divergences.json 'gaps' records why)"
         elif kind:
             text = f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging"
         else:

@@ -389,17 +389,22 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
     return "\n".join(out).rstrip() + "\n"
 
 
+def load_spec():
+    """The registry, the manifest, and the ledger the gap pass reads its retired paths from."""
+    return {
+        "registry": audit.load("registry/repos.json"),
+        "files": audit.load("spec/files.json"),
+        "divergences": load_ledger(),
+    }
+
+
 def main(argv=()):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
         "--report", action="store_true", help=f"write {REPORT_PATH} rather than print"
     )
     report_mode = parser.parse_args(list(argv)).report
-    spec = {
-        "registry": audit.load("registry/repos.json"),
-        "files": audit.load("spec/files.json"),
-        "divergences": load_ledger(),
-    }
+    spec = load_spec()
     spreads, promote, mislabel = fidelity_pass(spec)
     gaps, unreadable = manifest_gap_pass(spec)
 
