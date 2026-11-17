@@ -517,7 +517,7 @@ A repo whose legs are written by a tool keeps them in a tracked file. It names t
       test-matrix-file: .github/test-matrix.json
 ```
 
-The task installs the directory's base dependencies and calls the caller's `.github/actions/install-test-deps/action.yml`. Then it runs pytest without re-syncing, so the hook's overrides survive. The hook receives a `leg` input holding the whole matrix entry as a JSON string. It also receives a `directories` input holding the resolved Python projects, one `<kind><TAB><directory>` line each. It runs at the repository root, so a repo's hook enters each directory itself. A pip directory's environment is its `.venv`. A set `test-matrix` or `test-matrix-file` with no hook fails the leg with an error. With both empty, the `python-versions` legs run with no hook. The nested check then reads `Unit test job (<label>)`, which binds no ruleset.
+The task installs the directory's base dependencies and calls the caller's `.github/actions/install-test-deps/action.yml`. Then it runs pytest without re-syncing, so the hook's overrides survive. The hook receives a `leg` input holding the whole matrix entry as a JSON string. It also receives a `directories` input holding the resolved Python projects, one `<kind><TAB><directory>` line each. It runs at the repository root, so a repo's hook enters each directory itself. A pip directory's environment is its `.venv`. A set `test-matrix` or `test-matrix-file` with no hook fails the leg with an error. With either set, the nested check reads `Unit test job (<label>)`, which binds no ruleset. With both empty, the `python-versions` legs run with no hook.
 
 ## Adopting the Pure Functions
 

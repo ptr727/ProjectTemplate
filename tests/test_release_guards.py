@@ -1940,6 +1940,10 @@ gh() {
                 {"TEST_MATRIX": json.dumps(legs), "TEST_MATRIX_FILE": "ci/legs.json"},
                 "Set at most one of the test-matrix and test-matrix-file inputs",
             ),
+            "a refused inline value": (
+                {"TEST_MATRIX": json.dumps(dupes)},
+                "::error::The test-matrix input must be",
+            ),
             "a missing file": ({"TEST_MATRIX_FILE": "ci/absent.json"}, "ci/absent.json"),
             "a directory": ({"TEST_MATRIX_FILE": "ci"}, "The file ci that"),
             "a duplicate label": ({"TEST_MATRIX_FILE": "ci/dupes.json"}, "ci/dupes.json"),
