@@ -588,6 +588,7 @@ class TestScriptPresence(unittest.TestCase):
             "install-skills.sh",
             "install-safety-kit.sh",
             "install-global-rules.sh",
+            "restore-secrets.sh",
             "install-tools.sh",
             "upgrade-host.sh",
             "setup-github.sh",
@@ -617,6 +618,7 @@ class TestScriptPresence(unittest.TestCase):
             "install-skills.ps1",
             "install-safety-kit.ps1",
             "install-global-rules.ps1",
+            "restore-secrets.ps1",
             "install-tools.ps1",
             "upgrade-host.ps1",
             "setup-github.ps1",
@@ -988,7 +990,8 @@ $wanted = @(
     'Get-LockPath', 'Lock-Directory', 'Test-Ownership', 'Remove-Owned', 'Get-Tree', 'Remove-Tree', 'Move-Tree', 'Invoke-SwapIn', 'Invoke-Cleanup',
     'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
     'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall', 'Unlock-Directory', 'main',
-    'Invoke-AgentSetup', 'Invoke-AgentStatus', 'Resolve-Mode', 'Save-SourceCommitEnv', 'Restore-SourceCommitEnv'
+    'Invoke-AgentSetup', 'Invoke-AgentStatus', 'Resolve-Mode', 'Save-SourceCommitEnv', 'Restore-SourceCommitEnv',
+    'Invoke-RestoreSecrets', 'Invoke-StandUp', 'Invoke-Mode'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -999,6 +1002,8 @@ $script:DRY_RUN = $false
 $script:ASSUME_YES = $false
 $script:KEEP = $false
 $script:FROM_TREE = ''
+$script:SECRETS_GIVEN = $false
+$script:SECRET_NAMES = @()
 $script:PWSH_PATH = (Get-Process -Id $PID).Path
 $script:REPO = 'ptr727/ProjectTemplate'
 $script:REF = 'main'
@@ -1587,6 +1592,10 @@ def stand_up_steps() -> tuple[str, ...]:
 
 UPGRADE_STEPS = ("upgrade-host.sh --packages", "install-agents.sh --upgrade")
 
+# The restore the --secrets option adds, two tools whose full argument lists the secrets cases read.
+SECRETS_INSTALL_STEP = "install-tools.sh --install op python3"
+SECRETS_STEPS = (SECRETS_INSTALL_STEP, "restore-secrets.sh --bucket alpha --bucket beta")
+
 # The default report ends with the agent status, so it covers what a stand-up installs.
 REPORT_STEPS = (
     "upgrade-host.sh --status",
@@ -1628,6 +1637,10 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         mv.chmod(0o755)
         self.mv_log = self.root / "mv.log"
         self.tarball = self.root / "source.tar.gz"
+        self.build_tarball(("install-agents.sh", "install-global-rules.sh"))
+
+    def build_tarball(self, args_tools: tuple[str, ...]) -> None:
+        """Writes the source tarball, the tools in `args_tools` recording every argument and the rest only their first."""
         with tarfile.open(self.tarball, "w:gz") as archive:
             for tool in sorted(
                 {
@@ -1638,6 +1651,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                         *REPORT_STEPS,
                         *AGENT_SETUP_STEPS,
                         *AGENT_STATUS_STEPS,
+                        *SECRETS_STEPS,
                     )
                 }
             ):
@@ -1647,7 +1661,7 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
                     STUB_KIT_TOOL
                     if tool == "install-safety-kit.sh"
                     else STUB_ARGS_TOOL
-                    if tool in ("install-agents.sh", "install-global-rules.sh")
+                    if tool in args_tools
                     else STUB_TOOL,
                     0o755,
                 )
@@ -2157,6 +2171,149 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(self.steps(), [])
         self.assertEqual(list(self.data.iterdir()), [])
 
+    def secrets_run(
+        self,
+        *,
+        action: str = "--secrets",
+        args: tuple[str, ...] = ("alpha,beta",),
+        fail_step: str = "",
+        root: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs the loader with the tools that matter to a restore recording their whole argument list."""
+        self.build_tarball(
+            (
+                "install-agents.sh",
+                "install-global-rules.sh",
+                "install-tools.sh",
+                "restore-secrets.sh",
+            )
+        )
+        return self.run_main(fail_step, action=action, args=args, root=root)
+
+    def test_secrets_alone_installs_op_then_restores_exactly_the_named_buckets(self) -> None:
+        result = self.secrets_run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), list(SECRETS_STEPS), result.stderr)
+        self.assertFalse(self.kept.exists(), "a restore keeps no tree")
+
+    def test_secrets_alone_runs_from_the_fetched_tree_and_leaves_nothing_behind(self) -> None:
+        result = self.secrets_run()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual({tree for _, tree, _ in self.steps()}, {"tree"})
+        self.assertEqual(self.leftovers(), ["tree.lock"], result.stderr)
+
+    def test_secrets_takes_one_bucket_the_same_way(self) -> None:
+        result = self.secrets_run(args=("alpha",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.agents_steps(), [SECRETS_INSTALL_STEP, "restore-secrets.sh --bucket alpha"]
+        )
+
+    def test_secrets_drops_empty_names_from_the_list(self) -> None:
+        result = self.secrets_run(args=("alpha,,beta,",))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps(), list(SECRETS_STEPS))
+
+    def test_secrets_passes_dry_run_to_both_tools(self) -> None:
+        result = self.secrets_run(args=("alpha", "--dry-run"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.agents_steps(),
+            [f"{SECRETS_INSTALL_STEP} --dry-run", "restore-secrets.sh --bucket alpha --dry-run"],
+        )
+
+    def test_a_failing_op_install_stops_before_the_restore(self) -> None:
+        result = self.secrets_run(fail_step=SECRETS_INSTALL_STEP)
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.agents_steps(), [SECRETS_INSTALL_STEP])
+
+    def test_a_failing_restore_fails_the_run(self) -> None:
+        result = self.secrets_run(fail_step=SECRETS_STEPS[1])
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.agents_steps()[-1], SECRETS_STEPS[1])
+
+    def test_a_host_stand_up_restores_after_the_tools_step_and_before_the_github_step(
+        self,
+    ) -> None:
+        result = self.secrets_run(action="--host", args=("--secrets", "alpha"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        expected = list(stand_up_steps())
+        at = expected.index("setup-github.sh --configure")
+        expected[at:at] = [SECRETS_INSTALL_STEP, "restore-secrets.sh --bucket alpha"]
+        self.assertEqual(self.agents_steps(), expected, result.stderr)
+
+    def test_a_dev_stand_up_restores_after_the_optional_tools_and_before_github(self) -> None:
+        result = self.secrets_run(action="--dev", args=("--secrets", "alpha"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = self.agents_steps()
+        self.assertEqual(
+            steps[steps.index("install-tools.sh --install --optional") + 1 :][:3],
+            [
+                SECRETS_INSTALL_STEP,
+                "restore-secrets.sh --bucket alpha",
+                "setup-github.sh --configure",
+            ],
+        )
+
+    def test_a_stand_up_without_secrets_runs_no_restore(self) -> None:
+        result = self.secrets_run(action="--host", args=())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("restore-secrets.sh", " ".join(self.agents_steps()))
+
+    def test_a_stand_up_failing_at_the_restore_never_reaches_github_and_keeps_the_old_tree(
+        self,
+    ) -> None:
+        self.previous_tree()
+        result = self.secrets_run(
+            action="--host",
+            args=("--secrets", "alpha"),
+            fail_step="restore-secrets.sh --bucket alpha",
+        )
+        self.assertEqual(result.returncode, 7, result.stderr)
+        self.assertEqual(self.agents_steps()[-1], "restore-secrets.sh --bucket alpha")
+        self.assertNotIn("setup-github.sh --configure", self.agents_steps())
+        self.assertEqual(self.version(), "old", result.stderr)
+
+    def test_secrets_beside_any_other_action_is_refused_before_anything_runs(self) -> None:
+        for action in ("--report", "--upgrade", "--tools", "--github", "--skills", "--sudo"):
+            with self.subTest(action=action):
+                result = self.secrets_run(action=action, args=("--secrets", "alpha"))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("--secrets runs alone or with --host or --dev", result.stderr)
+                self.assertEqual(self.steps(), [])
+                self.assertEqual(list(self.data.iterdir()), [])
+
+    def test_secrets_with_a_bad_bucket_name_is_refused_before_anything_runs(self) -> None:
+        for given in ("Alpha", "a_b", "-x", "alpha,-x", "a b", "alpha/beta", "al.pha"):
+            with self.subTest(given=given):
+                result = self.secrets_run(args=(given,))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("lowercase letters, digits, and hyphens", result.stderr)
+                self.assertEqual(self.steps(), [])
+                self.assertEqual(list(self.data.iterdir()), [])
+
+    def test_secrets_with_no_buckets_is_refused_before_anything_runs(self) -> None:
+        for given in ("", ",", ",,"):
+            with self.subTest(given=given):
+                result = self.secrets_run(args=(given,))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("--secrets takes the buckets to restore", result.stderr)
+                self.assertEqual(self.steps(), [])
+        result = self.secrets_run(args=())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--secrets takes the buckets to restore", result.stderr)
+        self.assertEqual(self.steps(), [])
+
+    @requires_unprivileged_root
+    def test_secrets_as_root_is_refused_before_anything_is_fetched(self) -> None:
+        for action, args in (("--secrets", ("alpha",)), ("--host", ("--secrets", "alpha"))):
+            with self.subTest(action=action):
+                result = self.secrets_run(action=action, args=args, root=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("the sync refuses root", result.stderr)
+                self.assertEqual(self.steps(), [])
+                self.assertEqual(list(self.data.iterdir()), [])
+
 
 STUB_POWERSHELL_TOOL = """\
 $shown = $args | ForEach-Object { if ($_ -match '\\s') { "<$_>" } else { $_ } }
@@ -2181,6 +2338,14 @@ POWERSHELL_AGENT_STATUS_STEPS = (
     "install-safety-kit.ps1 -Report",
     "install-global-rules.ps1 -Report",
 )
+
+POWERSHELL_SECRETS_INSTALL_STEP = "install-tools.ps1 -Install op python"
+POWERSHELL_SECRETS_STEPS = (
+    POWERSHELL_SECRETS_INSTALL_STEP,
+    "restore-secrets.ps1 -Bucket alpha,beta",
+)
+
+POWERSHELL_STAND_UP_PREFIX = ("upgrade-host.ps1 -Packages", "install-tools.ps1 -Install")
 
 POWERSHELL_REPORT_STEPS = (
     "upgrade-host.ps1 -Status",
@@ -2224,6 +2389,9 @@ class TestPowerShellToolHandoff(unittest.TestCase):
             *POWERSHELL_UPGRADE_STEPS,
             *POWERSHELL_AGENT_SETUP_STEPS,
             *POWERSHELL_AGENT_STATUS_STEPS,
+            *POWERSHELL_SECRETS_STEPS,
+            *POWERSHELL_STAND_UP_PREFIX,
+            "setup-github.ps1 -Configure",
         ):
             (tools / step.split()[0]).write_text(STUB_POWERSHELL_TOOL, encoding="utf-8")
         self.log = self.work / "steps.log"
@@ -2508,6 +2676,128 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("-Agents takes the tools to install", result.stderr)
         self.assertEqual(self.steps(), [])
+
+    def run_restore(
+        self, call: str, names: list[str], elevated: bool = False, fail_step: str = ""
+    ) -> subprocess.CompletedProcess[str]:
+        """Sets what `-Secrets` binds as the loader's own lines read it, then runs `call`."""
+        quoted = ", ".join("'" + name + "'" for name in names)
+        text = BOOTSTRAP_PS.read_text(encoding="utf-8")
+        lines = re.findall(r"^\$SECRET_NAMES = .*$", text, re.MULTILINE)
+        self.assertEqual(len(lines), 1)
+        return self.run_handoff(
+            f"$Secrets = @({quoted})\n$script:SECRETS_GIVEN = $true\n{lines[0]}\n"
+            f"$script:SECRET_NAMES = $SECRET_NAMES\n$script:FROM_TREE = $env:FIXTURE_TREE\n{call}",
+            elevated=elevated,
+            fail_step=fail_step,
+        )
+
+    def test_a_restore_installs_op_then_restores_exactly_the_named_buckets(self) -> None:
+        result = self.run_restore("Invoke-RestoreSecrets", ["alpha,beta"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_SECRETS_STEPS), result.stdout)
+
+    def test_separate_words_restore_the_same_buckets(self) -> None:
+        result = self.run_restore("Invoke-RestoreSecrets", ["alpha", "beta"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_SECRETS_STEPS), result.stdout)
+
+    def test_a_failing_op_install_stops_before_the_restore(self) -> None:
+        result = self.run_restore(
+            "Invoke-RestoreSecrets", ["alpha"], fail_step=POWERSHELL_SECRETS_INSTALL_STEP
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.steps(), [POWERSHELL_SECRETS_INSTALL_STEP])
+
+    def test_a_stand_up_restores_after_the_tools_step_and_before_the_github_step(self) -> None:
+        result = self.run_restore("Invoke-StandUp -Kind 'host'", ["alpha"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.steps(),
+            [
+                *POWERSHELL_STAND_UP_PREFIX,
+                POWERSHELL_SECRETS_INSTALL_STEP,
+                "restore-secrets.ps1 -Bucket alpha",
+                "setup-github.ps1 -Configure",
+                *POWERSHELL_AGENT_SETUP_STEPS,
+            ],
+            result.stdout,
+        )
+
+    def test_a_stand_up_failing_at_the_restore_never_reaches_github(self) -> None:
+        result = self.run_restore(
+            "Invoke-StandUp -Kind 'dev'", ["alpha"], fail_step="restore-secrets.ps1 -Bucket alpha"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.steps()[-1], "restore-secrets.ps1 -Bucket alpha")
+        self.assertNotIn("setup-github.ps1 -Configure", self.steps())
+
+    def test_a_stand_up_without_secrets_runs_no_restore(self) -> None:
+        result = self.run_handoff(
+            "$script:FROM_TREE = $env:FIXTURE_TREE\nInvoke-StandUp -Kind 'host'"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("restore-secrets.ps1", " ".join(self.steps()))
+
+    def resolve_secrets_mode(
+        self, given: str, names: list[str], elevated: bool = False
+    ) -> subprocess.CompletedProcess[str]:
+        """Runs the loader's own Resolve-Mode with `-Secrets names` and `given` the other action set."""
+        mark = f"$script:ACTIONS['{given}'] = $true\n" if given else ""
+        quoted = ", ".join("'" + name + "'" for name in names)
+        text = BOOTSTRAP_PS.read_text(encoding="utf-8")
+        split = re.findall(r"^\$SECRET_NAMES = .*$", text, re.MULTILINE)[0]
+        return self.run_handoff(
+            "$script:ACTIONS = [ordered]@{ report = $false; tools = $false; host = $false; dev = $false }\n"
+            f"{mark}$Secrets = @({quoted})\n{split}\n$script:SECRET_NAMES = $SECRET_NAMES\n"
+            "$script:SECRETS_GIVEN = $true\nlog (Resolve-Mode)",
+            elevated=elevated,
+        )
+
+    def test_secrets_alone_is_the_secrets_action(self) -> None:
+        result = self.resolve_secrets_mode("", ["alpha"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1:], ["secrets"])
+
+    def test_secrets_beside_host_or_dev_is_no_second_action(self) -> None:
+        for given in ("host", "dev"):
+            with self.subTest(given=given):
+                result = self.resolve_secrets_mode(given, ["alpha"])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines()[-1:], [given])
+
+    def test_secrets_beside_any_other_action_is_refused(self) -> None:
+        for given in ("report", "tools"):
+            with self.subTest(given=given):
+                result = self.resolve_secrets_mode(given, ["alpha"])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("-Secrets runs alone or with -Host or -Dev", result.stderr)
+
+    def test_secrets_with_a_bad_bucket_name_is_refused(self) -> None:
+        for given in ("Alpha", "a_b", "-x", "alpha,-x", "a b", "alpha/beta", "al.pha"):
+            with self.subTest(given=given):
+                result = self.resolve_secrets_mode("", [given])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("lowercase letters, digits, and hyphens", result.stderr)
+
+    def test_secrets_with_no_buckets_is_refused(self) -> None:
+        for given in ("", ",", ",,"):
+            with self.subTest(given=given):
+                result = self.resolve_secrets_mode("", [given])
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("-Secrets takes the buckets to restore", result.stderr)
+
+    def test_an_elevated_secrets_run_is_refused(self) -> None:
+        for given in ("", "host"):
+            with self.subTest(given=given):
+                result = self.resolve_secrets_mode(given, ["alpha"], elevated=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("not elevated", result.stderr)
+
+    def test_the_loader_dispatches_the_secrets_action_to_the_restore(self) -> None:
+        result = self.run_restore("$script:MODE = 'secrets'\nInvoke-Mode", ["alpha,beta"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.steps(), list(POWERSHELL_SECRETS_STEPS), result.stdout)
 
 
 def menu_functions() -> str:

@@ -46,6 +46,7 @@ param(
     [string]$Dir,
     # Declared after -Ref and -Dir, so the positions those two had before it existed stay theirs.
     [string[]]$Agents,
+    [string[]]$Secrets,
     [switch]$Keep,
     # Named FromTree rather than Tree, since PowerShell variable names are case-insensitive and $TREE is the fetched tree below.
     [string]$FromTree,
@@ -96,6 +97,9 @@ $ACTIONS = [ordered]@{
 }
 # Names arrive as separate words or as one comma separated word, since -File hands a comma list over as a single string.
 $AGENT_NAMES = @($Agents | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+# Whether -Secrets was given at all, so an empty list is refused rather than read as no action.
+$SECRETS_GIVEN = $PSBoundParameters.ContainsKey('Secrets')
+$SECRET_NAMES = @($Secrets | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
 $WANT_HELP = [bool]$Help
 $DRY_RUN = [bool]$DryRun
 $ASSUME_YES = [bool]$Yes
@@ -130,6 +134,10 @@ Actions, name one, default -Report:
                     that are already installed
       -Agents LIST  Install the named coding-agent tools for this user only, LIST being names
                     separated by commas (claude, codex, opencode, herdr, cswap) or 'all'
+      -Secrets LIST Install op, then restore the named secret buckets into this user's profile,
+                    LIST being bucket names separated by commas. With -Host or -Dev it is not an
+                    action of its own: it runs after the tools step and before the GitHub step,
+                    so a restored SSH key is the one that step keeps. Refused with any other action.
       -Tools        Install the host tools, only
       -Github       Configure git, the SSH key, and commit signing, only
       -Skills       Install the fleet skills for the current user, only
@@ -169,6 +177,8 @@ Examples:
   bootstrap.ps1 -Ref develop -Report   Report using the tooling on develop
   bootstrap.ps1 -Tools -DryRun         Show what installing the tools would run
   bootstrap.ps1 -Agents herdr,cswap    Install two coding-agent tools
+  bootstrap.ps1 -Secrets alpha,beta    Restore two secret buckets into this profile
+  bootstrap.ps1 -Host -Secrets alpha   Stand a host up, restoring a bucket before the GitHub step
   bootstrap.ps1 -AgentSetup            Bring this user's coding agents fully current
   bootstrap.ps1 -AgentStatus           Report whether they are
 '@
@@ -583,6 +593,13 @@ function Invoke-AgentsInstall {
     Invoke-Tool -Tool 'install-agents.ps1' -Arguments (@('-Install') + $script:AGENT_NAMES)
 }
 
+# Only the buckets named are pulled.
+# Neither op nor the interpreter the sync needs is in the default tool set, so both are installed first.
+function Invoke-RestoreSecrets {
+    Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install', 'op', 'python'
+    Invoke-Tool -Tool 'restore-secrets.ps1' -Arguments '-Bucket', ($script:SECRET_NAMES -join ',')
+}
+
 # The order is fixed rather than chosen.
 # Packages come first so install-tools.ps1 and setup-github.ps1 act on a host winget has just brought current.
 # GitHub comes last because it is the only step that waits on a person in a browser.
@@ -597,6 +614,8 @@ function Invoke-StandUp {
     } else {
         Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install'
     }
+    # Before the GitHub step, so a restored SSH key is the one setup-github.ps1 keeps rather than a new one.
+    if ($script:SECRETS_GIVEN) { Invoke-RestoreSecrets }
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure'
     Invoke-AgentSetup
 }
@@ -762,6 +781,18 @@ function Resolve-Directory {
 # The main function tells the menu and the piped-in report apart, the way bootstrap.sh's own entry point does.
 function Resolve-Mode {
     $given = @($script:ACTIONS.Keys | Where-Object { $script:ACTIONS[$_] })
+    if ($script:SECRETS_GIVEN) {
+        if ($script:SECRET_NAMES.Count -eq 0) { die '-Secrets takes the buckets to restore, separated by commas' }
+        foreach ($name in $script:SECRET_NAMES) {
+            if ($name -cnotmatch '^[a-z0-9][a-z0-9-]*$') { die "-Secrets takes bucket names of lowercase letters, digits, and hyphens that start with a letter or digit, and '$name' is not one" }
+        }
+        # The restore sets up the stand-up's own key, so it elevated would restore into the wrong profile.
+        if (Test-Elevated) { die '-Secrets restores into the running user''s profile, so run this as that user and not elevated' }
+        # Beside -Host or -Dev the restore is a step of that stand-up, and alone it is the action.
+        $others = @($given | Where-Object { $_ -notin @('host', 'dev') })
+        if ($others.Count -gt 0) { die "-Secrets runs alone or with -Host or -Dev, and was given with -$($others[0])" }
+        if ($given.Count -eq 0) { $given = @('secrets') }
+    }
     if ($given.Count -gt 1) { die "More than one action given ($($given -join ', ')), name one" }
     # A given tree is never fetched, swapped, or removed, so only the actions that read or install from a tree in place accept one.
     # No action given is refused too, since the menu or the report it falls back to would then run from that tree.
@@ -791,6 +822,7 @@ function Invoke-Mode {
         'upgrade' { Invoke-Upgrade }
         'agents' { Invoke-AgentsInstall }
         'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
+        'secrets' { Invoke-RestoreSecrets }
         'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
         'skills' { Invoke-SkillsInstall }
         'agent-setup' { Invoke-AgentSetup }

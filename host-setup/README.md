@@ -8,8 +8,8 @@ What a machine needs before it can be worked in, and the tooling that puts it th
 - [`bootstrap.ps1`][bootstrap-ps1] does the same for native Windows. It runs under Windows PowerShell 5.1, the version every fresh Windows host guarantees. It hands off to PowerShell 7 once it has found or installed it, since every script it drives requires that version.
 - [`menu.sh`][menu] is a human-facing front end over this repository's tooling: the host actions above, plus the repo-level tools ([`spec/audit.py`][audit-runner], [`scripts/carry.py`][carry], [`scripts/build_dist.py`][build-dist]). Those tools are of the kind most of this repository authors for an agent following instructions rather than for a person choosing from a menu.
 - [`menu.ps1`][menu-ps1] is the same front end for native Windows, over `host-setup\windows\` instead. It runs under Windows PowerShell 5.1 and hands off to PowerShell 7 the same way `bootstrap.ps1` does. It adds menu entries with no Linux peer, such as reporting the WSL platform through `setup-wsl.ps1` and cleaning `Path` through `upgrade-host.ps1 -CleanPath`.
-- [`linux/`][linux] holds the tooling itself, for Debian and Ubuntu based hosts, Proxmox and WSL included. `install-tools.sh` installs and upgrades the host tools, and `upgrade-host.sh` upgrades the packages of the current release or moves to the next one. `setup-github.sh` configures the SSH key, git, and commit signing. `install-agents.sh` keeps the user's installed coding-agent tools current, and `install-skills.sh` drives the hub's skills installer from the same tree. `install-safety-kit.sh` drives the Claude Code safety kit installer from that tree, and `install-global-rules.sh` writes the host-wide rules for Codex and opencode.
-- [`windows/`][windows] holds the tooling for native Windows, through `winget` and PowerShell 7. `install-tools.ps1` installs and upgrades the host tools, and `upgrade-host.ps1` upgrades the winget packages, updates the WSL platform, and removes dead and duplicate `Path` entries. `setup-github.ps1` configures the SSH key, git, and commit signing. `setup-wsl.ps1` installs a WSL distribution and reports the Docker Desktop integration. `install-agents.ps1` keeps the user's installed coding-agent tools current, and `install-skills.ps1` drives the hub's skills installer from the same tree. `install-safety-kit.ps1` drives the Claude Code safety kit installer from that tree, and `install-global-rules.ps1` writes the host-wide rules for Codex and opencode.
+- [`linux/`][linux] holds the tooling itself, for Debian and Ubuntu based hosts, Proxmox and WSL included. `install-tools.sh` installs and upgrades the host tools, and `upgrade-host.sh` upgrades the packages of the current release or moves to the next one. `setup-github.sh` configures the SSH key, git, and commit signing. `install-agents.sh` keeps the user's installed coding-agent tools current, and `install-skills.sh` drives the hub's skills installer from the same tree. `install-safety-kit.sh` drives the Claude Code safety kit installer from that tree, and `install-global-rules.sh` writes the host-wide rules for Codex and opencode. `restore-secrets.sh` pulls named secret buckets into the user's home.
+- [`windows/`][windows] holds the tooling for native Windows, through `winget` and PowerShell 7. `install-tools.ps1` installs and upgrades the host tools, and `upgrade-host.ps1` upgrades the winget packages, updates the WSL platform, and removes dead and duplicate `Path` entries. `setup-github.ps1` configures the SSH key, git, and commit signing. `setup-wsl.ps1` installs a WSL distribution and reports the Docker Desktop integration. `install-agents.ps1` keeps the user's installed coding-agent tools current, and `install-skills.ps1` drives the hub's skills installer from the same tree. `install-safety-kit.ps1` drives the Claude Code safety kit installer from that tree, and `install-global-rules.ps1` writes the host-wide rules for Codex and opencode. `restore-secrets.ps1` pulls named secret buckets into the user's profile.
 - [`agent-safety/`][agent-safety] holds the host-safety guards, deployed per machine and per account.
 
 ## Standing a Host Up
@@ -72,6 +72,18 @@ One action brings a host's coding agents fully current, and one reports whether 
 ```
 
 A running agent session keeps the rules it started with. Restart agent sessions after a setup to load the new hooks and rules. The menu offers the same two actions as "Report agent setup" and "Update agent setup". Either action also takes `--from-tree PATH` (`-FromTree` on Windows) from a hub checkout. That runs from the tree in place instead of fetching one. `--agent-setup` then registers the checkout rather than the kept tree, and `--agent-status` only reports and registers nothing. Where Claude Code already holds a registration for another existing directory, the skills installer leaves it. It prints the command that moves it, so run that to point the plugin at the checkout.
+
+A rebuilt host can restore its secret files before it is stood up. `--secrets LIST` (`-Secrets` on Windows) takes bucket names separated by commas, each of lowercase letters, digits, and hyphens that start with a letter or digit. On its own it installs `op` and pulls exactly the named buckets into the home directory, through [`scripts/secrets_sync.py`][secrets-sync] from the fetched tree. Nothing is derived from the host name or a file prefix. Given with `--host` or `--dev`, it is a step of that stand-up rather than a second action. It runs after the tools step and before the GitHub step. A restored `~/.ssh/id_ed25519` is then the key `setup-github.sh` keeps, so a key already registered with GitHub needs no paste. With any other action it is refused, and so it is as root, since the sync refuses root. The sync prompts and needs a terminal on stdin to write, so `--yes` answers its confirmation and does not replace the terminal. `--dry-run` prints what each step would run. The sync's own `status` shows what a bucket holds before a restore.
+
+```shell
+./bootstrap.sh --secrets alpha,beta           # install op, pull two buckets into this home
+./bootstrap.sh --host --secrets alpha         # restore a bucket before the GitHub step of a stand-up
+```
+
+```powershell
+.\bootstrap.ps1 -Secrets alpha,beta
+.\bootstrap.ps1 -Host -Secrets alpha
+```
 
 Each tool also runs on its own, on a host that already has a checkout:
 
@@ -150,5 +162,6 @@ The kept tree is never a git checkout, which is what keeps the loader's two prop
 [menu]: ./menu.sh
 [menu-ps1]: ./menu.ps1
 [scripts-readme]: ../scripts/README.md
+[secrets-sync]: ../scripts/secrets_sync.py
 [test-bootstrap]: ../tests/test_bootstrap.py
 [windows]: ./windows/
