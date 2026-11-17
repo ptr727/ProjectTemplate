@@ -24,6 +24,7 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
 import audit
 import audit_markdown
+import workflow_reuse
 from git_env import git_location_cleared
 
 _LOCATION = contextlib.ExitStack()
@@ -1863,6 +1864,17 @@ class HubStampCase(GitRepoCase):
         (checkout / "spec" / "extra.json").write_text("{}\n", encoding="utf-8")
         sweep, _ = self.stamps(checkout)
         self.assertIn(f"| hub {head}-dirty | main {head}\n", sweep, "hub stamp: untracked read")
+
+    def test_workflow_reuse_stamp_reads_its_own_paths(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        with mock.patch.object(audit, "ROOT", checkout):
+            (checkout / "repo-config" / "extra.json").write_text("{}\n", encoding="utf-8")
+            self.assertEqual(head, workflow_reuse.hub_sha(), "workflow_reuse stamp: unread path")
+            (checkout / "spec" / "extra.py").write_text("\n", encoding="utf-8")
+            self.assertEqual(
+                f"{head}-dirty", workflow_reuse.hub_sha(), "workflow_reuse stamp: code"
+            )
 
     def test_issue_usage_error_fetches_nothing(self) -> None:
         names = [
