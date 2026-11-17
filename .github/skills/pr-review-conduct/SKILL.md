@@ -328,9 +328,9 @@ under `GOVERNANCE.md` "Repository Boundaries and Write Safety", reported rather 
 On Claude Code, where the executor restricts uv's cache writes, the cache variable that restriction
 needs is such an assignment. So every call there reaches the classifier. A call that merges or
 deletes is then reported to the maintainer as a blocked write rather than run. Those calls are
-`merge`, `cleanup <number>`, and `cleanup --sweep --apply`. The classifier refuses a merge no human
-has approved and can refuse the delete too. So running one there is a write fired to see whether it
-passes, which `GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids. Any other call there runs, and one the classifier refuses is the refused
+`merge`, `cleanup <number>`, and `cleanup --sweep --apply`. They are the writes the classifier is
+known to refuse, a merge as stated above and a branch delete on some days. So running one there is a
+write fired to see whether it passes, which `GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids. Any other call there runs, and one the classifier refuses is the refused
 write above.
 
 Run `local-strict-review` against the branch's current diff before every push this loop makes. The pass is owed before the push that opens the pull request in step 1 and each one after it. It is owed whatever finding a push answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about. So a re-push of a tree a recorded pass already covers needs no second pass. That is because the receipt is keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps the receipt only while the merge base holds. Rebasing onto a target that has moved retires the receipt although no file changed. That push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads. The hub's own `pre-push` hook is one, and a repository has none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around. That skill's refusal table says what each refusal means and what clears it.
