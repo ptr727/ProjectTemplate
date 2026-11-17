@@ -103,7 +103,7 @@ main() {
 
     command -v op >/dev/null || die "op is not installed. install-tools.sh --install op provides it, so run that first."
     local py
-    py=$(find_python) || die "Python 3.11 or newer not found. install-tools.sh provides it, so run the tools step first and this one after."
+    py=$(find_python) || die "Python 3.11 or newer not found, and the sync needs one."
 
     exec "$py" "$sync" "${args[@]}"
 }

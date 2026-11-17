@@ -97,7 +97,7 @@ function main {
 
     $python = Find-Python
     if (-not $python) {
-        die 'Python 3.11 or newer not found. install-tools.ps1 provides it, so run the tools step first and this one after.'
+        die 'Python 3.11 or newer not found, and the sync needs one.'
     }
 
     & $python.Exe @($python.Arguments) $sync @arguments

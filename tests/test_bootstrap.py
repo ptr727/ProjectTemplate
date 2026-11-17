@@ -2758,8 +2758,15 @@ class TestPowerShellToolHandoff(unittest.TestCase):
     def test_a_dev_stand_up_installs_no_tool_for_the_restore(self) -> None:
         result = self.run_restore("Invoke-StandUp -Kind 'dev'", ["alpha"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn(POWERSHELL_SECRETS_OP_STEP, self.steps())
-        self.assertIn("restore-secrets.ps1 -Bucket alpha", self.steps())
+        steps = self.steps()
+        self.assertEqual(
+            [step for step in steps if step.startswith("install-tools.ps1")],
+            ["install-tools.ps1 -Install -Optional"],
+        )
+        self.assertLess(
+            steps.index("install-tools.ps1 -Install -Optional"),
+            steps.index("restore-secrets.ps1 -Bucket alpha"),
+        )
 
     def test_a_stand_up_failing_at_the_restore_never_reaches_github(self) -> None:
         result = self.run_restore(

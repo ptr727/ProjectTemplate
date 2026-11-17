@@ -65,7 +65,7 @@ Actions, name one, default --report on a terminal is the menu:
       --agents LIST Install the named coding-agent tools for this user only, LIST being names
                     separated by commas (claude, codex, opencode, herdr, cswap) or "all"
       --secrets LIST
-                    Install op, then restore the named secret buckets into this user's home, LIST
+                    Install op and the interpreter, then restore the named secret buckets into this user's home, LIST
                     being bucket names separated by commas. With --host or --dev it is not an
                     action of its own: it runs after the tools step and before the GitHub step,
                     so a restored SSH key is the one that step keeps. Refused with any other action.

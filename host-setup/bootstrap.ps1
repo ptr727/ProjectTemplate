@@ -134,7 +134,7 @@ Actions, name one, default -Report:
                     that are already installed
       -Agents LIST  Install the named coding-agent tools for this user only, LIST being names
                     separated by commas (claude, codex, opencode, herdr, cswap) or 'all'
-      -Secrets LIST Install op, then restore the named secret buckets into this user's profile,
+      -Secrets LIST Install op and the interpreter, then restore the named secret buckets into this user's profile,
                     LIST being bucket names separated by commas. With -Host or -Dev it is not an
                     action of its own: it runs after the tools step and before the GitHub step,
                     so a restored SSH key is the one that step keeps. Refused with any other action.
