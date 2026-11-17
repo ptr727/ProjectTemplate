@@ -70,6 +70,7 @@ class Case(unittest.TestCase):
         return self.log.read_text(encoding="utf-8").splitlines() if self.log.exists() else []
 
 
+@unittest.skipUnless(os.name == "posix", "runs the Linux script under a PATH of symlinked stubs")
 class TestLinuxScript(Case):
     script = SH
     relative = "host-setup/linux/restore-secrets.sh"
