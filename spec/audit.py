@@ -1637,6 +1637,31 @@ def _hub_main_rev():
     return resolved.stdout.strip()
 
 
+def hub_stamp():
+    """The run stamp's hub field, the checkout's HEAD, then `| main <sha>` where `_hub_main_rev()` differs from it.
+
+    The spec and the registry come from the checkout, while the canonicals, their history, and the tracked paths come from `main`.
+    """
+
+    def short(rev):
+        r = subprocess.run(
+            ["git", "rev-parse", "--short", rev],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+        )
+        return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
+
+    head = short("HEAD")
+    try:
+        main = short(_hub_main_rev())
+    except RuntimeError:
+        main = "unknown"
+    return head if main == head else f"{head} | main {main}"
+
+
 @functools.cache
 def _git_revisions(rel_path, rev=None):
     """Every commit that touched rel_path in the hub's history, newest first, as (date, sha, text).
@@ -2815,15 +2840,7 @@ def main(argv=None):
             return 2
 
     run_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hub = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=ROOT,
-        check=False,
-    )
-    hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
+    hub_sha = hub_stamp()
 
     if issue_mode:
         if len(repos) != 1:

@@ -1762,6 +1762,8 @@ class ShallowCloneCase(GitRepoCase):
                 with self.subTest(label):
                     audit._require_full_history.cache_clear()
                     audit._git_revisions.cache_clear()
+                    audit._hub_main_rev.cache_clear()
+                    self.addCleanup(audit._hub_main_rev.cache_clear)
                     out, err = io.StringIO(), io.StringIO()
                     try:
                         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -1779,6 +1781,88 @@ class ShallowCloneCase(GitRepoCase):
                     self.assertTrue(
                         good, f"shallow-clone refusal, public {label} path (code {code})"
                     )
+
+
+class HubStampCase(GitRepoCase):
+    """Holds the run stamp to the commits the run read, the checkout's HEAD and the fetched main."""
+
+    def make_hub(self) -> tuple[pathlib.Path, pathlib.Path]:
+        upstream = self.make_repo("-b", "main")
+        for rel in (
+            "registry/repos.json",
+            "repo-config/settings.json",
+            "spec/secrets.json",
+            "spec/files.json",
+            "spec/project-types.json",
+            "spec/readme-sections.json",
+            "spec/third-party-tools.json",
+            "spec/divergences.json",
+        ):
+            (upstream / rel).parent.mkdir(parents=True, exist_ok=True)
+            (upstream / rel).write_bytes((audit.ROOT / rel).read_bytes())
+        self.run_git(upstream, "add", ".")
+        self.run_git(upstream, "commit", "-q", "-m", "one")
+        checkout = self.make_dir() / "hub"
+        subprocess.run(
+            ["git", "clone", "-q", str(upstream), str(checkout)], check=True, capture_output=True
+        )
+        return upstream, checkout
+
+    def short(self, root: pathlib.Path, rev: str) -> str:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", rev],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
+    def stamps(self, checkout: pathlib.Path) -> tuple[str, str]:
+        name = next(
+            r["name"]
+            for r in audit.load("registry/repos.json")["repos"]
+            if r.get("status") == "cataloged"
+        )
+        outputs = []
+        with (
+            mock.patch.object(audit, "ROOT", checkout),
+            mock.patch.object(audit, "audit_repo", lambda entry, spec, branch=None: ([], "")),
+        ):
+            for argv in ([name], ["--issue", name]):
+                audit._hub_main_rev.cache_clear()
+                self.addCleanup(audit._hub_main_rev.cache_clear)
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                    audit.main(argv)
+                outputs.append(out.getvalue())
+        return outputs[0], outputs[1]
+
+    def test_stamp_names_fetched_main_where_head_trails_it(self) -> None:
+        upstream, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        self.run_git(upstream, "commit", "-q", "--allow-empty", "-m", "two")
+        main = self.short(upstream, "HEAD")
+        sweep, issue = self.stamps(checkout)
+        want = f"| hub {head} | main {main}"
+        self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp names the fetched main")
+        self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp names the fetched main")
+
+    def test_stamp_names_head_alone_at_fetched_main(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        sweep, issue = self.stamps(checkout)
+        self.assertIn(f"| hub {head}\n", sweep, "hub stamp: sweep run stamp at main")
+        self.assertIn(f"| hub {head}`", issue, "hub stamp: issue body run stamp at main")
+        self.assertNotIn("| main ", sweep + issue, "hub stamp: no main field at main")
+
+    def test_stamp_says_main_unknown_where_the_fetch_fails(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        self.run_git(checkout, "remote", "remove", "origin")
+        sweep, issue = self.stamps(checkout)
+        want = f"| hub {head} | main unknown"
+        self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp with no fetch")
+        self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp with no fetch")
 
 
 class ParseArgsCase(unittest.TestCase):
