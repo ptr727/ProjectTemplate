@@ -28,6 +28,7 @@ KEEP=false
 DRY_RUN=false
 ASSUME_YES=false
 AGENTS=()
+SECRETS=()
 # A tree already on this host, given with --from-tree, which is run from in place rather than fetched.
 FROM_TREE=""
 RESOLVED=""
@@ -63,6 +64,11 @@ Actions, name one, default --report on a terminal is the menu:
                     tools that are already installed
       --agents LIST Install the named coding-agent tools for this user only, LIST being names
                     separated by commas (claude, codex, opencode, herdr, cswap) or "all"
+      --secrets LIST
+                    Install op and the interpreter, then restore the named secret buckets into this user's home, LIST
+                    being bucket names separated by commas. With --host or --dev it is not an
+                    action of its own: it runs after the tools step and before the GitHub step,
+                    so a restored SSH key is the one that step keeps. Refused with any other action.
       --tools       Install the host tools only
       --github      Configure git, the SSH key, and commit signing only
       --skills      Install the fleet skills for the current user only
@@ -101,6 +107,8 @@ Examples:
   bootstrap.sh --ref develop --report   Report using the tooling on develop
   bootstrap.sh --tools --dry-run        Show what installing the tools would run
   bootstrap.sh --agents herdr,cswap     Install two coding-agent tools
+  bootstrap.sh --secrets alpha,beta     Restore two secret buckets into this home
+  bootstrap.sh --host --secrets alpha   Stand a host up, restoring a bucket before the GitHub step
   bootstrap.sh --agent-setup            Bring this user's coding agents fully current
   bootstrap.sh --agent-status           Report whether they are
 EOF
@@ -351,6 +359,16 @@ upgrade() {
     fi
 }
 
+# Only the buckets named are pulled.
+restore_secrets() {
+    local bucket
+    local -a buckets=()
+    for bucket in "${SECRETS[@]}"; do
+        buckets+=(--bucket "$bucket")
+    done
+    run_tool restore-secrets.sh "${buckets[@]}"
+}
+
 # The order is fixed rather than chosen.
 # The sudo step comes first, so the one credential it caches covers every step after it.
 # Packages come before the tools, so a keyring or a repository is added against a current apt state.
@@ -365,6 +383,12 @@ stand_up() {
         run_tool install-tools.sh --install --optional
     else
         run_tool install-tools.sh --install
+    fi
+    # Before the GitHub step, so a restored SSH key is the one setup-github.sh keeps rather than a new one.
+    if [[ ${#SECRETS[@]} -gt 0 ]]; then
+        # Only op is missing here, since --dev installs the optional tools and both profiles install the interpreter.
+        [[ $profile == "host" ]] && run_tool install-tools.sh --install op
+        restore_secrets
     fi
     run_tool setup-github.sh --configure
     agent_setup
@@ -497,8 +521,8 @@ menu() {
 # --- Entry ---
 
 parse_args() {
-    local -a actions=() agent_fields=()
-    local agent_name saw_all=false
+    local -a actions=() agent_fields=() secret_fields=()
+    local agent_name secret_name saw_all=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -533,6 +557,18 @@ parse_args() {
                 [[ ${#AGENTS[@]} -eq 1 ]] || die "--agents takes \"all\" alone, or a list of tool names"
                 AGENTS=(--all)
             fi
+            shift
+            ;;
+        --secrets)
+            [[ $# -ge 2 && -n $2 ]] || die "--secrets takes the buckets to restore, separated by commas"
+            IFS=',' read -r -a secret_fields <<<"$2"
+            for secret_name in "${secret_fields[@]}"; do
+                if [[ -n $secret_name ]]; then
+                    [[ $secret_name =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "--secrets takes bucket names of lowercase letters, digits, and hyphens that start with a letter or digit, and \"$secret_name\" is not one"
+                    SECRETS+=("$secret_name")
+                fi
+            done
+            [[ ${#SECRETS[@]} -gt 0 ]] || die "--secrets takes the buckets to restore, separated by commas"
             shift
             ;;
         -y | --yes) ASSUME_YES=true ;;
@@ -570,6 +606,16 @@ parse_args() {
         die "More than one action given (${actions[*]}), name one"
     fi
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
+    # Beside --host or --dev the restore is a step of that stand-up, and alone it is the action.
+    if [[ ${#SECRETS[@]} -gt 0 ]]; then
+        if [[ -z $MODE ]]; then
+            MODE="secrets"
+        elif [[ $MODE != "host" && $MODE != "dev" ]]; then
+            die "--secrets runs alone or with --host or --dev, and was given with --$MODE"
+        fi
+        # The sync refuses root, so a run that would reach it says why before anything is fetched.
+        [[ $EUID -ne 0 ]] || die "--secrets restores into the running user's home, and the sync refuses root. Run this as the user the files belong to, without sudo."
+    fi
     # A given tree is never fetched, swapped, or removed, so only the actions that read or install from a tree in place accept one.
     if [[ -n $FROM_TREE && $MODE != "agent-setup" && $MODE != "agent-status" ]]; then
         die "--from-tree is accepted with --agent-setup or --agent-status only"
@@ -584,6 +630,10 @@ run_mode() {
     upgrade) upgrade ;;
     agents) run_tool install-agents.sh --install "${AGENTS[@]}" ;;
     tools) run_tool install-tools.sh --install ;;
+    secrets)
+        run_tool install-tools.sh --install op python
+        restore_secrets
+        ;;
     github) run_tool setup-github.sh --configure ;;
     skills) install_skills ;;
     agent-setup) agent_setup ;;

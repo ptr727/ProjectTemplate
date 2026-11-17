@@ -876,7 +876,6 @@ class LiveTreeCase(unittest.TestCase):
             "CODESTYLE.md",
             "WORKFLOW.md",
             "AUDIT.md",
-            "CLAUDE.md",
             ".github/copilot-instructions.md",
         ):
             self.assertTrue(

@@ -49,6 +49,7 @@ from fidelity_text import (
     extract_anchored,
     extract_section,
     normalize,
+    normalize_line_endings,
     section_key,
     strip_sections,
 )
@@ -141,6 +142,19 @@ def hub_only_paths(spec, rev=None):
     for declaration in spec["files"].get("repoOwnedTrees", []):
         excluded.update(hub_paths_below(declaration["source"], rev=rev).values())
     return hub_tracked(rev) - excluded
+
+
+def retired_paths(spec):
+    """The ledger's `retire` paths, owed a deletion downstream whether or not the hub still tracks them."""
+    return {path for path, (kind, _) in gap_dispositions(spec).items() if kind == "retire"}
+
+
+def deletion_candidates(spec, rev=None):
+    """Paths a downstream copy may owe a deletion: the hub-hosted set and every path the ledger retires.
+
+    A hit is a candidate rather than a verdict, since only its `retire` disposition asserts the deletion.
+    """
+    return hub_only_paths(spec, rev) | retired_paths(spec)
 
 
 def gap_dispositions(spec):
@@ -1549,6 +1563,18 @@ def content_hash(text):
     return _hash_normalized(normalize(text))
 
 
+def matches_hub_history(down_text, rel_path):
+    """Whether a downstream copy matches any past hub revision of rel_path, line endings aside.
+
+    Only line endings are normalized. A copy differing in an action pin or a `needs:` list goes to
+    the maintainer rather than to a deletion. A Dependabot bump and a repository edit look alike here.
+    """
+    if down_text is None:
+        return False
+    copy = normalize_line_endings(down_text)
+    return any(normalize_line_endings(past) == copy for past in git_file_history(rel_path))
+
+
 def classify_verbatim(down_text, canon_text, past_texts):
     """None if the copy matches the current canonical, 'stale' if it matches a past hub revision, else 'modified'."""
     dh = content_hash(down_text)
@@ -1586,8 +1612,8 @@ def _require_full_history(root):
 
 
 @functools.cache
-def _hub_main_rev():
-    """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA."""
+def _hub_main_fetch():
+    """`(sha, error)` for the hub's own `main`, fetched fresh from `origin` once per run."""
     fetch = subprocess.run(
         ["git", "fetch", "-q", "origin", "main"],
         cwd=ROOT,
@@ -1597,7 +1623,7 @@ def _hub_main_rev():
         check=False,
     )
     if fetch.returncode != 0:
-        raise RuntimeError(f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}")
+        return None, f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}"
     resolved = subprocess.run(
         ["git", "rev-parse", "FETCH_HEAD"],
         cwd=ROOT,
@@ -1607,8 +1633,63 @@ def _hub_main_rev():
         check=False,
     )
     if resolved.returncode != 0 or not resolved.stdout.strip():
-        raise RuntimeError(f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}")
-    return resolved.stdout.strip()
+        return None, f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}"
+    return resolved.stdout.strip(), None
+
+
+def _hub_main_rev():
+    """The hub's own `main` as a commit SHA, raising on every read once its fetch failed.
+
+    The failure is cached with the result, so a retry never reads a `main` the run stamp called unknown.
+    """
+    sha, error = _hub_main_fetch()
+    if error:
+        raise RuntimeError(error)
+    return sha
+
+
+def short_rev(rev):
+    """The hub's abbreviated SHA for `rev`, or "unknown" where git cannot resolve it."""
+    r = subprocess.run(
+        ["git", "rev-parse", "--short", rev],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
+
+
+# The working-tree paths this audit reads, so a change anywhere else leaves its stamp clean.
+AUDIT_READS = ("registry", "repo-config", "scripts", "spec")
+
+
+def hub_head(paths=AUDIT_READS):
+    """The checkout's short HEAD, with a `-dirty` suffix where the working tree under `paths` differs from it."""
+    head = short_rev("HEAD")
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", *paths],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return f"{head}-dirty" if head != "unknown" and status.stdout.strip() else head
+
+
+def hub_stamp():
+    """The run stamp's hub field, `hub_head()`, then `| main <sha>` where `_hub_main_rev()` differs from it.
+
+    The canonicals, their history, and the tracked paths come from `main`, and every other read comes from the working tree.
+    """
+    head = hub_head()
+    try:
+        main = short_rev(_hub_main_rev())
+    except RuntimeError:
+        main = "unknown"
+    return head if main == head != "unknown" else f"{head} | main {main}"
 
 
 @functools.cache
@@ -2497,7 +2578,7 @@ def _tree_file_findings(source_path, target_path, entries):
 
 
 def check_hubonly_carried(run):
-    """A path the hub tracks and the manifest omits is hub-hosted, so a downstream copy converges by deletion."""
+    """A hub-hosted path, or one the ledger retires, converges downstream by deletion rather than by a re-vendor."""
     if run.tree is None:
         return [
             (
@@ -2507,12 +2588,17 @@ def check_hubonly_carried(run):
         ]
     disp = gap_dispositions(run.spec)
     findings = []
-    for path in sorted(run.tree & hub_only_paths(run.spec)):
+    for path in sorted(run.tree & deletion_candidates(run.spec)):
         kind = disp.get(path, ("", ""))[0]
         if kind == "accepted":
             continue
         if kind == "retire":
-            text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            if path in hub_tracked(None):
+                text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            elif matches_hub_history(run.read_text(path), path):
+                text = f"hub-only: delete this repo's {path} - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
+            else:
+                text = f"hub-only: {path} - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
         elif kind:
             text = f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging"
         else:
@@ -2704,9 +2790,11 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         w(
             "Divergences from the hub canonical. A `verbatim:` file or section re-vendors the current hub copy "
             "byte-for-byte (a `section` re-vendors just that one `## heading` block). An `interface:` item must "
-            "honor the named workflow contract. A stale-but-present copy is re-vendored. A `hub-only:` item is the "
-            "opposite remedy, a file the hub hosts rather than carries, so the copy here is deleted and the hub's "
-            "is reached instead. A genuinely repo-specific difference is judged by meaning per AUDIT.md."
+            "honor the named workflow contract. A stale-but-present copy is re-vendored. A `hub-only:` item reading "
+            "`delete this repo's` is the opposite remedy, so the copy here is deleted once its ledger reason is "
+            "read, and the hub's copy is reached instead only where the item says the hub hosts it. Any other "
+            "`hub-only:` item is triaged per AUDIT.md before anything is deleted. A genuinely repo-specific "
+            "difference is judged by meaning per AUDIT.md."
         )
         w("")
         for t in drift:
@@ -2782,21 +2870,12 @@ def main(argv=None):
             return 2
 
     run_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hub = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=ROOT,
-        check=False,
-    )
-    hub_sha = hub.stdout.strip() if hub.returncode == 0 else "unknown"
-
     if issue_mode:
         if len(repos) != 1:
             print("--issue takes exactly one cataloged repo", file=sys.stderr)
             return 2
         entry = repos[0]
+        hub_sha = hub_stamp()
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
         except ShallowCloneError as e:
@@ -2819,7 +2898,7 @@ def main(argv=None):
         return 0
 
     override = f" | branch override {a.branch}" if a.branch else ""
-    print(f"audit run {run_utc} | hub {hub_sha}{override}")
+    print(f"audit run {run_utc} | hub {hub_stamp()}{override}")
     _, from_remote = hub_name()
     if not from_remote:
         print(

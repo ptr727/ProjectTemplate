@@ -138,7 +138,7 @@ flowchart TD
 ```mermaid
 flowchart LR
     subgraph layer1["Loading layer"]
-        L1["Does the governing rule\neven reach the session's\ncontext? (e.g. CLAUDE.md\nimporting AGENTS.md)"]
+        L1["Does the governing rule\neven reach the session's\ncontext? (e.g. AGENTS.md\nloaded at session start)"]
     end
     subgraph layer2["Prose layer"]
         L2["GOVERNANCE.md / AGENTS.md /\nSkill trigger descriptions --\nread and followed by judgment"]
@@ -159,7 +159,7 @@ The first diagram is this spec's actual decision flow, generalized from `claude/
 text, and requirement 10 judges a subagent dispatch instead. Requirement 9 wraps every command the flow allows. Requirement 8 runs once at the end of a
 session on whatever the denials and the ceilings did not prevent. The second is why a failure lands in one layer and not another. A rule that never
 reached the session at all is a loading bug. It is fixed the way PR #1081 fixed `local-strict-review`'s
-missed trigger, by wiring `CLAUDE.md` to import `AGENTS.md`. A rule that reached the session and was still not followed is promoted to a host hook. That applies where the trigger is mechanically decidable and the harm is destructive. Requirement 6, above, tracked at [issue #1073][issue-1073], is the worked example. Requirement 7, tracked at [issue #1589][issue-1589], is the second. The prose rule against an unbounded wait was read, quoted into six worker briefs, and produced the forbidden
+missed trigger, by getting `AGENTS.md` into every Claude Code session. Claude Code now reads it natively, and the kit sets it to load beside any `CLAUDE.md` in the working directory or above it. A directory added with `--add-dir` is the exception, since its `AGENTS.md` does not load. A rule that reached the session and was still not followed is promoted to a host hook. That applies where the trigger is mechanically decidable and the harm is destructive. Requirement 6, above, tracked at [issue #1073][issue-1073], is the worked example. Requirement 7, tracked at [issue #1589][issue-1589], is the second. The prose rule against an unbounded wait was read, quoted into six worker briefs, and produced the forbidden
 shape in all six. A rule whose violation can only be judged, not mechanically decided (was a
 review finding actually evidence-backed?), stays prose and a chained Skill trigger. That is because a hook there could only nag, never decide.
 

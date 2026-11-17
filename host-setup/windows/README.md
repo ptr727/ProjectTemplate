@@ -11,6 +11,7 @@ The tooling that makes a native Windows host satisfy the contract in [`docs/host
 - [`install-agents.ps1`][install-agents] keeps this user's coding-agent tools current through each tool's own updater, touching only the ones already installed. A tool a package manager owns is upgraded through that manager for that one package: npm, bun, or scoop. winget is left to `upgrade-host.ps1`, and choco, which needs an elevated shell, is reported with its command and not run. cswap is the exception to each tool's own updater, going through `uv tool upgrade` since its updater cannot replace its own running launcher on Windows. `uv` cannot replace a running launcher either, so the upgrade skips cswap while one runs and says so. The script installs a tool only when that tool is named. A tool winget owns is left to `upgrade-host.ps1`. It refuses an elevated session, since the tools live in the user's profile. opencode keeps one managed copy, the npm package `@opencode/cli`. Another copy found first on PATH is reported with the command that removes it, and is never removed here. Where npm cannot report its prefix, only an npm copy whose shim names `opencode-ai` is told from the managed package. Claude Code carries a fleet floor, which the report notes. An upgrade or install fails it where the updater, package manager, or installer it runs leaves it below.
 - [`install-safety-kit.ps1`][install-safety-kit] drives the Claude Code safety kit installer at `host-setup\agent-safety\claude\install.ps1` from this tree. It skips a host where Claude Code is not installed for this user.
 - [`install-global-rules.ps1`][install-global-rules] writes the host-wide agent rules to the global file of each installed Codex or opencode, by running `host-setup\agent-safety\global_rules.py` from this tree.
+- [`restore-secrets.ps1`][restore-secrets] pulls the named secret buckets into this user's profile, by running [`scripts/secrets_sync.py`][secrets-sync] from this tree. It pulls only the buckets it is given. It refuses an elevated session and needs `op`, which `install-tools.ps1 -Install op` provides.
 
 Each runs on its own, and each takes `-Help`.
 
@@ -205,6 +206,8 @@ The scripts are checked by `PSScriptAnalyzer`, which runs in CI as the peer of t
 [linux-readme]: ../linux/README.md
 [menu]: ../menu.sh
 [menu-ps1]: ../menu.ps1
+[restore-secrets]: ./restore-secrets.ps1
+[secrets-sync]: ../../scripts/secrets_sync.py
 [setup-github]: ./setup-github.ps1
 [setup-wsl]: ./setup-wsl.ps1
 [test-bootstrap]: ../../tests/test_bootstrap.py

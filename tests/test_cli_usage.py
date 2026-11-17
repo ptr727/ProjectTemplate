@@ -150,6 +150,8 @@ NO_REQUIRED_ARGUMENT = frozenset(
 
 REFUSES_A_LEADING_FLAG = {
     "catalog/snippets/hub_fetch_run.py": "forwards every argument after its hub path",
+    "host-setup/linux/restore-secrets.sh": "reads its options before it requires a bucket",
+    "host-setup/windows/restore-secrets.ps1": "binds its parameters before it requires a bucket",
 }
 
 REFUSED_AS_OPTION = re.compile(

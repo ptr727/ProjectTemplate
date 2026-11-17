@@ -81,7 +81,9 @@ flowchart TD
   boot --> fetch["hub tarball fetch, no git needed"]
   fetch --> upgrade["upgrade host packages"]
   upgrade --> tools["install-tools: the host toolchain, floors in spec/host-tools.json"]
-  tools --> github["setup-github: identity, SSH signing, gh auth"]
+  tools --> secrets["restore-secrets, only with --secrets: named buckets, so a restored SSH key is kept"]
+  secrets --> github["setup-github: identity, SSH signing, gh auth"]
+  tools -.-> github
   github --> agenttools["agent setup: upgrade the installed coding-agent CLIs"]
   agenttools --> skillsinstall["install-skills: fleet skills for the user"]
   skillsinstall --> safety["install-safety-kit: write guard + rendered CLAUDE.md"]

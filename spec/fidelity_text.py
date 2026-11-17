@@ -69,12 +69,17 @@ class LinkDefinition(NamedTuple):
     end: int
 
 
+def normalize_line_endings(text):
+    """`text` with CRLF and bare CR line endings turned into LF, and nothing else changed."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def normalize(text):
     """`text` with line endings, action pins, and job `needs:` lists neutralized, the drift governed elsewhere.
 
     This is not placeholder masking, see spec/fidelity-model.md "Normalization".
     """
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = normalize_line_endings(text)
     text = _ACTION_PIN.sub(r"\1@<pin>", text)
     return _JOB_NEEDS.sub(r"\1needs: <needs>", text)
 
@@ -249,7 +254,7 @@ def strip_sections(text, names, keep_pins=False):
     Positional, so an identical passage elsewhere in the document survives.
     """
     want = {section_key(n) for n in names}
-    base = text.replace("\r\n", "\n").replace("\r", "\n") if keep_pins else normalize(text)
+    base = normalize_line_endings(text) if keep_pins else normalize(text)
     lines = base.split("\n")
     dropped = set()
     for h, end in sections(base):

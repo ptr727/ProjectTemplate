@@ -83,5 +83,40 @@ class FidelityPassReadCase(unittest.TestCase):
                 self.assertEqual(len(promote), want)
 
 
+class ManifestGapPassCase(unittest.TestCase):
+    """manifest_gap_pass reads the ledger, so a path the fleet retired outright still names its carriers."""
+
+    def test_a_retired_path_the_hub_no_longer_tracks_names_its_carrier(self) -> None:
+        spec = {
+            "registry": {"repos": [ENTRY], "defaults": {}},
+            "files": {"baseline": [{"path": "kept.md"}]},
+            "divergences": {"gaps": [{"path": "gone.md", "disposition": "retire", "reason": "r"}]},
+        }
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            if path == f"repos/{SLUG}/branches/main":
+                return {"name": "main"}
+            raise AssertionError(f"unexpected gh read: {path}")
+
+        with (
+            mock.patch.object(audit, "gh", fake_gh),
+            mock.patch.object(audit, "hub_repo_name", lambda: "ProjectTemplate"),
+            mock.patch.object(audit, "hub_tracked", lambda rev=None: {"kept.md", "hosted.sh"}),
+            mock.patch.object(
+                audit, "repo_tree", lambda slug, br: {"kept.md", "gone.md", "hosted.sh", "own.md"}
+            ),
+        ):
+            gaps, unreadable = fidelity_honesty.manifest_gap_pass(spec)
+
+        self.assertEqual(gaps, {"gone.md": ["Fixture"], "hosted.sh": ["Fixture"]})
+        self.assertEqual(unreadable, [])
+
+    def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
+        """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
+        self.assertEqual(
+            fidelity_honesty.load_spec()["divergences"], fidelity_honesty.load_ledger()
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

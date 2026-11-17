@@ -49,7 +49,8 @@ may be using, the maintainer's own primary checkout included, even one that look
 hub and for the target repo alike, create a worktree of your own off that base clone and work
 there, per `repo-worktree`. Remove each one when the run ends, per that skill's "Listing and
 Cleanup". A merged pull request's worktree goes through
-`uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`. A
+`uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`. Spell every `scripts/pr_review.py` call this skill prints as
+`pr-review-conduct` "Expected review loop" says. A
 hub worktree that only read the hub is removed by hand once it is clean, its branch with it. On a machine carrying the hub's agent-safety install, Claude Code also
 refuses a mutating git command run directly in a primary checkout. However, its rules classify git
 and gh commands only. So a plain file write is never denied, and the re-vendoring this skill exists
@@ -84,13 +85,16 @@ conversion waits on a re-level of `develop` where an audit `branch:` finding nam
 covers a finding too large to classify and a path changed on both branches. Use the squash pull request `RESYNC.md`
 section 3 describes.
 
-1. **The instruction set first.** `CLAUDE.md`, then `AGENTS.md` and `GOVERNANCE.md` verbatim sections, then `CODESTYLE.md` and `WORKFLOW.md`. Include the `AGENTS.md` skill-dependency pointer paragraph in this same step, as one more verbatim unit and not a separate pass. The paragraph names `scripts/skills_install.py` and where the fleet's Skills live. `CLAUDE.md` is the single `@AGENTS.md`-import file that gets `AGENTS.md` into a Claude Code session's context at all. It is a separate baseline entry from `AGENTS.md` itself, so carrying one without the other still leaves that provider unconfigured. **Before touching `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or `WORKFLOW.md` in this step, run the `carried-instruction-file-guard` skill's distinctive-phrase probe against the target file, every time, without exception.** **This holds regardless of whether the update is a verbatim re-vendor or an intent-fidelity edit.** This is not advisory language to weigh against how routine the diff looks. A diff that looks routine is exactly the shape the AGENTS.md-overwrite incident took. Do not proceed to the re-vendor until the probe has run and any local addition it finds has a destination. That gate follows that skill's own procedure. `CLAUDE.md` is outside that guard's scope. It carries no mixed or repo-specific content by design, so its re-vendor is an ordinary verbatim-fidelity copy, no probe needed.
+1. **The instruction set first.** `AGENTS.md` and `GOVERNANCE.md` verbatim sections, then `CODESTYLE.md` and `WORKFLOW.md`. Include the `AGENTS.md` skill-dependency pointer paragraph in this same step, as one more verbatim unit and not a separate pass. The paragraph names `scripts/skills_install.py` and where the fleet's Skills live. **Before touching `AGENTS.md`, `GOVERNANCE.md`, `CODESTYLE.md`, or `WORKFLOW.md` in this step, run the `carried-instruction-file-guard` skill's distinctive-phrase probe against the target file, every time, without exception.** **This holds regardless of whether the update is a verbatim re-vendor or an intent-fidelity edit.** This is not advisory language to weigh against how routine the diff looks. A diff that looks routine is exactly the shape the AGENTS.md-overwrite incident took. Do not proceed to the re-vendor until the probe has run and any local addition it finds has a destination. That gate follows that skill's own procedure.
 2. **Deletions second, before any re-vendor**, other than step 3's re-vendor of the manifest-owned
    trees, which "Ship it" below moves into step 1's pull request. Only a `retire` disposition in
-   `spec/divergences.json` authorizes removing a file. The removal is swept tree-wide, per
-   RESYNC.md section 4, before the deletion counts as done.
-3. **Verbatim re-vendors** for `CLAUDE.md` and everything else the probe in step 1 cleared. A
-   finding classified modified rather than stale gets its diff read before being overwritten.
+   `spec/divergences.json` authorizes removing a file. A retired `CLAUDE.md` is one, since Claude
+   Code reads `AGENTS.md` itself. The audit's finding says whether the copy matches one of the
+   hub's past versions. Delete it only where it does, and report any other copy to the maintainer
+   rather than deleting it. The removal is swept tree-wide, per RESYNC.md section 4,
+   before the deletion counts as done.
+3. **Verbatim re-vendors** for every verbatim finding, the four instruction files only once step 1's
+   probe cleared them. A finding classified modified rather than stale gets its diff read before being overwritten.
    The reason is that it may be an improvement the hub should adopt instead of a mistake to erase.
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.

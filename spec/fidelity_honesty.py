@@ -19,8 +19,8 @@ level up. It answers two questions the audit cannot:
   2. Which `verbatim` units have a downstream copy that diverges in a NON-stale way? That is either a
      mis-set label (the content legitimately varies -> should be intent) or real drift to chase.
 
-It also runs a manifest-gap pass over the whole fleet. A gap is a file the hub tracks, the manifest does not
-declare, and a repo carries anyway. It is hub-hosted content in a repo that should not hold it (exactly the
+It also runs a manifest-gap pass over the whole fleet. A gap is a file the hub tracks and the manifest does not
+declare, or one the ledger retires, that a repo carries anyway. It is hub-hosted or retired content in a repo that should not hold it (exactly the
 configure.sh / settings.json bug). Each gap names its carriers, so a `retire` disposition reads as a deletion work list.
 
 Usage: uv run --no-project --script spec/fidelity_honesty.py [--report]
@@ -159,7 +159,10 @@ def fidelity_pass(spec):
 
 
 def manifest_gap_pass(spec):
-    """Hub-tracked, manifest-undeclared files, mapped to every cataloged repo that carries one.
+    """Deletion candidates, mapped to every cataloged repo that carries one.
+
+    Those are the hub-tracked files the manifest leaves undeclared, and every path the ledger retires.
+    Only a `retire` disposition asserts the deletion, so the rest are triaged in the ledger.
 
     Read fleet-wide rather than against a single reference adopter. A gap is a repo-by-repo fact, so one
     adopter answers only for its own tree. A file five repos carry and that adopter does not was invisible.
@@ -168,7 +171,7 @@ def manifest_gap_pass(spec):
     A repo whose tree cannot be read in full is reported rather than skipped. The reason is that an unread
     tree contributes no gaps and reads exactly like a repo that carries none.
     """
-    hub_only = audit.hub_only_paths(spec)
+    candidates = audit.deletion_candidates(spec)
     gaps, unreadable = {}, []
     for entry in spec["registry"]["repos"]:
         if entry.get("status") != "cataloged" or entry.get("name") == audit.hub_repo_name():
@@ -180,7 +183,7 @@ def manifest_gap_pass(spec):
         if carried is None:
             unreadable.append(entry["name"])
             continue
-        for path in carried & hub_only:
+        for path in carried & candidates:
             gaps.setdefault(path, []).append(entry["name"])
     return {p: sorted(r) for p, r in sorted(gaps.items())}, unreadable
 
@@ -386,21 +389,27 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
     return "\n".join(out).rstrip() + "\n"
 
 
+def load_spec():
+    """The registry, the manifest, and the ledger the gap pass reads its retired paths from."""
+    return {
+        "registry": audit.load("registry/repos.json"),
+        "files": audit.load("spec/files.json"),
+        "divergences": load_ledger(),
+    }
+
+
 def main(argv=()):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument(
         "--report", action="store_true", help=f"write {REPORT_PATH} rather than print"
     )
     report_mode = parser.parse_args(list(argv)).report
-    spec = {
-        "registry": audit.load("registry/repos.json"),
-        "files": audit.load("spec/files.json"),
-    }
+    spec = load_spec()
     spreads, promote, mislabel = fidelity_pass(spec)
     gaps, unreadable = manifest_gap_pass(spec)
 
     if report_mode:
-        content = render_report(spreads, promote, gaps, unreadable, load_ledger())
+        content = render_report(spreads, promote, gaps, unreadable, spec["divergences"])
         # LF matches the fleet default, since reports/*.md is LF.
         # Bytes are written so the local platform does not re-translate them.
         # Git dates the file, so no timestamp is embedded, which would churn on every regeneration.
@@ -441,11 +450,13 @@ def main(argv=()):
     for e, spread in mislabel:
         print(f"   {e['path']}: differs in {', '.join(spread['differs'])}")
 
-    print("\n== Manifest gap: hub-tracked files NOT in the manifest that a repo carries anyway ==")
+    print(
+        "\n== Manifest gap: hub-tracked files NOT in the manifest, or retired ones, that a repo carries anyway =="
+    )
     if not gaps:
-        print("   none - no cataloged repo carries a hub-hosted file")
+        print("   none - no cataloged repo carries a hub-hosted or retired file")
     for path, repos in gaps.items():
-        print(f"   UNTRACKED  {path} :: {', '.join(repos)}")
+        print(f"   GAP  {path} :: {', '.join(repos)}")
     if unreadable:
         print(f"   tree unreadable, gap unmeasured: {', '.join(unreadable)}")
     return 0

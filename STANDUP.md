@@ -127,9 +127,9 @@ This is the same shape as step 0. Signing has to be live before the first commit
 
 Carry these before writing any repo content of your own:
 
-- [`CLAUDE.md`][claude-md], [`AGENTS.md`][agents], [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow] and [`AUDIT.md`][audit], adapted rather than cloned for the ones that describe a repo.
+- [`AGENTS.md`][agents], [`GOVERNANCE.md`][governance], [`CODESTYLE.md`][codestyle], [`WORKFLOW.md`][workflow] and [`AUDIT.md`][audit], adapted rather than cloned for the ones that describe a repo.
 - **A downstream `AUDIT.md` is the short, repository-scoped form.** It says how the repository reaches the hub for its audit and configuration check. Write it from [`catalog/snippets/configs/AUDIT.md`][audit-snippet], filling each placeholder [`spec/files.json`][files] declares for it. A near-whole copy of the hub's file only drifts from it.
-- **`CLAUDE.md` is not optional decoration.** Claude Code reads `CLAUDE.md`, not `AGENTS.md`. So a repo carrying `AGENTS.md` alone never gets it into a Claude Code session's context at all. `AGENTS.md` alone gets only into whatever an agent chooses to read on its own initiative mid-task. That is exactly the reliability gap that motivates carrying this file. It is a fixed, `verbatim`, whole-file carry with no repo-specific content. See `CLAUDE.md` itself for what belongs in it and what does not.
+- **No `CLAUDE.md` is carried.** Claude Code reads `AGENTS.md` itself, from the 2.1.281 floor [`docs/host-setup.md`][host-setup] names. The host-safety kit sets it to load `CLAUDE.md` and `AGENTS.md` both, so a stray `CLAUDE.local.md` cannot stop the fleet rules loading. The audit reports a carried `CLAUDE.md` as one to delete where it matches a past hub version, and as one for the maintainer otherwise.
 - **`.markdownlint-cli2.jsonc` and `cspell.json`**, which are the mechanical half. A rule nothing checks drifts silently, so a repo that carries the prose authorities without the linter configs has guidance and no gate. Scope a linter's **file set in the workflow** rather than relaxing either config, since `.markdownlint-cli2.jsonc` is carried `verbatim`.
 
 Then **read** `CODESTYLE.md` and the `GOVERNANCE.md` documentation-style rules, rather than only placing the files. Comment shape, one sentence per line, US spelling and the character rules all govern the code and config you are about to write. None of them are recoverable cheaply afterwards.
@@ -248,7 +248,6 @@ The same [`AUDIT.md`][audit] run is the on-demand audit for any known repo, and 
 [agents]: ./AGENTS.md
 [audit]: ./AUDIT.md
 [audit-snippet]: ./catalog/snippets/configs/AUDIT.md
-[claude-md]: ./CLAUDE.md
 [codestyle]: ./CODESTYLE.md
 [content-import]: ./docs/content-import.md
 [deploy-site-task]: ./.github/workflows/deploy-site-task.yml
