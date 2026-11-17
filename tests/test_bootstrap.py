@@ -2206,6 +2206,8 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         root: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         """Runs the loader with the tools that matter to a restore recording their whole argument list."""
+        if not root and hasattr(os, "geteuid") and os.geteuid() == 0:
+            self.skipTest("--secrets is refused as root, so the case would never reach the restore")
         self.build_tarball(
             (
                 "install-agents.sh",
