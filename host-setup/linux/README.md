@@ -11,6 +11,7 @@ The tooling that makes a Debian or Ubuntu based host satisfy the contract in [`d
 - [`install-skills.sh`][install-skills] drives the hub's skills installer at [`scripts/skills_install.py`][skills-install] from this tree.
 - [`install-safety-kit.sh`][install-safety-kit] drives the Claude Code safety kit installer at [`host-setup/agent-safety/claude/install.sh`][kit-install] from this tree. It skips a host where Claude Code is not installed for this user.
 - [`install-global-rules.sh`][install-global-rules] writes the host-wide agent rules to the global instruction file of each installed Codex or opencode, by running [`global_rules.py`][global-rules] from this tree.
+- [`restore-secrets.sh`][restore-secrets] pulls the named secret buckets into this user's home, by running [`scripts/secrets_sync.py`][secrets-sync] from this tree. It pulls only the buckets it is given. It refuses root and needs `op`, which `install-tools.sh --install op` provides.
 
 Each runs on its own, and each takes `--help`.
 
@@ -141,7 +142,7 @@ The agent tools install into the user's home, so this script refuses root rather
 
 ## install-skills.sh Is the Exception
 
-The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it inside the agent setup, the last step of a stand-up. Run on a host without one, it stops and names the tools step as its prerequisite. `install-safety-kit.sh` and `install-global-rules.sh` are exceptions for the same reason. The kit installer needs Python 3.11 or later and runs only where Claude Code is present. The rules writer runs on any Python 3 and asks for 3.11 only where Codex or opencode is present.
+The sibling scripts are independently fetchable, and this one deliberately is not. It drives `scripts/skills_install.py` at the tree root, and the skills content lives in the tree, so a copy fetched alone has nothing to install. Python 3.7 or later is its one dependency, which is why the bootstrap runs it inside the agent setup, the last step of a stand-up. Run on a host without one, it stops and names the tools step as its prerequisite. `install-safety-kit.sh` and `install-global-rules.sh` are exceptions for the same reason. The kit installer needs Python 3.11 or later and runs only where Claude Code is present. The rules writer runs on any Python 3 and asks for 3.11 only where Codex or opencode is present. `restore-secrets.sh` is one more, driving `scripts/secrets_sync.py`, and it needs Python 3.11 or later.
 
 ## Why There Is No Linter Category
 
@@ -199,6 +200,8 @@ CI checks the scripts with `shellcheck` and `shfmt`. It runs both over every `.s
 [install-skills]: ./install-skills.sh
 [install-tools]: ./install-tools.sh
 [kit-install]: ../agent-safety/claude/install.sh
+[restore-secrets]: ./restore-secrets.sh
+[secrets-sync]: ../../scripts/secrets_sync.py
 [setup-github]: ./setup-github.sh
 [skills-install]: ../../scripts/skills_install.py
 [test-bootstrap]: ../../tests/test_bootstrap.py
