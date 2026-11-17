@@ -1661,11 +1661,15 @@ def short_rev(rev):
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
 
 
-def hub_head():
-    """The checkout's short HEAD, with a `-dirty` suffix where tracked files in its working tree hold uncommitted changes."""
+# The working-tree paths this audit reads, so a change anywhere else leaves its stamp clean.
+AUDIT_READS = ("registry", "repo-config", "scripts", "spec")
+
+
+def hub_head(paths=AUDIT_READS):
+    """The checkout's short HEAD, with a `-dirty` suffix where the working tree under `paths` differs from it."""
     head = short_rev("HEAD")
     status = subprocess.run(
-        ["git", "status", "--porcelain", "--untracked-files=no"],
+        ["git", "status", "--porcelain", "--untracked-files=all", "--", *paths],
         cwd=ROOT,
         capture_output=True,
         text=True,

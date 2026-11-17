@@ -1854,6 +1854,16 @@ class HubStampCase(GitRepoCase):
         self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp marks a dirty tree")
         self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp marks a dirty tree")
 
+    def test_dirty_suffix_reads_only_the_audited_paths(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        (checkout / "notes.txt").write_text("outside the audited paths\n", encoding="utf-8")
+        sweep, _ = self.stamps(checkout)
+        self.assertIn(f"| hub {head}\n", sweep, "hub stamp: a change outside the reads")
+        (checkout / "spec" / "extra.json").write_text("{}\n", encoding="utf-8")
+        sweep, _ = self.stamps(checkout)
+        self.assertIn(f"| hub {head}-dirty | main {head}\n", sweep, "hub stamp: untracked read")
+
     def test_issue_usage_error_fetches_nothing(self) -> None:
         names = [
             r["name"]

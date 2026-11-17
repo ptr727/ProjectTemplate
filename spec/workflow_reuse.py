@@ -290,7 +290,7 @@ def render_report(rows, unreadable, empty, hub_sha):
 
 
 def hub_sha():
-    return audit.hub_head()
+    return audit.hub_head((WORKFLOW_DIR, "catalog/snippets/workflows", "registry"))
 
 
 def _selftest():
