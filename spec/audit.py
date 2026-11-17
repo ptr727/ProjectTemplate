@@ -2722,8 +2722,9 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
             "Divergences from the hub canonical. A `verbatim:` file or section re-vendors the current hub copy "
             "byte-for-byte (a `section` re-vendors just that one `## heading` block). An `interface:` item must "
             "honor the named workflow contract. A stale-but-present copy is re-vendored. A `hub-only:` item is the "
-            "opposite remedy, a file the hub hosts rather than carries, so the copy here is deleted and the hub's "
-            "is reached instead. A genuinely repo-specific difference is judged by meaning per AUDIT.md."
+            "opposite remedy, a file the hub hosts or the fleet retired, so the copy here is deleted. The hub's "
+            "copy is reached instead only where the item says the hub hosts it. A genuinely repo-specific "
+            "difference is judged by meaning per AUDIT.md."
         )
         w("")
         for t in drift:
