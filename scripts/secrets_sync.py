@@ -48,6 +48,7 @@ from pathlib import Path
 from types import FrameType
 
 VAULT_PREFIX = "Secrets "
+HOST_PREFIX = "host-"
 BUCKET = re.compile(r"[a-z0-9-]+")
 MODE_PREFIX = "mode:"
 MODE_TAG = re.compile(re.escape(MODE_PREFIX) + r"([0-7]{3,4})")
@@ -464,6 +465,14 @@ def bucket_of(name: str) -> str | None:
     return bucket if name.startswith(VAULT_PREFIX) and BUCKET.fullmatch(bucket) else None
 
 
+def is_host(bucket: str) -> bool:
+    """Whether the bucket is host-scoped, so its titles may repeat in another host bucket.
+
+    The bare prefix `host-` names no host, so it is a shared bucket.
+    """
+    return bucket.startswith(HOST_PREFIX) and len(bucket) > len(HOST_PREFIX)
+
+
 def find_vault(vaults: Sequence[Vault], bucket: str) -> Vault | None:
     """The vault named exactly for `bucket`, refusing where more than one carries the name."""
     name = vault_name(bucket)
@@ -642,20 +651,38 @@ def read_local(path: Path) -> Local:
 def selected(
     op: Op, vaults: Sequence[Vault], buckets: Sequence[str]
 ) -> list[tuple[Vault, dict[str, Item]]]:
-    """Each named bucket's vault and items, refusing an absent vault or a title two buckets share."""
+    """Each named bucket's vault and items, refusing an absent vault or a title two buckets share.
+
+    A title two host buckets hold is not shared, since a host-scoped file repeats on every host.
+    """
     chosen: list[tuple[Vault, dict[str, Item]]] = []
     owner: dict[str, str] = {}
+    host_owner: dict[str, str] = {}
     for bucket in dict.fromkeys(buckets):
         vault = find_vault(vaults, bucket)
         if vault is None:
             raise Refusal(f"no vault is named {vault_name(bucket)!r}")
         items = members(op, vault)
         for title in items:
-            held = owner.setdefault(title.casefold(), f"{vault.name}:{title}")
-            if held != f"{vault.name}:{title}":
-                raise Refusal(f"{title} is held by both {held.split(':')[0]} and {vault.name}")
+            key = title.casefold()
+            rivals = [owner] if is_host(bucket) else [owner, host_owner]
+            for table in rivals:
+                held = table.get(key)
+                if held is not None:
+                    raise Refusal(f"{title} is held by both {held} and {vault.name}")
+            (host_owner if is_host(bucket) else owner)[key] = vault.name
         chosen.append((vault, items))
     return chosen
+
+
+def refuse_two_host_buckets(buckets: Sequence[str]) -> None:
+    """Refuse a pull naming two host buckets, since one host restores one host's files."""
+    hosts = [b for b in dict.fromkeys(buckets) if is_host(b)]
+    if len(hosts) > 1:
+        raise Refusal(
+            f"{vault_name(hosts[0])} and {vault_name(hosts[1])} are both host buckets,"
+            " so pull one host bucket per run"
+        )
 
 
 def secrets_files(home: Path) -> list[str]:
@@ -858,12 +885,18 @@ def push_plans(
 def held_elsewhere(op: Op, vaults: Sequence[Vault], name: str) -> dict[str, str]:
     """Each title another bucket's vault holds, folded for case, mapped to that vault's name.
 
+    A host bucket skips the other host buckets, since a host-scoped file repeats on every host.
+
     Titles are read as listed, without `members`' checks, so a fault inside an unrelated bucket
     never blocks a push to this one. A pull or status of that bucket still refuses it.
     """
     held: dict[str, str] = {}
+    own = bucket_of(name)
     for other in vaults:
-        if other.name == name or bucket_of(other.name) is None:
+        theirs = bucket_of(other.name)
+        if other.name == name or theirs is None:
+            continue
+        if own is not None and is_host(own) and is_host(theirs):
             continue
         for row in list_items(op, other):
             held.setdefault(str(row["title"]).casefold(), other.name)
@@ -1140,6 +1173,7 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
         check_restore_home(home)
     else:
         home = home_dir()
+    refuse_two_host_buckets(a.bucket)
     plans: list[Plan] = []
     sources: dict[str, Vault] = {}
     for vault, items in selected(op, list_vaults(op), a.bucket):
