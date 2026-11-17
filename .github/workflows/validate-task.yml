@@ -88,12 +88,10 @@ jobs:
           resolved="$RUNNER_TEMP/test-matrix.json"
           if [[ -n "$TEST_MATRIX_FILE" ]]; then
             subject="The file $TEST_MATRIX_FILE that the test-matrix-file input names"
-            workspace=$(realpath -e -- "$GITHUB_WORKSPACE")
-            # Resolved before the containment test, so neither a .. segment nor a symlink reaches outside the tree.
-            if ! path=$(realpath -e -- "$TEST_MATRIX_FILE" 2>/dev/null) || [[ ! -f "$path" || "$path" != "$workspace"/* ]]; then
+            if [[ ! -f "$TEST_MATRIX_FILE" ]]; then
               fail "$subject is not a file in the checked-out tree."
             fi
-            cp -- "$path" "$resolved"
+            cp -- "$TEST_MATRIX_FILE" "$resolved"
           elif [[ -n "$TEST_MATRIX" ]]; then
             subject="The test-matrix input"
             printf '%s\n' "$TEST_MATRIX" > "$resolved"

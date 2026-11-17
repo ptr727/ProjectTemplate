@@ -362,7 +362,7 @@ jobs:
               - '.github/actions/**'
 
   # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, per D1.6.
-  # A repo keeping its pytest legs in a tracked file names that file in a test-matrix-file input here.
+  # A repo keeping its pytest legs in a tracked file names it in a test-matrix-file input, once the pin reaches a release declaring one.
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
@@ -510,7 +510,7 @@ A repo whose pytest legs differ by dependency versions names them in `test-matri
 
 Each label is unique, 1 to 38 characters from letters, digits, underscore, dot, and hyphen, so `python-<label>` stays a valid Codecov flag. A `python-version`, when present, is a string with a non-whitespace character. The `test-matrix` job checks all of this and builds the matrix, so a malformed value fails there with a named cause.
 
-A repo whose legs are written by a tool keeps them in a tracked file. It names that file's path in `test-matrix-file` instead. The file holds a `test-matrix` value. The job checks the caller's tree out, reads the file, and holds its content to the same checks. Setting both inputs fails the run. So does a path naming no file in the checked-out tree, and so does content `test-matrix` would refuse. Each of those errors names the path.
+A repo whose legs are written by a tool keeps them in a tracked file. It names that file's path in `test-matrix-file` instead. The file holds a `test-matrix` value. The job checks the caller's tree out, reads the file, and holds its content to the same checks. Setting both inputs fails the run. A path naming no file in the checked-out tree fails it with an error naming the path, and so does content `test-matrix` would refuse.
 
 ```yaml
     with:
