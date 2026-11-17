@@ -1664,9 +1664,20 @@ def short_rev(rev):
 def hub_stamp():
     """The run stamp's hub field, the checkout's HEAD, then `| main <sha>` where `_hub_main_rev()` differs from it.
 
-    The spec and the registry come from the checkout's working tree, while the canonicals, their history, and the tracked paths come from `main`.
+    The canonicals, their history, and the tracked paths come from `main`, and every other read comes from the working tree.
+    So HEAD takes a `-dirty` suffix where tracked files there hold uncommitted changes.
     """
     head = short_rev("HEAD")
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if head != "unknown" and status.stdout.strip():
+        head += "-dirty"
     try:
         main = short_rev(_hub_main_rev())
     except RuntimeError:

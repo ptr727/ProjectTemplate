@@ -1844,6 +1844,16 @@ class HubStampCase(GitRepoCase):
         self.assertIn(f"| hub {head}`", issue, "hub stamp: issue body run stamp at main")
         self.assertNotIn("| main ", sweep + issue, "hub stamp: no main field at main")
 
+    def test_stamp_marks_uncommitted_changes_dirty(self) -> None:
+        _, checkout = self.make_hub()
+        head = self.short(checkout, "HEAD")
+        registry = checkout / "registry" / "repos.json"
+        registry.write_bytes(registry.read_bytes() + b"\n")
+        sweep, issue = self.stamps(checkout)
+        want = f"| hub {head}-dirty | main {head}"
+        self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp marks a dirty tree")
+        self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp marks a dirty tree")
+
     def test_stamp_says_main_unknown_where_the_fetch_fails(self) -> None:
         upstream, checkout = self.make_hub()
         head = self.short(checkout, "HEAD")
