@@ -179,7 +179,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    than deleting by hand. `1` is a refusal, a moved tip among them. `2` is a read that did not
    answer or a delete it could not confirm. `64` is a target under an owner other than the hub
    checkout's own `origin`, or that `origin` unreadable. A registry refusal is a `1`.
-   It also refuses while another open pull request in the repository has the branch as its head or base.
+   `cleanup` also refuses while another open pull request in the repository has the branch as its head or base.
    It names each, since the delete would close or retarget it.
    Where this seat cannot run `cleanup`, report the delete to the maintainer instead of deleting by hand.
    Name the pull request number and `--repo` so the maintainer runs the same command.

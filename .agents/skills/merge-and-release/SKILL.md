@@ -235,7 +235,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      any other exit stops and reports. `1` is a refusal, and `2` is an unanswered read or an unconfirmed
      delete. `64` is a target under an owner other than the hub checkout's own `origin`, or an
      unreadable `origin`. A registry refusal is a `1`.
-     It also refuses while another open pull request in the repository has the branch as its head or base, naming each.
+     `cleanup` also refuses while another open pull request in the repository has the branch as its head or base, naming each.
      Where this seat cannot run `cleanup`, report the cleanup to the maintainer instead of running its steps by hand. That report names the pull request number and `--repo`.
      No direct `git push origin --delete`, ref API delete, `git worktree remove`, or `git branch -D` runs on a feature branch from this skill. That is because `cleanup` is the one place holding the checks.
      Never apply this sweep to `develop` or `main`

@@ -329,7 +329,7 @@ On Claude Code, where the executor restricts uv's cache writes, the cache variab
 needs is such an assignment. So every call there reaches the classifier. A call that merges or
 deletes is then reported to the maintainer as a blocked write rather than run. Those calls are
 `merge`, `cleanup <number>`, and `cleanup --sweep --apply`. They are the writes the classifier is
-known to refuse, a merge as stated above and a branch delete on some days. So running one there is a
+known to refuse, a merge even with its gate met and a branch delete on some days. So running one there is a
 write fired to see whether it passes, which `GOVERNANCE.md` "Repository Boundaries and Write Safety" forbids. Any other call there runs, and one the classifier refuses is the refused
 write above.
 
