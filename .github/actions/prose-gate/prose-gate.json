@@ -114,7 +114,7 @@
       ".github/workflows/check-upstream-version-task.yml", ".github/workflows/deploy-site-task.yml", ".github/workflows/get-version-task.yml",
       ".github/workflows/publish-docker-readme-task.yml", ".github/workflows/publish-plan-task.yml",
       ".github/workflows/run-codegen-pull-request-task.yml", ".github/workflows/validate-task.yml",
-      "repo-config/README.md", "repo-config/configure.sh", "repo-config/develop.json", "repo-config/labels.json",
+      "CLAUDE.md", "repo-config/README.md", "repo-config/configure.sh", "repo-config/develop.json", "repo-config/labels.json",
       "repo-config/main.json", "repo-config/operational/develop.json", "repo-config/settings.json", "spec/secrets.json"
     ],
     "tool_directives": [
@@ -129,7 +129,7 @@
   ],
   "generated_roots": [".artifacts", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", "bin", "dist", "node_modules", "obj"],
   "instruction_docs": [
-    ".github/copilot-instructions.md", "AGENTS.md", "AUDIT.md", "CLAUDE.md", "CODESTYLE.md", "GOVERNANCE.md", "OPERATIONS.md", "RESYNC.md",
+    ".github/copilot-instructions.md", "AGENTS.md", "AUDIT.md", "CODESTYLE.md", "GOVERNANCE.md", "OPERATIONS.md", "RESYNC.md",
     "STANDUP.md", "WORKFLOW.md"
   ],
   "skill_roots": [".agents/skills/", ".github/skills/"],

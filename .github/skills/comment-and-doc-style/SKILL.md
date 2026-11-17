@@ -208,7 +208,7 @@ since a hook runs on every commit while the label decides a pull request.
 
 No comment, no docstring, and no instruction document names an issue, a pull request, or a commit.
 The surfaces are code and workflow comments, a docstring, a documentation comment, the Skills trees,
-and the fleet's own rule documents. Those rule documents are `AGENTS.md`, `AUDIT.md`, `CLAUDE.md`, `CODESTYLE.md`,
+and the fleet's own rule documents. Those rule documents are `AGENTS.md`, `AUDIT.md`, `CODESTYLE.md`,
 `GOVERNANCE.md`, `OPERATIONS.md`, `RESYNC.md`, `STANDUP.md`, `WORKFLOW.md`, and
 `.github/copilot-instructions.md`. A tracker, a history, a plan, and a README outside those trees
 are the repository's own narrative and keep their references. So do a commit message and a pull

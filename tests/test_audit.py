@@ -328,6 +328,19 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
             any(text.startswith("hub-only: tools/hub_tool.py ") for text in hub_only), hub_only
         )
 
+    def test_a_retired_path_the_hub_no_longer_tracks_is_reported(self) -> None:
+        """The ledger's retire disposition names the path where the hub's own tree no longer can."""
+        findings, _ = run_audit(CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB)
+
+        hub_only = self.hub_only_findings(findings)
+        self.assertEqual(
+            [t for t in hub_only if t.startswith("hub-only: delete this repo's CLAUDE.md ")],
+            [
+                "hub-only: delete this repo's CLAUDE.md - the fleet retired it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            ],
+            hub_only,
+        )
+
     def test_the_rendered_reviewer_configs_are_not_reported(self) -> None:
         """The hub renders these per repository and repo-config/configure.sh check judges them."""
         rendered = {".coderabbit.yaml", ".github/agent-policy.json", ".pr_agent.toml"}

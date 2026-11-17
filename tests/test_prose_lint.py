@@ -4162,7 +4162,7 @@ class TestIssueRefRule(unittest.TestCase):
 
     def test_a_reference_definition_label_is_read(self) -> None:
         """Only the destination is blanked, and a label renders as prose the reader sees."""
-        self.assertEqual(["issue-ref"], self.kinds("CLAUDE.md", "[#1011]: #1011\n"))
+        self.assertEqual(["issue-ref"], self.kinds("RESYNC.md", "[#1011]: #1011\n"))
 
     def test_a_file_that_will_not_parse_is_still_read(self) -> None:
         """The lexer never refuses a file, so a half-written one is read rather than skipped."""
