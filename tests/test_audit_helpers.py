@@ -9,6 +9,7 @@ import inspect
 import io
 import json
 import locale
+import os
 import pathlib
 import re
 import subprocess
@@ -1089,9 +1090,9 @@ class GitRevisionsCase(GitRepoCase):
         self.run_git(root, "commit", "-q", "-m", "develop-only change")
         with mock.patch.object(audit, "ROOT", root):
             audit._git_revisions.cache_clear()
-            audit._hub_main_rev.cache_clear()
+            audit._hub_main_fetch.cache_clear()
             self.addCleanup(audit._git_revisions.cache_clear)
-            self.addCleanup(audit._hub_main_rev.cache_clear)
+            self.addCleanup(audit._hub_main_fetch.cache_clear)
             revisions = audit._git_revisions(rel)
         self.assertEqual(
             [text for _, _, text in revisions],
@@ -1762,8 +1763,8 @@ class ShallowCloneCase(GitRepoCase):
                 with self.subTest(label):
                     audit._require_full_history.cache_clear()
                     audit._git_revisions.cache_clear()
-                    audit._hub_main_rev.cache_clear()
-                    self.addCleanup(audit._hub_main_rev.cache_clear)
+                    audit._hub_main_fetch.cache_clear()
+                    self.addCleanup(audit._hub_main_fetch.cache_clear)
                     out, err = io.StringIO(), io.StringIO()
                     try:
                         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -1829,8 +1830,8 @@ class HubStampCase(GitRepoCase):
             mock.patch.object(audit, "audit_repo", lambda entry, spec, branch=None: ([], "")),
         ):
             for argv in ([name], ["--issue", name]):
-                audit._hub_main_rev.cache_clear()
-                self.addCleanup(audit._hub_main_rev.cache_clear)
+                audit._hub_main_fetch.cache_clear()
+                self.addCleanup(audit._hub_main_fetch.cache_clear)
                 out = io.StringIO()
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
                     audit.main(argv)
@@ -1856,13 +1857,26 @@ class HubStampCase(GitRepoCase):
         self.assertNotIn("| main ", sweep + issue, "hub stamp: no main field at main")
 
     def test_stamp_says_main_unknown_where_the_fetch_fails(self) -> None:
-        _, checkout = self.make_hub()
+        upstream, checkout = self.make_hub()
         head = self.short(checkout, "HEAD")
         self.run_git(checkout, "remote", "remove", "origin")
         sweep, issue = self.stamps(checkout)
         want = f"| hub {head} | main unknown"
         self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp with no fetch")
         self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp with no fetch")
+        self.run_git(checkout, "remote", "add", "origin", str(upstream))
+        with mock.patch.object(audit, "ROOT", checkout), self.assertRaises(RuntimeError):
+            audit._hub_main_rev()
+
+    def test_stamp_names_both_fields_outside_a_checkout(self) -> None:
+        root = self.make_dir()
+        with (
+            mock.patch.object(audit, "ROOT", root),
+            mock.patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": str(root.parent)}),
+        ):
+            audit._hub_main_fetch.cache_clear()
+            self.addCleanup(audit._hub_main_fetch.cache_clear)
+            self.assertEqual("unknown | main unknown", audit.hub_stamp(), "hub stamp: no checkout")
 
 
 class ParseArgsCase(unittest.TestCase):

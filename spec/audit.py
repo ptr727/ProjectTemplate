@@ -1612,8 +1612,8 @@ def _require_full_history(root):
 
 
 @functools.cache
-def _hub_main_rev():
-    """The hub's own `main`, fetched fresh from `origin` and resolved to a commit SHA."""
+def _hub_main_fetch():
+    """`(sha, error)` for the hub's own `main`, fetched fresh from `origin` once per run."""
     fetch = subprocess.run(
         ["git", "fetch", "-q", "origin", "main"],
         cwd=ROOT,
@@ -1623,7 +1623,7 @@ def _hub_main_rev():
         check=False,
     )
     if fetch.returncode != 0:
-        raise RuntimeError(f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}")
+        return None, f"git fetch origin main failed in {ROOT}: {fetch.stderr.strip()}"
     resolved = subprocess.run(
         ["git", "rev-parse", "FETCH_HEAD"],
         cwd=ROOT,
@@ -1633,14 +1633,25 @@ def _hub_main_rev():
         check=False,
     )
     if resolved.returncode != 0 or not resolved.stdout.strip():
-        raise RuntimeError(f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}")
-    return resolved.stdout.strip()
+        return None, f"git rev-parse FETCH_HEAD failed in {ROOT}: {resolved.stderr.strip()}"
+    return resolved.stdout.strip(), None
+
+
+def _hub_main_rev():
+    """The hub's own `main` as a commit SHA, raising on every read once its fetch failed.
+
+    The failure is cached with the result, so a retry never reads a `main` the run stamp called unknown.
+    """
+    sha, error = _hub_main_fetch()
+    if error:
+        raise RuntimeError(error)
+    return sha
 
 
 def hub_stamp():
     """The run stamp's hub field, the checkout's HEAD, then `| main <sha>` where `_hub_main_rev()` differs from it.
 
-    The spec and the registry come from the checkout, while the canonicals, their history, and the tracked paths come from `main`.
+    The spec and the registry come from the checkout's working tree, while the canonicals, their history, and the tracked paths come from `main`.
     """
 
     def short(rev):
@@ -1659,7 +1670,7 @@ def hub_stamp():
         main = short(_hub_main_rev())
     except RuntimeError:
         main = "unknown"
-    return head if main == head else f"{head} | main {main}"
+    return head if main == head != "unknown" else f"{head} | main {main}"
 
 
 @functools.cache
