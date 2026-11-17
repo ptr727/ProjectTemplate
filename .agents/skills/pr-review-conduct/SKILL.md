@@ -317,7 +317,7 @@ is never carried into a downstream repository.
 
 On Claude Code, the host-safety installer's allow rule runs a `scripts/pr_review.py` call without
 the auto-mode classifier only where the call matches the rule's text. So run each such command as a
-call of its own, spelled as the skill printing it spells it. That holds for every
+call of its own, spelled exactly as the skill prints it. That holds for every
 `scripts/pr_review.py` call a fleet skill prints, in this skill or another. Where the hub checkout sits inside the session's working
 directories, a `cd <hub-checkout> &&` prefix keeps the match. A `cd` elsewhere may not. A leading
 variable assignment leaves the rule unmatched unless Claude Code counts that variable as known-safe.
