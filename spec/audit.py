@@ -2525,7 +2525,7 @@ def check_hubonly_carried(run):
         if kind == "accepted":
             continue
         if kind == "retire":
-            if path in hub_tracked():
+            if path in hub_tracked(None):
                 text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
             else:
                 text = f"hub-only: delete this repo's {path} - the fleet retired it, no repo carries it, and nothing replaces it (read its spec/divergences.json 'gaps' reason before deleting)"
