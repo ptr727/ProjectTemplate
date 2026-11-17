@@ -149,7 +149,10 @@ def retired_paths(spec):
 
 
 def deletion_candidates(spec, rev=None):
-    """Paths a downstream copy converges on by deletion: the hub-hosted set and every path the ledger retires."""
+    """Paths a downstream copy may owe a deletion: the hub-hosted set and every path the ledger retires.
+
+    A hit is a candidate rather than a verdict, since only its `retire` disposition asserts the deletion.
+    """
     return hub_only_paths(spec, rev) | retired_paths(spec)
 
 

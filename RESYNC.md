@@ -94,7 +94,7 @@ The detector is derived rather than listed. It is the hub's git-tracked paths mi
 ```mermaid
 flowchart LR
   candidate["hub git-tracked path, not in the baseline, a trees entry, or a repo-owned tree, or a retire path in the ledger"] --> disp["check spec/divergences.json disposition"]
-  disp -->|"retire"| delete["delete the file"]
+  disp -->|"retire"| delete["read it, move any repo-owned line, delete the file"]
   disp -->|"accepted"| keep["keep, closed permanently"]
   disp -->|"untriaged"| read["read before touching"]
   delete --> sweep["sweep every inbound reference, tree-wide"]
