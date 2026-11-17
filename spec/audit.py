@@ -1566,8 +1566,8 @@ def content_hash(text):
 def matches_hub_history(down_text, rel_path):
     """Whether a downstream copy matches any past hub revision of rel_path, line endings aside.
 
-    Only line endings are normalized. A copy differing in an action pin or a `needs:` list was
-    changed by the repository. So it goes to the maintainer rather than to a deletion.
+    Only line endings are normalized. A copy differing in an action pin or a `needs:` list goes to
+    the maintainer rather than to a deletion. A Dependabot bump and a repository edit look alike here.
     """
     if down_text is None:
         return False
