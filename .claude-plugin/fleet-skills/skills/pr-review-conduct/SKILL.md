@@ -237,8 +237,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    - Read each part whole in the review body, since the excerpt only locates it. Give every item
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.
-   - Post the outcomes with `pr_review.py comment <number> --repo <owner>/<repo> --fingerprint
-     <fp> --body <outcomes>`. One from an owner, member, or collaborator clears the hold,
+   - Post the outcomes with
+     `uv run --no-project --script scripts/pr_review.py comment <number> --repo <owner>/<repo> --fingerprint <fp> --body <outcomes>`. One from an owner, member, or collaborator clears the hold,
      `shapes=ACKNOWLEDGED`. New unplaced text on a new head owes a new acknowledgment.
    - The spelling is a data edit to the matching `scripts/reviewers/*.json` in the hub plus one
      fixture. Whoever acknowledged the part makes it in a pull request of its own, never an issue.
