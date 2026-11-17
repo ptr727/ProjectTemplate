@@ -290,17 +290,7 @@ def render_report(rows, unreadable, empty, hub_sha):
 
 
 def hub_sha():
-    import subprocess
-
-    r = subprocess.run(
-        ["git", "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        cwd=audit.ROOT,
-        check=False,
-    )
-    return r.stdout.strip() if r.returncode == 0 else "unknown"
+    return audit.short_rev("HEAD")
 
 
 def _selftest():

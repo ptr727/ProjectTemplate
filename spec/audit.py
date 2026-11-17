@@ -1648,26 +1648,27 @@ def _hub_main_rev():
     return sha
 
 
+def short_rev(rev):
+    """The hub's abbreviated SHA for `rev`, or "unknown" where git cannot resolve it."""
+    r = subprocess.run(
+        ["git", "rev-parse", "--short", rev],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
+
+
 def hub_stamp():
     """The run stamp's hub field, the checkout's HEAD, then `| main <sha>` where `_hub_main_rev()` differs from it.
 
     The spec and the registry come from the checkout's working tree, while the canonicals, their history, and the tracked paths come from `main`.
     """
-
-    def short(rev):
-        r = subprocess.run(
-            ["git", "rev-parse", "--short", rev],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-        return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
-
-    head = short("HEAD")
+    head = short_rev("HEAD")
     try:
-        main = short(_hub_main_rev())
+        main = short_rev(_hub_main_rev())
     except RuntimeError:
         main = "unknown"
     return head if main == head != "unknown" else f"{head} | main {main}"

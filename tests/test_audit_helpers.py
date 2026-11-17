@@ -1003,6 +1003,26 @@ class GitRepoCase(unittest.TestCase):
             self.run_git(path, *cmd[1:])
         return path
 
+    def seed_hub(self, root: pathlib.Path) -> str:
+        """Copy the files `audit.main` loads into root, returning a cataloged entry's name."""
+        for rel in (
+            "registry/repos.json",
+            "repo-config/settings.json",
+            "spec/secrets.json",
+            "spec/files.json",
+            "spec/project-types.json",
+            "spec/readme-sections.json",
+            "spec/third-party-tools.json",
+            "spec/divergences.json",
+        ):
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            (root / rel).write_bytes((audit.ROOT / rel).read_bytes())
+        return next(
+            r["name"]
+            for r in audit.load("registry/repos.json")["repos"]
+            if r.get("status") == "cataloged"
+        )
+
 
 class GitRevisionsCase(GitRepoCase):
     """Holds _git_revisions against temporary git repositories."""
@@ -1716,19 +1736,7 @@ class ShallowCloneCase(GitRepoCase):
         tmp_path = self.make_dir()
         hub_dir = tmp_path / "hub"
         hub_dir.mkdir()
-        rels = (
-            "registry/repos.json",
-            "repo-config/settings.json",
-            "spec/secrets.json",
-            "spec/files.json",
-            "spec/project-types.json",
-            "spec/readme-sections.json",
-            "spec/third-party-tools.json",
-            "spec/divergences.json",
-        )
-        for rel in rels:
-            (hub_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-            (hub_dir / rel).write_bytes((audit.ROOT / rel).read_bytes())
+        name = self.seed_hub(hub_dir)
         for cmd in (
             *GIT_IDENTITY,
             ["git", "add", "."],
@@ -1741,11 +1749,6 @@ class ShallowCloneCase(GitRepoCase):
             ["git", "clone", "-q", "--depth", "1", hub_dir.as_uri(), str(shallow_hub)],
             check=True,
             capture_output=True,
-        )
-        name = next(
-            r["name"]
-            for r in audit.load("registry/repos.json")["repos"]
-            if r.get("status") == "cataloged"
         )
 
         def history_read_only(entry, spec, branch=None):
@@ -1789,18 +1792,7 @@ class HubStampCase(GitRepoCase):
 
     def make_hub(self) -> tuple[pathlib.Path, pathlib.Path]:
         upstream = self.make_repo("-b", "main")
-        for rel in (
-            "registry/repos.json",
-            "repo-config/settings.json",
-            "spec/secrets.json",
-            "spec/files.json",
-            "spec/project-types.json",
-            "spec/readme-sections.json",
-            "spec/third-party-tools.json",
-            "spec/divergences.json",
-        ):
-            (upstream / rel).parent.mkdir(parents=True, exist_ok=True)
-            (upstream / rel).write_bytes((audit.ROOT / rel).read_bytes())
+        self.name = self.seed_hub(upstream)
         self.run_git(upstream, "add", ".")
         self.run_git(upstream, "commit", "-q", "-m", "one")
         checkout = self.make_dir() / "hub"
@@ -1816,20 +1808,16 @@ class HubStampCase(GitRepoCase):
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         ).stdout.strip()
 
     def stamps(self, checkout: pathlib.Path) -> tuple[str, str]:
-        name = next(
-            r["name"]
-            for r in audit.load("registry/repos.json")["repos"]
-            if r.get("status") == "cataloged"
-        )
         outputs = []
         with (
             mock.patch.object(audit, "ROOT", checkout),
             mock.patch.object(audit, "audit_repo", lambda entry, spec, branch=None: ([], "")),
         ):
-            for argv in ([name], ["--issue", name]):
+            for argv in ([self.name], ["--issue", self.name]):
                 audit._hub_main_fetch.cache_clear()
                 self.addCleanup(audit._hub_main_fetch.cache_clear)
                 out = io.StringIO()
