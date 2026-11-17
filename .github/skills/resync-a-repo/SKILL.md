@@ -88,9 +88,9 @@ section 3 describes.
 2. **Deletions second, before any re-vendor**, other than step 3's re-vendor of the manifest-owned
    trees, which "Ship it" below moves into step 1's pull request. Only a `retire` disposition in
    `spec/divergences.json` authorizes removing a file. A retired `CLAUDE.md` is one, since Claude
-   Code reads `AGENTS.md` itself. Delete it only where it matches one of the hub's past versions
-   exactly, read with `git log -p -- CLAUDE.md` in a hub checkout. Report any other copy to the
-   maintainer rather than deleting it. The removal is swept tree-wide, per RESYNC.md section 4,
+   Code reads `AGENTS.md` itself. The audit's finding says whether the copy matches one of the
+   hub's past versions. Delete it only where it does, and report any other copy to the maintainer
+   rather than deleting it. The removal is swept tree-wide, per RESYNC.md section 4,
    before the deletion counts as done.
 3. **Verbatim re-vendors** for every verbatim finding, the four instruction files only once step 1's
    probe cleared them. A finding classified modified rather than stale gets its diff read before being overwritten.

@@ -328,17 +328,30 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
             any(text.startswith("hub-only: tools/hub_tool.py ") for text in hub_only), hub_only
         )
 
-    def test_a_retired_path_the_hub_no_longer_tracks_is_reported(self) -> None:
-        """The ledger's retire disposition names the path where the hub's own tree no longer can."""
-        findings, _ = run_audit(CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB)
+    def retired_claude_md_findings(self, matches_history: bool) -> list[str]:
+        """The hub-only findings for a carried CLAUDE.md, its history match answered as given."""
+        with mock.patch.object(
+            audit, "git_blob_in_file_history", lambda path, sha, rev=None: matches_history
+        ):
+            findings, _ = run_audit(CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB)
+        return [t for t in self.hub_only_findings(findings) if "CLAUDE.md" in t]
 
-        hub_only = self.hub_only_findings(findings)
+    def test_a_retired_copy_matching_a_past_hub_version_is_deleted(self) -> None:
+        """The ledger's retire disposition names the path where the hub's own tree no longer can."""
         self.assertEqual(
-            [t for t in hub_only if t.startswith("hub-only: delete this repo's CLAUDE.md ")],
+            self.retired_claude_md_findings(True),
             [
-                "hub-only: delete this repo's CLAUDE.md - the fleet retired it, no repo carries it, and nothing replaces it (read its spec/divergences.json 'gaps' reason before deleting)"
+                "hub-only: delete this repo's CLAUDE.md - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
             ],
-            hub_only,
+        )
+
+    def test_a_retired_copy_matching_no_past_hub_version_goes_to_the_maintainer(self) -> None:
+        """A copy the repository changed is never reported as one to delete."""
+        self.assertEqual(
+            self.retired_claude_md_findings(False),
+            [
+                "hub-only: CLAUDE.md - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
+            ],
         )
 
     def test_a_retired_path_the_hub_still_hosts_is_reported_as_hosted(self) -> None:

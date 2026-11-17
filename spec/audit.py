@@ -2527,8 +2527,10 @@ def check_hubonly_carried(run):
         if kind == "retire":
             if path in hub_tracked(None):
                 text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+            elif git_blob_in_file_history(path, run.entries[path]):
+                text = f"hub-only: delete this repo's {path} - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
             else:
-                text = f"hub-only: delete this repo's {path} - the fleet retired it, no repo carries it, and nothing replaces it (read its spec/divergences.json 'gaps' reason before deleting)"
+                text = f"hub-only: {path} - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
         elif kind:
             text = f"hub-only: {path} is undeclared in spec/files.json and this repo carries it - the ledger dispositions it '{kind}', so settle that before converging"
         else:
