@@ -46,10 +46,10 @@ param(
     [string]$Dir,
     # Declared after -Ref and -Dir, so the positions those two had before it existed stay theirs.
     [string[]]$Agents,
-    [string[]]$Secrets,
     [switch]$Keep,
     # Named FromTree rather than Tree, since PowerShell variable names are case-insensitive and $TREE is the fetched tree below.
     [string]$FromTree,
+    [string[]]$Secrets,
     [Alias('h')][switch]$Help
 )
 
@@ -594,9 +594,7 @@ function Invoke-AgentsInstall {
 }
 
 # Only the buckets named are pulled.
-# Neither op nor the interpreter the sync needs is in the default tool set, so both are installed first.
 function Invoke-RestoreSecrets {
-    Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install', 'op', 'python'
     Invoke-Tool -Tool 'restore-secrets.ps1' -Arguments '-Bucket', ($script:SECRET_NAMES -join ',')
 }
 
@@ -615,7 +613,11 @@ function Invoke-StandUp {
         Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install'
     }
     # Before the GitHub step, so a restored SSH key is the one setup-github.ps1 keeps rather than a new one.
-    if ($script:SECRETS_GIVEN) { Invoke-RestoreSecrets }
+    if ($script:SECRETS_GIVEN) {
+        # Only op is missing here, since -Dev installs the optional tools and both profiles install the interpreter.
+        if ($Kind -eq 'host') { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install', 'op' }
+        Invoke-RestoreSecrets
+    }
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure'
     Invoke-AgentSetup
 }
@@ -790,7 +792,7 @@ function Resolve-Mode {
         if (Test-Elevated) { die '-Secrets restores into the running user''s profile, so run this as that user and not elevated' }
         # Beside -Host or -Dev the restore is a step of that stand-up, and alone it is the action.
         $others = @($given | Where-Object { $_ -notin @('host', 'dev') })
-        if ($others.Count -gt 0) { die "-Secrets runs alone or with -Host or -Dev, and was given with -$($others[0])" }
+        if ($others.Count -gt 0) { die "-Secrets runs alone or with -Host or -Dev, and was given with another action ($($others -join ', '))" }
         if ($given.Count -eq 0) { $given = @('secrets') }
     }
     if ($given.Count -gt 1) { die "More than one action given ($($given -join ', ')), name one" }
@@ -822,7 +824,10 @@ function Invoke-Mode {
         'upgrade' { Invoke-Upgrade }
         'agents' { Invoke-AgentsInstall }
         'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
-        'secrets' { Invoke-RestoreSecrets }
+        'secrets' {
+            Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install', 'op', 'python'
+            Invoke-RestoreSecrets
+        }
         'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
         'skills' { Invoke-SkillsInstall }
         'agent-setup' { Invoke-AgentSetup }

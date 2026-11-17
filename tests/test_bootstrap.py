@@ -168,6 +168,30 @@ class TestLoaderInvariant(unittest.TestCase):
 class TestSpecCoverage(unittest.TestCase):
     """Every tool `spec/host-tools.json` requires is one the platform installers can provide."""
 
+    def test_the_tools_the_loaders_install_for_a_restore_are_managed_tools(self) -> None:
+        """The names `--secrets` hands the installers exist there, which a stub installer cannot prove."""
+        linux = {
+            name
+            for found in re.findall(
+                r"install-tools\.sh --install ([a-z0-9 ]+)$",
+                BOOTSTRAP.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            for name in found.split()
+        }
+        windows = {
+            name
+            for found in re.findall(
+                r"'-Install', ((?:'[a-z0-9]+'(?:, )?)+)",
+                BOOTSTRAP_PS.read_text(encoding="utf-8"),
+            )
+            for name in re.findall(r"'([a-z0-9]+)'", found)
+        }
+        self.assertEqual(linux, {"op", "python"})
+        self.assertEqual(windows, {"op", "python"})
+        self.assertLessEqual(linux, self.declared_tools())
+        self.assertLessEqual(windows, self.declared_windows_tools())
+
     def declared_tools(self) -> set[str]:
         """The tool names `install-tools.sh` manages."""
         text = (LINUX / "install-tools.sh").read_text(encoding="utf-8")
@@ -1593,7 +1617,9 @@ def stand_up_steps() -> tuple[str, ...]:
 UPGRADE_STEPS = ("upgrade-host.sh --packages", "install-agents.sh --upgrade")
 
 # The restore the --secrets option adds, two tools whose full argument lists the secrets cases read.
-SECRETS_INSTALL_STEP = "install-tools.sh --install op python3"
+SECRETS_INSTALL_STEP = "install-tools.sh --install op python"
+# A --host stand-up has the interpreter already, so it adds only op before the restore.
+SECRETS_OP_STEP = "install-tools.sh --install op"
 SECRETS_STEPS = (SECRETS_INSTALL_STEP, "restore-secrets.sh --bucket alpha --bucket beta")
 
 # The default report ends with the agent status, so it covers what a stand-up installs.
@@ -2239,20 +2265,22 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         expected = list(stand_up_steps())
         at = expected.index("setup-github.sh --configure")
-        expected[at:at] = [SECRETS_INSTALL_STEP, "restore-secrets.sh --bucket alpha"]
+        expected[at:at] = [SECRETS_OP_STEP, "restore-secrets.sh --bucket alpha"]
         self.assertEqual(self.agents_steps(), expected, result.stderr)
+
+    def test_a_dev_stand_up_installs_no_tool_for_the_restore(self) -> None:
+        result = self.secrets_run(action="--dev", args=("--secrets", "alpha"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.agents_steps().count("install-tools.sh --install --optional"), 1)
+        self.assertNotIn(SECRETS_OP_STEP, self.agents_steps())
 
     def test_a_dev_stand_up_restores_after_the_optional_tools_and_before_github(self) -> None:
         result = self.secrets_run(action="--dev", args=("--secrets", "alpha"))
         self.assertEqual(result.returncode, 0, result.stderr)
         steps = self.agents_steps()
         self.assertEqual(
-            steps[steps.index("install-tools.sh --install --optional") + 1 :][:3],
-            [
-                SECRETS_INSTALL_STEP,
-                "restore-secrets.sh --bucket alpha",
-                "setup-github.sh --configure",
-            ],
+            steps[steps.index("install-tools.sh --install --optional") + 1 :][:2],
+            ["restore-secrets.sh --bucket alpha", "setup-github.sh --configure"],
         )
 
     def test_a_stand_up_without_secrets_runs_no_restore(self) -> None:
@@ -2340,6 +2368,7 @@ POWERSHELL_AGENT_STATUS_STEPS = (
 )
 
 POWERSHELL_SECRETS_INSTALL_STEP = "install-tools.ps1 -Install op python"
+POWERSHELL_SECRETS_OP_STEP = "install-tools.ps1 -Install op"
 POWERSHELL_SECRETS_STEPS = (
     POWERSHELL_SECRETS_INSTALL_STEP,
     "restore-secrets.ps1 -Bucket alpha,beta",
@@ -2692,19 +2721,21 @@ class TestPowerShellToolHandoff(unittest.TestCase):
             fail_step=fail_step,
         )
 
-    def test_a_restore_installs_op_then_restores_exactly_the_named_buckets(self) -> None:
+    def test_a_restore_pulls_exactly_the_named_buckets(self) -> None:
         result = self.run_restore("Invoke-RestoreSecrets", ["alpha,beta"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.steps(), list(POWERSHELL_SECRETS_STEPS), result.stdout)
+        self.assertEqual(self.steps(), [POWERSHELL_SECRETS_STEPS[1]], result.stdout)
 
     def test_separate_words_restore_the_same_buckets(self) -> None:
         result = self.run_restore("Invoke-RestoreSecrets", ["alpha", "beta"])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.steps(), list(POWERSHELL_SECRETS_STEPS), result.stdout)
+        self.assertEqual(self.steps(), [POWERSHELL_SECRETS_STEPS[1]], result.stdout)
 
     def test_a_failing_op_install_stops_before_the_restore(self) -> None:
         result = self.run_restore(
-            "Invoke-RestoreSecrets", ["alpha"], fail_step=POWERSHELL_SECRETS_INSTALL_STEP
+            "$script:MODE = 'secrets'\nInvoke-Mode",
+            ["alpha"],
+            fail_step=POWERSHELL_SECRETS_INSTALL_STEP,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.steps(), [POWERSHELL_SECRETS_INSTALL_STEP])
@@ -2716,13 +2747,19 @@ class TestPowerShellToolHandoff(unittest.TestCase):
             self.steps(),
             [
                 *POWERSHELL_STAND_UP_PREFIX,
-                POWERSHELL_SECRETS_INSTALL_STEP,
+                POWERSHELL_SECRETS_OP_STEP,
                 "restore-secrets.ps1 -Bucket alpha",
                 "setup-github.ps1 -Configure",
                 *POWERSHELL_AGENT_SETUP_STEPS,
             ],
             result.stdout,
         )
+
+    def test_a_dev_stand_up_installs_no_tool_for_the_restore(self) -> None:
+        result = self.run_restore("Invoke-StandUp -Kind 'dev'", ["alpha"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(POWERSHELL_SECRETS_OP_STEP, self.steps())
+        self.assertIn("restore-secrets.ps1 -Bucket alpha", self.steps())
 
     def test_a_stand_up_failing_at_the_restore_never_reaches_github(self) -> None:
         result = self.run_restore(

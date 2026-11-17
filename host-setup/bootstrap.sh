@@ -360,11 +360,9 @@ upgrade() {
 }
 
 # Only the buckets named are pulled.
-# Neither op nor the interpreter the sync needs is in the default tool set, so both are installed first.
 restore_secrets() {
     local bucket
     local -a buckets=()
-    run_tool install-tools.sh --install op python3
     for bucket in "${SECRETS[@]}"; do
         buckets+=(--bucket "$bucket")
     done
@@ -388,6 +386,8 @@ stand_up() {
     fi
     # Before the GitHub step, so a restored SSH key is the one setup-github.sh keeps rather than a new one.
     if [[ ${#SECRETS[@]} -gt 0 ]]; then
+        # Only op is missing here, since --dev installs the optional tools and both profiles install the interpreter.
+        [[ $profile == "host" ]] && run_tool install-tools.sh --install op
         restore_secrets
     fi
     run_tool setup-github.sh --configure
@@ -630,7 +630,10 @@ run_mode() {
     upgrade) upgrade ;;
     agents) run_tool install-agents.sh --install "${AGENTS[@]}" ;;
     tools) run_tool install-tools.sh --install ;;
-    secrets) restore_secrets ;;
+    secrets)
+        run_tool install-tools.sh --install op python
+        restore_secrets
+        ;;
     github) run_tool setup-github.sh --configure ;;
     skills) install_skills ;;
     agent-setup) agent_setup ;;
