@@ -2208,11 +2208,11 @@ class TestKeptTreeEndToEnd(unittest.TestCase):
     ) -> subprocess.CompletedProcess[str]:
         """Runs the loader with the tools that matter to a restore recording their whole argument list.
 
-        A case that ends before the root check at the top of a restore passes `reaches_restore=False`,
-        so a root runner still runs it.
+        bootstrap.sh refuses `--secrets` as root once it has parsed its arguments. A case refused before
+        that check, or given no `--secrets`, passes `reaches_restore=False`, so a root runner still runs it.
         """
         if reaches_restore and not root and hasattr(os, "geteuid") and os.geteuid() == 0:
-            self.skipTest("--secrets is refused as root, so the case would never reach the restore")
+            self.skipTest("bootstrap.sh refuses --secrets as root, so the case would fail")
         self.build_tarball(
             (
                 "install-agents.sh",
