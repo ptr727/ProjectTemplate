@@ -466,8 +466,11 @@ def bucket_of(name: str) -> str | None:
 
 
 def is_host(bucket: str) -> bool:
-    """Whether the bucket is host-scoped, so its titles may repeat in another host bucket."""
-    return bucket.startswith(HOST_PREFIX)
+    """Whether the bucket is host-scoped, so its titles may repeat in another host bucket.
+
+    The bare prefix `host-` names no host, so it is a shared bucket.
+    """
+    return bucket.startswith(HOST_PREFIX) and len(bucket) > len(HOST_PREFIX)
 
 
 def find_vault(vaults: Sequence[Vault], bucket: str) -> Vault | None:

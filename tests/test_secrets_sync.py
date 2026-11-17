@@ -991,6 +991,15 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertIn(("document", "create"), [key_of(a) for a in self.fake.writes()])
 
+    def test_a_bucket_named_only_the_host_prefix_is_a_shared_bucket(self) -> None:
+        self.assertFalse(ss.is_host("host-"))
+        self.assertTrue(ss.is_host("host-a"))
+        self.fake.add_item(self.vault("host-"), ".ssh/id_ed25519", SECRET)
+        path = self.write(".ssh/id_ed25519")
+        code, _, err = self.push("--bucket", "host-alpha", "--mode", "0600", str(path))
+        self.assertEqual(code, 1, err)
+        self.assertIn("already held by Secrets host-", err)
+
     def test_a_host_bucket_and_a_shared_bucket_collide_in_each_direction(self) -> None:
         self.fake.add_item(self.vault("alpha"), ".ssh/id_ed25519", SECRET)
         self.fake.add_item(self.vault("host-alpha"), ".ssh/config", SECRET)
