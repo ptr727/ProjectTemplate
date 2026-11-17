@@ -63,8 +63,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
    --jq .headRefOid`. Then, from a hub checkout, `scripts/` is not carried into downstream repos,
    run `uv run --no-project --script scripts/pr_review.py status [number] --repo owner/repo` on it and confirm the
    pr-review-conduct Merge Gate. Spell every `scripts/pr_review.py` call this skill prints as
-   `pr-review-conduct` "Expected review loop" says. Stop and report exactly what is missing rather than merging on a
-   partial gate. A digest carrying `state=MERGED` is a promotion merged since step 1 found it
+   `pr-review-conduct` "Expected review loop" says. Where the gate is not met, stop and report exactly what is missing rather than
+   merging on a partial gate. A digest carrying `state=MERGED` is a promotion merged since step 1 found it
    open, whose `merge=UNKNOWN` never clears, so stop re-reading it. Confirm its `merge_commit=` per
    step 4, run the ready-report comparison below against its `head=`, and report both. Dispatch
    nothing on the chosen scope alone, since whoever merged it may have released it already. Where
