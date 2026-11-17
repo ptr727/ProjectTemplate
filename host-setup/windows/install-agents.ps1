@@ -137,7 +137,7 @@ prefix, only an npm copy whose shim names opencode-ai is told from the managed p
 other npm copy is handled as any npm copy is.
 
 claude carries a fleet floor, recorded once in this script. -Report notes a copy below it, and -Upgrade or -Install
-fails that tool where its updater or installer leaves it below.
+fails that tool where the updater, package manager, or installer it runs leaves it below.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
@@ -332,11 +332,10 @@ function Test-Floor {
     if ($script:DRY_RUN) { return }
     $minimum = Get-ToolMinimum $ToolName
     if (-not $minimum) { return }
-    $now = $Now
-    if (-not $now) {
+    if (-not $Now) {
         warn "${ToolName}: its version could not be read after the run, so it is not known to meet the fleet floor $minimum"
-    } elseif ((Compare-HostVersion $now $minimum) -lt 0) {
-        warn "${ToolName}: at $now after the run, still below the fleet floor $minimum"
+    } elseif ((Compare-HostVersion $Now $minimum) -lt 0) {
+        warn "${ToolName}: at $Now after the run, still below the fleet floor $minimum"
         $script:FAILED.Add($ToolName)
     }
 }

@@ -183,7 +183,7 @@ opencode-ai among them, is reported with the command that removes it and is neve
 copy once none is.
 
 claude carries a fleet floor, recorded once in this script. --report notes a copy below it, and --upgrade or --install
-fails that tool where its updater or installer leaves it below.
+fails that tool where the updater, package manager, or installer it runs leaves it below.
 
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,

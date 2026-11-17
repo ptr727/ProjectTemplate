@@ -1477,6 +1477,21 @@ class TestRegistration(StampCase):
                 self.assertIn("is required", r.stderr)
                 self.assertEqual(self._settings(), shape)
 
+    def test_a_host_installed_before_the_setting_reports_it_absent(self):
+        """Every host the kit already reached has no pluginConfigs, so this is the first report each one prints."""
+        self.install()
+        data = self._settings()
+        del data["pluginConfigs"]
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        for plugin in install.INSTRUCTION_FILES_PLUGINS:
+            self.assertIn(
+                f"pluginConfigs.{plugin}.options.instructionFiles is absent rather than "
+                "claude-md-and-agents-md",
+                r.stdout,
+            )
+
     def test_a_misshapen_plugin_configs_reports_the_refusal_rather_than_an_absence(self):
         self.install()
         data = self._settings()
