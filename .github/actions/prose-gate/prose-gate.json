@@ -129,7 +129,7 @@
   ],
   "generated_roots": [".artifacts", ".git", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".venv", "__pycache__", "bin", "dist", "node_modules", "obj"],
   "instruction_docs": [
-    ".github/copilot-instructions.md", "AGENTS.md", "AUDIT.md", "CODESTYLE.md", "GOVERNANCE.md", "OPERATIONS.md", "RESYNC.md",
+    ".github/copilot-instructions.md", "AGENTS.md", "AUDIT.md", "CLAUDE.md", "CODESTYLE.md", "GOVERNANCE.md", "OPERATIONS.md", "RESYNC.md",
     "STANDUP.md", "WORKFLOW.md"
   ],
   "skill_roots": [".agents/skills/", ".github/skills/"],

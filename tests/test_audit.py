@@ -329,11 +329,14 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
         )
 
     def retired_claude_md_findings(self, matches_history: bool) -> list[str]:
-        """The hub-only findings for a carried CLAUDE.md, its history match answered as given."""
-        with mock.patch.object(
-            audit, "git_blob_in_file_history", lambda path, sha, rev=None: matches_history
-        ):
+        """The hub-only findings for a carried CLAUDE.md, its history match answered as given.
+
+        The fake tree reports every blob's SHA as "0", so the check must ask about that copy at that path.
+        """
+        history = mock.Mock(return_value=matches_history)
+        with mock.patch.object(audit, "git_blob_in_file_history", history):
             findings, _ = run_audit(CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB)
+        history.assert_called_once_with("CLAUDE.md", "0")
         return [t for t in self.hub_only_findings(findings) if "CLAUDE.md" in t]
 
     def test_a_retired_copy_matching_a_past_hub_version_is_deleted(self) -> None:
