@@ -1854,6 +1854,19 @@ class HubStampCase(GitRepoCase):
         self.assertIn(f"{want}\n", sweep, "hub stamp: sweep run stamp marks a dirty tree")
         self.assertIn(f"{want}`", issue, "hub stamp: issue body run stamp marks a dirty tree")
 
+    def test_issue_usage_error_fetches_nothing(self) -> None:
+        names = [
+            r["name"]
+            for r in audit.load("registry/repos.json")["repos"]
+            if r.get("status") == "cataloged"
+        ][:2]
+        with (
+            mock.patch.object(audit, "hub_stamp") as stamp,
+            contextlib.redirect_stderr(io.StringIO()),
+        ):
+            code = audit.main(["--issue", *names])
+        self.assertEqual((2, 0), (code, stamp.call_count), "hub stamp: --issue usage error")
+
     def test_stamp_says_main_unknown_where_the_fetch_fails(self) -> None:
         upstream, checkout = self.make_hub()
         head = self.short(checkout, "HEAD")

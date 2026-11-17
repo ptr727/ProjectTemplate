@@ -1661,12 +1661,8 @@ def short_rev(rev):
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else "unknown"
 
 
-def hub_stamp():
-    """The run stamp's hub field, the checkout's HEAD, then `| main <sha>` where `_hub_main_rev()` differs from it.
-
-    The canonicals, their history, and the tracked paths come from `main`, and every other read comes from the working tree.
-    So HEAD takes a `-dirty` suffix where tracked files there hold uncommitted changes.
-    """
+def hub_head():
+    """The checkout's short HEAD, with a `-dirty` suffix where tracked files in its working tree hold uncommitted changes."""
     head = short_rev("HEAD")
     status = subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=no"],
@@ -1676,8 +1672,15 @@ def hub_stamp():
         encoding="utf-8",
         check=False,
     )
-    if head != "unknown" and status.stdout.strip():
-        head += "-dirty"
+    return f"{head}-dirty" if head != "unknown" and status.stdout.strip() else head
+
+
+def hub_stamp():
+    """The run stamp's hub field, `hub_head()`, then `| main <sha>` where `_hub_main_rev()` differs from it.
+
+    The canonicals, their history, and the tracked paths come from `main`, and every other read comes from the working tree.
+    """
+    head = hub_head()
     try:
         main = short_rev(_hub_main_rev())
     except RuntimeError:
@@ -2863,13 +2866,12 @@ def main(argv=None):
             return 2
 
     run_utc = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    hub_sha = hub_stamp()
-
     if issue_mode:
         if len(repos) != 1:
             print("--issue takes exactly one cataloged repo", file=sys.stderr)
             return 2
         entry = repos[0]
+        hub_sha = hub_stamp()
         try:
             findings, audited_sha = audit_repo(entry, spec, a.branch)
         except ShallowCloneError as e:
@@ -2892,7 +2894,7 @@ def main(argv=None):
         return 0
 
     override = f" | branch override {a.branch}" if a.branch else ""
-    print(f"audit run {run_utc} | hub {hub_sha}{override}")
+    print(f"audit run {run_utc} | hub {hub_stamp()}{override}")
     _, from_remote = hub_name()
     if not from_remote:
         print(

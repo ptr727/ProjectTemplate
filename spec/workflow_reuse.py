@@ -290,7 +290,7 @@ def render_report(rows, unreadable, empty, hub_sha):
 
 
 def hub_sha():
-    return audit.short_rev("HEAD")
+    return audit.hub_head()
 
 
 def _selftest():
