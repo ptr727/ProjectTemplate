@@ -817,6 +817,18 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("fleet floor", result.stderr)
 
+    def test_a_manager_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
+        root = self.dir / "lib" / "node_modules"
+        self.stub(
+            "claude", "2.1.0 (Claude Code)", where=root / "@anthropic-ai" / "claude-code" / "bin"
+        )
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(self.called(), ["npm install -g @anthropic-ai/claude-code@latest"])
+        self.assertIn("still below the fleet floor 2.1.281", result.stderr)
+
     def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
         self.stub("claude", "2.1.0 (Claude Code)")
         result = self.run_script("--upgrade", "--dry-run", "claude")
@@ -898,6 +910,24 @@ class TestInstallAgents(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), AWKWARD)
+
+
+SCRIPT_PS_COPY = ROOT / "host-setup" / "windows" / "install-agents.ps1"
+
+
+class TestVersionHelperCopies(unittest.TestCase):
+    """install-agents.ps1 carries copies of install-tools.ps1's version helpers, since each script runs alone."""
+
+    def test_the_copies_match_their_source(self) -> None:
+        def body(path: Path, name: str) -> str:
+            text = path.read_text(encoding="utf-8")
+            start = text.index(f"function {name} {{")
+            return text[start : text.index("\n}\n", start)]
+
+        source = ROOT / "host-setup" / "windows" / "install-tools.ps1"
+        for name in ("Get-VersionKey", "Compare-HostVersion"):
+            with self.subTest(name=name):
+                self.assertEqual(body(SCRIPT_PS_COPY, name), body(source, name))
 
 
 PWSH = shutil.which("pwsh")
@@ -1594,6 +1624,20 @@ class TestInstallAgentsWindows(unittest.TestCase):
             "claude: at 2.1.0 after the run, still below the fleet floor 2.1.281", result.stderr
         )
         self.assertIn("claude update", self.recorded())
+
+    def test_a_manager_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
+        npm_bin = self.dir / "node_modules" / ".bin"
+        (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
+        self.own_npm(
+            self.stub("claude", "2.1.0 (Claude Code)", npm_bin),
+            self.dir,
+            "@anthropic-ai/claude-code",
+        )
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=npm_bin)
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertIn("npm install -g @anthropic-ai/claude-code@latest", self.recorded())
+        self.assertIn("still below the fleet floor 2.1.281", result.stderr)
 
     def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
         self.stub("claude", "2.1.0 (Claude Code)")

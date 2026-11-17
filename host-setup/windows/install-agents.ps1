@@ -66,6 +66,8 @@ $NOTES = [System.Collections.Generic.List[string]]::new()
 $NOTE_TEXTS = [System.Collections.Generic.List[string]]::new()
 $FAILED = [System.Collections.Generic.List[string]]::new()
 $CHANGED = [System.Collections.Generic.List[string]]::new()
+# The version Add-VersionChange last read, so the floor check judges the reading the change list shows.
+$NOW_VERSION = ''
 $TMP_DIR = ''
 $NPM_PREFIX = $null
 
@@ -284,7 +286,7 @@ function Get-ToolMinimum {
     return ''
 }
 
-# Copied from install-tools.ps1, which mirrors the host gate, since each script is fetched and run on its own.
+# Copied from install-tools.ps1, since each script is fetched and run on its own, and a test holds the two copies equal.
 function Get-VersionKey {
     param([string]$Version)
     $parts = @()
@@ -326,13 +328,11 @@ function Add-FloorNote {
 # An updater that exits cleanly and leaves the tool below its floor has not done what the run needed, so the run fails.
 # A version unreadable afterwards is warned about rather than failed, as an unreadable one is everywhere else here.
 function Test-Floor {
-    param([string]$ToolName)
+    param([string]$ToolName, [string]$Now)
     if ($script:DRY_RUN) { return }
     $minimum = Get-ToolMinimum $ToolName
     if (-not $minimum) { return }
-    $path = Get-ToolPath $ToolName
-    if (-not $path) { return }
-    $now = Get-ToolVersion $path
+    $now = $Now
     if (-not $now) {
         warn "${ToolName}: its version could not be read after the run, so it is not known to meet the fleet floor $minimum"
     } elseif ((Compare-HostVersion $now $minimum) -lt 0) {
@@ -975,6 +975,7 @@ function Add-VersionChange {
     param([string]$ToolName, [string]$Installed)
     $path = Get-ToolPath $ToolName
     $now = if ($path) { Get-ToolVersion $path } else { '' }
+    $script:NOW_VERSION = $now
     if ($now -eq $Installed) { return }
     $before = if ($Installed) { $Installed } else { '-' }
     $after = if ($now) { $now } else { '-' }
@@ -1036,7 +1037,7 @@ function Invoke-ToolUpgrade {
         return
     }
     Add-VersionChange -ToolName $ToolName -Installed $installed
-    Test-Floor $ToolName
+    Test-Floor -ToolName $ToolName -Now $script:NOW_VERSION
 
     if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
@@ -1073,7 +1074,7 @@ function Invoke-ManagerUpgrade {
         return
     }
     Add-VersionChange -ToolName $ToolName -Installed $Installed
-    Test-Floor $ToolName
+    Test-Floor -ToolName $ToolName -Now $script:NOW_VERSION
     if ($ToolName -eq 'herdr') { Invoke-HerdrAfterUpgrade }
 }
 
@@ -1106,7 +1107,7 @@ function Invoke-ToolInstall {
     $now = Get-ToolVersion $path
     $after = if ($now) { $now } else { '-' }
     $script:CHANGED.Add("$ToolName - -> $after")
-    Test-Floor $ToolName
+    Test-Floor -ToolName $ToolName -Now $now
 }
 
 function Invoke-Apply {

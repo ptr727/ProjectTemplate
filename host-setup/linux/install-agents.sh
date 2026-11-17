@@ -40,6 +40,8 @@ NOTES=()
 NOTE_TEXTS=()
 FAILED=()
 CHANGED=()
+# The version record_change last read, so the floor check judges the reading the change list shows.
+NOW_VERSION=""
 
 TMP_DIR=$(mktemp -d)
 readonly TMP_DIR
@@ -271,7 +273,7 @@ tool_minimum() {
     "$fn"
 }
 
-# Mirrors install-tools.ps1's Compare-HostVersion and the host gate, so a version reads the same in each.
+# Mirrors install-tools.ps1's Compare-HostVersion, so the two installers read a version alike.
 # Parts split on a dot, underscore, or hyphen, stop at the first non-number, and the shorter pads with zeros.
 version_parts() {
     local -a parts
@@ -314,13 +316,10 @@ floor_note() {
 # An updater that exits cleanly and leaves the tool below its floor has not done what the run needed, so the run fails.
 # A version unreadable afterwards is warned about rather than failed, as an unreadable one is everywhere else here.
 check_floor() {
-    local tool="$1" path now minimum
+    local tool="$1" now="$2" minimum
     [[ $DRY_RUN == false ]] || return 0
     minimum=$(tool_minimum "$tool")
     [[ -n $minimum ]] || return 0
-    path=$(tool_path "$tool")
-    [[ -n $path ]] || return 0
-    now=$(tool_version "$path")
     if [[ -z $now ]]; then
         warn "$tool: its version could not be read after the run, so it is not known to meet the fleet floor $minimum"
     elif version_below "$now" "$minimum"; then
@@ -875,10 +874,11 @@ report() {
 # --- Apply ---
 
 record_change() {
-    local tool="$1" installed="$2" path now=""
+    local tool="$1" installed="$2" path
+    NOW_VERSION=""
     path=$(tool_path "$tool")
-    [[ -z $path ]] || now=$(tool_version "$path")
-    [[ $now == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${now:--}")
+    [[ -z $path ]] || NOW_VERSION=$(tool_version "$path")
+    [[ $NOW_VERSION == "$installed" ]] || CHANGED+=("$tool ${installed:--} -> ${NOW_VERSION:--}")
 }
 
 upgrade_tool() {
@@ -915,7 +915,7 @@ upgrade_tool() {
         return 0
     fi
     record_change "$tool" "$installed"
-    check_floor "$tool"
+    check_floor "$tool" "$NOW_VERSION"
 
     [[ $tool != "herdr" ]] || herdr_after_upgrade
 }
@@ -951,7 +951,7 @@ manager_upgrade() {
         return 0
     fi
     record_change "$tool" "$installed"
-    check_floor "$tool"
+    check_floor "$tool" "$NOW_VERSION"
     [[ $tool != "herdr" ]] || herdr_after_upgrade
 }
 
@@ -982,7 +982,7 @@ install_tool() {
     fi
     now=$(tool_version "$path")
     CHANGED+=("$tool - -> ${now:--}")
-    check_floor "$tool"
+    check_floor "$tool" "$now"
 }
 
 apply() {
