@@ -113,7 +113,9 @@ class ManifestGapPassCase(unittest.TestCase):
 
     def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
         """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
-        self.assertIn("CLAUDE.md", audit.retired_paths(fidelity_honesty.load_spec()))
+        self.assertEqual(
+            fidelity_honesty.load_spec()["divergences"], fidelity_honesty.load_ledger()
+        )
 
 
 if __name__ == "__main__":

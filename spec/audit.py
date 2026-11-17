@@ -2519,14 +2519,13 @@ def check_hubonly_carried(run):
             )
         ]
     disp = gap_dispositions(run.spec)
-    hosted = hub_only_paths(run.spec)
     findings = []
     for path in sorted(run.tree & deletion_candidates(run.spec)):
         kind = disp.get(path, ("", ""))[0]
         if kind == "accepted":
             continue
         if kind == "retire":
-            if path in hosted:
+            if path in hub_tracked():
                 text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
             else:
                 text = f"hub-only: delete this repo's {path} - the fleet retired it, no repo carries it, and nothing replaces it (read its spec/divergences.json 'gaps' reason before deleting)"
