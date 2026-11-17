@@ -790,6 +790,16 @@ class TestInstallAgents(unittest.TestCase):
             notes,
         )
 
+    def test_an_unreadable_claude_version_is_noted_and_warned_about_but_never_fails(self) -> None:
+        self.stub("claude", "Claude Code")
+        self.assertEqual(
+            self.report()["claude"]["notes"],
+            ["its version could not be read, so it is not known to meet the fleet floor 2.1.281"],
+        )
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("could not be read after the run", result.stderr)
+
     def test_an_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
         self.stub("claude", "2.1.0 (Claude Code)")
         result = self.run_script("--upgrade", "--yes", "claude")
@@ -837,6 +847,9 @@ class TestInstallAgents(unittest.TestCase):
             ("2.0.999", "2.1.281", True),
             ("3.0.0", "2.1.281", False),
             ("2.1.09", "2.1.10", True),
+            ("2.1.281-1", "2.1.281", False),
+            ("2.1", "2.1.0", False),
+            ("2.1.281.0", "2.1.282", True),
         ]:
             with self.subTest(have=have, want=want):
                 result = subprocess.run(
@@ -1543,10 +1556,35 @@ class TestInstallAgentsWindows(unittest.TestCase):
         )
 
     def test_the_report_compares_the_floor_by_number(self) -> None:
-        for banner in ("2.1.281 (Claude Code)", "2.1.1000 (Claude Code)", "2.1.281-beta.1"):
+        for banner in (
+            "2.1.281 (Claude Code)",
+            "2.1.1000 (Claude Code)",
+            "2.1.281-beta.1",
+            "2.1.281-1",
+        ):
             with self.subTest(banner=banner):
                 self.stub("claude", banner)
                 self.assertEqual(self.claude_notes(), [])
+
+    def test_the_report_says_upgrade_does_not_fix_a_floor_it_will_not_run(self) -> None:
+        links = self.dir / "Microsoft" / "WinGet" / "Links"
+        self.stub("claude", "2.1.0 (Claude Code)", links)
+        result = self.run_script("-Json", "claude", extra_path=links)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "at 2.1.0, below the fleet floor 2.1.281, which -Upgrade does not fix here, per the note above",
+            json.loads(result.stdout)["tools"][0]["notes"],
+        )
+
+    def test_an_unreadable_claude_version_is_noted_and_warned_about_but_never_fails(self) -> None:
+        self.stub("claude", "Claude Code")
+        self.assertEqual(
+            self.claude_notes(),
+            ["its version could not be read, so it is not known to meet the fleet floor 2.1.281"],
+        )
+        result = self.run_script("-Upgrade", "-Yes", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("could not be read after the run", result.stderr)
 
     def test_an_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
         self.stub("claude", "2.1.0 (Claude Code)")

@@ -180,7 +180,7 @@ opencode-ai among them, is reported with the command that removes it and is neve
 --upgrade and --install leave opencode alone while one is first on PATH, and act on the managed
 copy once none is.
 
-claude carries a fleet floor, 2.1.281. --report notes a copy below it, and --upgrade or --install
+claude carries a fleet floor, recorded once in this script. --report notes a copy below it, and --upgrade or --install
 fails that tool where its updater or installer leaves it below.
 
 --json writes one object: "schema" (1), "platform" ("linux"), "tools", one entry per tool with
@@ -271,15 +271,27 @@ tool_minimum() {
     "$fn"
 }
 
-# A suffix such as a prerelease tag is ignored, so 2.1.281-beta reads as 2.1.281.
+# Mirrors install-tools.ps1's Compare-HostVersion and the host gate, so a version reads the same in each.
+# Parts split on a dot, underscore, or hyphen, stop at the first non-number, and the shorter pads with zeros.
+version_parts() {
+    local -a parts
+    local part
+    IFS='._-' read -r -a parts <<<"$1"
+    for part in "${parts[@]}"; do
+        [[ $part =~ ^[0-9]+$ ]] || break
+        printf '%s\n' "$((10#$part))"
+    done
+}
+
 version_below() {
     local -a have want
-    local i
-    IFS=. read -r -a have <<<"${1%%[!0-9.]*}"
-    IFS=. read -r -a want <<<"${2%%[!0-9.]*}"
-    for ((i = 0; i < 3; i++)); do
-        ((10#${have[i]:-0} < 10#${want[i]:-0})) && return 0
-        ((10#${have[i]:-0} > 10#${want[i]:-0})) && return 1
+    local i n
+    mapfile -t have < <(version_parts "$1")
+    mapfile -t want < <(version_parts "$2")
+    n=$((${#have[@]} > ${#want[@]} ? ${#have[@]} : ${#want[@]}))
+    for ((i = 0; i < n; i++)); do
+        ((${have[i]:-0} < ${want[i]:-0})) && return 0
+        ((${have[i]:-0} > ${want[i]:-0})) && return 1
     done
     return 1
 }

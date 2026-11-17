@@ -1477,6 +1477,17 @@ class TestRegistration(StampCase):
                 self.assertIn("is required", r.stderr)
                 self.assertEqual(self._settings(), shape)
 
+    def test_a_misshapen_plugin_configs_reports_the_refusal_rather_than_an_absence(self):
+        self.install()
+        data = self._settings()
+        data["pluginConfigs"]["agents-md@builtin"]["options"] = "x"
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("pluginConfigs.agents-md@builtin.options` as str", r.stdout)
+        self.assertIn("a re-run refuses the file", r.stdout)
+        self.assertNotIn("is absent rather than", r.stdout)
+
     def test_a_duplicated_hook_registration_reports_stale(self):
         self.install()
         data = self._settings()

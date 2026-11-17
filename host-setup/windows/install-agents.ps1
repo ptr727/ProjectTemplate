@@ -134,7 +134,7 @@ is first on PATH, and act on the managed package once none is. Where npm cannot 
 prefix, only an npm copy whose shim names opencode-ai is told from the managed package, and any
 other npm copy is handled as any npm copy is.
 
-claude carries a fleet floor, 2.1.281. -Report notes a copy below it, and -Upgrade or -Install
+claude carries a fleet floor, recorded once in this script. -Report notes a copy below it, and -Upgrade or -Install
 fails that tool where its updater or installer leaves it below.
 
 -Json writes one object: "schema" (1), "platform" ("windows"), "tools", one entry per tool with
@@ -284,18 +284,28 @@ function Get-ToolMinimum {
     return ''
 }
 
-# A suffix such as a prerelease tag is ignored, so 2.1.281-beta reads as 2.1.281.
-function Test-VersionBelow {
-    param([string]$Have, [string]$Want)
-    $a = @(($Have -replace '[^0-9.].*$', '') -split '\.')
-    $b = @(($Want -replace '[^0-9.].*$', '') -split '\.')
-    for ($i = 0; $i -lt 3; $i++) {
-        $x = if ($i -lt $a.Count -and $a[$i]) { [long]$a[$i] } else { 0 }
-        $y = if ($i -lt $b.Count -and $b[$i]) { [long]$b[$i] } else { 0 }
-        if ($x -lt $y) { return $true }
-        if ($x -gt $y) { return $false }
+# Copied from install-tools.ps1, which mirrors the host gate, since each script is fetched and run on its own.
+function Get-VersionKey {
+    param([string]$Version)
+    $parts = @()
+    foreach ($part in ($Version -split '[._-]')) {
+        if ($part -match '^\d+$') { $parts += [int]$part } else { break }
     }
-    return $false
+    if ($parts.Count -eq 0) { return , @(0) }
+    return , $parts
+}
+
+function Compare-HostVersion {
+    param([string]$Left, [string]$Right)
+    $a = Get-VersionKey $Left
+    $b = Get-VersionKey $Right
+    for ($i = 0; $i -lt [Math]::Max($a.Count, $b.Count); $i++) {
+        $x = if ($i -lt $a.Count) { $a[$i] } else { 0 }
+        $y = if ($i -lt $b.Count) { $b[$i] } else { 0 }
+        if ($x -lt $y) { return -1 }
+        if ($x -gt $y) { return 1 }
+    }
+    return 0
 }
 
 function Add-FloorNote {
@@ -304,7 +314,7 @@ function Add-FloorNote {
     if (-not $minimum) { return }
     if (-not $Installed) {
         note $ToolName "its version could not be read, so it is not known to meet the fleet floor $minimum"
-    } elseif (Test-VersionBelow -Have $Installed -Want $minimum) {
+    } elseif ((Compare-HostVersion $Installed $minimum) -lt 0) {
         if ($Upgrades) {
             note $ToolName "at $Installed, below the fleet floor $minimum, -Upgrade updates it"
         } else {
@@ -325,7 +335,7 @@ function Test-Floor {
     $now = Get-ToolVersion $path
     if (-not $now) {
         warn "${ToolName}: its version could not be read after the run, so it is not known to meet the fleet floor $minimum"
-    } elseif (Test-VersionBelow -Have $now -Want $minimum) {
+    } elseif ((Compare-HostVersion $now $minimum) -lt 0) {
         warn "${ToolName}: at $now after the run, still below the fleet floor $minimum"
         $script:FAILED.Add($ToolName)
     }

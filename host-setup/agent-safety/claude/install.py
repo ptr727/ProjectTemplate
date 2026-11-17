@@ -1425,7 +1425,18 @@ def registration_problems(claude_home):
     for _, rule in MANAGED_PERMISSIONS:
         if not isinstance(allow, list) or rule not in allow:
             out.append(f"the permission rule {rule} is absent from settings.json")
-    for plugin in INSTRUCTION_FILES_PLUGINS:
+    misshapen = [
+        (path, held, want)
+        for path, want in INSTRUCTION_FILES_SHAPE
+        if (held := at(data, path)) is not MISSING and not isinstance(held, want)
+    ]
+    for path, held, want in misshapen[:1]:
+        out.append(
+            f"settings.json has `{path.replace('/', '.')}` as {type(held).__name__} where "
+            f"{want.__name__} is required, so the instructionFiles setting cannot be read and a "
+            "re-run refuses the file"
+        )
+    for plugin in INSTRUCTION_FILES_PLUGINS if not misshapen else ():
         held = at(data, f"pluginConfigs/{plugin}/options/instructionFiles")
         if held != INSTRUCTION_FILES:
             why = "is absent" if held is MISSING else f"is {held!r}"
