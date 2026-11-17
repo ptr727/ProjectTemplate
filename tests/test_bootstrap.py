@@ -1015,7 +1015,7 @@ $wanted = @(
     'Resolve-Directory', 'Invoke-Tool', 'Invoke-SkillsInstall',
     'Show-Report', 'Test-Elevated', 'Test-AgentsUser', 'Invoke-Upgrade', 'Invoke-AgentsInstall', 'Unlock-Directory', 'main',
     'Invoke-AgentSetup', 'Invoke-AgentStatus', 'Resolve-Mode', 'Save-SourceCommitEnv', 'Restore-SourceCommitEnv',
-    'Invoke-RestoreSecrets', 'Invoke-StandUp', 'Invoke-Mode'
+    'Invoke-SecretRestore', 'Invoke-StandUp', 'Invoke-Mode'
 )
 foreach ($definition in $ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $wanted -contains $node.Name }, $true)) {
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -2722,12 +2722,12 @@ class TestPowerShellToolHandoff(unittest.TestCase):
         )
 
     def test_a_restore_pulls_exactly_the_named_buckets(self) -> None:
-        result = self.run_restore("Invoke-RestoreSecrets", ["alpha,beta"])
+        result = self.run_restore("Invoke-SecretRestore", ["alpha,beta"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), [POWERSHELL_SECRETS_STEPS[1]], result.stdout)
 
     def test_separate_words_restore_the_same_buckets(self) -> None:
-        result = self.run_restore("Invoke-RestoreSecrets", ["alpha", "beta"])
+        result = self.run_restore("Invoke-SecretRestore", ["alpha", "beta"])
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.steps(), [POWERSHELL_SECRETS_STEPS[1]], result.stdout)
 

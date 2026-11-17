@@ -594,7 +594,7 @@ function Invoke-AgentsInstall {
 }
 
 # Only the buckets named are pulled.
-function Invoke-RestoreSecrets {
+function Invoke-SecretRestore {
     Invoke-Tool -Tool 'restore-secrets.ps1' -Arguments '-Bucket', ($script:SECRET_NAMES -join ',')
 }
 
@@ -616,7 +616,7 @@ function Invoke-StandUp {
     if ($script:SECRETS_GIVEN) {
         # Only op is missing here, since -Dev installs the optional tools and both profiles install the interpreter.
         if ($Kind -eq 'host') { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install', 'op' }
-        Invoke-RestoreSecrets
+        Invoke-SecretRestore
     }
     Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure'
     Invoke-AgentSetup
@@ -826,7 +826,7 @@ function Invoke-Mode {
         'tools' { Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install' }
         'secrets' {
             Invoke-Tool -Tool 'install-tools.ps1' -Arguments '-Install', 'op', 'python'
-            Invoke-RestoreSecrets
+            Invoke-SecretRestore
         }
         'github' { Invoke-Tool -Tool 'setup-github.ps1' -Arguments '-Configure' }
         'skills' { Invoke-SkillsInstall }

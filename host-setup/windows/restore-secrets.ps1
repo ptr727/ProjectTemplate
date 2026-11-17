@@ -49,6 +49,21 @@ function Test-Elevated {
     return ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+# The tools installer ran in another process, so a user or machine PATH change it made is not in this one.
+# Each entry is appended rather than prepended, so a caller whose PATH already orders them keeps its own order.
+function Update-SessionPath {
+    if (-not $IsWindows) { return }
+    $present = @($env:PATH -split ';')
+    foreach ($scope in 'Machine', 'User') {
+        foreach ($dir in ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';')) {
+            if ($dir -and ($present -notcontains $dir)) {
+                $env:PATH = "$env:PATH;$dir"
+                $present += $dir
+            }
+        }
+    }
+}
+
 # The first candidate that is Python 3.11 or newer, which the sync needs.
 function Find-Python {
     $candidates = @(
@@ -87,10 +102,12 @@ function main {
     if ($DRY_RUN) { $arguments += '--dry-run' }
     if ($ASSUME_YES) { $arguments += '--yes' }
 
+    Update-SessionPath
+
     # A dry run on a host that has not installed op yet prints the command rather than failing on the missing tool.
     $hasOp = [bool](Get-Command op -ErrorAction SilentlyContinue)
     if ($DRY_RUN -and -not $hasOp) {
-        Write-Host "Would run: python $sync $($arguments -join ' ')"
+        Write-Host "Would run the sync: $sync $($arguments -join ' ')"
         exit 0
     }
     if (-not $hasOp) { die 'op is not installed. install-tools.ps1 -Install op provides it, so run that first.' }

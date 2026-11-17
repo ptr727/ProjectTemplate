@@ -97,7 +97,7 @@ main() {
 
     # A dry run on a host that has not installed op yet prints the command rather than failing on the missing tool.
     if [[ $DRY_RUN == true ]] && ! command -v op >/dev/null; then
-        printf 'Would run: python3 %s %s\n' "$sync" "${args[*]}"
+        printf 'Would run the sync: %s %s\n' "$sync" "${args[*]}"
         return 0
     fi
 

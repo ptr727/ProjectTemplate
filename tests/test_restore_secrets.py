@@ -163,7 +163,7 @@ class TestLinuxScript(Case):
     def test_a_dry_run_without_op_prints_the_command_and_succeeds(self) -> None:
         result = self.run_script("--bucket", "alpha", "--dry-run", with_op=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Would run:", result.stdout)
+        self.assertIn("Would run the sync:", result.stdout)
         self.assertIn("pull --bucket alpha --dry-run", result.stdout)
         self.assertEqual(self.calls(), [])
 
@@ -273,7 +273,7 @@ class TestWindowsScript(Case):
     def test_a_dry_run_without_op_prints_the_command_and_succeeds(self) -> None:
         result = self.run_script("-Bucket", "alpha", "-DryRun", with_op=False)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Would run:", result.stdout)
+        self.assertIn("Would run the sync:", result.stdout)
         self.assertEqual(self.calls(), [])
 
     def test_a_tree_without_the_sync_is_named(self) -> None:
