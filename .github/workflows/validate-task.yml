@@ -23,12 +23,18 @@ on:
         default: ''
       # Built into the unit-test matrix by the test-matrix job, and read raw by its python-versions check and the lint job's Resolve lint Python version step.
       python-versions:
-        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
+        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix or test-matrix-file set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
         required: false
         type: string
         default: '["3.13"]'
       test-matrix:
-        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. The hook may also run a check needing that leg's environment, and a failure there fails the leg before its Python tests run. Empty runs the python-versions legs with no hook.
+        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. The hook may also run a check needing that leg's environment, and a failure there fails the leg before its Python tests run. Set at most one of this and test-matrix-file. Empty, with test-matrix-file empty too, runs the python-versions legs with no hook.
+        required: false
+        type: string
+        default: ''
+      # Read by the test-matrix job's Validate test-matrix input step, which holds it to test-matrix's own rules.
+      test-matrix-file:
+        description: Repository-relative path of a tracked file whose content is a test-matrix value. It suits a caller whose legs are written by a tool rather than in its workflow. The legs and the hook behave exactly as with test-matrix. Set at most one of this and test-matrix. A path naming no file in the checked-out tree fails the run with an error naming the path. So does a file whose content test-matrix would refuse.
         required: false
         type: string
         default: ''
@@ -51,14 +57,48 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.build.outputs.matrix }}
+      legs: ${{ steps.check.outputs.legs }}
     steps:
 
+      - name: Checkout code step
+        if: ${{ inputs.test-matrix-file != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Either input lands in one file here, so the check below and the build step read the same bytes whichever input the caller set.
       - name: Validate test-matrix input step
-        if: ${{ inputs.test-matrix != '' }}
+        id: check
         env:
           TEST_MATRIX: ${{ inputs.test-matrix }}
+          TEST_MATRIX_FILE: ${{ inputs.test-matrix-file }}
         run: |
           set -Eeuo pipefail
+          # The annotation carries caller text, so it is escaped per the workflow command encoding rules, percent first.
+          fail() {
+            local escaped=${1//'%'/%25}
+            escaped=${escaped//$'\r'/%0D}
+            escaped=${escaped//$'\n'/%0A}
+            echo "::error::$escaped"
+            exit 1
+          }
+          if [[ -n "$TEST_MATRIX" && -n "$TEST_MATRIX_FILE" ]]; then
+            fail "Set at most one of the test-matrix and test-matrix-file inputs, since both name the pytest legs."
+          fi
+          resolved="$RUNNER_TEMP/test-matrix.json"
+          if [[ -n "$TEST_MATRIX_FILE" ]]; then
+            subject="The file $TEST_MATRIX_FILE that the test-matrix-file input names"
+            if [[ ! -f "$TEST_MATRIX_FILE" ]]; then
+              fail "$subject is not a file in the checked-out tree."
+            fi
+            cp -- "$TEST_MATRIX_FILE" "$resolved"
+          elif [[ -n "$TEST_MATRIX" ]]; then
+            subject="The test-matrix input"
+            printf '%s\n' "$TEST_MATRIX" > "$resolved"
+          else
+            echo "legs=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if ! jq -e -s '
             length == 1 and (.[0] |
               type == "array" and length > 0
@@ -66,13 +106,10 @@ jobs:
                 and (.label | type == "string" and test("\\A[A-Za-z0-9_.-]{1,38}\\z"))
                 and ((has("python-version") | not) or (.["python-version"] | type == "string" and test("\\S"))))
               and ((map(.label) | unique | length) == length))
-          ' <<<"$TEST_MATRIX" >/dev/null 2>&1; then
-            escaped=${TEST_MATRIX//'%'/%25}
-            escaped=${escaped//$'\r'/%0D}
-            escaped=${escaped//$'\n'/%0A}
-            echo "::error::The test-matrix input must be a non-empty JSON array of objects, each with a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen, and a python-version, when present, that is a string with a non-whitespace character, got: $escaped"
-            exit 1
+          ' "$resolved" >/dev/null 2>&1; then
+            fail "$subject must be a non-empty JSON array of objects, each with a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen, and a python-version, when present, that is a string with a non-whitespace character, got: $(<"$resolved")"
           fi
+          echo "legs=true" >> "$GITHUB_OUTPUT"
 
       # An entry holding no non-whitespace character would otherwise run green on an interpreter nobody chose.
       # That is because setup-uv trims what it reads and then reads an empty input as an absent one.
@@ -82,7 +119,7 @@ jobs:
       # Some of those numbers uv resolves to a real interpreter rather than refusing.
       # So that shape is a second silent pass, which this check prevents rather than names as a cause.
       # The check reads the raw input rather than matrix.python-version, which by then cannot say whether its 3.2 was written 3.2 or 3.20.
-      # With test-matrix set, python-versions never expands, so this step alone guards the first entry that setup-uv reads.
+      # With either matrix input set, python-versions never expands, so this step alone guards the first entry that setup-uv reads.
       - name: Validate python-versions input step
         env:
           PYTHON_VERSIONS: ${{ inputs.python-versions }}
@@ -104,12 +141,12 @@ jobs:
       - name: Build unit-test matrix step
         id: build
         env:
-          TEST_MATRIX: ${{ inputs.test-matrix }}
+          LEGS: ${{ steps.check.outputs.legs }}
           PYTHON_VERSIONS: ${{ inputs.python-versions }}
         run: |
           set -Eeuo pipefail
-          if [[ -n "$TEST_MATRIX" ]]; then
-            matrix=$(jq -c -s '{include: .[0]}' <<<"$TEST_MATRIX")
+          if [[ "$LEGS" == "true" ]]; then
+            matrix=$(jq -c -s '{include: .[0]}' "$RUNNER_TEMP/test-matrix.json")
           else
             matrix=$(jq -c --argjson versions "$PYTHON_VERSIONS" -n '{"python-version": $versions}')
           fi
@@ -636,7 +673,7 @@ jobs:
   # The job reports success having done nothing, which is the clean skip this job promises.
   # See D1.6 for a declared Python directory with no tests/.
   # See D1.2 for the undeclared root.
-  # The matrix dimension is the interpreter, or the test-matrix leg when that is set.
+  # The matrix dimension is the interpreter, or the test-matrix leg when either matrix input is set.
   # A caller naming neither runs the single leg this job ran before the input existed.
   # A python-versions leg names an interpreter whether or not one ran.
   # So a .NET-only caller reports a Python version its Python steps never used.
@@ -663,13 +700,13 @@ jobs:
           persist-credentials: false
 
       - name: Check caller install-test-deps hook step
-        if: ${{ inputs.test-matrix != '' }}
+        if: ${{ needs.test-matrix.outputs.legs == 'true' }}
         env:
           HOOK_FOUND: ${{ hashFiles('.github/actions/install-test-deps/action.yml') != '' }}
         run: |
           set -Eeuo pipefail
           if [[ "$HOOK_FOUND" != "true" ]]; then
-            echo "::error::The test-matrix input is set but .github/actions/install-test-deps/action.yml is missing."
+            echo "::error::The test-matrix or test-matrix-file input is set but .github/actions/install-test-deps/action.yml is missing."
             exit 1
           fi
 
@@ -743,7 +780,7 @@ jobs:
           ignore-nothing-to-cache: true
 
       - name: Install Python dependencies step
-        if: ${{ steps.python.outputs.any == 'true' && inputs.test-matrix != '' }}
+        if: ${{ steps.python.outputs.any == 'true' && needs.test-matrix.outputs.legs == 'true' }}
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
@@ -776,7 +813,7 @@ jobs:
           done <<< "$PYTHON_PROJECTS"
 
       - name: Run caller install-test-deps hook step
-        if: ${{ steps.python.outputs.any == 'true' && inputs.test-matrix != '' }}
+        if: ${{ steps.python.outputs.any == 'true' && needs.test-matrix.outputs.legs == 'true' }}
         uses: ./.github/actions/install-test-deps
         with:
           leg: ${{ toJSON(matrix) }}
@@ -792,7 +829,7 @@ jobs:
         env:
           PYTHON_PROJECTS: ${{ steps.python.outputs.projects }}
           DECLARED: ${{ steps.python.outputs.declared }}
-          HOOK_LEG: ${{ inputs.test-matrix != '' }}
+          HOOK_LEG: ${{ needs.test-matrix.outputs.legs == 'true' }}
         run: |
           set -Eeuo pipefail
           # One resolve over the collected requirements files, since the glob sorts the base file last.

@@ -1773,7 +1773,7 @@ gh() {
 
         self.assertIn("uv run --no-sync pytest --cov-report=xml", job)
 
-        gate = "inputs.test-matrix != ''"
+        gate = "needs.test-matrix.outputs.legs == 'true'"
         for name in (
             "Check caller install-test-deps hook step",
             "Install Python dependencies step",
@@ -1818,8 +1818,8 @@ gh() {
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         self.assertIn("    needs: test-matrix\n", workflow.split("\n  unit-test:\n", 1)[1])
         check = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
-        self.assertIn("        if: ${{ inputs.test-matrix != '' }}\n", check)
-        match = re.search(r"jq -e -s '\n(.*?)\n +' <<<", check, re.DOTALL)
+        self.assertIn("      legs: ${{ steps.check.outputs.legs }}\n", check)
+        match = re.search(r"jq -e -s '\n(.*?)\n +' \"\$resolved\"", check, re.DOTALL)
         assert match is not None
         program = match.group(1)
 
@@ -1853,6 +1853,115 @@ gh() {
         for label, value in rejected.items():
             with self.subTest(label):
                 self.assertFalse(accepted(value))
+
+    @unittest.skipUnless(
+        shutil.which("jq") and os.name == "posix",
+        "runs the step's own script, which reads the file through jq",
+    )
+    def test_validator_test_matrix_file_takes_the_inline_input_checks(self) -> None:
+        """A matrix file runs through the same check and build as the inline input, or fails naming its path.
+
+        The step's whole script is run, then the build step's, so the file reaches the matrix the
+        way a caller's run reaches it. Each refusal is asserted to leave no legs output behind.
+        """
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
+
+        # Only a file needs the tree, and it has to be there before the check reads it.
+        checkout = yaml_step(job, "Checkout code step")
+        self.assertIn("        if: ${{ inputs.test-matrix-file != '' }}\n", checkout)
+        self.assertEqual(yaml_value(checkout, "with", "persist-credentials"), "false")
+        steps = re.findall(r"(?m)^      - name: (.*)$", job)
+        self.assertLess(
+            steps.index("Checkout code step"), steps.index("Validate test-matrix input step")
+        )
+        self.assertNotIn(
+            "        if:", yaml_step(job, "Validate test-matrix input step").split("run: |", 1)[0]
+        )
+
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        check = root / "check.sh"
+        check.write_text(
+            step_script_text(job, "Validate test-matrix input step"), encoding="utf-8", newline="\n"
+        )
+        build = root / "build.sh"
+        build.write_text(
+            step_script_text(job, "Build unit-test matrix step"), encoding="utf-8", newline="\n"
+        )
+        workspace = root / "workspace"
+        (workspace / "ci").mkdir(parents=True)
+        legs = [{"label": "minimum", "lib": "1.0.0"}, {"label": "latest", "lib": "2.0.0"}]
+        (workspace / "ci/legs.json").write_text(json.dumps(legs, indent=2), encoding="utf-8")
+        dupes = [{"label": "a"}, {"label": "a"}]
+        (workspace / "ci/dupes.json").write_text(json.dumps(dupes, indent=2), encoding="utf-8")
+        (workspace / "ci/broken.json").write_text('[{"label": "a"', encoding="utf-8")
+
+        temp = root / "runner-temp"
+        temp.mkdir()
+
+        def step(script: Path, **env: str) -> tuple[int, str, str]:
+            """Run one step's script, keeping runner-temp, since the build step reads what the check left there."""
+            output = root / "output"
+            output.write_text("", encoding="utf-8")
+            result = run(
+                [bash_or_skip(), str(script)],
+                cwd=workspace,
+                env={
+                    **os.environ,
+                    "RUNNER_TEMP": str(temp),
+                    "GITHUB_OUTPUT": str(output),
+                    "TEST_MATRIX": "",
+                    "TEST_MATRIX_FILE": "",
+                    "PYTHON_VERSIONS": '["3.13"]',
+                    **env,
+                },
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+            )
+            return result.returncode, result.stdout + result.stderr, output.read_text("utf-8")
+
+        def built(**env: str) -> object:
+            """The matrix the build step writes after a passing check, with the check's legs output."""
+            status, log, output = step(check, **env)
+            self.assertEqual(0, status, log)
+            status, log, line = step(build, LEGS=output.removeprefix("legs=").strip())
+            self.assertEqual(0, status, log)
+            return json.loads(line.removeprefix("matrix="))
+
+        # Each input builds the legs it holds, the inline one differing so a stale resolved file cannot pass for it.
+        self.assertEqual({"include": legs}, built(TEST_MATRIX_FILE="ci/legs.json"))
+        self.assertEqual({"include": legs[::-1]}, built(TEST_MATRIX=json.dumps(legs[::-1])))
+        self.assertEqual({"python-version": ["3.13"]}, built())
+
+        refused = {
+            "both inputs set": (
+                {"TEST_MATRIX": json.dumps(legs), "TEST_MATRIX_FILE": "ci/legs.json"},
+                "Set at most one of the test-matrix and test-matrix-file inputs",
+            ),
+            "a refused inline value": (
+                {"TEST_MATRIX": json.dumps(dupes)},
+                "::error::The test-matrix input must be",
+            ),
+            "a missing file": ({"TEST_MATRIX_FILE": "ci/absent.json"}, "ci/absent.json"),
+            "a directory": ({"TEST_MATRIX_FILE": "ci"}, "The file ci that"),
+            "a duplicate label": ({"TEST_MATRIX_FILE": "ci/dupes.json"}, "ci/dupes.json"),
+            "content that is not JSON": ({"TEST_MATRIX_FILE": "ci/broken.json"}, "ci/broken.json"),
+        }
+        for label, (env, named) in refused.items():
+            with self.subTest(label):
+                status, log, output = step(check, **env)
+                self.assertEqual(1, status, log)
+                self.assertRegex(log, r"(?m)^::error::")
+                self.assertIn(named, log)
+                self.assertEqual("", output)
+
+        # A refused file is quoted back whole, so a pretty-printed one reaches the annotation encoded as one line.
+        status, log, _ = step(check, TEST_MATRIX_FILE="ci/dupes.json")
+        self.assertEqual(1, status)
+        self.assertEqual(1, len(log.splitlines()), log)
+        self.assertIn("got: [%0A", log)
 
     def test_validator_pytest_leg_fans_out_over_every_named_interpreter(self) -> None:
         """A pinned interpreter drops an adopter's other legs with nothing failing or warning.
@@ -1890,7 +1999,9 @@ gh() {
         builder = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
         self.assertIn("    outputs:\n      matrix: ${{ steps.build.outputs.matrix }}\n", builder)
         self.assertIn("        id: build\n", builder)
-        self.assertIn("matrix=$(jq -c -s '{include: .[0]}' <<<\"$TEST_MATRIX\")", builder)
+        self.assertIn(
+            "matrix=$(jq -c -s '{include: .[0]}' \"$RUNNER_TEMP/test-matrix.json\")", builder
+        )
         self.assertIn("'{\"python-version\": $versions}'", builder)
         self.assertIn('jq -e -s \'length == 1 and (.[0] | type == "array"', builder)
 

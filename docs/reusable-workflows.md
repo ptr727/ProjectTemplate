@@ -87,7 +87,7 @@ The target set. A row exists once its hub task ships, and until then the row is 
 | Hub task | Hooks, at `.github/actions/<hook>` in the caller | Hub default |
 | --- | --- | --- |
 | `merge-bot-task.yml` | none, extra bot rules are a `with:` input | not applicable |
-| `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job), `install-test-deps` (a `test-matrix` leg's dependency install and per-leg checks) | no-op for `validate`, none for `install-test-deps`, which is required where `test-matrix` is set |
+| `validate-task.yml` | `validate` (a repo's own domain checks, beyond the fleet doc-lint block and the generic unit-test job), `install-test-deps` (a `test-matrix` leg's dependency install and per-leg checks) | no-op for `validate`, none for `install-test-deps`, which is required where `test-matrix` or `test-matrix-file` is set |
 | `get-version-task.yml`, `publish-plan-task.yml` | none | not applicable |
 | `build-release-task.yml` | `dotnet-publish`, `build-nuget`, `build-pypi`, `build-release-asset` | `dotnet-publish-default`, `nuget-build-default`, `pypi-build-default`, none for `build-release-asset`, which is required where `enable_release_asset` is set |
 | `build-docker-task.yml` | `docker-prepare` (extra tags, build-args, matrix), `docker-build-base` | vanilla single-target from `image`, base build required when `build-base` |
@@ -362,6 +362,7 @@ jobs:
               - '.github/actions/**'
 
   # A C# or Python repo adds secrets: with CODECOV_TOKEN mapped by name here, per D1.6.
+  # A repo keeping its pytest legs in a tracked file names it in a test-matrix-file input, once the pin reaches a release declaring one.
   validate:
     name: Validate sources job
     uses: ptr727/ProjectTemplate/.github/workflows/validate-task.yml@<hub-main-commit-sha> # <release-tag>
@@ -509,7 +510,14 @@ A repo whose pytest legs differ by dependency versions names them in `test-matri
 
 Each label is unique, 1 to 38 characters from letters, digits, underscore, dot, and hyphen, so `python-<label>` stays a valid Codecov flag. A `python-version`, when present, is a string with a non-whitespace character. The `test-matrix` job checks all of this and builds the matrix, so a malformed value fails there with a named cause.
 
-The task installs the directory's base dependencies and calls the caller's `.github/actions/install-test-deps/action.yml`. Then it runs pytest without re-syncing, so the hook's overrides survive. The hook receives a `leg` input holding the whole matrix entry as a JSON string. It also receives a `directories` input holding the resolved Python projects, one `<kind><TAB><directory>` line each. It runs at the repository root, so a repo's hook enters each directory itself. A pip directory's environment is its `.venv`. A set `test-matrix` with no hook fails the leg with an error, and an empty one runs the `python-versions` legs with no hook. The nested check then reads `Unit test job (<label>)`, which binds no ruleset.
+A repo whose legs are written by a tool keeps them in a tracked file. It names that file's path in `test-matrix-file` instead. The file holds a `test-matrix` value. The job checks the caller's tree out, reads the file, and holds its content to the same checks. Setting both inputs fails the run. A path naming no file in the checked-out tree fails it with an error naming the path, and so does content `test-matrix` would refuse.
+
+```yaml
+    with:
+      test-matrix-file: .github/test-matrix.json
+```
+
+The task installs the directory's base dependencies and calls the caller's `.github/actions/install-test-deps/action.yml`. Then it runs pytest without re-syncing, so the hook's overrides survive. The hook receives a `leg` input holding the whole matrix entry as a JSON string. It also receives a `directories` input holding the resolved Python projects, one `<kind><TAB><directory>` line each. It runs at the repository root, so a repo's hook enters each directory itself. A pip directory's environment is its `.venv`. A set `test-matrix` or `test-matrix-file` with no hook fails the leg with an error. With either set, the nested check reads `Unit test job (<label>)`, which binds no ruleset. With both empty, the `python-versions` legs run with no hook.
 
 ## Adopting the Pure Functions
 
