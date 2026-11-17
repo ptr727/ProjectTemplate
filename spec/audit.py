@@ -49,6 +49,7 @@ from fidelity_text import (
     extract_anchored,
     extract_section,
     normalize,
+    normalize_line_endings,
     section_key,
     strip_sections,
 )
@@ -1563,10 +1564,15 @@ def content_hash(text):
 
 
 def matches_hub_history(down_text, rel_path):
-    """Whether a downstream copy matches any past hub revision of rel_path, line endings aside."""
-    return down_text is not None and content_hash(down_text) in {
-        content_hash(past) for past in git_file_history(rel_path)
-    }
+    """Whether a downstream copy matches any past hub revision of rel_path, line endings aside.
+
+    Only line endings are normalized. A copy differing in an action pin or a `needs:` list was
+    changed by the repository. So it goes to the maintainer rather than to a deletion.
+    """
+    if down_text is None:
+        return False
+    copy = normalize_line_endings(down_text)
+    return any(normalize_line_endings(past) == copy for past in git_file_history(rel_path))
 
 
 def classify_verbatim(down_text, canon_text, past_texts):
