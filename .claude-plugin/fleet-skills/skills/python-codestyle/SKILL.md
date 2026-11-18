@@ -112,6 +112,10 @@ uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist (published packages only)
 ```
 
+A fleet repo keeps the carried `hub_fetch_run.py` at its root. There, each ruff command in this section takes
+`--extend-exclude ./hub_fetch_run.py --force-exclude`. The repo's own ruff config may be stricter than the hub's.
+The flags keep ruff from reporting or rewriting the helper, which stays byte-identical to the hub's copy.
+
 The **build**-profile Python clean-compile, in its uv form, is `uv run ruff format` +
 `uv run ruff check` + the repo's type checker. That checker is `uv run pyright`, or `uv run mypy`
 where mypy is the CI checker, or both where the repo runs both (see Type checking above). Where the

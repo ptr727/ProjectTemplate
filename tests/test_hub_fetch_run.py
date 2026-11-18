@@ -469,6 +469,7 @@ HELPER = "${workspaceFolder}/hub_fetch_run.py"
 TASK_SNIPPETS = ("vscode-tasks.json", "vscode-tasks-python.json")
 HUSKY_HOOK = ROOT / "catalog" / "snippets" / "husky" / "pre-commit"
 PRE_COMMIT_CONFIG = ROOT / "catalog" / "snippets" / "pre-commit" / ".pre-commit-config.yaml"
+PYPI_BUILD_ACTION = ROOT / ".github" / "actions" / "pypi-build-default" / "action.yml"
 RUFF_EXCLUDE = ("--extend-exclude", "./hub_fetch_run.py", "--force-exclude")
 
 
@@ -506,11 +507,11 @@ class LintTaskTests(unittest.TestCase):
                             with self.subTest(snippet=name, task=label, arg=arg):
                                 self.assertEqual(arg, HELPER)
 
-    def test_every_snippet_ruff_call_skips_the_root_helper(self) -> None:
+    def test_every_carried_ruff_call_skips_the_root_helper(self) -> None:
         """A carrying repo's own ruff config may be stricter than the hub's, so each call excludes the helper itself."""
         tasks = snippet_tasks("vscode-tasks-python.json")
         calls = [" ".join(tasks[label]["args"]) for label in ("ruff format", "ruff check")]
-        for path in (HUSKY_HOOK, PRE_COMMIT_CONFIG):
+        for path in (HUSKY_HOOK, PRE_COMMIT_CONFIG, PYPI_BUILD_ACTION):
             text = path.read_text(encoding="utf-8")
             calls += [
                 line
@@ -518,7 +519,7 @@ class LintTaskTests(unittest.TestCase):
                 if re.search(r"\bruff(@\S+)? (check|format)\b", line)
                 and not line.lstrip().startswith(("#", "name:"))
             ]
-        self.assertEqual(len(calls), 6)
+        self.assertEqual(len(calls), 8)
         for call in calls:
             with self.subTest(call=call):
                 self.assertIn(" ".join(RUFF_EXCLUDE), call)
