@@ -1562,6 +1562,13 @@ class TestInstallAgentsWindows(unittest.TestCase):
             "[dry run] npm install -g --allow-scripts=@opencode/cli @opencode/cli", result.stdout
         )
 
+    def test_install_runs_npm_with_the_managed_package_s_scripts_allowed(self) -> None:
+        """A real install hands npm the helper's arguments whole, so the allowance reaches npm."""
+        self.stub("npm", "npm 10.0.0")
+        # The stub installs nothing, so the run ends reporting no opencode on PATH, and only the call is checked.
+        self.run_script("-Install", "-Yes", "opencode")
+        self.assertIn("npm install -g --allow-scripts=@opencode/cli @opencode/cli", self.recorded())
+
     def test_install_runs_the_documented_codex_windows_installer(self) -> None:
         result = self.run_script("-Install", "-Yes", "-DryRun", "codex")
         self.assertEqual(result.returncode, 0, result.stderr)
