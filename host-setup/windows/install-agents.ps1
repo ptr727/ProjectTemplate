@@ -121,7 +121,7 @@ none, so an install always names what it installs, or says -All.
 
 A tool reads as "self" when no package manager owns it, so this script runs its update, and as
 the name of a package manager when one owns it. -Upgrade then runs that manager's upgrade for
-that one package: npm or bun install the latest tag, and scoop updates the app. winget is
+that one package: npm or bun install the latest tag, npm allowing that package's install scripts, and scoop updates the app. winget is
 upgraded by upgrade-host.ps1. choco needs an elevated shell and an npm directory under Program
 Files or ProgramData needs one too, so each is reported with its command and nothing is run. herdr's
 agent integrations are reinstalled after an upgrade wherever herdr reports one outdated, and a
@@ -351,6 +351,12 @@ function Get-NpmPackage {
         'opencode' { return '@opencode/cli' }
     }
     return $null
+}
+
+# From npm 12 on, a global install skips a package's install scripts unless allow-scripts names it, and opencode then cannot start.
+function Get-NpmInstallArgument {
+    param([string]$Package, [string]$Spec)
+    return @('install', '-g', "--allow-scripts=$Package", $Spec)
 }
 
 # Every npm registry name a tool has shipped under, current first.
@@ -603,7 +609,7 @@ function Get-PackageStep {
     $name = if ($pkg) { $pkg } elseif ($Step -eq 'remove') { Get-NamedNpmPackage -Tool $Tool -Path $Path } else { $null }
     if (-not $name) { $name = $recorded }
     # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-    $arguments = if ($Step -eq 'upgrade') { @('install', '-g', "$name@latest") } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
+    $arguments = if ($Step -eq 'upgrade' -and $Manager -eq 'npm') { Get-NpmInstallArgument -Package $name -Spec "$name@latest" } elseif ($Step -eq 'upgrade') { @('install', '-g', "$name@latest") } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
     $shown = "$Manager $($arguments -join ' ')"
     if (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
         $plan.Why = "$Manager is not on PATH, so run: $shown"
@@ -791,7 +797,7 @@ $TOOLS = @(
     }
     @{
         Name    = 'opencode'
-        Source  = "npm install -g $(Get-NpmPackage -Tool 'opencode')"
+        Source  = "npm $((Get-NpmInstallArgument -Package (Get-NpmPackage -Tool 'opencode') -Spec (Get-NpmPackage -Tool 'opencode')) -join ' ')"
         # The managed copy is the npm package Get-NpmPackage records, upgraded through npm's plan, so no Upgrade of its own runs.
         Managed = $true
         Install = {
@@ -799,7 +805,8 @@ $TOOLS = @(
                 warn "opencode installs on Windows as the npm package $(Get-NpmPackage -Tool 'opencode'), and npm is not installed (https://opencode.ai/docs/)"
                 return 1
             }
-            return (Invoke-Step -Command 'npm' -Arguments @('install', '-g', (Get-NpmPackage -Tool 'opencode')))
+            $package = Get-NpmPackage -Tool 'opencode'
+            return (Invoke-Step -Command 'npm' -Arguments (Get-NpmInstallArgument -Package $package -Spec $package))
         }
     }
     @{
