@@ -1758,6 +1758,25 @@ gh() {
         self.assertIn("uv pip install -e .", job)
         self.assertIn('"project" not in tomllib.load', job)
 
+    def test_validator_pre_test_hook_runs_before_the_dotnet_tests(self) -> None:
+        """A caller's system tools reach the runner before the .NET tests, and only where it carries the hook."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
+        order = [
+            job.index("name: Checkout code step"),
+            job.index("name: Run caller pre-test hook step"),
+            job.index("name: Setup .NET SDK step"),
+            job.index("name: Run unit tests step"),
+        ]
+        self.assertEqual(sorted(order), order)
+        hook = job.split("- name: Run caller pre-test hook step\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(
+            hook,
+            "        if: hashFiles('**/*Tests*.csproj') != ''"
+            " && hashFiles('.github/actions/pre-test/action.yml') != ''\n"
+            "        uses: ./.github/actions/pre-test",
+        )
+
     def test_validator_test_matrix_hook_runs_between_install_and_pytest(self) -> None:
         """A dependency-version leg overrides installed versions after the base install and before pytest."""
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
