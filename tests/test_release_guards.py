@@ -1773,7 +1773,8 @@ gh() {
         self.assertEqual(
             hook,
             "        if: hashFiles('**/*Tests*.csproj') != ''"
-            " && hashFiles('.github/actions/pre-test/action.yml') != ''\n"
+            " && hashFiles('.github/actions/pre-test/action.yml',"
+            " '.github/actions/pre-test/action.yaml') != ''\n"
             "        uses: ./.github/actions/pre-test",
         )
 
@@ -1790,7 +1791,14 @@ gh() {
         ]
         self.assertEqual(sorted(order), order)
 
-        self.assertIn("is set but .github/actions/install-test-deps/action.yml is missing", job)
+        self.assertIn(
+            "is set but .github/actions/install-test-deps/ holds no action.yml or action.yaml", job
+        )
+        self.assertIn(
+            "hashFiles('.github/actions/install-test-deps/action.yml',"
+            " '.github/actions/install-test-deps/action.yaml')",
+            job,
+        )
         self.assertIn("leg: ${{ toJSON(matrix) }}", job)
 
         self.assertIn("uv run --no-sync pytest --cov-report=xml", job)

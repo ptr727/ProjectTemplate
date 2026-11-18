@@ -703,17 +703,17 @@ jobs:
       - name: Check caller install-test-deps hook step
         if: ${{ needs.test-matrix.outputs.legs == 'true' }}
         env:
-          HOOK_FOUND: ${{ hashFiles('.github/actions/install-test-deps/action.yml') != '' }}
+          HOOK_FOUND: ${{ hashFiles('.github/actions/install-test-deps/action.yml', '.github/actions/install-test-deps/action.yaml') != '' }}
         run: |
           set -Eeuo pipefail
           if [[ "$HOOK_FOUND" != "true" ]]; then
-            echo "::error::The test-matrix or test-matrix-file input is set but .github/actions/install-test-deps/action.yml is missing."
+            echo "::error::The test-matrix or test-matrix-file input is set but .github/actions/install-test-deps/ holds no action.yml or action.yaml."
             exit 1
           fi
 
       # A system tool a .NET test shells out to must reach the runner before the tests, which no later hook can do.
       - name: Run caller pre-test hook step
-        if: hashFiles('**/*Tests*.csproj') != '' && hashFiles('.github/actions/pre-test/action.yml') != ''
+        if: hashFiles('**/*Tests*.csproj') != '' && hashFiles('.github/actions/pre-test/action.yml', '.github/actions/pre-test/action.yaml') != ''
         uses: ./.github/actions/pre-test
 
       # The caller's global.json selects the SDK line, or the dotnet-sdk action's fallback line where it carries none yet.
