@@ -151,6 +151,49 @@ SHORT_NAME_PINS = {
     "coderabbit": "coderabbit",
     "pr-agent-settings": "pragent",
 }
+CARRIED_PATH_PINS = frozenset(
+    {
+        ".codecov.yml",
+        ".dockerignore",
+        ".editorconfig",
+        ".editorconfig-checker.json",
+        ".gitattributes",
+        ".github/copilot-instructions.md",
+        ".github/dependabot.yml",
+        ".github/workflows/build-release-task.yml",
+        ".github/workflows/deploy-site-task.yml",
+        ".github/workflows/deploy-site.yml",
+        ".github/workflows/merge-bot-pull-request.yml",
+        ".github/workflows/publish-release.yml",
+        ".github/workflows/test-pull-request.yml",
+        ".github/workflows/validate-task.yml",
+        ".gitignore",
+        ".markdownlint-cli2.jsonc",
+        ".vscode/tasks.json",
+        "AGENTS.md",
+        "AUDIT.md",
+        "CLAUDE.md",
+        "CODESTYLE.md",
+        "Docker/README.md",
+        "GOVERNANCE.md",
+        "HISTORY.md",
+        "OPERATIONS.md",
+        "README.md",
+        "WORKFLOW.md",
+        "codecov.yml",
+        "cspell.json",
+        "global.json",
+        "host-tools.json",
+        "repo-config/README.md",
+        "repo-config/configure.sh",
+        "repo-config/develop.json",
+        "repo-config/main.json",
+        "repo-config/operational/develop.json",
+        "repo-config/settings.json",
+        "spec/secrets.json",
+        "version.json",
+    }
+)
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
 GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
@@ -1004,6 +1047,60 @@ def secret_scope_errors(secrets, repos):
             secret_names.secret_plan(secrets, repo, None, name)
         except secret_names.SecretNameError as e:
             errors.append(f"registry entry {name}: {e}")
+    return errors
+
+
+def gap_scope_errors(gaps, repo_names):
+    """Errors in the `gaps` rows' scoping, and the paths holding a fleet-wide row.
+
+    A row scoped by `repos` records those repositories keeping their own copy, so it may only accept.
+    A path holds at most one fleet-wide row, since the audit reads one disposition per path.
+    """
+    errors = []
+    fleet = set()
+    for g in gaps:
+        if not isinstance(g, dict) or not isinstance(g.get("path"), str):
+            continue  # the ledger loop already reports a malformed row
+        gp = g["path"]
+        if "repos" not in g:
+            if gp in fleet:
+                errors.append(f"divergences.json: gap '{gp}' has more than one fleet-wide row")
+            fleet.add(gp)
+            continue
+        if not is_str_list(g["repos"]) or not g["repos"]:
+            errors.append(
+                f"divergences.json: gap '{gp}' repos must be a non-empty array of strings"
+            )
+        else:
+            errors.extend(
+                f"divergences.json: gap '{gp}' repo '{rn}' not in the registry"
+                for rn in g["repos"]
+                if rn not in repo_names
+            )
+        if g.get("disposition") != "accepted":
+            errors.append(
+                f"divergences.json: gap '{gp}' is scoped by repos, so its disposition must be 'accepted', a keep decision for those repos alone"
+            )
+    return errors, fleet
+
+
+def dropped_carry_errors(baseline_paths, gap_paths, root, pins=None):
+    """Each baseline path is pinned, and each pinned path dropped from both the manifest and the hub has a `gaps` row.
+
+    The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
+    A drop the hub also deletes leaves no hub-only path to report a downstream copy by, so the row is owed.
+    A tree's files are not pinned, since a pruned tree already reports a copy its source no longer holds.
+    """
+    pins = CARRIED_PATH_PINS if pins is None else pins
+    errors = [
+        f"files.json: baseline path '{p}' has no line in spec/validate.py CARRIED_PATH_PINS, so a later drop of it goes unseen"
+        for p in sorted(baseline_paths - pins)
+    ]
+    for p in sorted(pins - baseline_paths - gap_paths):
+        if not (root / p).exists():
+            errors.append(
+                f"files.json: '{p}' was a carried file, and the manifest and the hub both dropped it, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
+            )
     return errors
 
 
@@ -2083,6 +2180,19 @@ def main(argv=()):
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
                 errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
             errors.extend(investigate_tracking_errors(f"gap '{gp}'", g))
+        scope_errors, fleet_gap_paths = gap_scope_errors(div_gaps, repo_names)
+        errors.extend(scope_errors)
+        errors.extend(
+            dropped_carry_errors(
+                {
+                    i["path"]
+                    for i in baseline
+                    if isinstance(i, dict) and isinstance(i.get("path"), str)
+                },
+                fleet_gap_paths,
+                ROOT,
+            )
+        )
 
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 

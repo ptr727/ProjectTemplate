@@ -36,6 +36,12 @@
                     "path": { "type": "string" },
                     "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire"] },
                     "reason": { "type": "string" },
+                    "repos": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "description": "Registry names of the repositories this row alone covers, recording that each keeps its own copy of the path. Absent, the row covers the whole fleet. spec/validate.py allows it only on an accepted row, so a path holds one fleet-wide row beside any number of scoped ones."
+                    },
                     "tracking": {
                         "type": ["string", "null"],
                         "description": "Where the decision or the remediation this entry records is tracked, such as owner/repo#123. Required on an investigate entry, per $defs/investigateNeedsTracking."

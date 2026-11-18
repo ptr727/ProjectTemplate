@@ -2769,6 +2769,89 @@ class PlaceholderErrorsCase(unittest.TestCase):
         self.assertIn(marker, out.getvalue())
 
 
+class DroppedCarryCase(unittest.TestCase):
+    """A carried file the manifest and the hub both drop owes a gaps row, since nothing else reports its copies."""
+
+    PINS = frozenset({"KEPT.md", "GONE.md", "HOSTED.md"})
+
+    def errors(self, baseline: set[str], gaps: set[str]) -> list[str]:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "HOSTED.md").write_text("still tracked\n", encoding="utf-8")
+            return validate.dropped_carry_errors(baseline, gaps, root, self.PINS)
+
+    def test_a_drop_the_hub_also_deleted_needs_a_row(self) -> None:
+        self.assertEqual(
+            self.errors({"KEPT.md"}, set()),
+            [
+                "files.json: 'GONE.md' was a carried file, and the manifest and the hub both dropped it, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
+            ],
+        )
+
+    def test_a_row_or_a_hub_copy_settles_the_drop(self) -> None:
+        """The hub still holding HOSTED.md makes it hub-only, which the audit reports without a row."""
+        self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md"}), [])
+
+    def test_an_unpinned_baseline_path_is_reported(self) -> None:
+        self.assertEqual(
+            self.errors({"KEPT.md", "GONE.md", "NEW.md"}, set()),
+            [
+                "files.json: baseline path 'NEW.md' has no line in spec/validate.py CARRIED_PATH_PINS, so a later drop of it goes unseen"
+            ],
+        )
+
+    def test_the_shipped_manifest_and_ledger_are_clean(self) -> None:
+        baseline = {e["path"] for e in validate.load("spec/files.json")["baseline"]}
+        _, fleet = validate.gap_scope_errors(validate.load("spec/divergences.json")["gaps"], set())
+        self.assertEqual(validate.dropped_carry_errors(baseline, fleet, validate.ROOT), [])
+
+
+class GapScopeCase(unittest.TestCase):
+    """A gaps row scoped by repos is one repository's keep decision, and a path holds one fleet-wide row."""
+
+    def test_a_scoped_keep_beside_a_fleet_row_is_clean(self) -> None:
+        gaps = [
+            {"path": "CLAUDE.md", "disposition": "retire", "reason": "r"},
+            {"path": "CLAUDE.md", "disposition": "accepted", "reason": "r", "repos": ["A"]},
+        ]
+        self.assertEqual(validate.gap_scope_errors(gaps, {"A"}), ([], {"CLAUDE.md"}))
+
+    def test_each_scoping_defect_is_reported(self) -> None:
+        gaps = [
+            {"path": "a.md", "disposition": "retire", "reason": "r"},
+            {"path": "a.md", "disposition": "accepted", "reason": "r"},
+            {"path": "b.md", "disposition": "retire", "reason": "r", "repos": ["A"]},
+            {"path": "c.md", "disposition": "accepted", "reason": "r", "repos": ["Nobody"]},
+            {"path": "d.md", "disposition": "accepted", "reason": "r", "repos": []},
+        ]
+        errors, fleet = validate.gap_scope_errors(gaps, {"A"})
+        self.assertEqual(
+            errors,
+            [
+                "divergences.json: gap 'a.md' has more than one fleet-wide row",
+                "divergences.json: gap 'b.md' is scoped by repos, so its disposition must be 'accepted', a keep decision for those repos alone",
+                "divergences.json: gap 'c.md' repo 'Nobody' not in the registry",
+                "divergences.json: gap 'd.md' repos must be a non-empty array of strings",
+            ],
+        )
+        self.assertEqual(fleet, {"a.md"})
+
+    def test_the_gate_reaches_both_checks(self) -> None:
+        """Deleting either call site leaves every helper test above green, so run the gate's own entry point."""
+        for name in ("gap_scope_errors", "dropped_carry_errors"):
+            with self.subTest(check=name):
+                marker = f"fixture {name} error"
+                value: object = ([marker], set()) if name == "gap_scope_errors" else [marker]
+                out = io.StringIO()
+                with (
+                    unittest.mock.patch.object(validate, name, return_value=value),
+                    contextlib.redirect_stdout(out),
+                ):
+                    status = validate.main([])
+                self.assertEqual(status, 1)
+                self.assertIn(marker, out.getvalue())
+
+
 class InvestigateTrackingWiringCase(unittest.TestCase):
     """The helper is wired into both ledger loops, which no test of the helper alone can show.
 

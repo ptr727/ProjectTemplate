@@ -106,12 +106,9 @@ def fidelity_pass(spec):
             spreads.append((unit, None))
             continue
         canon_hash = audit.content_hash(canon)
-        # Hash each past revision's same region (a section may be absent in an old revision -> skip it).
-        history = set()
-        for t in audit.git_file_history(canon_path):
-            region = t if extract is None else extract(t)
-            if region is not None:
-                history.add(audit.content_hash(region))
+        history = audit.history_keys(
+            t if extract is None else extract(t) for t in audit.git_file_history(canon_path)
+        )
         spread = {"match": [], "stale": [], "differs": [], "absent": [], "unavailable": []}
         for r in repos:
             sel = audit.repo_selectors(r, defaults)
@@ -248,6 +245,7 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
         g
         for g in ledger.get("gaps", [])
         if isinstance(g, dict)
+        and "repos" not in g
         and isinstance(g.get("path"), str)
         and isinstance(g.get("disposition"), str)
         and isinstance(g.get("reason"), str)
