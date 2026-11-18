@@ -121,7 +121,8 @@ none, so an install always names what it installs, or says -All.
 
 A tool reads as "self" when no package manager owns it, so this script runs its update, and as
 the name of a package manager when one owns it. -Upgrade then runs that manager's upgrade for
-that one package: npm or bun install the latest tag, npm allowing that package's install scripts, and scoop updates the app. winget is
+that one package: npm or bun install the latest tag, and scoop updates the app. An npm install
+also allows that one package's install scripts, which npm 12 otherwise skips. winget is
 upgraded by upgrade-host.ps1. choco needs an elevated shell and an npm directory under Program
 Files or ProgramData needs one too, so each is reported with its command and nothing is run. herdr's
 agent integrations are reinstalled after an upgrade wherever herdr reports one outdated, and a
