@@ -405,6 +405,7 @@ jobs:
 
       # A declared pip directory runs the ruff its venv installs, so a version its requirements pin is the one CI runs.
       # It falls back to uvx only where the venv holds none.
+      # Each ruff call skips a carried root hub_fetch_run.py, which the hub lints at its source.
       - name: Lint Python step
         if: steps.python.outputs.any == 'true'
         env:
@@ -418,11 +419,11 @@ jobs:
             [ -n "$dir" ] || continue
             echo "ruff check in $dir"
             if [ "$kind" = uv ]; then
-              (cd "$dir" && uv run ruff check .) < /dev/null
+              (cd "$dir" && uv run ruff check --extend-exclude ./hub_fetch_run.py --force-exclude .) < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && "$dir/.venv/bin/python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("ruff") is None)' < /dev/null; then
-              (cd "$dir" && .venv/bin/python -m ruff check .) < /dev/null
+              (cd "$dir" && .venv/bin/python -m ruff check --extend-exclude ./hub_fetch_run.py --force-exclude .) < /dev/null
             else
-              (cd "$dir" && uvx "ruff@$RUFF_VERSION" check .) < /dev/null
+              (cd "$dir" && uvx "ruff@$RUFF_VERSION" check --extend-exclude ./hub_fetch_run.py --force-exclude .) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 
@@ -439,11 +440,11 @@ jobs:
             [ -n "$dir" ] || continue
             echo "ruff format --check in $dir"
             if [ "$kind" = uv ]; then
-              (cd "$dir" && uv run ruff format --check .) < /dev/null
+              (cd "$dir" && uv run ruff format --check --extend-exclude ./hub_fetch_run.py --force-exclude .) < /dev/null
             elif [ "$kind" = pip ] && [ "$DECLARED" = "true" ] && "$dir/.venv/bin/python" -c 'import importlib.util, sys; sys.exit(importlib.util.find_spec("ruff") is None)' < /dev/null; then
-              (cd "$dir" && .venv/bin/python -m ruff format --check .) < /dev/null
+              (cd "$dir" && .venv/bin/python -m ruff format --check --extend-exclude ./hub_fetch_run.py --force-exclude .) < /dev/null
             else
-              (cd "$dir" && uvx "ruff@$RUFF_VERSION" format --check .) < /dev/null
+              (cd "$dir" && uvx "ruff@$RUFF_VERSION" format --check --extend-exclude ./hub_fetch_run.py --force-exclude .) < /dev/null
             fi
           done <<< "$PYTHON_PROJECTS"
 

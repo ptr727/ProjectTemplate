@@ -468,6 +468,8 @@ LINT_TASKS = {
 HELPER = "${workspaceFolder}/hub_fetch_run.py"
 TASK_SNIPPETS = ("vscode-tasks.json", "vscode-tasks-python.json")
 HUSKY_HOOK = ROOT / "catalog" / "snippets" / "husky" / "pre-commit"
+PRE_COMMIT_CONFIG = ROOT / "catalog" / "snippets" / "pre-commit" / ".pre-commit-config.yaml"
+RUFF_EXCLUDE = ("--extend-exclude", "./hub_fetch_run.py", "--force-exclude")
 
 
 def snippet_tasks(name: str) -> dict[str, dict]:
@@ -499,10 +501,27 @@ class LintTaskTests(unittest.TestCase):
         for name in TASK_SNIPPETS:
             for label, task in snippet_tasks(name).items():
                 for form in self.forms(task) if "command" in task else []:
-                    for arg in form:
-                        if arg.endswith("hub_fetch_run.py"):
+                    for prev, arg in zip(["", *form], form, strict=False):
+                        if arg.endswith("hub_fetch_run.py") and prev != "--extend-exclude":
                             with self.subTest(snippet=name, task=label, arg=arg):
                                 self.assertEqual(arg, HELPER)
+
+    def test_every_snippet_ruff_call_skips_the_root_helper(self) -> None:
+        """A carrying repo's own ruff config may be stricter than the hub's, so each call excludes the helper itself."""
+        tasks = snippet_tasks("vscode-tasks-python.json")
+        calls = [" ".join(tasks[label]["args"]) for label in ("ruff format", "ruff check")]
+        for path in (HUSKY_HOOK, PRE_COMMIT_CONFIG):
+            text = path.read_text(encoding="utf-8")
+            calls += [
+                line
+                for line in text.splitlines()
+                if re.search(r"\bruff(@\S+)? (check|format)\b", line)
+                and not line.lstrip().startswith(("#", "name:"))
+            ]
+        self.assertEqual(len(calls), 6)
+        for call in calls:
+            with self.subTest(call=call):
+                self.assertIn(" ".join(RUFF_EXCLUDE), call)
 
     def test_husky_hook_calls_the_root_copy_after_moving_to_the_top_level(self) -> None:
         """The hook resolves the helper from the repo root, so the move to the top level comes first."""

@@ -1551,8 +1551,11 @@ gh() {
         pip_tree = {"pyproject.toml": "", "requirements.txt": "", ".venv/bin/python": ""}
         venv_ruff = {"VENV_RUFF": "1"}
         for step, args in (
-            ("Lint Python step", "check ."),
-            ("Check Python formatting step", "format --check ."),
+            ("Lint Python step", "check --extend-exclude ./hub_fetch_run.py --force-exclude ."),
+            (
+                "Check Python formatting step",
+                "format --check --extend-exclude ./hub_fetch_run.py --force-exclude .",
+            ),
         ):
             cases = {
                 "declared pip ruff installed in the venv runs there": (

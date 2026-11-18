@@ -24,6 +24,7 @@
         // The directory also adapts or drops "uv Upgrade", which runs `uv sync` too.
         // A pip-form directory declared in the validator's `python-directories` input runs ruff as `.venv/bin/python -m ruff` (`.venv\Scripts\python.exe` on Windows) where its environment installs ruff, matching CI.
         // Any other pip-form directory runs ruff as `uvx ruff@latest`.
+        // Every ruff form keeps `--extend-exclude ./hub_fetch_run.py --force-exclude`, per the pre-commit snippet's README.
         // Every pip-form directory runs pytest as `.venv/bin/python -m pytest` (`.venv\Scripts\python.exe` on Windows), and the type checker against `.venv`, per the python-codestyle Skill "Local development loop".
         // A lint-only Scripts-profile subtree, with no [project], no [build-system], no `uv.lock`, and no `requirements*.txt`, runs every tool via `uvx <tool>` rather than `uv run <tool>`.
         // The type-checker swap composes with it: `uvx mypy@latest` for a mypy repo, `uvx pyright@latest` otherwise.
@@ -35,7 +36,10 @@
             "args": [
                 "run",
                 "ruff",
-                "format"
+                "format",
+                "--extend-exclude",
+                "./hub_fetch_run.py",
+                "--force-exclude"
             ],
             "problemMatcher": [],
             "presentation": {
@@ -50,7 +54,10 @@
             "args": [
                 "run",
                 "ruff",
-                "check"
+                "check",
+                "--extend-exclude",
+                "./hub_fetch_run.py",
+                "--force-exclude"
             ],
             "problemMatcher": [],
             "presentation": {
