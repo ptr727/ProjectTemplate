@@ -50,12 +50,12 @@ runs:
     - name: Lint with ruff step
       shell: bash
       working-directory: ${{ inputs.project-dir }}
-      run: uv run ruff check
+      run: uv run ruff check --extend-exclude ./hub_fetch_run.py --force-exclude
 
     - name: Verify formatting with ruff step
       shell: bash
       working-directory: ${{ inputs.project-dir }}
-      run: uv run ruff format --check
+      run: uv run ruff format --check --extend-exclude ./hub_fetch_run.py --force-exclude
 
     - name: Type check with pyright step
       shell: bash

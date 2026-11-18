@@ -103,14 +103,18 @@ shows. A
 
 ```sh
 uv sync                          # creates .venv, installs deps + dev group
-uv run ruff format               # auto-format
-uv run ruff check --fix          # auto-fix lint
-uv run ruff check                # verify lint clean
-uv run ruff format --check       # verify format clean
+uv run ruff format --extend-exclude ./hub_fetch_run.py --force-exclude          # auto-format
+uv run ruff check --fix --extend-exclude ./hub_fetch_run.py --force-exclude     # auto-fix lint
+uv run ruff check --extend-exclude ./hub_fetch_run.py --force-exclude           # verify lint clean
+uv run ruff format --check --extend-exclude ./hub_fetch_run.py --force-exclude  # verify format clean
 uv run pyright                   # verify types
 uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist (published packages only)
 ```
+
+A downstream repo keeps the carried `hub_fetch_run.py` at its root. So each ruff command this skill and its references name carries
+`--extend-exclude ./hub_fetch_run.py --force-exclude`, whatever form runs it. The repo's own ruff config may be stricter than the hub's.
+The flags keep ruff from reporting or rewriting the helper, which stays byte-identical to the hub's copy.
 
 The **build**-profile Python clean-compile, in its uv form, is `uv run ruff format` +
 `uv run ruff check` + the repo's type checker. That checker is `uv run pyright`, or `uv run mypy`
@@ -134,10 +138,10 @@ uv venv --clear                           # creates .venv, replacing an existing
 uv pip install --python .venv/bin/python -r requirements.txt -r requirements-dev.txt   # one -r per requirements*.txt
 uv pip install --python .venv/bin/python -e .   # only where pyproject.toml has a [project] table
 # in a declared directory whose .venv installs ruff, .venv/bin/python -m ruff replaces uvx ruff@latest
-uvx ruff@latest format                    # auto-format
-uvx ruff@latest check --fix               # auto-fix lint
-uvx ruff@latest check                     # verify lint clean
-uvx ruff@latest format --check            # verify format clean
+uvx ruff@latest format --extend-exclude ./hub_fetch_run.py --force-exclude          # auto-format
+uvx ruff@latest check --fix --extend-exclude ./hub_fetch_run.py --force-exclude     # auto-fix lint
+uvx ruff@latest check --extend-exclude ./hub_fetch_run.py --force-exclude           # verify lint clean
+uvx ruff@latest format --check --extend-exclude ./hub_fetch_run.py --force-exclude  # verify format clean
 .venv/bin/python -m pytest                # run tests
 ```
 

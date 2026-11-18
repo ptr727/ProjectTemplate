@@ -7,11 +7,7 @@
 # The type checker and ruff hooks run via uvx, native tooling, no Docker.
 # That needs no project dependency, matching CI's own invocation for the lint-only profile.
 # A repo on the build profile with a uv.lock may swap an entry for `uv run <tool>` to pin its own project version instead.
-# Any repo whose own ruff config applies must also exclude hub_fetch_run.py from ruff.
-# Append it to an existing `extend-exclude` list under `[tool.ruff]`, or add `extend-exclude = ["hub_fetch_run.py"]` when none exists.
-# Also set `force-exclude = true`.
-# A `ruff.toml` or `.ruff.toml` takes the same keys at its top level.
-# Without force-exclude, ruff ignores the exclude for any path named explicitly, such as when pass_filenames is on.
+# Every ruff entry, swapped or not, keeps `--extend-exclude ./hub_fetch_run.py --force-exclude`, per the README.
 # A pip-form repo whose root the validator's `python-directories` input declares may swap an entry for `.venv/bin/python -m <tool>` where its requirements install that tool, matching CI.
 # Run that way, pyright also takes `--pythonpath .venv/bin/python`.
 # On Windows each of those interpreter paths is `.venv\Scripts\python.exe` instead.
@@ -23,12 +19,12 @@ repos:
     hooks:
       - id: ruff-format
         name: ruff format --check
-        entry: uvx ruff@latest format --check
+        entry: uvx ruff@latest format --check --extend-exclude ./hub_fetch_run.py --force-exclude
         language: system
         pass_filenames: false
       - id: ruff-check
         name: ruff check
-        entry: uvx ruff@latest check
+        entry: uvx ruff@latest check --extend-exclude ./hub_fetch_run.py --force-exclude
         language: system
         pass_filenames: false
       - id: type-check

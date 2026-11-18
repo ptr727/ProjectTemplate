@@ -56,8 +56,8 @@ dotnet husky run || exit 1
 
 # Python: ruff format + ruff check + the repo's type checker via uv, native tooling.
 # Drop this block in a non-Python repo, for the same reason the .NET block above is unguarded.
-uv run ruff format --check || exit 1
-uv run ruff check || exit 1
+uv run ruff format --check --extend-exclude ./hub_fetch_run.py --force-exclude || exit 1
+uv run ruff check --extend-exclude ./hub_fetch_run.py --force-exclude || exit 1
 # Swap for `uv run mypy` if this repo's CI runs mypy instead.
 uv run pyright || exit 1
 
