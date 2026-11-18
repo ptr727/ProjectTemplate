@@ -711,6 +711,11 @@ jobs:
             exit 1
           fi
 
+      # A system tool a .NET test shells out to must reach the runner before the tests, which no later hook can do.
+      - name: Run caller pre-test hook step
+        if: hashFiles('**/*Tests*.csproj') != '' && hashFiles('.github/actions/pre-test/action.yml') != ''
+        uses: ./.github/actions/pre-test
+
       # The caller's global.json selects the SDK line, or the dotnet-sdk action's fallback line where it carries none yet.
       - name: Setup .NET SDK step
         if: hashFiles('**/*Tests*.csproj') != ''
