@@ -180,7 +180,7 @@ def manifest_gap_pass(spec):
         if carried is None:
             unreadable.append(entry["name"])
             continue
-        for path in carried & candidates:
+        for path in (carried & candidates) - audit.repo_kept_paths(spec, entry["name"]):
             gaps.setdefault(path, []).append(entry["name"])
     return {p: sorted(r) for p, r in sorted(gaps.items())}, unreadable
 

@@ -1050,6 +1050,17 @@ def secret_scope_errors(secrets, repos):
     return errors
 
 
+def repos_errors(label, repos, repo_names):
+    """A ledger row's `repos` is a non-empty array of registry names."""
+    if not is_str_list(repos) or not repos:
+        return [f"divergences.json: {label} repos must be a non-empty array of strings"]
+    return [
+        f"divergences.json: {label} repo '{rn}' not in the registry"
+        for rn in repos
+        if rn not in repo_names
+    ]
+
+
 def gap_scope_errors(gaps, repo_names):
     """Errors in the `gaps` rows' scoping, and the paths holding a fleet-wide row.
 
@@ -1067,16 +1078,7 @@ def gap_scope_errors(gaps, repo_names):
                 errors.append(f"divergences.json: gap '{gp}' has more than one fleet-wide row")
             fleet.add(gp)
             continue
-        if not is_str_list(g["repos"]) or not g["repos"]:
-            errors.append(
-                f"divergences.json: gap '{gp}' repos must be a non-empty array of strings"
-            )
-        else:
-            errors.extend(
-                f"divergences.json: gap '{gp}' repo '{rn}' not in the registry"
-                for rn in g["repos"]
-                if rn not in repo_names
-            )
+        errors.extend(repos_errors(f"gap '{gp}'", g["repos"], repo_names))
         if g.get("disposition") != "accepted":
             errors.append(
                 f"divergences.json: gap '{gp}' is scoped by repos, so its disposition must be 'accepted', a keep decision for those repos alone"
@@ -1088,8 +1090,10 @@ def dropped_carry_errors(baseline_paths, gap_paths, root, pins=None):
     """Each baseline path is pinned, and each pinned path dropped from both the manifest and the hub has a `gaps` row.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
+    A pin is never removed, since a removed pin is a drop this check no longer sees.
     A drop the hub also deletes leaves no hub-only path to report a downstream copy by, so the row is owed.
-    A tree's files are not pinned, since a pruned tree already reports a copy its source no longer holds.
+    A tree's files are not pinned, since a pruned tree reports a copy its source no longer holds.
+    Dropping a whole `trees` declaration ends that pruning, and no pin or row covers its target.
     """
     pins = CARRIED_PATH_PINS if pins is None else pins
     errors = [
@@ -2148,12 +2152,7 @@ def main(argv=()):
                 errors.append(
                     f"divergences.json: '{p}' disposition '{d.get('disposition')}' invalid (expected one of {', '.join(dispositions)})"
                 )
-            if not is_str_list(d.get("repos")) or not d.get("repos"):
-                errors.append(f"divergences.json: '{p}' repos must be a non-empty array of strings")
-            else:
-                for rn in d["repos"]:
-                    if rn not in repo_names:
-                        errors.append(f"divergences.json: '{p}' repo '{rn}' not in the registry")
+            errors.extend(repos_errors(f"'{p}'", d.get("repos"), repo_names))
             if not isinstance(d.get("reason"), str) or not d.get("reason"):
                 errors.append(f"divergences.json: '{p}' reason must be a non-empty string")
             if not (d.get("tracking") is None or isinstance(d.get("tracking"), str)):

@@ -2017,7 +2017,7 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
         if down_region is None:
             return [("DRIFT", f"verbatim: {label} region absent downstream, cannot compare")]
         down_text, canon_text = down_region, canon_region
-        history = [h for h in (extract(t) for t in history) if h is not None]
+        history = [extract(t) for t in history]
     verdict = classify_verbatim(down_text, canon_text, history)
     if verdict is None:
         return []

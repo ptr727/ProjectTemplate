@@ -86,11 +86,11 @@ class FidelityPassReadCase(unittest.TestCase):
 class ManifestGapPassCase(unittest.TestCase):
     """manifest_gap_pass reads the ledger, so a path the fleet retired outright still names its carriers."""
 
-    def test_a_retired_path_the_hub_no_longer_tracks_names_its_carrier(self) -> None:
+    def gaps_for(self, rows: list[dict[str, Any]]) -> dict[str, list[str]]:
         spec = {
             "registry": {"repos": [ENTRY], "defaults": {}},
             "files": {"baseline": [{"path": "kept.md"}]},
-            "divergences": {"gaps": [{"path": "gone.md", "disposition": "retire", "reason": "r"}]},
+            "divergences": {"gaps": rows},
         }
 
         def fake_gh(path: str, ok404: bool = False) -> Any:
@@ -107,9 +107,22 @@ class ManifestGapPassCase(unittest.TestCase):
             ),
         ):
             gaps, unreadable = fidelity_honesty.manifest_gap_pass(spec)
-
-        self.assertEqual(gaps, {"gone.md": ["Fixture"], "hosted.sh": ["Fixture"]})
         self.assertEqual(unreadable, [])
+        return gaps
+
+    def test_a_retired_path_the_hub_no_longer_tracks_names_its_carrier(self) -> None:
+        self.assertEqual(
+            self.gaps_for([{"path": "gone.md", "disposition": "retire", "reason": "r"}]),
+            {"gone.md": ["Fixture"], "hosted.sh": ["Fixture"]},
+        )
+
+    def test_a_scoped_keep_drops_that_repository_as_a_carrier(self) -> None:
+        """The report agrees with the audit, which reports no copy a scoped keep row covers."""
+        keep = {"path": "gone.md", "disposition": "accepted", "reason": "r", "repos": ["Fixture"]}
+        self.assertEqual(
+            self.gaps_for([{"path": "gone.md", "disposition": "retire", "reason": "r"}, keep]),
+            {"hosted.sh": ["Fixture"]},
+        )
 
     def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
         """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
