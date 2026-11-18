@@ -2774,7 +2774,7 @@ class DroppedCarryCase(unittest.TestCase):
 
     PINS = frozenset({"KEPT.md", "GONE.md", "HOSTED.md"})
 
-    def errors(self, baseline: set[str], gaps: set[str]) -> list[str]:
+    def errors(self, baseline: set[str], gaps: dict[str, str]) -> list[str]:
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "HOSTED.md").write_text("still tracked\n", encoding="utf-8")
@@ -2782,7 +2782,7 @@ class DroppedCarryCase(unittest.TestCase):
 
     def test_a_drop_the_hub_also_deleted_needs_a_row(self) -> None:
         self.assertEqual(
-            self.errors({"KEPT.md"}, set()),
+            self.errors({"KEPT.md"}, {}),
             [
                 "files.json: 'GONE.md' was a carried file, and the manifest and the hub both dropped it, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
             ],
@@ -2790,11 +2790,17 @@ class DroppedCarryCase(unittest.TestCase):
 
     def test_a_row_or_a_hub_copy_settles_the_drop(self) -> None:
         """The hub still holding HOSTED.md makes it hub-only, which the audit reports without a row."""
-        self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md"}), [])
+        for kind in ("retire", "accepted"):
+            with self.subTest(kind=kind):
+                self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md": kind}), [])
+
+    def test_a_row_the_audit_does_not_act_on_leaves_the_drop_unsettled(self) -> None:
+        """The audit reports a copy of a path the hub no longer tracks only for retire, so investigate settles nothing."""
+        self.assertEqual(len(self.errors({"KEPT.md"}, {"GONE.md": "investigate"})), 1)
 
     def test_an_unpinned_baseline_path_is_reported(self) -> None:
         self.assertEqual(
-            self.errors({"KEPT.md", "GONE.md", "NEW.md"}, set()),
+            self.errors({"KEPT.md", "GONE.md", "NEW.md"}, {}),
             [
                 "files.json: baseline path 'NEW.md' has no line in spec/validate.py CARRIED_PATH_PINS, so a later drop of it goes unseen"
             ],
@@ -2814,7 +2820,7 @@ class GapScopeCase(unittest.TestCase):
             {"path": "CLAUDE.md", "disposition": "retire", "reason": "r"},
             {"path": "CLAUDE.md", "disposition": "accepted", "reason": "r", "repos": ["A"]},
         ]
-        self.assertEqual(validate.gap_scope_errors(gaps, {"A"}), ([], {"CLAUDE.md"}))
+        self.assertEqual(validate.gap_scope_errors(gaps, {"A"}), ([], {"CLAUDE.md": "retire"}))
 
     def test_each_scoping_defect_is_reported(self) -> None:
         gaps = [
@@ -2834,14 +2840,14 @@ class GapScopeCase(unittest.TestCase):
                 "divergences.json: gap 'd.md' repos must be a non-empty array of strings",
             ],
         )
-        self.assertEqual(fleet, {"a.md"})
+        self.assertEqual(fleet, {"a.md": "retire"})
 
     def test_the_gate_reaches_both_checks(self) -> None:
         """Deleting either call site leaves every helper test above green, so run the gate's own entry point."""
         for name in ("gap_scope_errors", "dropped_carry_errors"):
             with self.subTest(check=name):
                 marker = f"fixture {name} error"
-                value: object = ([marker], set()) if name == "gap_scope_errors" else [marker]
+                value: object = ([marker], {}) if name == "gap_scope_errors" else [marker]
                 out = io.StringIO()
                 with (
                     unittest.mock.patch.object(validate, name, return_value=value),
@@ -2981,10 +2987,20 @@ class InvestigateTrackingSchemaMirrorCase(unittest.TestCase):
     def test_both_arrays_carry_the_conditional(self) -> None:
         for array in ("dispositions", "gaps"):
             with self.subTest(array=array):
-                self.assertEqual(
+                self.assertIn(
+                    {"$ref": "#/$defs/investigateNeedsTracking"},
                     self.schema["properties"][array]["items"]["allOf"],
-                    [{"$ref": "#/$defs/investigateNeedsTracking"}],
                 )
+
+    def test_a_scoped_gap_row_is_held_to_accepted(self) -> None:
+        """The gate refuses a scoped row that does not accept, so the schema asserts it for an editor too."""
+        self.assertIn(
+            {"$ref": "#/$defs/scopedGapAccepts"},
+            self.schema["properties"]["gaps"]["items"]["allOf"],
+        )
+        rule = self.schema["$defs"]["scopedGapAccepts"]
+        self.assertEqual(rule["if"]["required"], ["repos"])
+        self.assertEqual(rule["then"]["properties"]["disposition"]["const"], "accepted")
 
     def test_the_conditional_requires_a_non_empty_tracking_value(self) -> None:
         rule = self.schema["$defs"]["investigateNeedsTracking"]

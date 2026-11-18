@@ -1062,13 +1062,13 @@ def repos_errors(label, repos, repo_names):
 
 
 def gap_scope_errors(gaps, repo_names):
-    """Errors in the `gaps` rows' scoping, and the paths holding a fleet-wide row.
+    """Errors in the `gaps` rows' scoping, and each path's fleet-wide disposition.
 
     A row scoped by `repos` records those repositories keeping their own copy, so it may only accept.
     A path holds at most one fleet-wide row, since the audit reads one disposition per path.
     """
     errors = []
-    fleet = set()
+    fleet = {}
     for g in gaps:
         if not isinstance(g, dict) or not isinstance(g.get("path"), str):
             continue  # the ledger loop already reports a malformed row
@@ -1076,7 +1076,7 @@ def gap_scope_errors(gaps, repo_names):
         if "repos" not in g:
             if gp in fleet:
                 errors.append(f"divergences.json: gap '{gp}' has more than one fleet-wide row")
-            fleet.add(gp)
+            fleet.setdefault(gp, g.get("disposition"))
             continue
         errors.extend(repos_errors(f"gap '{gp}'", g["repos"], repo_names))
         if g.get("disposition") != "accepted":
@@ -1086,8 +1086,11 @@ def gap_scope_errors(gaps, repo_names):
     return errors, fleet
 
 
-def dropped_carry_errors(baseline_paths, gap_paths, root, pins=None):
-    """Each baseline path is pinned, and each pinned path dropped from both the manifest and the hub has a `gaps` row.
+def dropped_carry_errors(baseline_paths, fleet_gaps, root, pins=None):
+    """Each baseline path is pinned, and each pinned path dropped from both the manifest and the hub is settled.
+
+    A settled path has a fleet-wide `retire` or `accepted` gaps row.
+    The audit acts on no other disposition for a path the hub no longer tracks.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
     A pin is never removed, since a removed pin is a drop this check no longer sees.
@@ -1100,7 +1103,8 @@ def dropped_carry_errors(baseline_paths, gap_paths, root, pins=None):
         f"files.json: baseline path '{p}' has no line in spec/validate.py CARRIED_PATH_PINS, so a later drop of it goes unseen"
         for p in sorted(baseline_paths - pins)
     ]
-    for p in sorted(pins - baseline_paths - gap_paths):
+    settled = {p for p, kind in fleet_gaps.items() if kind in ("retire", "accepted")}
+    for p in sorted(pins - baseline_paths - settled):
         if not (root / p).exists():
             errors.append(
                 f"files.json: '{p}' was a carried file, and the manifest and the hub both dropped it, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
@@ -2179,7 +2183,7 @@ def main(argv=()):
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
                 errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
             errors.extend(investigate_tracking_errors(f"gap '{gp}'", g))
-        scope_errors, fleet_gap_paths = gap_scope_errors(div_gaps, repo_names)
+        scope_errors, fleet_gaps = gap_scope_errors(div_gaps, repo_names)
         errors.extend(scope_errors)
         errors.extend(
             dropped_carry_errors(
@@ -2188,7 +2192,7 @@ def main(argv=()):
                     for i in baseline
                     if isinstance(i, dict) and isinstance(i.get("path"), str)
                 },
-                fleet_gap_paths,
+                fleet_gaps,
                 ROOT,
             )
         )

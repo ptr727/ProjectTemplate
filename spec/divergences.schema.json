@@ -47,11 +47,19 @@
                         "description": "Where the decision or the remediation this entry records is tracked, such as owner/repo#123. Required on an investigate entry, per $defs/investigateNeedsTracking."
                     }
                 },
-                "allOf": [{ "$ref": "#/$defs/investigateNeedsTracking" }]
+                "allOf": [{ "$ref": "#/$defs/investigateNeedsTracking" }, { "$ref": "#/$defs/scopedGapAccepts" }]
             }
         }
     },
     "$defs": {
+        "scopedGapAccepts": {
+            "title": "A gap row scoped by repos records a keep decision, so it accepts",
+            "if": { "required": ["repos"] },
+            "then": {
+                "required": ["disposition"],
+                "properties": { "disposition": { "const": "accepted" } }
+            }
+        },
         "investigateNeedsTracking": {
             "title": "An investigate disposition names where its pending decision is being made",
             "if": {
