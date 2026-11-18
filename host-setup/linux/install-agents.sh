@@ -169,7 +169,8 @@ none, so an install always names what it installs, or says --all.
 A tool reads as "self" when no package manager owns it, so this script runs the tool's own
 updater, or for the managed opencode its installer, and as the name of a package manager when one owns it. --upgrade then runs that
 manager's upgrade for that one package: npm or bun install the latest tag, Homebrew upgrades the
-formula or cask, and mise upgrades the tool. apt is upgraded by upgrade-host.sh, and Nix is
+formula or cask, and mise upgrades the tool. An npm install also allows that one package's
+install scripts, which npm 12 otherwise skips. apt is upgraded by upgrade-host.sh, and Nix is
 declarative, so neither is run. An npm directory this user cannot write is reported with its
 command rather than run, and nothing here ever uses sudo. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
 one outdated, and a herdr server still running the previous binary is left running and reported
@@ -494,6 +495,8 @@ package_step() {
     if [[ $step == "upgrade" ]]; then
         # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
         command=("$manager" install -g "${pkg:-$recorded}@latest")
+        # From npm 12 on, a global install skips a package's install scripts unless allow-scripts names it, so claude-code's postinstall would not run.
+        if [[ $manager == "npm" ]]; then command=(npm install -g "--allow-scripts=${pkg:-$recorded}" "${pkg:-$recorded}@latest"); fi
     elif [[ $manager == "bun" ]]; then
         command=(bun remove -g "${named:-$recorded}")
     else

@@ -307,7 +307,9 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["npm install -g @openai/codex@latest"])
+        self.assertEqual(
+            self.called(), ["npm install -g --allow-scripts=@openai/codex @openai/codex@latest"]
+        )
         self.assertEqual(self.report()["codex"]["manager"], "npm")
 
     def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
@@ -315,7 +317,10 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry run] npm install -g @openai/codex@latest", result.stdout)
+        self.assertIn(
+            "[dry run] npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
+            result.stdout,
+        )
         self.assertEqual(self.called(), [])
 
     def test_the_report_names_the_command_an_upgrade_will_run(self) -> None:
@@ -323,7 +328,10 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         notes = self.report()["codex"]["notes"]
         self.assertEqual(
-            notes, ["installed through npm, --upgrade runs: npm install -g @openai/codex@latest"]
+            notes,
+            [
+                "installed through npm, --upgrade runs: npm install -g --allow-scripts=@openai/codex @openai/codex@latest"
+            ],
         )
         self.assertNotIn("which upgrades it", " ".join(notes))
 
@@ -336,7 +344,7 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), [])
         self.assertIn(
-            "is not writable by this user, so run as its owner: npm install -g @openai/codex@latest",
+            "is not writable by this user, so run as its owner: npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
             result.stdout,
         )
         self.assertNotIn("sudo", result.stdout)
@@ -355,7 +363,10 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 3)
         self.assertIn("codex: npm failed to upgrade it", result.stderr)
         self.assertIn("Failed: codex", result.stderr)
-        self.assertEqual(self.called(), ["claude update", "npm install -g @openai/codex@latest"])
+        self.assertEqual(
+            self.called(),
+            ["claude update", "npm install -g --allow-scripts=@openai/codex @openai/codex@latest"],
+        )
 
     def test_bun_is_upgraded_through_bun(self) -> None:
         self.stub(
@@ -403,7 +414,12 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("mise", "mise 2024.1.1")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["npm install -g @anthropic-ai/claude-code@latest"])
+        self.assertEqual(
+            self.called(),
+            [
+                "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest"
+            ],
+        )
         self.assertEqual(self.report()["claude"]["manager"], "npm")
 
     def test_an_npm_global_under_a_keg_only_node_in_the_cellar_is_npms_and_not_brews(self) -> None:
@@ -414,7 +430,9 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("brew", "Homebrew 4.0.0")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["npm install -g @openai/codex@latest"])
+        self.assertEqual(
+            self.called(), ["npm install -g --allow-scripts=@openai/codex @openai/codex@latest"]
+        )
 
     def test_a_fork_with_the_same_command_under_the_npm_root_is_reported_not_run(self) -> None:
         root = self.dir / "lib" / "node_modules"
@@ -826,7 +844,12 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes", "claude")
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(self.called(), ["npm install -g @anthropic-ai/claude-code@latest"])
+        self.assertEqual(
+            self.called(),
+            [
+                "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest"
+            ],
+        )
         self.assertIn("still below the fleet floor 2.1.281", result.stderr)
 
     def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
@@ -1034,7 +1057,9 @@ class TestInstallAgentsWindows(unittest.TestCase):
         npm_bin = self.stray_npm_opencode("@opencode/cli")
         result = self.run_script("-Upgrade", "-Yes", "opencode", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("npm install -g @opencode/cli@latest", self.recorded())
+        self.assertIn(
+            "npm install -g --allow-scripts=@opencode/cli @opencode/cli@latest", self.recorded()
+        )
 
     def test_upgrade_with_a_stray_opencode_and_no_managed_package_removes_nothing(self) -> None:
         npm_bin = self.stray_npm_opencode("opencode-ai")
@@ -1164,7 +1189,9 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("npm install -g @openai/codex@latest", self.recorded())
+        self.assertIn(
+            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest", self.recorded()
+        )
         self.assertNotIn("codex update", self.recorded())
 
     def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
@@ -1174,8 +1201,13 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "-DryRun", "codex", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry run] npm install -g @openai/codex@latest", result.stdout)
-        self.assertNotIn("npm install -g @openai/codex@latest", self.recorded())
+        self.assertIn(
+            "[dry run] npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
+            result.stdout,
+        )
+        self.assertNotIn(
+            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest", self.recorded()
+        )
 
     def test_the_report_names_the_command_and_not_the_false_claim(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
@@ -1183,7 +1215,10 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Report", "codex", extra_path=npm_bin)
-        self.assertIn("-Upgrade runs: npm install -g @openai/codex@latest", result.stdout)
+        self.assertIn(
+            "-Upgrade runs: npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
+            result.stdout,
+        )
         self.assertNotIn("which upgrades it", result.stdout)
 
     @unittest.skipIf(
@@ -1205,7 +1240,9 @@ class TestInstallAgentsWindows(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("is not writable by this user", result.stdout)
-        self.assertNotIn("npm install -g @openai/codex@latest", self.recorded())
+        self.assertNotIn(
+            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest", self.recorded()
+        )
 
     def test_a_failing_manager_is_reported_and_the_other_tools_still_run(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
@@ -1461,7 +1498,10 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.scoop_which(f"{self.dir}/scoop/apps/nodejs/current/node.exe")
         result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=on_path)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("npm install -g @openai/codex@latest", " ".join(self.recorded()))
+        self.assertIn(
+            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
+            " ".join(self.recorded()),
+        )
         self.assertNotIn("scoop update", " ".join(self.recorded()))
 
     def test_files_outside_the_npm_prefix_are_not_claimed_by_that_npm(self) -> None:
@@ -1518,7 +1558,16 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Install", "-Yes", "-DryRun", "opencode")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("[dry run] npm install -g @opencode/cli", result.stdout)
+        self.assertIn(
+            "[dry run] npm install -g --allow-scripts=@opencode/cli @opencode/cli", result.stdout
+        )
+
+    def test_install_runs_npm_with_the_managed_package_s_scripts_allowed(self) -> None:
+        """A real install hands npm the helper's arguments whole, so the allowance reaches npm."""
+        self.stub("npm", "npm 10.0.0")
+        # The stub installs nothing, so the run ends reporting no opencode on PATH, and only the call is checked.
+        self.run_script("-Install", "-Yes", "opencode")
+        self.assertIn("npm install -g --allow-scripts=@opencode/cli @opencode/cli", self.recorded())
 
     def test_install_runs_the_documented_codex_windows_installer(self) -> None:
         result = self.run_script("-Install", "-Yes", "-DryRun", "codex")
@@ -1638,7 +1687,10 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=npm_bin)
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertIn("npm install -g @anthropic-ai/claude-code@latest", self.recorded())
+        self.assertIn(
+            "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest",
+            self.recorded(),
+        )
         self.assertIn("still below the fleet floor 2.1.281", result.stderr)
 
     def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
