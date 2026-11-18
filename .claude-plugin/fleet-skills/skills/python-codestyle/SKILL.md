@@ -112,7 +112,7 @@ uv run pytest                    # run tests
 uv build                         # produce wheel + sdist in ./dist (published packages only)
 ```
 
-A fleet repo keeps the carried `hub_fetch_run.py` at its root. There, each ruff command in this section takes
+A downstream repo keeps the carried `hub_fetch_run.py` at its root. There, each ruff command in this section takes
 `--extend-exclude ./hub_fetch_run.py --force-exclude`. The repo's own ruff config may be stricter than the hub's.
 The flags keep ruff from reporting or rewriting the helper, which stays byte-identical to the hub's copy.
 
