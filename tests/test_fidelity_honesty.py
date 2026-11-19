@@ -200,6 +200,7 @@ class ScopedKeepReportCase(unittest.TestCase):
         spreads = [({"path": "x.md", "fidelity": "verbatim"}, spread)]
         out = fidelity_honesty.render_report(spreads, [], {}, [], {"dispositions": [empty]}, {})
         self.assertNotIn("## Resolved", out)
+        self.assertIn("x.md", out.split("## Untriaged", 1)[1])
 
     def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
         """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
