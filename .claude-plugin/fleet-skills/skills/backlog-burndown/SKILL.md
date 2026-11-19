@@ -913,10 +913,10 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. Dispatch
-   one for each worker that ends, even once this round has dispatched eight groups.
-   Only the planner knows which group takes a slot. A group resuming in the round it stopped in
-   needs no place among the eight. A refill planner returning no group is what
-   tells the orchestrator that no group can be dispatched. Its brief names each group this round
+   one for each worker that ends. Once this round has dispatched eight groups, dispatch one only
+   while a group this round stopped or parked has not resumed. Such a group needs no place among
+   the eight, and no other group can take a slot. A refill planner returning no group, or no
+   planner being owed, is what tells the orchestrator that no group can be dispatched. Its brief names each group this round
    dispatched, marking each whose worker has not yet ended and each that stopped or parked. It
    names no file set. The planner reads each group's current set from its claim comment, which
    holds any grown set granted since the plan. One refill planner runs at
@@ -980,7 +980,9 @@ leaves the work findable.
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
 A parked group stops that group and nothing else. Once its `decision` issue's answer is
-recorded, per "Ranking", the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It
+recorded, per "Ranking", the planner returns the group as resuming, unless "Ranking" still holds it.
+The planner drops the park from its claim comment as it does, as an attended resume drops a stop.
+The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
 ends the work with nothing to merge, it records the release, stating that the answer ended the work with nothing to merge. It
 also closes any pull request the answer retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
@@ -1059,7 +1061,8 @@ The run ends at the first of these, each an ending of its own:
 Every ending but the session's own first drops every waiting dispatch retry and stops its timer.
 From then, a dispatch that fails is not retried and ends nothing. That holds for a reviewer and
 for continuing a handed-back worker alike. The ending names that worker as uncollected, leaves its
-branch and claim as they stand, and goes on. It names a worker whose dropped retry it needed the
+branch as it stands, and goes on. It records the state in the group's claim comment, as a stop is
+recorded. A later run then holds the issue back as stopped until the maintainer releases the claim. It names a worker whose dropped retry it needed the
 same way. Where the error left unclear whether the dispatch started, it marks that seat as one
 that may be live. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
@@ -1074,7 +1077,7 @@ planner writes being unknown. Where its error left unclear whether the failed di
 marks that seat as one that may have. Where that seat was a planner, its claims are unknown too. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree.
-It is also a worker named as uncollected, since no later run resumes its group. It
+It is also a worker named as uncollected, since only the maintainer releases its claim. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
