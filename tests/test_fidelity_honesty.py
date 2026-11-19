@@ -189,6 +189,11 @@ class ScopedKeepReportCase(unittest.TestCase):
             "- **gone.md** - Fixture _(recorded Other now resolved)_ - kept on purpose", out
         )
 
+    def test_a_disposition_row_with_a_non_string_repo_is_dropped_rather_than_raising(self) -> None:
+        bad = {"path": "x.md", "repos": [{"name": "A"}], "disposition": "accepted", "reason": "r"}
+        out = fidelity_honesty.render_report([], [], {}, [], {"dispositions": [bad]}, {})
+        self.assertNotIn("x.md", out)
+
     def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
         """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
         self.assertEqual(

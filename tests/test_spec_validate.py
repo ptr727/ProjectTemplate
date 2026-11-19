@@ -2865,6 +2865,98 @@ class DroppedCarryCase(unittest.TestCase):
         )
 
 
+class DropRemedyForTreePathCase(unittest.TestCase):
+    """A path moved into a tree is steered to accepted, and every other path keeps the old text."""
+
+    TREE: ClassVar[dict[str, Any]] = DroppedCarryCase.TREE
+
+    def test_a_tree_path_names_accepted_only(self) -> None:
+        for path in ("lib/fleet/moved.sh", "src/moved.sh"):
+            with self.subTest(path=path):
+                got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {path})
+                self.assertEqual(len(got), 1)
+                self.assertIn("Use 'accepted'", got[0])
+                self.assertNotIn("Use 'retire'", got[0])
+
+    def test_another_path_keeps_the_retire_choice(self) -> None:
+        got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {"GONE.md"})
+        self.assertIn("Use 'retire' to delete the copies, or 'accepted'", got[0])
+
+
+class RetiredPathCase(unittest.TestCase):
+    """A retire row a tree or a repo-owned tree governs is refused, and a scoped row needs a path the audit reports."""
+
+    TREE: ClassVar[dict[str, Any]] = DroppedCarryCase.TREE
+
+    def errors(
+        self,
+        gaps: list[dict[str, Any]],
+        tracked: set[str] | None = None,
+        baseline: set[str] | None = None,
+    ) -> list[str]:
+        fleet = {g["path"]: g["disposition"] for g in gaps if "repos" not in g}
+        return validate.retired_path_errors(
+            gaps,
+            fleet,
+            baseline or set(),
+            tracked or set(),
+            [self.TREE],
+            ["tests"],
+        )
+
+    @staticmethod
+    def row(path: str, disposition: str = "retire", **extra: Any) -> dict[str, Any]:
+        return {"path": path, "disposition": disposition, "reason": "r", **extra}
+
+    def test_a_retire_row_under_a_tree_is_refused(self) -> None:
+        for path in ("lib/fleet/a.sh", "src/a.sh"):
+            with self.subTest(path=path):
+                got = self.errors([self.row(path)])
+                self.assertEqual(len(got), 1)
+                self.assertIn("a tree carries the path", got[0])
+                self.assertIn("Use 'accepted'", got[0])
+
+    def test_an_accepted_row_under_a_tree_is_clean(self) -> None:
+        self.assertEqual(self.errors([self.row("lib/fleet/a.sh", "accepted")]), [])
+
+    def test_a_retire_row_under_a_repo_owned_tree_is_refused(self) -> None:
+        got = self.errors([self.row("tests/a.py")])
+        self.assertEqual(len(got), 1)
+        self.assertIn("the repositories' own", got[0])
+        self.assertIn("Drop the row", got[0])
+
+    def test_a_plain_retire_row_is_clean(self) -> None:
+        self.assertEqual(self.errors([self.row("GONE.md")]), [])
+
+    def test_a_scoped_row_needs_a_retire_row_or_a_hub_file(self) -> None:
+        scoped = self.row("GONE.md", "accepted", repos=["A"])
+        self.assertEqual(len(self.errors([scoped])), 1)
+        self.assertEqual(self.errors([self.row("GONE.md"), scoped]), [])
+        self.assertEqual(self.errors([scoped], tracked={"GONE.md"}), [])
+
+    def test_a_hub_file_the_audit_does_not_see_is_no_candidate(self) -> None:
+        """A baseline path, a tree source and a repo-owned path never reach the audit's hub-only set."""
+        for path, kwargs in (
+            ("KEPT.md", {"baseline": {"KEPT.md"}}),
+            ("src/a.sh", {}),
+            ("tests/a.py", {}),
+        ):
+            with self.subTest(path=path):
+                scoped = self.row(path, "accepted", repos=["A"])
+                self.assertEqual(len(self.errors([scoped], tracked={path}, **kwargs)), 1)
+
+    def test_the_gate_reaches_the_check(self) -> None:
+        marker = "fixture retired_path_errors error"
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(validate, "retired_path_errors", return_value=[marker]),
+            contextlib.redirect_stdout(out),
+        ):
+            status = validate.main([])
+        self.assertEqual(status, 1)
+        self.assertIn(marker, out.getvalue())
+
+
 class HubTrackedPathsCase(unittest.TestCase):
     """The drop check reads regular files, as the audit does, and reports a tree git cannot list."""
 
@@ -2926,6 +3018,8 @@ class DroppedCarryWithoutLedgerCase(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "spec" / "divergences.json").unlink()
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, timeout=60)
+            subprocess.run(["git", "-C", str(root), "add", "spec"], check=True, timeout=60)
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
                 capture_output=True,
@@ -2936,7 +3030,8 @@ class DroppedCarryWithoutLedgerCase(unittest.TestCase):
             )
         output = result.stdout + result.stderr
         self.assertNotIn("Traceback", output)
-        self.assertIn("could not list the hub's tracked files with git ls-files", output)
+        self.assertNotIn("could not list the hub's tracked files with git ls-files", output)
+        self.assertIn("was a carried file, and the manifest dropped it", output)
 
 
 class GapScopeCase(unittest.TestCase):
