@@ -195,6 +195,7 @@ CARRIED_PATH_PINS = frozenset(
         "version.json",
     }
 )
+CARRIED_TREE_PINS = frozenset({".github/skills", "lib/fleet/sh"})
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
 GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
@@ -1158,7 +1159,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
     A pin is never removed, since a removed pin is a drop this check no longer sees.
     A drop the hub also deletes leaves no hub-only path to report a downstream copy by, so the row is owed.
     A tree's own files are not pinned, since a pruned tree reports a copy its source no longer holds.
-    Dropping a whole `trees` declaration ends that pruning, and no pin or row covers its target.
+    Dropping a whole `trees` declaration ends that pruning, and `dropped_tree_errors` covers its target.
     """
     pins = CARRIED_PATH_PINS if pins is None else pins
     errors = [
@@ -1180,6 +1181,36 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
         errors.append(
             f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}. {choice}"
         )
+    return errors
+
+
+def dropped_tree_errors(tree_targets, fleet_gaps, pins=None):
+    """Each declared tree target is pinned, and each pinned target the manifest dropped has an `accepted` row.
+
+    A dropped declaration ends the pruning of its target.
+    The fleet-wide row records the decision to leave the copies.
+    `retire` is refused, since the audit compares a retired row to downstream file paths and a directory row deletes nothing.
+    The pins are every target the manifest has ever declared, and a pin is never removed.
+    """
+    pins = CARRIED_TREE_PINS if pins is None else pins
+    errors = [
+        f"files.json: tree target '{t}' has no line in spec/validate.py CARRIED_TREE_PINS, so a later drop of it goes unseen"
+        for t in sorted(set(tree_targets) - pins)
+    ]
+    for t in sorted(pins - set(tree_targets)):
+        kind = fleet_gaps.get(t)
+        if t not in fleet_gaps:
+            errors.append(
+                f"files.json: tree target '{t}' was declared and the manifest dropped it, so its downstream copies are now unreported. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos, with disposition 'accepted' to record the decision to leave them"
+            )
+        elif kind == "retire":
+            errors.append(
+                f"divergences.json: gap '{t}' is retired, but 'retire' is refused for a tree target, since the audit compares retired rows to downstream file paths only and a directory row would delete nothing. Use 'accepted'"
+            )
+        elif kind != "accepted":
+            errors.append(
+                f"divergences.json: gap '{t}' is a dropped tree target, so its row must be 'accepted', not '{kind}'"
+            )
     return errors
 
 
@@ -2316,6 +2347,8 @@ def main(argv=()):
                 div_gaps, fleet_gaps, baseline_paths, tracked, validated_trees, owned_roots
             )
         )
+
+    errors.extend(dropped_tree_errors([t["target"] for t in validated_trees], fleet_gaps))
 
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 

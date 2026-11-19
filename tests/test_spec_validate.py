@@ -2883,6 +2883,76 @@ class DropRemedyForTreePathCase(unittest.TestCase):
         self.assertIn("Use 'retire' to delete the copies, or 'accepted'", got[0])
 
 
+class DroppedTreeCase(unittest.TestCase):
+    """A tree target the manifest drops owes an accepted fleet-wide row, since the audit reads no directory copy."""
+
+    PINS = frozenset({"lib/kept", "lib/gone"})
+
+    def errors(self, targets: list[str], fleet: dict[str, str]) -> list[str]:
+        return validate.dropped_tree_errors(targets, fleet, self.PINS)
+
+    def test_a_declared_target_with_no_pin_errors(self) -> None:
+        got = self.errors(["lib/kept", "lib/gone", "lib/new"], {})
+        self.assertEqual(len(got), 1)
+        self.assertIn("'lib/new' has no line in spec/validate.py CARRIED_TREE_PINS", got[0])
+
+    def test_a_dropped_target_with_no_row_errors(self) -> None:
+        got = self.errors(["lib/kept"], {})
+        self.assertEqual(len(got), 1)
+        self.assertIn("'lib/gone'", got[0])
+        self.assertIn("downstream copies are now unreported", got[0])
+        self.assertIn("'accepted'", got[0])
+
+    def test_a_dropped_target_with_a_retire_row_is_refused(self) -> None:
+        got = self.errors(["lib/kept"], {"lib/gone": "retire"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("'retire' is refused for a tree target", got[0])
+        self.assertIn("would delete nothing", got[0])
+
+    def test_a_dropped_target_with_another_disposition_must_be_accepted(self) -> None:
+        got = self.errors(["lib/kept"], {"lib/gone": "track"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("must be 'accepted', not 'track'", got[0])
+
+    def test_a_dropped_target_with_an_accepted_row_passes(self) -> None:
+        self.assertEqual(self.errors(["lib/kept"], {"lib/gone": "accepted"}), [])
+
+    def test_a_directory_row_passes_the_existing_gap_checks(self) -> None:
+        """An accepted fleet-wide row at a path no file holds trips neither the scope check nor the retired-path check."""
+        gaps = [
+            {
+                "path": "lib/gone",
+                "disposition": "accepted",
+                "reason": "left in place",
+                "tracking": None,
+            }
+        ]
+        scope, fleet = validate.gap_scope_errors(gaps, set(), set())
+        self.assertEqual(scope, [])
+        self.assertEqual(fleet, {"lib/gone": "accepted"})
+        self.assertEqual(validate.retired_path_errors(gaps, fleet, set(), {"a.md"}, [], []), [])
+        self.assertEqual(self.errors(["lib/kept"], fleet), [])
+
+    def test_the_shipped_manifest_and_ledger_are_clean(self) -> None:
+        targets = [t["target"] for t in validate.load("spec/files.json")["trees"]]
+        _, fleet = validate.gap_scope_errors(
+            validate.load("spec/divergences.json")["gaps"], set(), set()
+        )
+        self.assertEqual(validate.dropped_tree_errors(targets, fleet), [])
+        self.assertLessEqual(set(targets), validate.CARRIED_TREE_PINS)
+
+    def test_the_gate_reaches_the_check(self) -> None:
+        marker = "fixture dropped_tree_errors error"
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(validate, "dropped_tree_errors", return_value=[marker]),
+            contextlib.redirect_stdout(out),
+        ):
+            status = validate.main([])
+        self.assertEqual(status, 1)
+        self.assertIn(marker, out.getvalue())
+
+
 class RetiredPathCase(unittest.TestCase):
     """A retire row a tree or a repo-owned tree governs is refused, and a scoped row needs a path the audit reports."""
 
