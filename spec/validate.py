@@ -2157,6 +2157,7 @@ def main(argv=()):
 
     # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")
+    fleet_gaps = {}
     if (ROOT / "spec/divergences.json").exists():
         div = load("spec/divergences.json")
         repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
@@ -2238,29 +2239,30 @@ def main(argv=()):
         }
         scope_errors, fleet_gaps = gap_scope_errors(div_gaps, repo_names, cataloged)
         errors.extend(scope_errors)
-        tracked = hub_tracked_paths(ROOT)
-        if tracked is None:
-            errors.append(
-                "files.json: could not list the hub's tracked files with git ls-files, so no dropped carry was checked"
+
+    tracked = hub_tracked_paths(ROOT)
+    if tracked is None:
+        errors.append(
+            "files.json: could not list the hub's tracked files with git ls-files, so no dropped carry was checked"
+        )
+    else:
+        errors.extend(
+            dropped_carry_errors(
+                {
+                    i["path"]
+                    for i in baseline
+                    if isinstance(i, dict) and isinstance(i.get("path"), str)
+                },
+                fleet_gaps,
+                tracked,
+                validated_trees,
+                [
+                    o["source"]
+                    for o in owned_trees
+                    if isinstance(o, dict) and isinstance(o.get("source"), str)
+                ],
             )
-        else:
-            errors.extend(
-                dropped_carry_errors(
-                    {
-                        i["path"]
-                        for i in baseline
-                        if isinstance(i, dict) and isinstance(i.get("path"), str)
-                    },
-                    fleet_gaps,
-                    tracked,
-                    validated_trees,
-                    [
-                        o["source"]
-                        for o in owned_trees
-                        if isinstance(o, dict) and isinstance(o.get("source"), str)
-                    ],
-                )
-            )
+        )
 
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 

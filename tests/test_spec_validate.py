@@ -2873,6 +2873,48 @@ class HubTrackedPathsCase(unittest.TestCase):
         self.assertIn("could not list the hub's tracked files with git ls-files", out.getvalue())
 
 
+class DroppedCarryWithoutLedgerCase(unittest.TestCase):
+    """The drop check runs with no ledger present, since a missing ledger settles no drop."""
+
+    def test_the_drop_check_runs_where_the_ledger_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            shutil.copy(
+                validate.ROOT / "registry" / "repos.schema.json",
+                root / "registry" / "repos.schema.json",
+            )
+            (root / "registry" / "repos.json").write_text(
+                json.dumps(
+                    {
+                        "defaults": {"workflowModel": "release"},
+                        "repos": [
+                            {
+                                "name": "Fixture",
+                                "url": "https://github.com/owner/fixture",
+                                "status": "backlog",
+                                "classificationPending": True,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "spec" / "divergences.json").unlink()
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                check=False,
+            )
+        output = result.stdout + result.stderr
+        self.assertNotIn("Traceback", output)
+        self.assertIn("could not list the hub's tracked files with git ls-files", output)
+
+
 class GapScopeCase(unittest.TestCase):
     """A gaps row scoped by repos is one repository's keep decision, and a path holds one fleet-wide row."""
 
