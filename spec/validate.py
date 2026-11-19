@@ -1113,7 +1113,7 @@ def hub_tracked_paths(root):
     for entry in listed.split(b"\0"):
         meta, _, path = entry.partition(b"\t")
         if path and meta.split(b" ", 1)[0] in (b"100644", b"100755"):
-            paths.add(path.decode("utf-8"))
+            paths.add(path.decode("utf-8", "surrogateescape"))
     return paths
 
 

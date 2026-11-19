@@ -3047,6 +3047,11 @@ class GroundTruthCase(unittest.TestCase):
             f"gap disposition parsing -> {got_disp}",
         )
 
+    def test_a_malformed_scoped_row_is_dropped_rather_than_read(self) -> None:
+        """The report sets each scoped row's repos, so a non-string entry would raise there."""
+        led = {"gaps": [{"path": "x.md", "disposition": "accepted", "repos": [{"name": "A"}]}]}
+        self.assertEqual(audit.gap_rows(led), ([], []))
+
     def test_a_scoped_keep_row_is_one_repository_s_and_not_the_fleet_s(self) -> None:
         """A row scoped by repos neither overrides the fleet-wide retire nor reaches another repository."""
         led = {
