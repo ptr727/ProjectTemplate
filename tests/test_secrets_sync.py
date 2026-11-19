@@ -40,6 +40,10 @@ REAL_RUN_OP = ss.run_op
 
 SECRET = b"alpha-constructed-secret-value\n"
 POSIX_ONLY = unittest.skipIf(sys.platform == "win32", "POSIX modes and symbolic links")
+REAL_ROOT = ss.running_uid() == 0
+NOT_REAL_ROOT = unittest.skipIf(
+    REAL_ROOT, "a root runner owns every file it writes and reads past every mode"
+)
 WRITE_KEYS = frozenset(
     {
         ("vault", "create"),
@@ -256,6 +260,8 @@ class Case(unittest.TestCase):
         self.enterContext(unittest.mock.patch.object(ss, "stdin_is_tty", lambda: self.tty))
         self.enterContext(unittest.mock.patch.object(ss, "ask", self.answer))
         self.enterContext(unittest.mock.patch.object(ss.time, "sleep", lambda _seconds: None))
+        if REAL_ROOT:
+            self.enterContext(unittest.mock.patch.object(ss.os, "geteuid", lambda: 1000))
 
     def answer(self, question: str) -> bool:
         self.asked.append(question)
@@ -366,8 +372,7 @@ class TestSession(Case):
 
     def test_a_dry_run_with_no_account_is_refused_without_adding_one(self) -> None:
         self.fake.accounts = 0
-        with unittest.mock.patch.object(ss.os, "geteuid", lambda: 1000, create=True):
-            code, _, err = self.run_main("pull", "--bucket", "alpha", "--dry-run")
+        code, _, err = self.run_main("pull", "--bucket", "alpha", "--dry-run")
         self.assertEqual(code, 1)
         self.assertIn("op account add", err)
         self.assertNotIn(("account", "add"), self.fake.keys())
@@ -1210,6 +1215,7 @@ class TestPush(Case):
         self.assertEqual(code, 2)
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("vault", "create")])
 
+    @NOT_REAL_ROOT
     def test_a_path_under_an_unlistable_directory_is_refused_by_name(self) -> None:
         locked = self.home / ".secrets"
         locked.mkdir()
@@ -1335,6 +1341,7 @@ class TestPull(Case):
         self.assertEqual(self.asked, [], "a create needs no prompt")
         self.assert_quiet(out, err)
 
+    @NOT_REAL_ROOT
     def test_a_differing_local_file_is_overwritten_only_on_confirmation(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
         path = self.write(".secrets/alpha", b"local\n")
@@ -1404,6 +1411,7 @@ class TestPull(Case):
         self.assertEqual(seen, [0o600])
         self.assertEqual(stat.S_IMODE((self.home / ".secrets/alpha").stat().st_mode), 0o644)
 
+    @NOT_REAL_ROOT
     def test_a_replaced_file_keeps_its_group_and_a_new_one_takes_the_default(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
@@ -1421,6 +1429,7 @@ class TestPull(Case):
         self.assertEqual(seen, [path.stat().st_gid])
         self.assertEqual(path.read_bytes(), SECRET)
 
+    @NOT_REAL_ROOT
     def test_a_group_that_cannot_be_kept_is_refused_and_nothing_is_replaced(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
         path = self.write(".secrets/alpha", b"local\n")
@@ -1447,6 +1456,7 @@ class TestPull(Case):
         self.assertNotIn("constructed rename failure", err)
         self.assertEqual(list((self.home / ".secrets").iterdir()), [])
 
+    @NOT_REAL_ROOT
     def test_a_local_file_newer_than_the_remote_copy_is_skipped_unless_overwrite_newer(
         self,
     ) -> None:
@@ -1467,12 +1477,14 @@ class TestPull(Case):
         self.assertIn("would write", out)
         self.assertFalse((self.home / ".secrets").exists())
 
+    @NOT_REAL_ROOT
     def test_a_differing_mode_is_set_on_confirmation(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:0600",))
         path = self.write(".secrets/alpha", mode=0o644)
         self.assertEqual(self.run_main("pull", "--bucket", "alpha", "--yes")[0], 0)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    @NOT_REAL_ROOT
     def test_an_item_changed_remotely_during_the_pull_prompt_is_not_written(self) -> None:
         vid = self.vault()
         iid = self.fake.add_item(vid, ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
@@ -1488,6 +1500,7 @@ class TestPull(Case):
         self.assertIn("changed remotely after the plan was printed", err)
         self.assertEqual(path.read_bytes(), b"local\n")
 
+    @NOT_REAL_ROOT
     def test_a_session_ended_during_the_pull_prompt_writes_nothing(self) -> None:
         self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, updated="2099-01-01T00:00:00Z")
         path = self.write(".secrets/alpha", b"local\n")
@@ -1515,6 +1528,7 @@ class TestPull(Case):
         self.assertEqual(path.read_bytes(), b"local\n")
         self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["alpha"])
 
+    @NOT_REAL_ROOT
     def test_a_file_written_during_the_prompt_is_not_replaced(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET)
@@ -1620,6 +1634,7 @@ class TestContentTime(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{LATER}"])
 
+    @NOT_REAL_ROOT
     def test_a_forced_update_reads_as_newer_than_what_it_replaced(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{LATER}"))
@@ -1730,6 +1745,7 @@ class TestContentTime(Case):
         self.assertIn("same", out)
         self.assertNotIn("malformed", err)
 
+    @NOT_REAL_ROOT
     def test_a_pull_re_times_an_unchanged_file_without_a_prompt(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
@@ -1745,6 +1761,7 @@ class TestContentTime(Case):
         code, out, _ = self.run_main("pull", "--bucket", "alpha")
         self.assertIn("Nothing to pull", out)
 
+    @NOT_REAL_ROOT
     def test_a_pull_names_each_action_by_what_it_does(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/absent", SECRET)
@@ -2256,6 +2273,7 @@ def alive(pid: int) -> bool:
 
 @unittest.skipIf(sys.platform == "win32", "Windows cannot deliver SIGINT or SIGTERM to a script")
 @unittest.skipUnless(Path("/proc").is_dir(), "the survivor check reads /proc")
+@unittest.skipIf(REAL_ROOT, "the script refuses root before any call")
 class TestInterrupt(unittest.TestCase):
     """A signal mid-call stops the `op` child, signs out, removes temporary files, and ends the run by that signal."""
 
