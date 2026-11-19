@@ -2244,6 +2244,7 @@ sys.modules["secrets_sync"] = module
 spec.loader.exec_module(module)
 module.stdin_is_tty = lambda: True
 module.ask = lambda question: True
+module.refuse_root = lambda: None
 status = module.run(sys.argv[1:])
 if isinstance(status, module.signal.Signals):
     module.reraise(status)
@@ -2264,7 +2265,6 @@ def alive(pid: int) -> bool:
 
 @unittest.skipIf(sys.platform == "win32", "Windows cannot deliver SIGINT or SIGTERM to a script")
 @unittest.skipUnless(Path("/proc").is_dir(), "the survivor check reads /proc")
-@unittest.skipIf(RUNNING_AS_ROOT, "the script refuses root before any call")
 class TestInterrupt(unittest.TestCase):
     """A signal mid-call stops the `op` child, signs out, removes temporary files, and ends the run by that signal."""
 
