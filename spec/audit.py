@@ -171,7 +171,7 @@ def gap_rows(ledger):
         ):
             if "repos" not in g:
                 fleet.append(g)
-            elif isinstance(g["repos"], list):
+            elif isinstance(g["repos"], list) and all(isinstance(r, str) for r in g["repos"]):
                 scoped.append(g)
     return fleet, scoped
 

@@ -2862,6 +2862,13 @@ class HubTrackedPathsCase(unittest.TestCase):
         with unittest.mock.patch.object(validate.subprocess, "run", return_value=done):
             self.assertEqual(validate.hub_tracked_paths(validate.ROOT), {"README.md", "run.sh"})
 
+    def test_a_path_that_is_not_utf8_is_listed_rather_than_raising(self) -> None:
+        """The audit decodes the hub's tracked paths with surrogateescape, so the gate does too."""
+        listing = b"100644 " + b"0" * 40 + b" 0\tbad-\xff.md\0"
+        done = subprocess.CompletedProcess([], 0, stdout=listing, stderr=b"")
+        with unittest.mock.patch.object(validate.subprocess, "run", return_value=done):
+            self.assertEqual(validate.hub_tracked_paths(validate.ROOT), {"bad-\udcff.md"})
+
     def test_a_tree_git_cannot_list_is_reported_rather_than_checked(self) -> None:
         out = io.StringIO()
         with (
