@@ -89,6 +89,8 @@ requires_unprivileged_root = unittest.skipUnless(
     unprivileged_root_is_available(), NO_UNPRIVILEGED_ROOT
 )
 
+RUNNING_AS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+
 
 _WINDOWS = os.name == "nt"
 
