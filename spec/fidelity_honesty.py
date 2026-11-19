@@ -244,6 +244,7 @@ def render_report(spreads, promote, gaps, unreadable, ledger, kept):
         if isinstance(d, dict)
         and isinstance(d.get("path"), str)
         and isinstance(d.get("repos"), list)
+        and d["repos"]
         and all(isinstance(r, str) for r in d["repos"])
         and isinstance(d.get("disposition"), str)
         and isinstance(d.get("reason"), str)
