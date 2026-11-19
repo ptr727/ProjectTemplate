@@ -32,11 +32,14 @@ import unittest.mock
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from host_capability import RUNNING_AS_ROOT
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "secrets_sync.py"
 sys.path.insert(0, str(SCRIPT.parent))
 import secrets_sync as ss
 
 REAL_RUN_OP = ss.run_op
+REAL_REFUSE_ROOT = ss.refuse_root
 
 SECRET = b"alpha-constructed-secret-value\n"
 POSIX_ONLY = unittest.skipIf(sys.platform == "win32", "POSIX modes and symbolic links")
@@ -256,6 +259,8 @@ class Case(unittest.TestCase):
         self.enterContext(unittest.mock.patch.object(ss, "stdin_is_tty", lambda: self.tty))
         self.enterContext(unittest.mock.patch.object(ss, "ask", self.answer))
         self.enterContext(unittest.mock.patch.object(ss.time, "sleep", lambda _seconds: None))
+        if RUNNING_AS_ROOT:
+            self.enterContext(unittest.mock.patch.object(ss, "refuse_root", lambda: None))
 
     def answer(self, question: str) -> bool:
         self.asked.append(question)
@@ -366,8 +371,7 @@ class TestSession(Case):
 
     def test_a_dry_run_with_no_account_is_refused_without_adding_one(self) -> None:
         self.fake.accounts = 0
-        with unittest.mock.patch.object(ss.os, "geteuid", lambda: 1000, create=True):
-            code, _, err = self.run_main("pull", "--bucket", "alpha", "--dry-run")
+        code, _, err = self.run_main("pull", "--bucket", "alpha", "--dry-run")
         self.assertEqual(code, 1)
         self.assertIn("op account add", err)
         self.assertNotIn(("account", "add"), self.fake.keys())
@@ -398,7 +402,10 @@ class TestSession(Case):
                 self.assertIn("op account add", err)
 
     def test_root_is_refused_before_any_call(self) -> None:
-        with unittest.mock.patch.object(ss.os, "geteuid", lambda: 0, create=True):
+        with (
+            unittest.mock.patch.object(ss, "refuse_root", REAL_REFUSE_ROOT),
+            unittest.mock.patch.object(ss.os, "geteuid", lambda: 0, create=True),
+        ):
             code, _, err = self.run_main("status")
         self.assertEqual(code, 1)
         self.assertIn("root", err)
@@ -1210,6 +1217,7 @@ class TestPush(Case):
         self.assertEqual(code, 2)
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("vault", "create")])
 
+    @unittest.skipIf(RUNNING_AS_ROOT, "root lists a mode-000 directory")
     def test_a_path_under_an_unlistable_directory_is_refused_by_name(self) -> None:
         locked = self.home / ".secrets"
         locked.mkdir()
@@ -2236,6 +2244,7 @@ sys.modules["secrets_sync"] = module
 spec.loader.exec_module(module)
 module.stdin_is_tty = lambda: True
 module.ask = lambda question: True
+module.refuse_root = lambda: None
 status = module.run(sys.argv[1:])
 if isinstance(status, module.signal.Signals):
     module.reraise(status)
