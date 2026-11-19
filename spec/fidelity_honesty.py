@@ -106,12 +106,9 @@ def fidelity_pass(spec):
             spreads.append((unit, None))
             continue
         canon_hash = audit.content_hash(canon)
-        # Hash each past revision's same region (a section may be absent in an old revision -> skip it).
-        history = set()
-        for t in audit.git_file_history(canon_path):
-            region = t if extract is None else extract(t)
-            if region is not None:
-                history.add(audit.content_hash(region))
+        history = audit.history_keys(
+            t if extract is None else extract(t) for t in audit.git_file_history(canon_path)
+        )
         spread = {"match": [], "stale": [], "differs": [], "absent": [], "unavailable": []}
         for r in repos:
             sel = audit.repo_selectors(r, defaults)
@@ -170,9 +167,10 @@ def manifest_gap_pass(spec):
     list rather than a hint, since the carriers are named.
     A repo whose tree cannot be read in full is reported rather than skipped. The reason is that an unread
     tree contributes no gaps and reads exactly like a repo that carries none.
+    A copy a scoped `accepted` row lets its repo keep is returned apart, as the third value.
     """
     candidates = audit.deletion_candidates(spec)
-    gaps, unreadable = {}, []
+    gaps, kept, unreadable = {}, {}, []
     for entry in spec["registry"]["repos"]:
         if entry.get("status") != "cataloged" or entry.get("name") == audit.hub_repo_name():
             continue
@@ -183,9 +181,14 @@ def manifest_gap_pass(spec):
         if carried is None:
             unreadable.append(entry["name"])
             continue
+        own = audit.repo_kept_paths(spec, entry["name"])
         for path in carried & candidates:
-            gaps.setdefault(path, []).append(entry["name"])
-    return {p: sorted(r) for p, r in sorted(gaps.items())}, unreadable
+            (kept if path in own else gaps).setdefault(path, []).append(entry["name"])
+    return (
+        {p: sorted(r) for p, r in sorted(gaps.items())},
+        unreadable,
+        {p: sorted(r) for p, r in sorted(kept.items())},
+    )
 
 
 def load_ledger():
@@ -210,7 +213,7 @@ def _fmt(repos):
     return ", ".join(sorted(repos)) if repos else "-"
 
 
-def render_report(spreads, promote, gaps, unreadable, ledger):
+def render_report(spreads, promote, gaps, unreadable, ledger, kept):
     """Join the live passes against the curated ledger into the checked-in burn-down Markdown.
 
     A recorded disposition still matching a live divergence is a burn-down row. A live divergence (a
@@ -244,14 +247,8 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
         and isinstance(d.get("disposition"), str)
         and isinstance(d.get("reason"), str)
     ]
-    gap_entries = [
-        g
-        for g in ledger.get("gaps", [])
-        if isinstance(g, dict)
-        and isinstance(g.get("path"), str)
-        and isinstance(g.get("disposition"), str)
-        and isinstance(g.get("reason"), str)
-    ]
+    fleet_gaps, scoped_gaps = audit.gap_rows(ledger)
+    gap_entries = [g for g in fleet_gaps if isinstance(g.get("reason"), str)]
     gap_disp = {g["path"]: g for g in gap_entries}
     covered = {}  # path -> repos that carry a disposition (to find the untriaged remainder)
     for d in dispositions:
@@ -289,6 +286,15 @@ def render_report(spreads, promote, gaps, unreadable, ledger):
     for g in gap_entries:  # a gap disposition stays live while the file is still an untracked gap
         if g["path"] in gaps:
             by_disp.setdefault(g["disposition"], []).append((g, None, None, None))
+    for g in scoped_gaps:
+        named = set(g["repos"])
+        live = sorted(named & set(kept.get(g["path"], [])))
+        unk = sorted(named & set(unreadable))
+        if not live and not unk:
+            resolved.append(g)
+        elif isinstance(g.get("reason"), str):
+            gone = sorted(named - set(live) - set(unk))
+            by_disp.setdefault(g["disposition"], []).append((g, live, gone, unk))
 
     out = []
     w = out.append
@@ -406,10 +412,10 @@ def main(argv=()):
     report_mode = parser.parse_args(list(argv)).report
     spec = load_spec()
     spreads, promote, mislabel = fidelity_pass(spec)
-    gaps, unreadable = manifest_gap_pass(spec)
+    gaps, unreadable, kept = manifest_gap_pass(spec)
 
     if report_mode:
-        content = render_report(spreads, promote, gaps, unreadable, spec["divergences"])
+        content = render_report(spreads, promote, gaps, unreadable, spec["divergences"], kept)
         # LF matches the fleet default, since reports/*.md is LF.
         # Bytes are written so the local platform does not re-translate them.
         # Git dates the file, so no timestamp is embedded, which would churn on every regeneration.
@@ -453,10 +459,12 @@ def main(argv=()):
     print(
         "\n== Manifest gap: hub-tracked files NOT in the manifest, or retired ones, that a repo carries anyway =="
     )
-    if not gaps:
+    if not gaps and not kept:
         print("   none - no cataloged repo carries a hub-hosted or retired file")
     for path, repos in gaps.items():
         print(f"   GAP  {path} :: {', '.join(repos)}")
+    for path, repos in kept.items():
+        print(f"   KEPT {path} :: {', '.join(repos)}")
     if unreadable:
         print(f"   tree unreadable, gap unmeasured: {', '.join(unreadable)}")
     return 0

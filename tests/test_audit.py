@@ -96,6 +96,7 @@ def run_audit(
     hub: frozenset[str] = frozenset(),
     texts: dict[str, str] | None = None,
     moved: frozenset[str] = frozenset(),
+    gaps: tuple[dict[str, Any], ...] = (),
 ) -> tuple[list[tuple[str, str]], FakeGh]:
     """Audit a Python repository carrying `tree`, where a test module makes .codecov.yml owed.
 
@@ -113,6 +114,7 @@ def run_audit(
         },
         "divergences": audit.load("spec/divergences.json"),
     }
+    spec["divergences"]["gaps"] = [*spec["divergences"]["gaps"], *gaps]
     fake = FakeGh(tree, modes, unread, texts, moved)
     with (
         mock.patch.object(audit, "gh", fake),
@@ -355,6 +357,50 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
                 "hub-only: CLAUDE.md - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"
             ],
         )
+
+    def test_an_unreadable_retired_copy_is_reported_unread(self) -> None:
+        """A copy never read is neither a past hub version nor this repo's edit, so neither finding is made."""
+        history = mock.Mock(return_value=["@AGENTS.md\n"])
+        read_text = audit.Run.read_text
+
+        def no_inline_content(run: audit.Run, path: str) -> str | None:
+            """The contents API answers CLAUDE.md with no inline content, as for a blob too large to inline."""
+            return None if path == "CLAUDE.md" else read_text(run, path)
+
+        with (
+            mock.patch.object(audit, "git_file_history", history),
+            mock.patch.object(audit.Run, "read_text", no_inline_content),
+        ):
+            findings, _ = run_audit(CARRIED | {".codecov.yml", "CLAUDE.md"}, hub=self.HUB)
+        history.assert_not_called()
+        self.assertEqual(
+            [t for t in self.hub_only_findings(findings) if "CLAUDE.md" in t],
+            [
+                "hub-only: could not read CLAUDE.md content on main to compare it with past hub versions (no inline content returned); verify by hand"
+            ],
+        )
+
+    def test_a_scoped_keep_row_spares_that_repository_s_retired_copy(self) -> None:
+        """The changed copy that would go to the maintainer is not reported once its keep is recorded."""
+        keep = {
+            "path": "CLAUDE.md",
+            "disposition": "accepted",
+            "reason": "kept",
+            "repos": ["Fixture"],
+        }
+        other = {**keep, "repos": ["Another"]}
+        for row, want in ((keep, 0), (other, 1)):
+            with self.subTest(repos=row["repos"]):
+                history = mock.Mock(return_value=["@AGENTS.md\n"])
+                with mock.patch.object(audit, "git_file_history", history):
+                    findings, _ = run_audit(
+                        CARRIED | {".codecov.yml", "CLAUDE.md"},
+                        hub=self.HUB,
+                        texts={"CLAUDE.md": "@AGENTS.md\nOur own rule.\n"},
+                        gaps=(row,),
+                    )
+                got = [t for t in self.hub_only_findings(findings) if "CLAUDE.md" in t]
+                self.assertEqual(len(got), want, got)
 
     def test_a_retired_path_the_hub_still_hosts_is_reported_as_hosted(self) -> None:
         """The control for the case above, a retire path the hub tracks, which names the hub's copy."""

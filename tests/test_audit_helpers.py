@@ -3047,6 +3047,30 @@ class GroundTruthCase(unittest.TestCase):
             f"gap disposition parsing -> {got_disp}",
         )
 
+    def test_a_scoped_keep_row_is_one_repository_s_and_not_the_fleet_s(self) -> None:
+        """A row scoped by repos neither overrides the fleet-wide retire nor reaches another repository."""
+        led = {
+            "divergences": {
+                "gaps": [
+                    {"path": "CLAUDE.md", "disposition": "retire", "reason": "fleet"},
+                    {
+                        "path": "CLAUDE.md",
+                        "disposition": "accepted",
+                        "reason": "own",
+                        "repos": ["A"],
+                    },
+                    {"path": "x.md", "disposition": "retire", "reason": "scoped", "repos": ["A"]},
+                ]
+            }
+        }
+        self.assertEqual(audit.gap_dispositions(led), {"CLAUDE.md": ("retire", "fleet")})
+        self.assertEqual(audit.repo_kept_paths(led, "A"), {"CLAUDE.md"})
+        self.assertEqual(audit.repo_kept_paths(led, "B"), set())
+
+    def test_history_keys_skip_an_absent_revision_and_honor_the_key(self) -> None:
+        self.assertEqual(audit.history_keys(["a\r\n", None], audit.normalize_line_endings), {"a\n"})
+        self.assertEqual(audit.history_keys([None]), set())
+
     def test_deletion_candidates_add_retired_paths_the_hub_no_longer_tracks(self) -> None:
         spec = {
             "files": {"baseline": [{"path": "kept.md"}]},
@@ -3070,7 +3094,6 @@ class GroundTruthCase(unittest.TestCase):
                 ("the revision itself", past, True),
                 ("the revision with CRLF line endings", past.replace("\n", "\r\n"), True),
                 ("a copy with another action pin", past.replace(old_pin, new_pin), False),
-                ("a copy that could not be read", None, False),
             ]
             self.assertEqual(
                 audit.content_hash(cases[2][1]),
