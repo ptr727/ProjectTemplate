@@ -157,17 +157,35 @@ def deletion_candidates(spec, rev=None):
     return hub_only_paths(spec, rev) | retired_paths(spec)
 
 
-def gap_dispositions(spec):
-    """The curated ledger's manifest-gap dispositions, as path -> (disposition, reason)."""
-    out = {}
-    for g in spec.get("divergences", {}).get("gaps", []):
+def gap_rows(ledger):
+    """The ledger's well-formed `gaps` rows, split into fleet-wide rows and rows scoped by `repos`.
+
+    A scoped row is those repositories' keep decision rather than the fleet's.
+    """
+    fleet, scoped = [], []
+    for g in ledger.get("gaps", []):
         if (
             isinstance(g, dict)
             and isinstance(g.get("path"), str)
             and isinstance(g.get("disposition"), str)
         ):
-            out[g["path"]] = (g["disposition"], g.get("reason", ""))
-    return out
+            if "repos" not in g:
+                fleet.append(g)
+            elif isinstance(g["repos"], list) and all(isinstance(r, str) for r in g["repos"]):
+                scoped.append(g)
+    return fleet, scoped
+
+
+def gap_dispositions(spec):
+    """The curated ledger's fleet-wide manifest-gap dispositions, as path -> (disposition, reason)."""
+    fleet, _ = gap_rows(spec.get("divergences", {}))
+    return {g["path"]: (g["disposition"], g.get("reason", "")) for g in fleet}
+
+
+def repo_kept_paths(spec, name):
+    """The paths whose `accepted` gap rows scoped by `repos` let the named repository keep its own copy."""
+    _, scoped = gap_rows(spec.get("divergences", {}))
+    return {g["path"] for g in scoped if g["disposition"] == "accepted" and name in g["repos"]}
 
 
 def repo_tree_blobs(slug, ground_head):
@@ -1563,16 +1581,22 @@ def content_hash(text):
     return _hash_normalized(normalize(text))
 
 
+def history_keys(past_texts, key=content_hash):
+    """`key` of every past text, so one membership test asks whether a copy matches any of them.
+
+    A None, such as a section absent from an old revision, contributes nothing.
+    """
+    return {key(past) for past in past_texts if past is not None}
+
+
 def matches_hub_history(down_text, rel_path):
     """Whether a downstream copy matches any past hub revision of rel_path, line endings aside.
 
     Only line endings are normalized. A copy differing in an action pin or a `needs:` list goes to
     the maintainer rather than to a deletion. A Dependabot bump and a repository edit look alike here.
     """
-    if down_text is None:
-        return False
-    copy = normalize_line_endings(down_text)
-    return any(normalize_line_endings(past) == copy for past in git_file_history(rel_path))
+    past = history_keys(git_file_history(rel_path), normalize_line_endings)
+    return normalize_line_endings(down_text) in past
 
 
 def classify_verbatim(down_text, canon_text, past_texts):
@@ -1580,10 +1604,7 @@ def classify_verbatim(down_text, canon_text, past_texts):
     dh = content_hash(down_text)
     if dh == content_hash(canon_text):
         return None
-    for past in past_texts:
-        if content_hash(past) == dh:
-            return "stale"
-    return "modified"
+    return "stale" if dh in history_keys(past_texts) else "modified"
 
 
 class ShallowCloneError(RuntimeError):
@@ -1997,7 +2018,7 @@ def check_verbatim(label, down_text, canonical_rel, extract=None):
         if down_region is None:
             return [("DRIFT", f"verbatim: {label} region absent downstream, cannot compare")]
         down_text, canon_text = down_region, canon_region
-        history = [h for h in (extract(t) for t in history) if h is not None]
+        history = [extract(t) for t in history]
     verdict = classify_verbatim(down_text, canon_text, history)
     if verdict is None:
         return []
@@ -2587,15 +2608,20 @@ def check_hubonly_carried(run):
             )
         ]
     disp = gap_dispositions(run.spec)
+    kept = repo_kept_paths(run.spec, run.entry["name"])
     findings = []
-    for path in sorted(run.tree & deletion_candidates(run.spec)):
+    for path in sorted((run.tree & deletion_candidates(run.spec)) - kept):
         kind = disp.get(path, ("", ""))[0]
         if kind == "accepted":
             continue
-        if kind == "retire":
-            if path in hub_tracked(None):
-                text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
-            elif matches_hub_history(run.read_text(path), path):
+        if kind == "retire" and path in hub_tracked(None):
+            text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+        elif kind == "retire":
+            copy = run.read_text(path)
+            if copy is None:  # never read, so neither a match nor this repo's own edit is known
+                findings.append(run.unread("hub-only", path, "compare it with past hub versions"))
+                continue
+            if matches_hub_history(copy, path):
                 text = f"hub-only: delete this repo's {path} - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
             else:
                 text = f"hub-only: {path} - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"

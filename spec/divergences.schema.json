@@ -36,16 +36,30 @@
                     "path": { "type": "string" },
                     "disposition": { "enum": ["re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire"] },
                     "reason": { "type": "string" },
+                    "repos": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "minItems": 1,
+                        "description": "Registry names of the cataloged repositories this row alone covers, recording that each keeps its own copy of the path. Absent, the row covers the whole fleet. spec/validate.py allows it only on an accepted row. A path holds at most one fleet-wide row, and any number of scoped ones."
+                    },
                     "tracking": {
                         "type": ["string", "null"],
                         "description": "Where the decision or the remediation this entry records is tracked, such as owner/repo#123. Required on an investigate entry, per $defs/investigateNeedsTracking."
                     }
                 },
-                "allOf": [{ "$ref": "#/$defs/investigateNeedsTracking" }]
+                "allOf": [{ "$ref": "#/$defs/investigateNeedsTracking" }, { "$ref": "#/$defs/scopedGapAccepts" }]
             }
         }
     },
     "$defs": {
+        "scopedGapAccepts": {
+            "title": "A gap row scoped by repos records a keep decision, so it accepts",
+            "if": { "required": ["repos"] },
+            "then": {
+                "required": ["disposition"],
+                "properties": { "disposition": { "const": "accepted" } }
+            }
+        },
         "investigateNeedsTracking": {
             "title": "An investigate disposition names where its pending decision is being made",
             "if": {

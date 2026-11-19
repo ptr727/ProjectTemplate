@@ -2769,6 +2769,209 @@ class PlaceholderErrorsCase(unittest.TestCase):
         self.assertIn(marker, out.getvalue())
 
 
+class DroppedCarryCase(unittest.TestCase):
+    """A carried file the manifest drops and the audit cannot see owes a gaps row, since nothing else reports its copies."""
+
+    PINS = frozenset({"KEPT.md", "GONE.md", "HOSTED.md"})
+    TREE: ClassVar[dict[str, Any]] = {
+        "source": "src",
+        "target": "lib/fleet",
+        "include": ["**/*"],
+        "prune": True,
+    }
+
+    def errors(
+        self,
+        baseline: set[str],
+        gaps: dict[str, str],
+        pins: frozenset[str] = PINS,
+    ) -> list[str]:
+        tracked = {"HOSTED.md", "src/SHADOW.md", "tests/OWNED.md"}
+        return validate.dropped_carry_errors(baseline, gaps, tracked, [self.TREE], ["tests"], pins)
+
+    def test_a_drop_the_hub_also_deleted_needs_a_row(self) -> None:
+        self.assertEqual(
+            self.errors({"KEPT.md"}, {}),
+            [
+                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos. Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
+            ],
+        )
+
+    def test_a_row_or_a_hub_copy_settles_the_drop(self) -> None:
+        """The hub still tracking HOSTED.md makes it hub-only, which the audit reports without a row."""
+        for kind in ("retire", "accepted"):
+            with self.subTest(kind=kind):
+                self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md": kind}), [])
+
+    def test_a_row_the_audit_does_not_act_on_leaves_the_drop_unsettled(self) -> None:
+        """An investigate row neither has the audit report the copies nor decides to leave them."""
+        self.assertEqual(
+            [e.split(". ", 1)[1] for e in self.errors({"KEPT.md"}, {"GONE.md": "investigate"})],
+            [
+                "Change its 'investigate' gaps row. Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
+            ],
+        )
+
+    def test_a_file_moved_into_a_tree_owes_an_accepted_row(self) -> None:
+        """lib/fleet/moved.sh left the baseline for a tree's target, so the decision is recorded rather than assumed."""
+        pins = self.PINS | {"lib/fleet/moved.sh"}
+        got = self.errors({"KEPT.md"}, {"GONE.md": "retire"}, pins)
+        self.assertEqual([e.split("'")[1] for e in got], ["lib/fleet/moved.sh"])
+        moved = {"GONE.md": "retire", "lib/fleet/moved.sh": "accepted"}
+        self.assertEqual(self.errors({"KEPT.md"}, moved, pins), [])
+
+    def test_a_tracked_path_the_audit_skips_is_still_a_drop(self) -> None:
+        """A tree source or a repo-owned tree keeps a hub path out of the audit's hub-only set."""
+        got = self.errors(set(), {}, pins=frozenset({"src/SHADOW.md", "tests/OWNED.md"}))
+        self.assertEqual([e.split("'")[1] for e in got], ["src/SHADOW.md", "tests/OWNED.md"])
+
+    def test_an_unpinned_baseline_path_is_reported(self) -> None:
+        self.assertEqual(
+            self.errors({"KEPT.md", "GONE.md", "NEW.md"}, {}),
+            [
+                "files.json: baseline path 'NEW.md' has no line in spec/validate.py CARRIED_PATH_PINS, so a later drop of it goes unseen"
+            ],
+        )
+
+    def test_the_shipped_manifest_and_ledger_are_clean(self) -> None:
+        baseline = {e["path"] for e in validate.load("spec/files.json")["baseline"]}
+        _, fleet = validate.gap_scope_errors(
+            validate.load("spec/divergences.json")["gaps"], set(), set()
+        )
+        tracked = validate.hub_tracked_paths(validate.ROOT)
+        self.assertIsNotNone(tracked)
+        assert tracked is not None
+        files = validate.load("spec/files.json")
+        owned = [o["source"] for o in files["repoOwnedTrees"]]
+        self.assertEqual(
+            validate.dropped_carry_errors(baseline, fleet, tracked, files["trees"], owned), []
+        )
+
+
+class HubTrackedPathsCase(unittest.TestCase):
+    """The drop check reads regular files, as the audit does, and reports a tree git cannot list."""
+
+    def test_only_regular_files_are_listed(self) -> None:
+        listing = (
+            b"100644 " + b"0" * 40 + b" 0\tREADME.md\0"
+            b"100755 " + b"0" * 40 + b" 0\trun.sh\0"
+            b"120000 " + b"0" * 40 + b" 0\tlink.md\0"
+            b"160000 " + b"0" * 40 + b" 0\tsub\0"
+        )
+        done = subprocess.CompletedProcess([], 0, stdout=listing, stderr=b"")
+        with unittest.mock.patch.object(validate.subprocess, "run", return_value=done):
+            self.assertEqual(validate.hub_tracked_paths(validate.ROOT), {"README.md", "run.sh"})
+
+    def test_a_path_that_is_not_utf8_is_listed_rather_than_raising(self) -> None:
+        """The audit decodes the hub's tracked paths with surrogateescape, so the gate does too."""
+        listing = b"100644 " + b"0" * 40 + b" 0\tbad-\xff.md\0"
+        done = subprocess.CompletedProcess([], 0, stdout=listing, stderr=b"")
+        with unittest.mock.patch.object(validate.subprocess, "run", return_value=done):
+            self.assertEqual(validate.hub_tracked_paths(validate.ROOT), {"bad-\udcff.md"})
+
+    def test_a_tree_git_cannot_list_is_reported_rather_than_checked(self) -> None:
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(validate, "hub_tracked_paths", return_value=None),
+            contextlib.redirect_stdout(out),
+        ):
+            status = validate.main([])
+        self.assertEqual(status, 1)
+        self.assertIn("could not list the hub's tracked files with git ls-files", out.getvalue())
+
+
+class DroppedCarryWithoutLedgerCase(unittest.TestCase):
+    """The drop check runs with no ledger present, since a missing ledger settles no drop."""
+
+    def test_the_drop_check_runs_where_the_ledger_is_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            shutil.copytree(validate.ROOT / "spec", root / "spec")
+            (root / "registry").mkdir()
+            shutil.copy(
+                validate.ROOT / "registry" / "repos.schema.json",
+                root / "registry" / "repos.schema.json",
+            )
+            (root / "registry" / "repos.json").write_text(
+                json.dumps(
+                    {
+                        "defaults": {"workflowModel": "release"},
+                        "repos": [
+                            {
+                                "name": "Fixture",
+                                "url": "https://github.com/owner/fixture",
+                                "status": "backlog",
+                                "classificationPending": True,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "spec" / "divergences.json").unlink()
+            result = subprocess.run(
+                [sys.executable, str(root / "spec" / "validate.py")],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=60,
+                check=False,
+            )
+        output = result.stdout + result.stderr
+        self.assertNotIn("Traceback", output)
+        self.assertIn("could not list the hub's tracked files with git ls-files", output)
+
+
+class GapScopeCase(unittest.TestCase):
+    """A gaps row scoped by repos is one repository's keep decision, and a path holds one fleet-wide row."""
+
+    def test_a_scoped_keep_beside_a_fleet_row_is_clean(self) -> None:
+        gaps = [
+            {"path": "CLAUDE.md", "disposition": "retire", "reason": "r"},
+            {"path": "CLAUDE.md", "disposition": "accepted", "reason": "r", "repos": ["A"]},
+        ]
+        self.assertEqual(
+            validate.gap_scope_errors(gaps, {"A"}, {"A"}), ([], {"CLAUDE.md": "retire"})
+        )
+
+    def test_each_scoping_defect_is_reported(self) -> None:
+        gaps = [
+            {"path": "a.md", "disposition": "retire", "reason": "r"},
+            {"path": "a.md", "disposition": "accepted", "reason": "r"},
+            {"path": "b.md", "disposition": "retire", "reason": "r", "repos": ["A"]},
+            {"path": "c.md", "disposition": "accepted", "reason": "r", "repos": ["Nobody"]},
+            {"path": "d.md", "disposition": "accepted", "reason": "r", "repos": []},
+            {"path": "e.md", "disposition": "accepted", "reason": "r", "repos": ["Archived"]},
+        ]
+        errors, fleet = validate.gap_scope_errors(gaps, {"A", "Archived"}, {"A"})
+        self.assertEqual(
+            errors,
+            [
+                "divergences.json: gap 'a.md' has more than one fleet-wide row",
+                "divergences.json: gap 'b.md' is scoped by repos, so its disposition must be 'accepted', a keep decision for those repos alone",
+                "divergences.json: gap 'c.md' repo 'Nobody' not in the registry",
+                "divergences.json: gap 'd.md' repos must be a non-empty array of strings",
+                "divergences.json: gap 'e.md' repo 'Archived' is not cataloged, so no audit reads its copy",
+            ],
+        )
+        self.assertEqual(fleet, {"a.md": "retire"})
+
+    def test_the_gate_reaches_both_checks(self) -> None:
+        """Deleting either call site leaves every helper test above green, so run the gate's own entry point."""
+        for name in ("gap_scope_errors", "dropped_carry_errors"):
+            with self.subTest(check=name):
+                marker = f"fixture {name} error"
+                value: object = ([marker], {}) if name == "gap_scope_errors" else [marker]
+                out = io.StringIO()
+                with (
+                    unittest.mock.patch.object(validate, name, return_value=value),
+                    contextlib.redirect_stdout(out),
+                ):
+                    status = validate.main([])
+                self.assertEqual(status, 1)
+                self.assertIn(marker, out.getvalue())
+
+
 class InvestigateTrackingWiringCase(unittest.TestCase):
     """The helper is wired into both ledger loops, which no test of the helper alone can show.
 
@@ -2898,10 +3101,20 @@ class InvestigateTrackingSchemaMirrorCase(unittest.TestCase):
     def test_both_arrays_carry_the_conditional(self) -> None:
         for array in ("dispositions", "gaps"):
             with self.subTest(array=array):
-                self.assertEqual(
+                self.assertIn(
+                    {"$ref": "#/$defs/investigateNeedsTracking"},
                     self.schema["properties"][array]["items"]["allOf"],
-                    [{"$ref": "#/$defs/investigateNeedsTracking"}],
                 )
+
+    def test_a_scoped_gap_row_is_held_to_accepted(self) -> None:
+        """The gate refuses a scoped row that does not accept, so the schema asserts it for an editor too."""
+        self.assertIn(
+            {"$ref": "#/$defs/scopedGapAccepts"},
+            self.schema["properties"]["gaps"]["items"]["allOf"],
+        )
+        rule = self.schema["$defs"]["scopedGapAccepts"]
+        self.assertEqual(rule["if"]["required"], ["repos"])
+        self.assertEqual(rule["then"]["properties"]["disposition"]["const"], "accepted")
 
     def test_the_conditional_requires_a_non_empty_tracking_value(self) -> None:
         rule = self.schema["$defs"]["investigateNeedsTracking"]
