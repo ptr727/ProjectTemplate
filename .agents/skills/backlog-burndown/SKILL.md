@@ -269,11 +269,11 @@ for, and it binds harder than any throughput target.
   groups from earlier rounds included. It covers too the claim of each group dispatched whose
   worker has not yet ended. A worker creates its branch only once it runs. A worker handed back
   for review has not ended, since the same worker is continued. It covers too the claim of each
-  group stopped or parked on a question, until that claim records a release. That is because such
-  a group keeps its claim per "Raising a Blocked Question", even where it stopped before its first
-  file edit and so holds no branch. The orchestrator reads
-  that set from the assignments and outcomes its working notes hold, per "Run State", and a
-  refill planner's brief carries it. A claim comment alone cannot say, since a merged group's cleanup
+  group stopped or parked on a question, until that claim records a release. Such a group keeps
+  its claim per "Raising a Blocked Question". That holds even where it stopped before creating its
+  branch. The orchestrator reads
+  that set from the assignments and outcomes its working notes hold, per "Run State". A refill
+  planner's brief names the groups in it. A claim comment alone cannot say, since a merged group's cleanup
   leaves its claim reading like one whose worker has yet to start. A stopped or parked group is
   the exception, since its claim comment records the stop or the park. So that one is read from
   the comment, which reaches a group stopped in an earlier round or run.
@@ -666,7 +666,8 @@ rather than a decision.
   clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
   one branch. It is retired per "Cleanup Is the Orchestrator's", once its tip equals the remote
-  tip. Only then dispatch, into a slot per "The Round" step 6. This is the
+  tip. Only then edit the claim comment to drop the stop or park it records, so the group is an
+  ordinary claim again. Then dispatch, into a slot per "The Round" step 6. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
@@ -1059,7 +1060,7 @@ Every ending but the session's own first drops every waiting dispatch retry and 
 From then, a dispatch that fails is not retried and ends nothing. That holds for a reviewer and
 for continuing a handed-back worker alike. The ending names that worker as uncollected, leaves its
 branch and claim as they stand, and goes on. It names a worker whose dropped retry it needed the
-same way. Where the error left unclear whether the dispatch started, it marks that worker as one
+same way. Where the error left unclear whether the dispatch started, it marks that seat as one
 that may be live. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. Such an ending also waits
