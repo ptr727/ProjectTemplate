@@ -112,8 +112,8 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
 
     This one guards the maintainer's choice of model and his quota rather than the credentials or
     the machine. It sits in the host layer all the same, because a dispatch happens inside the
-    harness, where no hook a repository carries can see it. It refuses only a dispatch that names
-    the model. A saved workflow, a child workflow a script starts, a computed model, and an agent
+    harness, where no hook a repository carries can see it. It refuses a dispatch that names the
+    model, and a dispatch naming no model of a type the default does not reach. A saved workflow, a child workflow a script starts, a computed model, and an agent
     definition pinning one all pass. So does a fork, which runs at the session's model whatever it
     names, a model the hook cannot read. So does a nested session an agent launches
     with the allowance set, which is circumvention rather than the mistake this guards.

@@ -29,6 +29,7 @@ Usage: python3 install.py            (installs to ~/.claude).
 import argparse
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -1010,22 +1011,22 @@ def stamped_subagent_model(claude_home):
 def tier_defaults():
     """The default tier and its model, and the maintainer-only tier and its model, or None where unreadable.
 
-    Read from the mapping this checkout deploys, so a model release changes the default with no edit here.
+    Read from the mapping this checkout deploys, through the tier guard's own reader.
+    So the installer and the hook never read one mapping two ways.
     """
-    try:
-        cfg = json.loads(payload_source(TIER_CONFIG_NAME).read_text(encoding="utf-8"))
-        models = cfg["tools"]["claude-code"]["models"]
-        default_tier, reserved_tier = cfg["defaultTier"], cfg["maintainerOnly"]
-        default, reserved = models[default_tier], models[reserved_tier]
-    except (OSError, ValueError, KeyError, TypeError):
+    spec = importlib.util.spec_from_file_location("model_tier_guard", HERE / TIER_NAME)
+    if spec is None or spec.loader is None:
         return None
-    if not isinstance(default, str) or not default or not isinstance(reserved, str):
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    tiers = guard.load_tiers(payload_source(TIER_CONFIG_NAME))
+    if tiers is None:
         return None
     return {
-        "default_tier": default_tier,
-        "default": default,
-        "reserved_tier": reserved_tier,
-        "reserved": reserved,
+        "default_tier": tiers["default_tier"],
+        "default": tiers["default"],
+        "reserved_tier": tiers["reserved"],
+        "reserved": tiers["blocked"],
     }
 
 

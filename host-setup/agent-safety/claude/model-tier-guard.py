@@ -66,11 +66,9 @@ def load_tiers(path):
         default_tier = cfg["defaultTier"]
         default = models[default_tier]
         inheriting = entry.get("inheritingAgentTypes", [])
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    except (OSError, ValueError, KeyError, TypeError):
         return None
     if not isinstance(blocked, str) or not isinstance(default, str) or not blocked:
-        return None
-    if not isinstance(models, dict) or not isinstance(inheriting, list):
         return None
     return {
         "blocked": blocked,
@@ -78,7 +76,7 @@ def load_tiers(path):
         "default_tier": default_tier,
         "default": default,
         "models": models,
-        "inheriting": {t.lower() for t in inheriting if isinstance(t, str) and t},
+        "inheriting": {t.lower() for t in inheriting},
     }
 
 

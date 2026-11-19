@@ -60,7 +60,7 @@ python3 ~/.claude/hooks/tool-containment.py --selftest     # containment matrix:
 python3 ~/.claude/hooks/model-tier-guard.py --selftest     # tier matrix: all cases pass
 python3 ~/.claude/hooks/stray-process-sweep.py --orphans   # exit 0: no command scope outlived its session
 grep -c CLAUDE_CODE_SHELL_PREFIX ~/.claude/settings.json      # expect 1 where the installer reported the prefix set
-grep -c CLAUDE_CODE_SUBAGENT_MODEL ~/.claude/settings.json    # expect 1, the default subagent model
+grep -c '"CLAUDE_CODE_SUBAGENT_MODEL"' ~/.claude/settings.json  # expect 1 where the installer reported it set
 grep -c 'agent-safety v' ~/.claude/CLAUDE.md            # expect 2 (start + end marker)
 grep -c 'fleet-bootstrap v' ~/.claude/CLAUDE.md         # expect 2 (start + end marker)
 grep -cF 'Bash(python3 scripts/pr_review.py:*)' ~/.claude/settings.json   # expect 1 (never duplicated)
