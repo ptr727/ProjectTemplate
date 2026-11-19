@@ -2871,19 +2871,32 @@ class DropRemedyForTreePathCase(unittest.TestCase):
 
     TREE: ClassVar[dict[str, Any]] = DroppedCarryCase.TREE
 
-    def test_a_tree_path_names_accepted_only(self) -> None:
-        for path in ("lib/fleet/moved.sh", "src/moved.sh"):
-            with self.subTest(path=path):
-                got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {path})
-                self.assertEqual(len(got), 1)
-                self.assertIn("Use 'accepted'", got[0])
-                self.assertNotIn("Use 'retire'", got[0])
-                if path.startswith("lib/fleet/"):
-                    self.assertIn("a file the tree's check requires", got[0])
-                else:
-                    self.assertIn("the tree source 'src'", got[0])
-                    self.assertIn("without comparing the copy to past hub versions", got[0])
-                    self.assertNotIn("a file the tree's check requires", got[0])
+    def test_a_target_path_names_accepted_only(self) -> None:
+        got = validate.dropped_carry_errors(
+            set(), {}, set(), [self.TREE], [], {"lib/fleet/moved.sh"}
+        )
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertNotIn("Use 'retire'", got[0])
+        self.assertIn("a file the tree's check requires", got[0])
+
+    def test_a_tracked_source_path_names_accepted_with_its_own_reason(self) -> None:
+        got = validate.dropped_carry_errors(
+            set(), {}, {"src/moved.sh"}, [self.TREE], [], {"src/moved.sh"}
+        )
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertNotIn("Use 'retire'", got[0])
+        self.assertIn("the tree source 'src'", got[0])
+        self.assertIn("without comparing the copy to past hub versions", got[0])
+        self.assertNotIn("a file the tree's check requires", got[0])
+
+    def test_an_untracked_source_path_keeps_the_retire_choice(self) -> None:
+        # The audit compares an untracked retired path with past hub versions, so retire is valid there.
+        got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {"src/moved.sh"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'retire' to delete the copies, or 'accepted'", got[0])
+        self.assertNotIn("the tree source", got[0])
 
     def test_another_path_keeps_the_retire_choice(self) -> None:
         got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {"GONE.md"})
@@ -2985,20 +2998,25 @@ class RetiredPathCase(unittest.TestCase):
     def row(path: str, disposition: str = "retire", **extra: Any) -> dict[str, Any]:
         return {"path": path, "disposition": disposition, "reason": "r", **extra}
 
-    def test_a_retire_row_under_a_tree_is_refused(self) -> None:
-        for path in ("lib/fleet/a.sh", "src/a.sh"):
-            with self.subTest(path=path):
-                got = self.errors([self.row(path)])
-                self.assertEqual(len(got), 1)
-                self.assertIn("Use 'accepted'", got[0])
-                if path.startswith("lib/fleet/"):
-                    self.assertIn("a tree carries the path", got[0])
-                    self.assertIn("a file the tree's check requires", got[0])
-                else:
-                    self.assertIn("the tree source 'src'", got[0])
-                    self.assertIn("without comparing the copy to past hub versions", got[0])
-                    self.assertNotIn("a file the tree's check requires", got[0])
-                    self.assertNotIn("a tree carries the path", got[0])
+    def test_a_retire_row_on_a_tree_target_is_refused(self) -> None:
+        got = self.errors([self.row("lib/fleet/a.sh")])
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertIn("a tree carries the path", got[0])
+        self.assertIn("a file the tree's check requires", got[0])
+
+    def test_a_retire_row_on_a_tracked_source_path_is_refused_with_its_own_reason(self) -> None:
+        got = self.errors([self.row("src/a.sh")], tracked={"src/a.sh"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertIn("the tree source 'src'", got[0])
+        self.assertIn("without comparing the copy to past hub versions", got[0])
+        self.assertNotIn("a file the tree's check requires", got[0])
+        self.assertNotIn("a tree carries the path", got[0])
+
+    def test_a_retire_row_on_an_untracked_source_path_is_clean(self) -> None:
+        # The audit compares an untracked retired path with past hub versions, so nothing refuses the row.
+        self.assertEqual(self.errors([self.row("src/a.sh")]), [])
 
     def test_an_accepted_row_under_a_tree_is_clean(self) -> None:
         self.assertEqual(self.errors([self.row("lib/fleet/a.sh", "accepted")]), [])

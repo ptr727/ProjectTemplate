@@ -1154,6 +1154,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
     A retire row has the audit report the copies, and an accepted row records the decision to leave them.
     A file moved into a tree takes an accepted row, since the tree's own check governs its copies.
+    A tracked path under a tree source takes one too, while an untracked one under it is retired like any other path.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
     A pin is never removed, since a removed pin is a drop this check no longer sees.
@@ -1177,7 +1178,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
         source_tree = tree_carrying(trees, p, "source")
         if tree_carrying(trees, p, "target"):
             choice = "Use 'accepted' to leave the copies, since a tree carries this path and 'retire' would tell carriers to delete a file the tree's check requires"
-        elif source_tree:
+        elif source_tree and p in tracked:
             choice = f"Use 'accepted' to leave the copies, since the path lies under the tree source '{source_tree['source']}', which the hub keeps as that tree's canonical copy, and 'retire' would have the audit tell a repo holding it to delete it as a hub-hosted file without comparing the copy to past hub versions"
         else:
             choice = "Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
@@ -1236,7 +1237,8 @@ def retired_path_errors(gaps, fleet_gaps, baseline_paths, tracked, trees, owned_
     """The `gaps` rows whose disposition the audit would misread or never act on.
 
     A fleet-wide `retire` row has carriers delete the path, so a path a tree carries needs `accepted`.
-    A path under a tree's source does too, since the audit would then report a copy as hub-hosted without the history comparison.
+    So does a path the hub tracks under a tree's source, since the audit would then report a copy as hub-hosted without the history comparison.
+    An untracked path there takes that comparison, so `retire` stays valid for it.
     A repo-owned path is the repositories' own, so no deletion is owed and the row is dropped.
     A scoped row keeps a copy the audit reports, a path some fleet-wide `retire` row or the hub itself hosts.
     """
@@ -1249,7 +1251,7 @@ def retired_path_errors(gaps, fleet_gaps, baseline_paths, tracked, trees, owned_
             errors.append(
                 f"divergences.json: gap '{p}' is retired, but a tree carries the path, so retiring it would tell carriers to delete a file the tree's check requires. Use 'accepted'"
             )
-        elif source_tree:
+        elif source_tree and p in tracked:
             errors.append(
                 f"divergences.json: gap '{p}' is retired, but the path lies under the tree source '{source_tree['source']}', which the hub keeps as that tree's canonical copy, so the audit would tell a repo holding it to delete it as a hub-hosted file without comparing the copy to past hub versions. Use 'accepted'"
             )
