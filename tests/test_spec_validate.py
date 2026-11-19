@@ -872,6 +872,7 @@ def run_gate_on_files(overrides: dict[str, object], make_tree=None) -> str:
         files_path.write_text(json.dumps(files), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(root / "spec" / "validate.py")],
+            env=without_git_location(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1108,6 +1109,7 @@ class RegistryNameUniquenessCase(unittest.TestCase):
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1464,6 +1466,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1862,6 +1865,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             (root / "registry" / "repos.schema.json").write_bytes(b'{"a": "\x80"}')
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1884,6 +1888,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             # No repos.schema.json at all, which raises OSError rather than reaching the wrong-shape case.
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
