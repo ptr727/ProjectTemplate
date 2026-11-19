@@ -622,6 +622,23 @@ class ModelTierCase(unittest.TestCase):
 
         self.assertTrue(any("needs a name and a models object" in e for e in self.errors()))
 
+    def test_accepts_a_tool_without_inheriting_agent_types(self) -> None:
+        self.assertNotIn("inheritingAgentTypes", self.config["tools"]["claude-code"])  # type: ignore[index]
+
+        self.assertEqual(self.errors(), [])
+
+    def test_accepts_a_list_of_inheriting_agent_types(self) -> None:
+        self.config["tools"]["claude-code"]["inheritingAgentTypes"] = ["Explore", "Plan"]  # type: ignore[index]
+
+        self.assertEqual(self.errors(), [])
+
+    def test_rejects_malformed_inheriting_agent_types(self) -> None:
+        for value in ("Explore", [""], [7], ["Plan", "plan"]):
+            with self.subTest(value=value):
+                self.config["tools"]["claude-code"]["inheritingAgentTypes"] = value  # type: ignore[index]
+
+                self.assertTrue(any("inheritingAgentTypes" in e for e in self.errors()))
+
     def test_the_hub_table_matches_the_hub_config(self) -> None:
         self.assertEqual(validate.model_tier_errors(Path(__file__).resolve().parents[1]), [])
 

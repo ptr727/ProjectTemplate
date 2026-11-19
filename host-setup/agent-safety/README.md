@@ -104,12 +104,18 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
     every dispatch naming a model, since a guard that cannot tell what to block must not go quiet. A
     session launched with the allowance blocks no model, so it needs no mapping.
 
+    Where the agent takes a default model for a dispatch naming none, set that default to the
+    default tier's model. Record what was written, so a value the host set itself is never
+    overwritten. An agent may build in a type that default does not reach. Refuse a dispatch of
+    that type naming no model, since it runs at the session's own model. That refusal names each
+    tier a dispatch may take, never the maintainer-only one.
+
     This one guards the maintainer's choice of model and his quota rather than the credentials or
     the machine. It sits in the host layer all the same, because a dispatch happens inside the
     harness, where no hook a repository carries can see it. It refuses only a dispatch that names
     the model. A saved workflow, a child workflow a script starts, a computed model, and an agent
-    definition pinning one all pass. So do a dispatch naming no model and a fork naming another
-    model, which run at a model the hook cannot read. So does a nested session an agent launches
+    definition pinning one all pass. So does a fork, which runs at the session's model whatever it
+    names, a model the hook cannot read. So does a nested session an agent launches
     with the allowance set, which is circumvention rather than the mistake this guards.
 
 ## Decision Flow

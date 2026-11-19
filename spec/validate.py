@@ -953,6 +953,16 @@ def model_tier_errors(root):
                 f"spec/model-tiers.json: tool {tool!r} must give maintainerOnly a model no other tier shares"
             )
             continue
+        inheriting = entry.get("inheritingAgentTypes", [])
+        if (
+            not is_str_list(inheriting)
+            or not all(inheriting)
+            or len({t.lower() for t in inheriting}) != len(inheriting)
+        ):
+            errors.append(
+                f"spec/model-tiers.json: tool {tool!r} inheritingAgentTypes must be a list of "
+                "distinct non-empty agent type names"
+            )
         rows.append(f"| {entry['name']} | " + " | ".join(f"`{models[t]}`" for t in tiers) + " |")
     agents_path = root / "AGENTS.md"
     if not agents_path.is_file():
