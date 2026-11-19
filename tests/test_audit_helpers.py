@@ -3052,6 +3052,11 @@ class GroundTruthCase(unittest.TestCase):
         led = {"gaps": [{"path": "x.md", "disposition": "accepted", "repos": [{"name": "A"}]}]}
         self.assertEqual(audit.gap_rows(led), ([], []))
 
+    def test_a_scoped_row_with_no_repos_is_dropped_rather_than_read(self) -> None:
+        """An empty repos list names no repository, so the report would read the row as resolved."""
+        led = {"gaps": [{"path": "x.md", "disposition": "accepted", "repos": []}]}
+        self.assertEqual(audit.gap_rows(led), ([], []))
+
     def test_a_scoped_keep_row_is_one_repository_s_and_not_the_fleet_s(self) -> None:
         """A row scoped by repos neither overrides the fleet-wide retire nor reaches another repository."""
         led = {
