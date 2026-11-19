@@ -32,9 +32,10 @@ always runs at the session's model, and this hook cannot read the session's mode
 allowed whatever it names. Using no fork for work meant to run below the session's tier therefore
 stays a prose rule, in AGENTS.md "Model Tiers".
 
-A config that is missing, unreadable, or lacks the keys cannot say which model is blocked. A call
-naming any model is then denied, so the guard never goes quiet without saying so, and a call naming
-none is allowed.
+A config that is missing, unreadable, or lacks the keys cannot say which model is blocked. Nor can
+one whose `inheritingAgentTypes` is not a list of strings, since the hook cannot tell which types it
+names. A call naming any model is then denied, so the guard never goes quiet without saying so, and a
+call naming none is allowed.
 
 Run `model-tier-guard.py --selftest` to check the decision matrix without Claude Code.
 """
@@ -69,6 +70,8 @@ def load_tiers(path):
     except (OSError, ValueError, KeyError, TypeError):
         return None
     if not isinstance(blocked, str) or not isinstance(default, str) or not blocked:
+        return None
+    if not isinstance(inheriting, list) or not all(isinstance(t, str) for t in inheriting):
         return None
     return {
         "blocked": blocked,
