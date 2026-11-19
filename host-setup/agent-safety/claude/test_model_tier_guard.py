@@ -23,6 +23,7 @@ TIERS = {
     "tools": {
         "claude-code": {
             "models": {"highest": "fable", "frontier": "opus", "standard": "sonnet"},
+            "inheritingAgentTypes": ["Explore", "Plan"],
         }
     },
 }
@@ -159,6 +160,51 @@ class TestModelTierGuard(unittest.TestCase):
         self.write_config({"tools": {}})
         self.assertDenied(self.run_hook("Agent", {"model": "opus"}), "installer")
         self.assertIsNone(self.run_hook("Agent", {}))
+
+    def test_an_inheriting_type_naming_no_model_is_denied(self):
+        for tool_input in (
+            {"subagent_type": "Explore", "prompt": "x"},
+            {"subagent_type": "Plan", "prompt": "x"},
+            {"subagent_type": "explore", "model": ""},
+            {"subagent_type": "PLAN", "model": None},
+        ):
+            with self.subTest(tool_input=tool_input):
+                self.assertDenied(self.run_hook("Agent", tool_input), "naming no model")
+
+    def test_the_inheriting_deny_lists_each_dispatchable_tier_and_marks_the_default(self):
+        out = self.run_hook("Agent", {"subagent_type": "Explore"})
+        self.assertDenied(out, "`frontier` (`opus`, the default)", "`standard` (`sonnet`)")
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertNotIn("fable", reason)
+        self.assertNotIn("FLEET_ALLOW_HIGHEST", reason)
+        self.assertNotIn("CLAUDE_CODE_SUBAGENT_MODEL", reason)
+
+    def test_an_inheriting_type_naming_a_model_is_allowed(self):
+        for model in ("opus", "sonnet"):
+            with self.subTest(model=model):
+                self.assertIsNone(
+                    self.run_hook("Agent", {"subagent_type": "Explore", "model": model})
+                )
+
+    def test_an_inheriting_type_naming_the_blocked_model_is_still_denied(self):
+        self.assertDenied(
+            self.run_hook("Agent", {"subagent_type": "Plan", "model": "fable"}), "maintainer-only"
+        )
+
+    def test_the_launch_allowance_lets_an_inheriting_type_through(self):
+        self.assertIsNone(self.run_hook("Agent", {"subagent_type": "Explore"}, allow="1"))
+
+    def test_another_type_naming_no_model_is_allowed(self):
+        for agent_type in ("general-purpose", "Explorer", ""):
+            with self.subTest(agent_type=agent_type):
+                self.assertIsNone(self.run_hook("Agent", {"subagent_type": agent_type}))
+
+    def test_a_mapping_without_the_key_allows_an_inheriting_type(self):
+        cfg = json.loads(json.dumps(TIERS))
+        del cfg["tools"]["claude-code"]["inheritingAgentTypes"]
+        self.write_config(cfg)
+        self.assertIsNone(self.run_hook("Agent", {"subagent_type": "Explore"}))
+        self.assertDenied(self.run_hook("Agent", {"model": "fable"}))
 
     def test_unparseable_input_is_allowed(self):
         done = subprocess.run(

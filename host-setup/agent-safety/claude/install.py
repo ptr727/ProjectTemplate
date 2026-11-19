@@ -4,7 +4,8 @@
 Deploys the PreToolUse write guard, the PreToolUse model-tier guard with its tier mapping, the
 SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the hooks in the
 user settings.json. On a host with a systemd user manager it also sets the prefix in that file's
-`env`. It merges the permission rules this kit owns into the same file. It merges the `autoMode`
+`env`. It sets the default subagent model there too, the model of the mapping's default tier.
+It merges the permission rules this kit owns into the same file. It merges the `autoMode`
 rules this kit owns there too, each found by its tag. It sets the AGENTS.md plugin to read
 CLAUDE.md and AGENTS.md both. It renders the user
 CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is self-tested
@@ -28,6 +29,7 @@ Usage: python3 install.py            (installs to ~/.claude).
 import argparse
 import datetime
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -56,6 +58,10 @@ TIER_CONFIG_NAME = "model-tiers.json"
 TIER_MATCHER = "Agent|Workflow"
 
 PREFIX_VAR = "CLAUDE_CODE_SHELL_PREFIX"
+
+SUBAGENT_VAR = "CLAUDE_CODE_SUBAGENT_MODEL"
+SUBAGENT_FORCE_VAR = "CLAUDE_CODE_SUBAGENT_MODEL_FORCE"
+STAMP_SUBAGENT_KEY = "subagentModel"
 
 # The hook files this kit copies into ~/.claude/hooks, in deploy order.
 # Named here rather than spelled inside `main`, since a test scraping `main` for a literal path goes silent when the copy is refactored.
@@ -966,24 +972,142 @@ def text_digest(text):
     return hashlib.sha256(normalized(text).encode("utf-8")).hexdigest()[:16]
 
 
-def stamped_instructions_digest(claude_home):
-    """The digest of the instruction file the installer last wrote or left, or None where none is.
+def trusted_stamp(claude_home):
+    """The stamp as an object, or None where it is missing, unreadable, or fails its shape check.
 
-    None covers a missing or unreadable stamp and one written before the field existed. Each of
-    those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
+    A stamp failing its own shape check vouches for nothing, so no field of it is trusted either.
     """
     try:
         raw = read_regular_file(claude_home / "agent-safety-stamp.json")
         stamp = None if raw is None else json.loads(raw.decode("utf-8"))
     except (ValueError, OSError):
         return None
-    if stamp is None:
+    if stamp is None or stamp_problems(stamp):
         return None
-    # A stamp failing its own shape check vouches for nothing, so its digest is not trusted either.
-    if stamp_problems(stamp):
-        return None
-    value = stamp.get("instructionsDigest")
+    return stamp
+
+
+def stamped_instructions_digest(claude_home):
+    """The digest of the instruction file the installer last wrote or left, or None where none is.
+
+    None covers a missing or unreadable stamp and one written before the field existed. Each of
+    those leaves an edit indistinguishable from an earlier render, so a caller treats it as an edit.
+    """
+    stamp = trusted_stamp(claude_home)
+    value = stamp.get("instructionsDigest") if stamp is not None else None
     return value if isinstance(value, str) else None
+
+
+def stamped_subagent_model(claude_home):
+    """The default subagent model this kit last recorded writing, or None where it recorded none.
+
+    None covers a stamp written before the field existed, so a value already on such a host is the host's own.
+    """
+    stamp = trusted_stamp(claude_home)
+    value = stamp.get(STAMP_SUBAGENT_KEY) if stamp is not None else None
+    return value if isinstance(value, str) else None
+
+
+def tier_defaults():
+    """The default tier and its model, and the maintainer-only tier and its model, or None where unreadable.
+
+    Read from the mapping this checkout deploys, through the tier guard's own reader.
+    So the installer and the hook never read one mapping two ways.
+    """
+    spec = importlib.util.spec_from_file_location("model_tier_guard", HERE / TIER_NAME)
+    if spec is None or spec.loader is None:
+        return None
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    tiers = guard.load_tiers(payload_source(TIER_CONFIG_NAME))
+    if tiers is None:
+        return None
+    return {
+        "default_tier": tiers["default_tier"],
+        "default": tiers["default"],
+        "reserved_tier": tiers["reserved"],
+        "reserved": tiers["blocked"],
+    }
+
+
+def subagent_force(env_block, environ=None):
+    """Where `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is set, said in words, or None where it is not."""
+    environ = os.environ if environ is None else environ
+    held = env_block.get(SUBAGENT_FORCE_VAR) if isinstance(env_block, dict) else None
+    if held is not None and held != "":
+        return f"settings.json sets {SUBAGENT_FORCE_VAR} to {held!r}"
+    if environ.get(SUBAGENT_FORCE_VAR):
+        return (
+            f"this shell's environment sets {SUBAGENT_FORCE_VAR} to {environ[SUBAGENT_FORCE_VAR]!r}"
+        )
+    return None
+
+
+def subagent_model_state(held, recorded, default):
+    """How the kit treats a held `CLAUDE_CODE_SUBAGENT_MODEL`, as one of four states.
+
+    "absent" is no key, `held` being MISSING, or an empty or null value, which sets no default either.
+    "current" is the default itself. "outdated" is the value this kit last recorded writing, where
+    the default has since changed. "foreign" is anything else, which is the host's own and is never
+    overwritten.
+    """
+    if held is MISSING or held is None or held == "":
+        return "absent"
+    if held == default:
+        return "current"
+    if isinstance(recorded, str) and held == recorded:
+        return "outdated"
+    return "foreign"
+
+
+def foreign_subagent_note(held, tiers):
+    """What a host's own `CLAUDE_CODE_SUBAGENT_MODEL` means, naming the maintainer-only tier where it is that one."""
+    note = (
+        f"{SUBAGENT_VAR} is {held!r}, which this kit does not own, so a dispatch naming no model "
+        f"runs there rather than at {tiers['default']!r}, the {tiers['default_tier']} tier's model."
+    )
+    if isinstance(held, str) and held.lower() == tiers["reserved"].lower():
+        note += (
+            f" That is the {tiers['reserved_tier']} tier's model, so the default dispatch tier on "
+            "this host is the maintainer-only one."
+        )
+    return note
+
+
+def subagent_model_findings(env_block, claude_home):
+    """(problems, notes) about the default subagent model, a problem being what a re-run of the installer clears."""
+    tiers = tier_defaults()
+    if tiers is None:
+        return [
+            f"{TIER_CONFIG_NAME} in this checkout cannot be read, so {SUBAGENT_VAR} cannot be checked"
+        ], []
+    held = env_block.get(SUBAGENT_VAR, MISSING) if isinstance(env_block, dict) else MISSING
+    forced = subagent_force(env_block)
+    if forced:
+        return [], [
+            (
+                f"{forced}, which flattens every subagent onto one model whatever tier a dispatch "
+                f"names. This kit leaves it, and {SUBAGENT_VAR}, as they are."
+            )
+        ]
+    state = subagent_model_state(held, stamped_subagent_model(claude_home), tiers["default"])
+    if state == "absent":
+        return [
+            (
+                f"{SUBAGENT_VAR} is not set, so a dispatch naming no model runs at the session's "
+                f"own model rather than at {tiers['default']!r}, the {tiers['default_tier']} tier's"
+            )
+        ], []
+    if state == "outdated":
+        return [
+            (
+                f"{SUBAGENT_VAR} is {held!r}, which this kit wrote, where the "
+                f"{tiers['default_tier']} tier's model is now {tiers['default']!r}"
+            )
+        ], []
+    if state == "foreign":
+        return [], [foreign_subagent_note(held, tiers)]
+    return [], []
 
 
 def record_leftover_instructions(claude_home, claude_md, written):
@@ -1162,12 +1286,13 @@ def installed_digest(claude_home):
     return h.hexdigest()[:16]
 
 
-def build_stamp(claude_home, installed, instructions_digest=None):
+def build_stamp(claude_home, installed, instructions_digest=None, subagent_model=None):
     """The record written to the machine after an install, or computed live for a report.
 
     An install passes the digest of what it rendered rather than re-reading the file. A write by
     anything else between the install's write and this read would otherwise be stamped as the install's own.
     The next run would otherwise also replace it with no backup.
+    `subagent_model` is the default subagent model this kit wrote and still owns, or None where it owns none.
     """
     return {
         "stampVersion": STAMP_VERSION,
@@ -1183,6 +1308,7 @@ def build_stamp(claude_home, installed, instructions_digest=None):
             else None
         ),
         "installedUtc": installed,
+        STAMP_SUBAGENT_KEY: subagent_model,
     }
 
 
@@ -1417,6 +1543,7 @@ def registration_problems(claude_home):
             f"{PREFIX_VAR} names a containment prefix where it cannot contain ({reason}), "
             "so re-run the installer to correct it"
         )
+    out.extend(subagent_model_findings(data.get("env"), claude_home)[0])
     allow = (
         data.get("permissions", {}).get("allow")
         if isinstance(data.get("permissions"), dict)
@@ -1596,6 +1723,8 @@ def report(claude_home):
             f"Note: {PREFIX_VAR} is {foreign!r}, which this kit does not own, so this kit does not "
             f"contain agent commands. {remedy}"
         )
+    for note in subagent_model_findings(env_block, claude_home)[1]:
+        print(f"Note: {note}")
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
@@ -1985,6 +2114,32 @@ def main():
     else:
         env.pop(PREFIX_VAR, None)
         done.append(f"{PREFIX_VAR} not set, so agent commands run uncontained ({reason})")
+    tiers = tier_defaults()
+    recorded = stamped_subagent_model(claude_home)
+    held = env.get(SUBAGENT_VAR, MISSING)
+    owned_subagent = recorded if recorded is not None and held == recorded else None
+    forced = subagent_force(env)
+    if tiers is None:
+        done.append(f"{SUBAGENT_VAR} left as it is, since {TIER_CONFIG_NAME} cannot be read")
+    elif forced:
+        done.append(
+            f"{SUBAGENT_VAR} left as it is, since {forced}, which flattens every subagent onto one "
+            "model whatever tier a dispatch names"
+        )
+    else:
+        state = subagent_model_state(held, recorded, tiers["default"])
+        if state in ("absent", "outdated"):
+            env[SUBAGENT_VAR] = tiers["default"]
+            owned_subagent = tiers["default"]
+            was = "set" if state == "absent" else f"changed from {held!r}, which this kit wrote"
+            done.append(
+                f"{SUBAGENT_VAR} {was} to {tiers['default']!r}, the {tiers['default_tier']} tier's "
+                "model, from the next session launch"
+            )
+        elif state == "current":
+            done.append(f"{SUBAGENT_VAR} {tiers['default']!r}: already current")
+        else:
+            done.append(f"{SUBAGENT_VAR} left as it is. {foreign_subagent_note(held, tiers)}")
     if not env:
         del data["env"]
 
@@ -2088,6 +2243,7 @@ def main():
         claude_home,
         datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         text_digest(rendered),
+        owned_subagent,
     )
     try:
         write_regular_file(stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"))
