@@ -872,6 +872,7 @@ def run_gate_on_files(overrides: dict[str, object], make_tree=None) -> str:
         files_path.write_text(json.dumps(files), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(root / "spec" / "validate.py")],
+            env=without_git_location(),
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1108,6 +1109,7 @@ class RegistryNameUniquenessCase(unittest.TestCase):
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1464,6 +1466,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1862,6 +1865,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             (root / "registry" / "repos.schema.json").write_bytes(b'{"a": "\x80"}')
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1884,6 +1888,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             # No repos.schema.json at all, which raises OSError rather than reaching the wrong-shape case.
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2871,13 +2876,32 @@ class DropRemedyForTreePathCase(unittest.TestCase):
 
     TREE: ClassVar[dict[str, Any]] = DroppedCarryCase.TREE
 
-    def test_a_tree_path_names_accepted_only(self) -> None:
-        for path in ("lib/fleet/moved.sh", "src/moved.sh"):
-            with self.subTest(path=path):
-                got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {path})
-                self.assertEqual(len(got), 1)
-                self.assertIn("Use 'accepted'", got[0])
-                self.assertNotIn("Use 'retire'", got[0])
+    def test_a_target_path_names_accepted_only(self) -> None:
+        got = validate.dropped_carry_errors(
+            set(), {}, set(), [self.TREE], [], {"lib/fleet/moved.sh"}
+        )
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertNotIn("Use 'retire'", got[0])
+        self.assertIn("a file the tree's check requires", got[0])
+
+    def test_a_tracked_source_path_names_accepted_with_its_own_reason(self) -> None:
+        got = validate.dropped_carry_errors(
+            set(), {}, {"src/moved.sh"}, [self.TREE], [], {"src/moved.sh"}
+        )
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertNotIn("Use 'retire'", got[0])
+        self.assertIn("the tree source 'src'", got[0])
+        self.assertIn("without comparing the copy to past hub versions", got[0])
+        self.assertNotIn("a file the tree's check requires", got[0])
+
+    def test_an_untracked_source_path_keeps_the_retire_choice(self) -> None:
+        # The audit compares an untracked retired path with past hub versions, so retire is valid there.
+        got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {"src/moved.sh"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'retire' to delete the copies, or 'accepted'", got[0])
+        self.assertNotIn("the tree source", got[0])
 
     def test_another_path_keeps_the_retire_choice(self) -> None:
         got = validate.dropped_carry_errors(set(), {}, set(), [self.TREE], [], {"GONE.md"})
@@ -2979,13 +3003,25 @@ class RetiredPathCase(unittest.TestCase):
     def row(path: str, disposition: str = "retire", **extra: Any) -> dict[str, Any]:
         return {"path": path, "disposition": disposition, "reason": "r", **extra}
 
-    def test_a_retire_row_under_a_tree_is_refused(self) -> None:
-        for path in ("lib/fleet/a.sh", "src/a.sh"):
-            with self.subTest(path=path):
-                got = self.errors([self.row(path)])
-                self.assertEqual(len(got), 1)
-                self.assertIn("a tree carries the path", got[0])
-                self.assertIn("Use 'accepted'", got[0])
+    def test_a_retire_row_on_a_tree_target_is_refused(self) -> None:
+        got = self.errors([self.row("lib/fleet/a.sh")])
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertIn("a tree carries the path", got[0])
+        self.assertIn("a file the tree's check requires", got[0])
+
+    def test_a_retire_row_on_a_tracked_source_path_is_refused_with_its_own_reason(self) -> None:
+        got = self.errors([self.row("src/a.sh")], tracked={"src/a.sh"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("Use 'accepted'", got[0])
+        self.assertIn("the tree source 'src'", got[0])
+        self.assertIn("without comparing the copy to past hub versions", got[0])
+        self.assertNotIn("a file the tree's check requires", got[0])
+        self.assertNotIn("a tree carries the path", got[0])
+
+    def test_a_retire_row_on_an_untracked_source_path_is_clean(self) -> None:
+        # The audit compares an untracked retired path with past hub versions, so nothing refuses the row.
+        self.assertEqual(self.errors([self.row("src/a.sh")]), [])
 
     def test_an_accepted_row_under_a_tree_is_clean(self) -> None:
         self.assertEqual(self.errors([self.row("lib/fleet/a.sh", "accepted")]), [])
@@ -3234,6 +3270,7 @@ class InvestigateTrackingWiringCase(unittest.TestCase):
             )
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=without_git_location(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -3260,6 +3297,25 @@ class InvestigateTrackingWiringCase(unittest.TestCase):
 
     def test_a_tracked_investigate_entry_passes_both_arrays(self) -> None:
         self.assertNotIn(self.MESSAGE, self.run_against("owner/repo#123"))
+
+    def test_the_gate_subprocess_does_not_inherit_a_git_location(self) -> None:
+        # An inherited GIT_DIR points the scratch tree's git ls-files at the caller's repository, so the run would not measure the scratch tree.
+        real_run = subprocess.run
+        seen: list[dict[str, str] | None] = []
+
+        def recording_run(*args: Any, **kwargs: Any) -> Any:
+            if any("validate.py" in str(a) for a in args[0]):
+                seen.append(kwargs.get("env"))
+            return real_run(*args, **kwargs)
+
+        with (
+            unittest.mock.patch.dict(os.environ, {"GIT_DIR": str(validate.ROOT / ".git")}),
+            unittest.mock.patch.object(subprocess, "run", recording_run),
+        ):
+            self.run_against("owner/repo#123")
+        self.assertEqual(len(seen), 1)
+        self.assertIsNotNone(seen[0])
+        self.assertNotIn("GIT_DIR", seen[0] or {})
 
 
 class InvestigateTrackingSchemaMirrorCase(unittest.TestCase):
