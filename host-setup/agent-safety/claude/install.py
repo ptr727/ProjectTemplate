@@ -1095,7 +1095,7 @@ def subagent_model_findings(env_block, claude_home):
         return [
             (
                 f"{SUBAGENT_VAR} is not set, so a dispatch naming no model runs at the session's "
-                f"own model rather than at {tiers['default']!r}, the {tiers['default_tier']} tier's"
+                f"own model rather than at {tiers['default']!r}, the {tiers['default_tier']} tier's model."
             )
         ], []
     if state == "outdated":
