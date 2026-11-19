@@ -2770,26 +2770,25 @@ class PlaceholderErrorsCase(unittest.TestCase):
 
 
 class DroppedCarryCase(unittest.TestCase):
-    """A carried file the manifest and the hub both drop owes a gaps row, since nothing else reports its copies."""
+    """A carried file the manifest drops and the hub does not track owes a gaps row, since nothing else reports its copies."""
 
     PINS = frozenset({"KEPT.md", "GONE.md", "HOSTED.md", "lib/fleet/moved.sh"})
+    TREE: ClassVar[dict[str, Any]] = {"target": "lib/fleet", "include": ["**/*"], "prune": True}
 
-    def errors(self, baseline: set[str], gaps: dict[str, str]) -> list[str]:
-        with tempfile.TemporaryDirectory() as d:
-            root = Path(d)
-            (root / "HOSTED.md").write_text("still tracked\n", encoding="utf-8")
-            return validate.dropped_carry_errors(baseline, gaps, root, ["lib/fleet"], self.PINS)
+    def errors(self, baseline: set[str], gaps: dict[str, str], prune: bool = True) -> list[str]:
+        trees = [{**self.TREE, "prune": prune}]
+        return validate.dropped_carry_errors(baseline, gaps, {"HOSTED.md"}, trees, self.PINS)
 
     def test_a_drop_the_hub_also_deleted_needs_a_row(self) -> None:
         self.assertEqual(
             self.errors({"KEPT.md"}, {}),
             [
-                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the hub holds no file there, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
+                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the hub tracks no file there, so the audit reports no downstream copy. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos: 'retire' to delete the copies, or 'accepted' to leave them"
             ],
         )
 
     def test_a_row_or_a_hub_copy_settles_the_drop(self) -> None:
-        """The hub still holding HOSTED.md makes it hub-only, which the audit reports without a row."""
+        """The hub still tracking HOSTED.md makes it hub-only, which the audit reports without a row."""
         for kind in ("retire", "accepted"):
             with self.subTest(kind=kind):
                 self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md": kind}), [])
@@ -2803,9 +2802,14 @@ class DroppedCarryCase(unittest.TestCase):
             ],
         )
 
-    def test_a_path_a_tree_now_carries_is_not_a_drop(self) -> None:
-        """lib/fleet/moved.sh left the baseline for a tree whose target holds it, so the tree owns the copy."""
+    def test_a_path_a_pruned_tree_carries_is_not_a_drop(self) -> None:
+        """lib/fleet/moved.sh left the baseline for a pruned tree that carries it, so the tree owns the copy."""
         self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md": "retire"}), [])
+
+    def test_a_path_an_unpruned_tree_carries_is_still_a_drop(self) -> None:
+        """An unpruned tree reports no copy its source no longer holds, so the row is still owed."""
+        got = self.errors({"KEPT.md"}, {"GONE.md": "retire"}, prune=False)
+        self.assertEqual([e.split("'")[1] for e in got], ["lib/fleet/moved.sh"])
 
     def test_an_unpinned_baseline_path_is_reported(self) -> None:
         self.assertEqual(
@@ -2820,8 +2824,11 @@ class DroppedCarryCase(unittest.TestCase):
         _, fleet = validate.gap_scope_errors(
             validate.load("spec/divergences.json")["gaps"], set(), set()
         )
-        targets = [t["target"] for t in validate.load("spec/files.json")["trees"]]
-        self.assertEqual(validate.dropped_carry_errors(baseline, fleet, validate.ROOT, targets), [])
+        tracked = validate.hub_tracked_paths(validate.ROOT)
+        self.assertIsNotNone(tracked)
+        assert tracked is not None
+        trees = validate.load("spec/files.json")["trees"]
+        self.assertEqual(validate.dropped_carry_errors(baseline, fleet, tracked, trees), [])
 
 
 class GapScopeCase(unittest.TestCase):

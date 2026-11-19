@@ -23,6 +23,7 @@ import json
 import pathlib
 import posixpath
 import re
+import subprocess
 import sys
 
 import secret_names  # sibling, standard library only
@@ -1093,11 +1094,47 @@ def gap_scope_errors(gaps, repo_names, cataloged):
     return errors, fleet
 
 
-def dropped_carry_errors(baseline_paths, fleet_gaps, root, tree_targets, pins=None):
-    """Each baseline path is pinned, and each pinned path the manifest dropped and the hub holds no file at is settled.
+def hub_tracked_paths(root):
+    """Every path git tracks at `root`, the fact the audit reads, or None where git cannot list them.
+
+    A shallow clone still lists its one commit's tree, which is all this needs.
+    """
+    try:
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return {p.decode("utf-8") for p in listed.split(b"\0") if p}
+
+
+def tree_carrying(trees, path):
+    """The declared tree whose target and include patterns carry `path`, or None."""
+    candidate = pathlib.PurePosixPath(path)
+    for tree in trees:
+        target_root = pathlib.PurePosixPath(tree["target"])
+        include = tree.get("include")
+        if target_root not in candidate.parents or not is_str_list(include):
+            continue
+        relative = candidate.relative_to(target_root).as_posix()
+        if any(
+            pattern == "**/*"
+            or fnmatch.fnmatchcase(relative, pattern)
+            or pathlib.PurePosixPath(relative).match(pattern)
+            for pattern in include
+        ):
+            return tree
+    return None
+
+
+def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, pins=None):
+    """Each baseline path is pinned, and each pinned path the manifest dropped and the hub does not track is settled.
 
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
-    A path below a declared tree's target is the tree's copy rather than a drop, so it is left out.
+    A path a pruned tree carries is the tree's copy rather than a drop, so it is left out.
     A retire row has the audit report the copies, and an accepted row records the decision to leave them.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
@@ -1112,16 +1149,18 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, root, tree_targets, pins=No
         for p in sorted(baseline_paths - pins)
     ]
     settled = {p for p, kind in fleet_gaps.items() if kind in ("retire", "accepted")}
-    for p in sorted(pins - baseline_paths - settled):
-        if not (root / p).exists() and not any(p.startswith(f"{t}/") for t in tree_targets):
-            remedy = (
-                f"Change its '{fleet_gaps[p]}' gaps row"
-                if p in fleet_gaps
-                else "Add a spec/divergences.json 'gaps' row"
-            )
-            errors.append(
-                f"files.json: '{p}' was a carried file, and the manifest dropped it while the hub holds no file there, so the audit reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them"
-            )
+    for p in sorted(pins - baseline_paths - settled - tracked):
+        tree = tree_carrying(trees, p)
+        if tree is not None and tree.get("prune") is True:
+            continue
+        remedy = (
+            f"Change its '{fleet_gaps[p]}' gaps row"
+            if p in fleet_gaps
+            else "Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos"
+        )
+        errors.append(
+            f"files.json: '{p}' was a carried file, and the manifest dropped it while the hub tracks no file there, so the audit reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them"
+        )
     return errors
 
 
@@ -1956,23 +1995,7 @@ def main(argv=()):
     for path in sorted(named_skills):
         if not (ROOT / path).is_file():
             errors.append(f"files.json: Copilot instructions reference missing skill path {path}")
-        skill_path = pathlib.PurePosixPath(path)
-        carried = False
-        for tree in validated_trees:
-            target_root = pathlib.PurePosixPath(tree["target"])
-            include = tree.get("include")
-            if target_root not in skill_path.parents or not is_str_list(include):
-                continue
-            relative = skill_path.relative_to(target_root).as_posix()
-            carried = any(
-                pattern == "**/*"
-                or fnmatch.fnmatchcase(relative, pattern)
-                or pathlib.PurePosixPath(relative).match(pattern)
-                for pattern in include
-            )
-            if carried:
-                break
-        if not carried:
+        if tree_carrying(validated_trees, path) is None:
             errors.append(
                 f"files.json: Copilot instructions reference skill path {path} outside every carried tree include"
             )
@@ -2203,22 +2226,24 @@ def main(argv=()):
         }
         scope_errors, fleet_gaps = gap_scope_errors(div_gaps, repo_names, cataloged)
         errors.extend(scope_errors)
-        errors.extend(
-            dropped_carry_errors(
-                {
-                    i["path"]
-                    for i in baseline
-                    if isinstance(i, dict) and isinstance(i.get("path"), str)
-                },
-                fleet_gaps,
-                ROOT,
-                [
-                    t["target"].rstrip("/")
-                    for t in (trees if isinstance(trees, list) else [])
-                    if isinstance(t, dict) and isinstance(t.get("target"), str)
-                ],
+        tracked = hub_tracked_paths(ROOT)
+        if tracked is None:
+            errors.append(
+                "files.json: could not list the hub's tracked files with git ls-files, so no dropped carry was checked"
             )
-        )
+        else:
+            errors.extend(
+                dropped_carry_errors(
+                    {
+                        i["path"]
+                        for i in baseline
+                        if isinstance(i, dict) and isinstance(i.get("path"), str)
+                    },
+                    fleet_gaps,
+                    tracked,
+                    validated_trees,
+                )
+            )
 
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 
