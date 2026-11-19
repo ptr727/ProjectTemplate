@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "spec"))
 import audit
 import secret_names
 import validate
+from git_env import without_git_location
 
 CHECK_TYPES = {"types": {"python": {"checks": [{"id": "python.typed"}]}}, "crossCutting": {}}
 
@@ -3088,10 +3089,12 @@ class DroppedCarryWithoutLedgerCase(unittest.TestCase):
                 encoding="utf-8",
             )
             (root / "spec" / "divergences.json").unlink()
-            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, timeout=60)
-            subprocess.run(["git", "-C", str(root), "add", "spec"], check=True, timeout=60)
+            env = without_git_location()
+            subprocess.run(["git", "-C", str(root), "init", "-q"], check=True, timeout=60, env=env)
+            subprocess.run(["git", "-C", str(root), "add", "spec"], check=True, timeout=60, env=env)
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
+                env=env,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

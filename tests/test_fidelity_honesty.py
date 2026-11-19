@@ -194,6 +194,13 @@ class ScopedKeepReportCase(unittest.TestCase):
         out = fidelity_honesty.render_report([], [], {}, [], {"dispositions": [bad]}, {})
         self.assertNotIn("x.md", out)
 
+    def test_a_disposition_row_with_no_repos_is_not_read_as_resolved(self) -> None:
+        empty = {"path": "x.md", "repos": [], "disposition": "accepted", "reason": "r"}
+        spread = {"differs": ["A"], "stale": [], "absent": [], "match": [], "unavailable": []}
+        spreads = [({"path": "x.md", "fidelity": "verbatim"}, spread)]
+        out = fidelity_honesty.render_report(spreads, [], {}, [], {"dispositions": [empty]}, {})
+        self.assertNotIn("## Resolved", out)
+
     def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
         """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
         self.assertEqual(
