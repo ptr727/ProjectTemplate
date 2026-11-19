@@ -206,6 +206,20 @@ class TestModelTierGuard(unittest.TestCase):
         self.assertIsNone(self.run_hook("Agent", {"subagent_type": "Explore"}))
         self.assertDenied(self.run_hook("Agent", {"model": "fable"}))
 
+    def test_a_malformed_inheriting_list_is_treated_as_missing(self):
+        for value in (["Explore", 1], [None], "Explore", {"Explore": True}, 7):
+            with self.subTest(value=value):
+                cfg = json.loads(json.dumps(TIERS))
+                cfg["tools"]["claude-code"]["inheritingAgentTypes"] = value
+                self.write_config(cfg)
+                self.assertDenied(
+                    self.run_hook("Agent", {"model": "fable"}), "missing or unreadable"
+                )
+                self.assertDenied(
+                    self.run_hook("Agent", {"model": "opus"}), "missing or unreadable"
+                )
+                self.assertIsNone(self.run_hook("Agent", {}))
+
     def test_unparseable_input_is_allowed(self):
         done = subprocess.run(
             [sys.executable, str(self.dir / "model-tier-guard.py")],
