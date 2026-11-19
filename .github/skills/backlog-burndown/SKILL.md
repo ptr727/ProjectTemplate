@@ -274,7 +274,9 @@ for, and it binds harder than any throughput target.
   file edit and so holds no branch. The orchestrator reads
   that set from the assignments and outcomes its working notes hold, per "Run State", and a
   refill planner's brief carries it. A claim comment alone cannot say, since a merged group's cleanup
-  leaves its claim reading like one whose worker has yet to start.
+  leaves its claim reading like one whose worker has yet to start. A stopped or parked group is
+  the exception, since its claim comment records the stop or the park. So that one is read from
+  the comment, which reaches a group stopped in an earlier round or run.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
   `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
@@ -650,7 +652,8 @@ rather than a decision.
   group blocking the promotion pull request, never arrive at all. Where several groups stop
   close together, their questions go in one prompt, which is batching without deferral.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
-- **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
+- **A stopped group keeps its branch and its claim.** Record the stop in its claim comment, keeping
+  the comment's `**Backlog burndown claim` opening, as a park is recorded. Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
   prompt whether that worktree holds uncommitted work, by `repo-worktree` "Listing and Cleanup"'s
   hand-removal read. For a standalone clone, say also whether its
@@ -909,7 +912,7 @@ subagents and holds only what they return.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. Dispatch
-   it whenever the four-at-once limit has room, even once this round has dispatched eight groups.
+   one for each worker that ends, even once this round has dispatched eight groups.
    Only the planner knows which group takes a slot. A group resuming in the round it stopped in
    needs no place among the eight. A refill planner returning no group is what
    tells the orchestrator that no group can be dispatched. Its brief names each group this round
@@ -1056,7 +1059,8 @@ Every ending but the session's own first drops every waiting dispatch retry and 
 From then, a dispatch that fails is not retried and ends nothing. That holds for a reviewer and
 for continuing a handed-back worker alike. The ending names that worker as uncollected, leaves its
 branch and claim as they stand, and goes on. It names a worker whose dropped retry it needed the
-same way. Every ending but
+same way. Where the error left unclear whether the dispatch started, it marks that worker as one
+that may be live. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. Such an ending also waits
 for a refill planner still running. An ending releases no claim it did not clean up. "Grouping and File Claims"
@@ -1068,7 +1072,8 @@ dispatch failure names each worker and any refill planner still in flight, the c
 planner writes being unknown. Where its error left unclear whether the failed dispatch started, it
 marks that seat as one that may have. Where that seat was a planner, its claims are unknown too. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
-maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree. It
+maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree.
+It is also a worker named as uncollected, since no later run resumes its group. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
