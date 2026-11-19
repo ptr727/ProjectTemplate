@@ -1174,8 +1174,11 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
             if p in fleet_gaps
             else "Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos"
         )
-        if tree_carrying(trees, p, "target") or tree_carrying(trees, p, "source"):
+        source_tree = tree_carrying(trees, p, "source")
+        if tree_carrying(trees, p, "target"):
             choice = "Use 'accepted' to leave the copies, since a tree carries this path and 'retire' would tell carriers to delete a file the tree's check requires"
+        elif source_tree:
+            choice = f"Use 'accepted' to leave the copies, since the path lies under the tree source '{source_tree['source']}', which the hub keeps as that tree's canonical copy, and 'retire' would have the audit tell a repo holding it to delete it as a hub-hosted file without comparing the copy to past hub versions"
         else:
             choice = "Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
         errors.append(
@@ -1233,6 +1236,7 @@ def retired_path_errors(gaps, fleet_gaps, baseline_paths, tracked, trees, owned_
     """The `gaps` rows whose disposition the audit would misread or never act on.
 
     A fleet-wide `retire` row has carriers delete the path, so a path a tree carries needs `accepted`.
+    A path under a tree's source does too, since the audit would then report a copy as hub-hosted without the history comparison.
     A repo-owned path is the repositories' own, so no deletion is owed and the row is dropped.
     A scoped row keeps a copy the audit reports, a path some fleet-wide `retire` row or the hub itself hosts.
     """
@@ -1240,9 +1244,14 @@ def retired_path_errors(gaps, fleet_gaps, baseline_paths, tracked, trees, owned_
     for p, kind in sorted(fleet_gaps.items()):
         if kind != "retire":
             continue
-        if tree_carrying(trees, p, "target") or tree_carrying(trees, p, "source"):
+        source_tree = tree_carrying(trees, p, "source")
+        if tree_carrying(trees, p, "target"):
             errors.append(
                 f"divergences.json: gap '{p}' is retired, but a tree carries the path, so retiring it would tell carriers to delete a file the tree's check requires. Use 'accepted'"
+            )
+        elif source_tree:
+            errors.append(
+                f"divergences.json: gap '{p}' is retired, but the path lies under the tree source '{source_tree['source']}', which the hub keeps as that tree's canonical copy, so the audit would tell a repo holding it to delete it as a hub-hosted file without comparing the copy to past hub versions. Use 'accepted'"
             )
         elif under_owned_root(p, owned_roots):
             errors.append(
