@@ -1,3 +1,4 @@
+# pyright: strict
 """Fetch a ptr727/ProjectTemplate script fresh from `main` and run it through uv.
 
 Never pinned or vendored: a pin nothing keeps current goes stale by construction.

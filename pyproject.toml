@@ -30,9 +30,8 @@ pythonVersion = "3.13"
 # Pylance in an editor otherwise flags the same POSIX-only attributes live on a Windows or macOS host.
 pythonPlatform = "Linux"
 typeCheckingMode = "standard"
-include = ["spec", "host-setup", "scripts", "tests", "catalog/snippets/hub_fetch_run.py"]
+include = ["spec", "host-setup", "scripts", "tests"]
 exclude = ["**/__pycache__"]
-strict = ["catalog/snippets/hub_fetch_run.py"]
 
 [tool.coverage.run]
 source = ["scripts", "spec", "host-setup"]
