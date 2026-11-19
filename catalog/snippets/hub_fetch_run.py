@@ -85,7 +85,7 @@ def resolve_main_commit() -> str | None:
         sha = body.decode(errors="replace").strip()
     except urllib.error.HTTPError as exc:
         reason = f"HTTP {exc.code}"
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001  # any lookup failure falls back to git ls-remote
         reason = type(exc).__name__
     else:
         if re.fullmatch(r"[0-9a-f]{40}", sha):
