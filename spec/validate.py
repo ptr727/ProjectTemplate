@@ -1061,10 +1061,11 @@ def repos_errors(label, repos, repo_names):
     ]
 
 
-def gap_scope_errors(gaps, repo_names):
+def gap_scope_errors(gaps, repo_names, cataloged):
     """Errors in the `gaps` rows' scoping, and each path's fleet-wide disposition.
 
     A row scoped by `repos` records those repositories keeping their own copy, so it may only accept.
+    It names cataloged repositories only, since the audit reads no other repository's copy.
     A path holds at most one fleet-wide row, since the audit reads one disposition per path.
     """
     errors = []
@@ -1079,6 +1080,12 @@ def gap_scope_errors(gaps, repo_names):
             fleet.setdefault(gp, g.get("disposition"))
             continue
         errors.extend(repos_errors(f"gap '{gp}'", g["repos"], repo_names))
+        if is_str_list(g["repos"]):
+            errors.extend(
+                f"divergences.json: gap '{gp}' repo '{rn}' is not cataloged, so no audit reads its copy"
+                for rn in g["repos"]
+                if rn in repo_names and rn not in cataloged
+            )
         if g.get("disposition") != "accepted":
             errors.append(
                 f"divergences.json: gap '{gp}' is scoped by repos, so its disposition must be 'accepted', a keep decision for those repos alone"
@@ -1106,8 +1113,13 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, root, pins=None):
     settled = {p for p, kind in fleet_gaps.items() if kind in ("retire", "accepted")}
     for p in sorted(pins - baseline_paths - settled):
         if not (root / p).exists():
+            remedy = (
+                f"Change its '{fleet_gaps[p]}' gaps row"
+                if p in fleet_gaps
+                else "Add a spec/divergences.json 'gaps' row"
+            )
             errors.append(
-                f"files.json: '{p}' was a carried file, and the manifest dropped it while the hub holds no file there, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
+                f"files.json: '{p}' was a carried file, and the manifest dropped it while the hub holds no file there, so the audit reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them"
             )
     return errors
 
@@ -2183,7 +2195,12 @@ def main(argv=()):
             if not (g.get("tracking") is None or isinstance(g.get("tracking"), str)):
                 errors.append(f"divergences.json: gap '{gp}' tracking must be a string or null")
             errors.extend(investigate_tracking_errors(f"gap '{gp}'", g))
-        scope_errors, fleet_gaps = gap_scope_errors(div_gaps, repo_names)
+        cataloged = {
+            r.get("name")
+            for r in repos["repos"]
+            if isinstance(r, dict) and r.get("status") == "cataloged"
+        }
+        scope_errors, fleet_gaps = gap_scope_errors(div_gaps, repo_names, cataloged)
         errors.extend(scope_errors)
         errors.extend(
             dropped_carry_errors(

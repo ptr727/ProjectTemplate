@@ -40,7 +40,7 @@
                         "type": "array",
                         "items": { "type": "string" },
                         "minItems": 1,
-                        "description": "Registry names of the repositories this row alone covers, recording that each keeps its own copy of the path. Absent, the row covers the whole fleet. spec/validate.py allows it only on an accepted row. A path holds at most one fleet-wide row, and any number of scoped ones."
+                        "description": "Registry names of the cataloged repositories this row alone covers, recording that each keeps its own copy of the path. Absent, the row covers the whole fleet. spec/validate.py allows it only on an accepted row. A path holds at most one fleet-wide row, and any number of scoped ones."
                     },
                     "tracking": {
                         "type": ["string", "null"],

@@ -2796,7 +2796,12 @@ class DroppedCarryCase(unittest.TestCase):
 
     def test_a_row_the_audit_does_not_act_on_leaves_the_drop_unsettled(self) -> None:
         """An investigate row neither has the audit report the copies nor decides to leave them."""
-        self.assertEqual(len(self.errors({"KEPT.md"}, {"GONE.md": "investigate"})), 1)
+        self.assertEqual(
+            [e.split(". ", 1)[1] for e in self.errors({"KEPT.md"}, {"GONE.md": "investigate"})],
+            [
+                "Change its 'investigate' gaps row: 'retire' to delete the copies, or 'accepted' to leave them"
+            ],
+        )
 
     def test_an_unpinned_baseline_path_is_reported(self) -> None:
         self.assertEqual(
@@ -2808,7 +2813,9 @@ class DroppedCarryCase(unittest.TestCase):
 
     def test_the_shipped_manifest_and_ledger_are_clean(self) -> None:
         baseline = {e["path"] for e in validate.load("spec/files.json")["baseline"]}
-        _, fleet = validate.gap_scope_errors(validate.load("spec/divergences.json")["gaps"], set())
+        _, fleet = validate.gap_scope_errors(
+            validate.load("spec/divergences.json")["gaps"], set(), set()
+        )
         self.assertEqual(validate.dropped_carry_errors(baseline, fleet, validate.ROOT), [])
 
 
@@ -2820,7 +2827,9 @@ class GapScopeCase(unittest.TestCase):
             {"path": "CLAUDE.md", "disposition": "retire", "reason": "r"},
             {"path": "CLAUDE.md", "disposition": "accepted", "reason": "r", "repos": ["A"]},
         ]
-        self.assertEqual(validate.gap_scope_errors(gaps, {"A"}), ([], {"CLAUDE.md": "retire"}))
+        self.assertEqual(
+            validate.gap_scope_errors(gaps, {"A"}, {"A"}), ([], {"CLAUDE.md": "retire"})
+        )
 
     def test_each_scoping_defect_is_reported(self) -> None:
         gaps = [
@@ -2829,8 +2838,9 @@ class GapScopeCase(unittest.TestCase):
             {"path": "b.md", "disposition": "retire", "reason": "r", "repos": ["A"]},
             {"path": "c.md", "disposition": "accepted", "reason": "r", "repos": ["Nobody"]},
             {"path": "d.md", "disposition": "accepted", "reason": "r", "repos": []},
+            {"path": "e.md", "disposition": "accepted", "reason": "r", "repos": ["Archived"]},
         ]
-        errors, fleet = validate.gap_scope_errors(gaps, {"A"})
+        errors, fleet = validate.gap_scope_errors(gaps, {"A", "Archived"}, {"A"})
         self.assertEqual(
             errors,
             [
@@ -2838,6 +2848,7 @@ class GapScopeCase(unittest.TestCase):
                 "divergences.json: gap 'b.md' is scoped by repos, so its disposition must be 'accepted', a keep decision for those repos alone",
                 "divergences.json: gap 'c.md' repo 'Nobody' not in the registry",
                 "divergences.json: gap 'd.md' repos must be a non-empty array of strings",
+                "divergences.json: gap 'e.md' repo 'Archived' is not cataloged, so no audit reads its copy",
             ],
         )
         self.assertEqual(fleet, {"a.md": "retire"})
