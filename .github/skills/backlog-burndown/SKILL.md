@@ -914,9 +914,7 @@ subagents and holds only what they return.
    planner that runs orchestrator step 1 for the free slots, without the net-flow count. Dispatch
    one for each worker that ends. Once this round has dispatched eight groups, dispatch one only
    while a group this round stopped or parked has not resumed. Such a group needs no place among
-   the eight, and no other group can take a slot. The last owed refill planner returning no group,
-   with none still owed, is what tells the orchestrator that no group can be dispatched. Its brief names each group this round
-   dispatched. It marks each whose worker has not yet ended and each that stopped or parked and
+   the eight, and no other group can take a slot. The planner's brief names each group this round dispatched. It marks each whose worker has not yet ended and each that stopped or parked and
    has not resumed. It
    names no file set. The planner reads each group's current set from its claim comment, which
    holds any grown set granted since the plan. One refill planner runs at
