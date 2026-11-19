@@ -1141,13 +1141,13 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
 
     The audit sees a tracked regular file outside every tree source and every repo-owned tree.
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
-    A path a pruned tree carries is the tree's copy rather than a drop, so it is left out.
     A retire row has the audit report the copies, and an accepted row records the decision to leave them.
+    A file moved into a tree takes an accepted row, since the tree's own check governs its copies.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
     A pin is never removed, since a removed pin is a drop this check no longer sees.
     A drop the hub also deletes leaves no hub-only path to report a downstream copy by, so the row is owed.
-    A tree's files are not pinned, since a pruned tree reports a copy its source no longer holds.
+    A tree's own files are not pinned, since a pruned tree reports a copy its source no longer holds.
     Dropping a whole `trees` declaration ends that pruning, and no pin or row covers its target.
     """
     pins = CARRIED_PATH_PINS if pins is None else pins
@@ -1165,16 +1165,13 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
         )
     }
     for p in sorted(pins - baseline_paths - settled - seen):
-        tree = tree_carrying(trees, p)
-        if tree is not None and tree.get("prune") is True:
-            continue
         remedy = (
             f"Change its '{fleet_gaps[p]}' gaps row"
             if p in fleet_gaps
             else "Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos"
         )
         errors.append(
-            f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them"
+            f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
         )
     return errors
 
