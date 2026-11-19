@@ -4,7 +4,7 @@
 # Carrying this hook makes the hub exercise the override path on every hub pull request.
 # A repo with no hook of its own exercises the hub default at .github/actions/validate-default instead.
 name: Validate repository (hub)
-description: Registry and spec validation, the audit helper suite and the self-tests outside the unittest suite, the fleet-skills freshness check, and the unclassified-character report.
+description: Registry and spec validation, the audit helper suite and the self-tests outside the unittest suite, a strict type check of the carried hub_fetch_run.py, the fleet-skills freshness check, and the unclassified-character report.
 
 runs:
   using: composite
@@ -39,6 +39,13 @@ runs:
         uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/model-tier-guard.py --selftest
         uvx coverage@latest run --source=scripts,spec,host-setup --append host-setup/agent-safety/claude/test_model_tier_guard.py
         uvx coverage@latest report
+
+    - name: Type-check the carried hub_fetch_run.py strictly step
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        uvx mypy@latest --strict --python-version 3.13 --config-file= catalog/snippets/hub_fetch_run.py
+        uvx pyright@latest --pythonversion 3.13 catalog/snippets/hub_fetch_run.py
 
     # Read-only: fails if a generated skill distribution differs from .agents/skills/.
     - name: Check fleet skills are current step
