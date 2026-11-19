@@ -1187,7 +1187,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
 def dropped_tree_errors(tree_targets, fleet_gaps, pins=None):
     """Each declared tree target is pinned, and each pinned target the manifest dropped has an `accepted` row.
 
-    A dropped declaration ends the pruning of its target, and the audit reads no downstream file there.
+    A dropped declaration ends the pruning of its target.
     The fleet-wide row records the decision to leave the copies.
     `retire` is refused, since the audit compares a retired row to downstream file paths and a directory row deletes nothing.
     The pins are every target the manifest has ever declared, and a pin is never removed.
