@@ -56,8 +56,10 @@ Both prose invocations exit non-zero locally whenever findings exist. The second
 Scope a run to what changed, which matches the correct-as-next-edited rule:
 
 ```sh
-python3 scripts/prose_lint.py . --diff origin/develop
+python3 scripts/prose_lint.py . --diff "$(git merge-base origin/develop HEAD)"
 ```
+
+The merge base keeps the run to the branch's own change, as the pull request gate does. Diffing against the tip of `origin/develop` reads newer `develop` edits as added lines.
 
 Discovery reads what git tracks plus what it is not ignoring. So a new file is read before it is staged, and a `--diff` run counts every line of one as added. Reading the tracked list alone meant a new file was invisible to both modes until it was staged. That reported clean on exactly the file a change existed to add. An ignored path stays out, since a build output is not authored text. An explicit path is always read whatever git says about it. That holds where git can describe the tree. Where it cannot, the run warns on stderr and falls back to a filesystem walk. That walk skips the generated roots by name and applies no ignore rules.
 

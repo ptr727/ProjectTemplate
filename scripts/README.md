@@ -58,8 +58,10 @@ A character in no tier is a `charset-unknown` finding rather than a silent pass.
 Run it scoped to changed lines, matching the standing rule that existing prose is corrected as each file is next edited rather than swept:
 
 ```sh
-python3 scripts/prose_lint.py . --diff origin/develop
+python3 scripts/prose_lint.py . --diff "$(git merge-base origin/develop HEAD)"
 ```
+
+The merge base keeps the run to the branch's own change, as the pull request gate does. Diffing against the tip of `origin/develop` reads newer `develop` edits as added lines.
 
 Whole-tree (`python3 scripts/prose_lint.py .`) reports zero, so a finding is a line the change under review wrote rather than backlog it inherited. What gates a pull request is the composite action, which passes no `--check` and so gates every rule in the default set, `charset-unknown` included. The separate whole-tree `--check charset-unknown --summary` step in [`.github/actions/validate`][validate-hook] is the warn-only one, because classifying a character is a fleet-law edit rather than a prose fix. It reports rather than gates.
 
