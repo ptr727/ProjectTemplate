@@ -268,7 +268,10 @@ for, and it binds harder than any throughput target.
   repository. It also covers the claim comments of every group still holding a branch, parked
   groups from earlier rounds included. It covers too the claim of each group dispatched whose
   worker has not yet ended. A worker creates its branch only once it runs. A worker handed back
-  for review has not ended, since the same worker is continued. The orchestrator reads
+  for review has not ended, since the same worker is continued. It covers too the claim of each
+  group stopped or parked on a question, until that claim records a release. That is because such
+  a group keeps its claim per "Raising a Blocked Question", even where it stopped before its first
+  file edit and so holds no branch. The orchestrator reads
   that set from the assignments and outcomes its working notes hold, per "Run State", and a
   refill planner's brief carries it. A claim comment alone cannot say, since a merged group's cleanup
   leaves its claim reading like one whose worker has yet to start.
@@ -905,9 +908,14 @@ subagents and holds only what they return.
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
-   planner that runs orchestrator step 1 for the free slots, without the net-flow count. Its brief
-   names each group this round dispatched, with its claimed files, marking each whose worker has
-   not yet ended. One refill planner runs at
+   planner that runs orchestrator step 1 for the free slots, without the net-flow count. Dispatch
+   it whenever the four-at-once limit has room, even once this round has dispatched eight groups.
+   Only the planner knows which group takes a slot. A group resuming in the round it stopped in
+   needs no place among the eight. A refill planner returning no group is what
+   tells the orchestrator that no group can be dispatched. Its brief names each group this round
+   dispatched, marking each whose worker has not yet ended and each that stopped or parked. It
+   names no file set. The planner reads each group's current set from its claim comment, which
+   holds any grown set granted since the plan. One refill planner runs at
    a time, and none starts while a dispatch is pending. While one runs, a grown set a worker reports and a group's cleanup
    each wait for it to return. So every claim is written from a current read. Then dispatch each group's worker per steps 2 and 3.
 5. **Clean up** each group as its worker ends, per "Cleanup Is the Orchestrator's". Each command there is one call whose exit and
@@ -938,6 +946,8 @@ a state of the session rather than of any issue, so the orchestrator handles it 
   condition, and one leaving unclear whether a subagent started. It also covers a dispatch still
   failing after its third wait, and a timer that cannot start. The final message names the seat
   whose dispatch failed and the error its last attempt returned.
+- **Once the run is ending, a failed dispatch takes neither path above.** "Ending an Away Run"
+  says what becomes of it.
 
 ### Parking Instead of Asking
 
@@ -1043,11 +1053,15 @@ The run ends at the first of these, each an ending of its own:
 - The session ends.
 
 Every ending but the session's own first drops every waiting dispatch retry and stops its timer.
-The one kept is a reviewer's retry in an ending that collects, since collecting its worker needs it. Every ending but
+From then, a dispatch that fails is not retried and ends nothing. That holds for a reviewer and
+for continuing a handed-back worker alike. The ending names that worker as uncollected, leaves its
+branch and claim as they stand, and goes on. It names a worker whose dropped retry it needed the
+same way. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. Such an ending also waits
 for a refill planner still running. An ending releases no claim it did not clean up. "Grouping and File Claims"
-counts no claim in flight that has neither a branch nor a live worker. Every ending but
+counts no claim in flight that has neither a branch nor a live worker, unless its group stopped
+or parked on a question. Every ending but
 the session's own names each claim the run recorded for a group with no outcome. It also names
 each planner that ended returning nothing, since the claims it wrote are unknown. A run ended by a
 dispatch failure names each worker and any refill planner still in flight, the claims such a
