@@ -2470,6 +2470,7 @@ class TestDefaultSubagentModel(StampCase):
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn(install.SUBAGENT_VAR + " is not set", r.stdout)
+        self.assertIn("tier's model.", r.stdout)
         self.install()
         self.assertEqual(self._held(), self.default)
 
