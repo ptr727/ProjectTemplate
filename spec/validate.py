@@ -1154,7 +1154,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
     A retire row has the audit report the copies, and an accepted row records the decision to leave them.
     A file moved into a tree takes an accepted row, since the tree's own check governs its copies.
-    A tracked path under a tree source takes one too, while an untracked one under it is retired like any other path.
+    A tracked path under a tree source takes one too, while an untracked one under it is offered `retire` as any other path is.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
     A pin is never removed, since a removed pin is a drop this check no longer sees.
