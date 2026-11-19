@@ -44,8 +44,10 @@ runs:
       shell: bash
       run: |
         set -Eeuo pipefail
-        uvx mypy@latest --strict --python-version 3.13 --config-file= catalog/snippets/hub_fetch_run.py
-        uvx pyright@latest --pythonversion 3.13 catalog/snippets/hub_fetch_run.py
+        for platform in linux:Linux darwin:Darwin win32:Windows; do
+          uvx mypy@latest --strict --python-version 3.13 --platform "${platform%%:*}" --config-file= catalog/snippets/hub_fetch_run.py
+          uvx pyright@latest --pythonversion 3.13 --pythonplatform "${platform##*:}" catalog/snippets/hub_fetch_run.py
+        done
 
     # Read-only: fails if a generated skill distribution differs from .agents/skills/.
     - name: Check fleet skills are current step
