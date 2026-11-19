@@ -14,7 +14,7 @@ python_version = "3.13"
 # Otherwise a POSIX-only stdlib attribute a runtime skip guard already excludes on that host still fails here.
 # That is because mypy's own flow analysis does not narrow it away.
 platform = "linux"
-files = ["spec", "host-setup", "scripts", "tests"]
+files = ["spec", "host-setup", "scripts", "tests", "catalog/snippets/hub_fetch_run.py"]
 mypy_path = [".github/actions/prose-gate", ".github/actions/python-directories", ".github/actions/repo-gate"]
 exclude = 'scripts/(prose_lint|repo_gate)\.py'
 
@@ -24,14 +24,30 @@ exclude = 'scripts/(prose_lint|repo_gate)\.py'
 module = ["markdown_it", "markdown_it.*", "pygments", "pygments.*", "yaml", "ruamel", "ruamel.*", "tomlkit", "tomlkit.*", "editorconfig", "editorconfig.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["hub_fetch_run"]
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+extra_checks = true
+
 [tool.pyright]
 pythonVersion = "3.13"
 # Matches [tool.mypy]'s platform pin above, for the same reason.
 # Pylance in an editor otherwise flags the same POSIX-only attributes live on a Windows or macOS host.
 pythonPlatform = "Linux"
 typeCheckingMode = "standard"
-include = ["spec", "host-setup", "scripts", "tests"]
+include = ["spec", "host-setup", "scripts", "tests", "catalog/snippets/hub_fetch_run.py"]
 exclude = ["**/__pycache__"]
+strict = ["catalog/snippets/hub_fetch_run.py"]
 
 [tool.coverage.run]
 source = ["scripts", "spec", "host-setup"]

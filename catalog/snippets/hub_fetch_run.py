@@ -80,7 +80,8 @@ def resolve_main_commit() -> str | None:
         request.add_unredirected_header("Authorization", f"Bearer {token}")
     try:
         with urllib.request.urlopen(request, timeout=LOOKUP_TIMEOUT) as response:
-            sha = response.read().decode(errors="replace").strip()
+            body: bytes = response.read()
+        sha = body.decode(errors="replace").strip()
     except urllib.error.HTTPError as exc:
         reason = f"HTTP {exc.code}"
     except Exception as exc:  # noqa: BLE001
