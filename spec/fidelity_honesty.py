@@ -287,11 +287,14 @@ def render_report(spreads, promote, gaps, unreadable, ledger, kept=None):
         if g["path"] in gaps:
             by_disp.setdefault(g["disposition"], []).append((g, None, None, None))
     for g in scoped_gaps:
-        live = sorted(set(g["repos"]) & set((kept or {}).get(g["path"], [])))
-        if not live:
+        named = set(g["repos"])
+        live = sorted(named & set((kept or {}).get(g["path"], [])))
+        unk = sorted(named & set(unreadable))
+        if not live and not unk:
             resolved.append(g)
         elif isinstance(g.get("reason"), str):
-            by_disp.setdefault(g["disposition"], []).append((g, live, [], []))
+            gone = sorted(named - set(live) - set(unk))
+            by_disp.setdefault(g["disposition"], []).append((g, live, gone, unk))
 
     out = []
     w = out.append

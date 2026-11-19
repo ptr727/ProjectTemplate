@@ -2795,7 +2795,7 @@ class DroppedCarryCase(unittest.TestCase):
                 self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md": kind}), [])
 
     def test_a_row_the_audit_does_not_act_on_leaves_the_drop_unsettled(self) -> None:
-        """The audit reports a copy of a path the hub no longer tracks only for retire, so investigate settles nothing."""
+        """An investigate row neither has the audit report the copies nor decides to leave them."""
         self.assertEqual(len(self.errors({"KEPT.md"}, {"GONE.md": "investigate"})), 1)
 
     def test_an_unpinned_baseline_path_is_reported(self) -> None:

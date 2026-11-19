@@ -1090,7 +1090,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, root, pins=None):
     """Each baseline path is pinned, and each pinned path dropped from both the manifest and the hub is settled.
 
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
-    The audit acts on no other disposition for a path the hub no longer tracks.
+    A retire row has the audit report the copies, and an accepted row records the decision to leave them.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
     A pin is never removed, since a removed pin is a drop this check no longer sees.

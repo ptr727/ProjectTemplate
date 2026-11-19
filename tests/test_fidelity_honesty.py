@@ -149,6 +149,21 @@ class ScopedKeepReportCase(unittest.TestCase):
         out = self.report({})
         self.assertIn("- **gone.md** - Fixture (accepted)", out)
 
+    def test_a_kept_repository_with_an_unreadable_tree_stays_unverified(self) -> None:
+        """An unread tree is not proof the copy left, so the keep stays on its row."""
+        out = fidelity_honesty.render_report([], [], {}, ["Fixture"], {"gaps": [self.KEEP]}, {})
+        self.assertIn("_(unavailable, unverified: Fixture)_", out)
+        self.assertNotIn("## Resolved", out)
+
+    def test_a_kept_repository_that_dropped_its_copy_reads_now_resolved(self) -> None:
+        keep = {**self.KEEP, "repos": ["Fixture", "Other"]}
+        out = fidelity_honesty.render_report(
+            [], [], {}, [], {"gaps": [keep]}, {"gone.md": ["Fixture"]}
+        )
+        self.assertIn(
+            "- **gone.md** - Fixture _(recorded Other now resolved)_ - kept on purpose", out
+        )
+
     def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
         """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
         self.assertEqual(
