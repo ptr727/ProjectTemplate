@@ -3,7 +3,14 @@
 
 Registered as a Claude Code PreToolUse hook on the Agent and Workflow tools. It reads the
 tool-input JSON on stdin. It prints a deny decision when the call names the model of the tier
-`model-tiers.json` marks maintainer-only, today `highest`, so `fable`. Everything else passes.
+`model-tiers.json` marks maintainer-only, today `highest`, so `fable`.
+
+It also denies an Agent call naming no model whose `subagent_type` the mapping lists under the
+tool's `inheritingAgentTypes`, today `Explore` and `Plan`. The type matches without regard to case.
+The agent-safety installer sets a default subagent model, so a dispatch naming no model runs at the
+default tier's model. Those built-in types do not take that default. They run at the session's own
+model instead, which may be the maintainer-only tier's. The deny text asks for the dispatch again
+naming a tier. A mapping deployed before that key existed lists no such type. Everything else passes.
 
 The mapping is read from `model-tiers.json` beside this file, which the installer copies from the
 hub's spec/model-tiers.json. A model release is then an edit to the hub's spec/model-tiers.json and
@@ -19,8 +26,11 @@ It bounds a good-faith agent's mistake rather than an adversary. A nested `claud
 with the variable set is not told apart, since that is circumvention rather than a mistake. A
 workflow script is read as text, so a model chosen by a computed expression is not seen. A saved
 workflow named by `name` alone cannot be inspected and is allowed. So is a child workflow a script
-starts by name or path, since only the top-level script is read. A dispatch naming no model runs at
-a model this hook cannot read, and so does a fork naming another model, so both are allowed.
+starts by name or path, since only the top-level script is read. Any other dispatch naming no model
+runs at the default the installer sets, or at its agent definition's model, so it is allowed. A fork
+always runs at the session's model, and this hook cannot read the session's model, so a fork is
+allowed whatever it names. Using no fork for work meant to run below the session's tier therefore
+stays a prose rule, in AGENTS.md "Model Tiers".
 
 A config that is missing, unreadable, or lacks the keys cannot say which model is blocked. A call
 naming any model is then denied, so the guard never goes quiet without saying so, and a call naming
@@ -40,19 +50,45 @@ TOOL = "claude-code"
 
 
 def load_tiers(path):
-    """The (blocked model, default tier, default model) triple from the config, or None where it cannot be read."""
+    """What the config says this hook needs, or None where it cannot be read.
+
+    `blocked` is the maintainer-only model and `reserved` that tier's name.
+    `default_tier` and `default` are the default tier and its model, and `models` maps every tier.
+    `inheriting` holds the lower-cased agent types the default subagent model does not reach.
+    """
     try:
         with open(path, encoding="utf-8") as f:
             cfg = json.load(f)
-        models = cfg["tools"][TOOL]["models"]
-        blocked = models[cfg["maintainerOnly"]]
+        entry = cfg["tools"][TOOL]
+        models = entry["models"]
+        reserved = cfg["maintainerOnly"]
+        blocked = models[reserved]
         default_tier = cfg["defaultTier"]
         default = models[default_tier]
+        inheriting = entry.get("inheritingAgentTypes", [])
     except (OSError, ValueError, KeyError, TypeError):
         return None
     if not isinstance(blocked, str) or not isinstance(default, str) or not blocked:
         return None
-    return blocked, default_tier, default
+    return {
+        "blocked": blocked,
+        "reserved": reserved,
+        "default_tier": default_tier,
+        "default": default,
+        "models": models,
+        "inheriting": {t.lower() for t in inheriting},
+    }
+
+
+def tier_choices(tiers):
+    """Each tier a dispatch may name and its model, the maintainer-only one left out and the default marked."""
+    choices = []
+    for tier, model in tiers["models"].items():
+        if tier == tiers["reserved"]:
+            continue
+        mark = ", the default" if tier == tiers["default_tier"] else ""
+        choices.append(f"`{tier}` (`{model}`{mark})")
+    return ", ".join(choices)
 
 
 def script_text(tool_input, cwd=None):
@@ -120,7 +156,14 @@ def classify(tool_name, tool_input, tiers, environ, cwd=None):
                 "agent-safety installer to restore it."
             )
         return "allow", ""
-    blocked, default_tier, default = tiers
+    agent_type = tool_input.get("subagent_type") if tool_name == "Agent" else None
+    if not model and isinstance(agent_type, str) and agent_type.lower() in tiers["inheriting"]:
+        return "deny", (
+            f"An `{agent_type}` dispatch naming no model runs at this session's own model, since "
+            "the default subagent model does not reach that agent type. Dispatch it again naming "
+            f"the tier the task calls for: {tier_choices(tiers)}."
+        )
+    blocked, default_tier, default = tiers["blocked"], tiers["default_tier"], tiers["default"]
     hit = model.lower() == blocked.lower() if model else names_model(text, blocked)
     if not hit:
         return "allow", ""
@@ -133,7 +176,16 @@ def classify(tool_name, tool_input, tiers, environ, cwd=None):
 
 
 def _selftest():
-    tiers = ("fable", "frontier", "opus")
+    models = {"highest": "fable", "frontier": "opus", "standard": "sonnet"}
+    tiers = {
+        "blocked": "fable",
+        "reserved": "highest",
+        "default_tier": "frontier",
+        "default": "opus",
+        "models": models,
+        "inheriting": {"explore", "plan"},
+    }
+    no_key = {**tiers, "inheriting": set()}
     cases = [
         ("Agent", {"model": "fable"}, tiers, {}, "deny"),
         ("Agent", {"model": "Fable"}, tiers, {}, "deny"),
@@ -147,6 +199,12 @@ def _selftest():
         ("Bash", {"model": "fable"}, tiers, {}, "allow"),
         ("Agent", {"model": "opus"}, None, {}, "deny"),
         ("Agent", {}, None, {}, "allow"),
+        ("Agent", {"subagent_type": "Explore"}, tiers, {}, "deny"),
+        ("Agent", {"subagent_type": "plan", "model": ""}, tiers, {}, "deny"),
+        ("Agent", {"subagent_type": "Explore", "model": "sonnet"}, tiers, {}, "allow"),
+        ("Agent", {"subagent_type": "Plan"}, tiers, {ALLOW_ENV: "1"}, "allow"),
+        ("Agent", {"subagent_type": "general-purpose"}, tiers, {}, "allow"),
+        ("Agent", {"subagent_type": "Explore"}, no_key, {}, "allow"),
     ]
     ok = True
     for tool, tool_input, cfg, environ, want in cases:

@@ -33,7 +33,7 @@ import install
 REAL_WHICH = shutil.which
 
 
-def run(home, *args, dirty=False, contain=True, timeout=None):
+def run(home, *args, dirty=False, contain=True, timeout=None, extra_env=None):
     """Invoke the installer as a subprocess, the way a host actually runs it.
 
     dirty forces the dirty-checkout signal install.py's own source_ref() would otherwise read
@@ -48,13 +48,17 @@ def run(home, *args, dirty=False, contain=True, timeout=None):
 
     The host-local instruction file is pointed beside the throwaway home, so no case reads the
     developer's own file into what it renders.
+
+    The subagent force switch is dropped from the inherited environment.
+    So a developer's own setting does not decide a verdict, and `extra_env` adds what one case needs.
     """
-    env = dict(
-        os.environ,
+    env = {k: v for k, v in os.environ.items() if k != install.SUBAGENT_FORCE_VAR}
+    env.update(
         CLAUDE_HOME=str(home),
         AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(home)),
         AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
         AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
+        **(extra_env or {}),
     )
     return subprocess.run(
         [sys.executable, str(INSTALL), *args],
@@ -2246,7 +2250,7 @@ class TestContainmentPrefix(StampCase):
         """The digest stays identical across hosts, so only the registration differs."""
         self.install(contain=False)
         self.assertTrue((self.home / "hooks" / install.CONTAIN_NAME).is_file())
-        self.assertNotIn("env", self._settings())
+        self.assertNotIn(install.PREFIX_VAR, self._settings()["env"])
         r = run(self.home, "--report", contain=False)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         # The report says so, since a silent fallback reads exactly like a contained host.
@@ -2285,7 +2289,9 @@ class TestContainmentPrefix(StampCase):
         data["env"]["OTHER"] = "kept"
         self._write(data)
         self.install(contain=False)
-        self.assertEqual(self._settings()["env"], {"OTHER": "kept"})
+        env = self._settings()["env"]
+        self.assertNotIn(install.PREFIX_VAR, env)
+        self.assertEqual(env["OTHER"], "kept")
 
     def test_a_foreign_prefix_is_kept_and_noted_without_a_stale_verdict(self):
         """Someone else's wrapper is theirs, and a re-run leaves it, so it cannot be drift a re-run clears."""
@@ -2338,6 +2344,183 @@ class TestContainmentPrefix(StampCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("`env`", r.stderr)
         self.assertEqual(self._settings()["env"], ["not", "an", "object"])
+
+
+class TestDefaultSubagentModel(StampCase):
+    """The default subagent model is the default tier's, and owned only while it holds what the stamp says the kit wrote."""
+
+    def setUp(self):
+        super().setUp()
+        self.tiers = install.tier_defaults()
+        self.assertIsNotNone(self.tiers)
+        self.default = self.tiers["default"]
+
+    def _settings(self):
+        return json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
+
+    def _write(self, data):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "settings.json").write_text(
+            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+        )
+
+    def _held(self):
+        return self._settings().get("env", {}).get(install.SUBAGENT_VAR)
+
+    def _recorded(self):
+        return json.loads(self.stamp.read_text(encoding="utf-8"))[install.STAMP_SUBAGENT_KEY]
+
+    def _host_wrote(self, value):
+        data = self._settings()
+        data["env"][install.SUBAGENT_VAR] = value
+        self._write(data)
+
+    def _kit_wrote(self, value):
+        """Stand in for an install made while `value` was the default, which a test cannot change in spec/."""
+        self._host_wrote(value)
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        stamp[install.STAMP_SUBAGENT_KEY] = value
+        self.stamp.write_text(json.dumps(stamp, indent=2) + "\n", encoding="utf-8")
+
+    def test_the_default_is_read_from_the_mapping(self):
+        mapping = json.loads(
+            install.payload_source(install.TIER_CONFIG_NAME).read_text(encoding="utf-8")
+        )
+        want = mapping["tools"]["claude-code"]["models"][mapping["defaultTier"]]
+        self.assertEqual(self.default, want)
+
+    def test_an_absent_value_is_written_recorded_and_current(self):
+        r = self.install()
+        self.assertIn("from the next session launch", r.stdout)
+        self.assertEqual(self._held(), self.default)
+        self.assertEqual(self._recorded(), self.default)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("CURRENT", r.stdout)
+
+    def test_a_reinstall_keeps_a_value_it_wrote_and_its_record(self):
+        self.install()
+        r = self.install()
+        self.assertIn("already current", r.stdout)
+        self.assertEqual(self._held(), self.default)
+        self.assertEqual(self._recorded(), self.default)
+
+    def test_a_host_value_equal_to_the_default_is_current_and_not_claimed(self):
+        self._write({"env": {install.SUBAGENT_VAR: self.default}})
+        self.install()
+        self.assertEqual(self._held(), self.default)
+        self.assertIsNone(self._recorded())
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_a_value_the_kit_wrote_under_an_earlier_default_is_updated(self):
+        self.install()
+        self._kit_wrote("retired-model")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("which this kit wrote", r.stdout)
+        r = self.install()
+        self.assertIn("changed from 'retired-model'", r.stdout)
+        self.assertEqual(self._held(), self.default)
+        self.assertEqual(self._recorded(), self.default)
+
+    def test_a_host_value_is_kept_noted_and_never_recorded(self):
+        self._write({"env": {install.SUBAGENT_VAR: "host-own-model", "OTHER": "kept"}})
+        r = self.install()
+        self.assertIn("does not own", r.stdout)
+        self.assertEqual(self._held(), "host-own-model")
+        self.assertEqual(self._settings()["env"]["OTHER"], "kept")
+        self.assertIsNone(self._recorded())
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("Note: " + install.SUBAGENT_VAR, r.stdout)
+        self.assertNotIn("maintainer-only", r.stdout)
+
+    def test_a_value_changed_by_hand_after_an_install_becomes_the_hosts_own(self):
+        self.install()
+        self._host_wrote("host-own-model")
+        self.install()
+        self.assertEqual(self._held(), "host-own-model")
+        self.assertIsNone(self._recorded())
+
+    def test_a_value_on_a_host_stamped_before_the_record_existed_is_the_hosts_own(self):
+        self.install()
+        self._kit_wrote("retired-model")
+        stamp = json.loads(self.stamp.read_text(encoding="utf-8"))
+        del stamp[install.STAMP_SUBAGENT_KEY]
+        self.stamp.write_text(json.dumps(stamp), encoding="utf-8")
+        self.install()
+        self.assertEqual(self._held(), "retired-model")
+
+    def test_a_host_value_at_the_maintainer_only_model_says_so(self):
+        reserved = self.tiers["reserved"]
+        self._write({"env": {install.SUBAGENT_VAR: reserved.upper()}})
+        r = self.install()
+        self.assertIn("maintainer-only", r.stdout)
+        self.assertEqual(self._held(), reserved.upper())
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("the default dispatch tier on this host is the maintainer-only one", r.stdout)
+
+    def test_a_removed_value_reports_stale_and_a_reinstall_restores_it(self):
+        self.install()
+        data = self._settings()
+        del data["env"][install.SUBAGENT_VAR]
+        self._write(data)
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(install.SUBAGENT_VAR + " is not set", r.stdout)
+        self.assertIn("tier's model.", r.stdout)
+        self.install()
+        self.assertEqual(self._held(), self.default)
+
+    def test_an_empty_value_sets_no_default_so_it_is_filled(self):
+        self._write({"env": {install.SUBAGENT_VAR: ""}})
+        self.install()
+        self.assertEqual(self._held(), self.default)
+        self.assertEqual(self._recorded(), self.default)
+
+    def test_the_force_switch_in_settings_is_reported_and_nothing_changes(self):
+        self._write({"env": {install.SUBAGENT_FORCE_VAR: "1"}})
+        r = self.install()
+        self.assertIn("flattens every subagent", r.stdout)
+        env = self._settings()["env"]
+        self.assertEqual(
+            env, {install.SUBAGENT_FORCE_VAR: "1", install.PREFIX_VAR: env[install.PREFIX_VAR]}
+        )
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("flattens every subagent", r.stdout)
+
+    def test_the_force_switch_in_the_environment_is_reported_and_nothing_changes(self):
+        force = {install.SUBAGENT_FORCE_VAR: "1"}
+        r = run(self.home, extra_env=force)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("flattens every subagent", r.stdout)
+        self.assertIsNone(self._held())
+        r = run(self.home, "--report", extra_env=force)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("this shell's environment", r.stdout)
+
+    def test_the_force_switch_keeps_the_record_of_a_value_still_held(self):
+        self.install()
+        r = run(self.home, extra_env={install.SUBAGENT_FORCE_VAR: "1"})
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self._held(), self.default)
+        self.assertEqual(self._recorded(), self.default)
+
+    def test_the_kit_never_sets_the_force_switch(self):
+        self.install()
+        self.assertNotIn(install.SUBAGENT_FORCE_VAR, self._settings()["env"])
+
+    def test_the_state_of_each_held_value(self):
+        state = install.subagent_model_state
+        self.assertEqual(state(install.MISSING, None, "m"), "absent")
+        self.assertEqual(state("m", None, "m"), "current")
+        self.assertEqual(state("old", "old", "m"), "outdated")
+        self.assertEqual(state("old", None, "m"), "foreign")
+        self.assertEqual(state(None, None, "m"), "absent")
+        self.assertEqual(state("", None, "m"), "absent")
 
 
 class TestContainmentCapable(unittest.TestCase):

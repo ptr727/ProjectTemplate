@@ -195,6 +195,7 @@ CARRIED_PATH_PINS = frozenset(
         "version.json",
     }
 )
+CARRIED_TREE_PINS = frozenset({".github/skills", "lib/fleet/sh"})
 ENVIRONMENT_NAME_RE = re.compile(ENVIRONMENT_NAME_PATTERN)
 DEPLOYMENT_BRANCH_RE = re.compile(DEPLOYMENT_BRANCH_PATTERN)
 GROUND_TRUTH_BRANCH_RE = re.compile(GROUND_TRUTH_BRANCH_PATTERN)
@@ -953,6 +954,16 @@ def model_tier_errors(root):
                 f"spec/model-tiers.json: tool {tool!r} must give maintainerOnly a model no other tier shares"
             )
             continue
+        inheriting = entry.get("inheritingAgentTypes", [])
+        if (
+            not is_str_list(inheriting)
+            or not all(inheriting)
+            or len({t.lower() for t in inheriting}) != len(inheriting)
+        ):
+            errors.append(
+                f"spec/model-tiers.json: tool {tool!r} inheritingAgentTypes must be a list of "
+                "distinct non-empty agent type names"
+            )
         rows.append(f"| {entry['name']} | " + " | ".join(f"`{models[t]}`" for t in tiers) + " |")
     agents_path = root / "AGENTS.md"
     if not agents_path.is_file():
@@ -1148,7 +1159,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
     A pin is never removed, since a removed pin is a drop this check no longer sees.
     A drop the hub also deletes leaves no hub-only path to report a downstream copy by, so the row is owed.
     A tree's own files are not pinned, since a pruned tree reports a copy its source no longer holds.
-    Dropping a whole `trees` declaration ends that pruning, and no pin or row covers its target.
+    Dropping a whole `trees` declaration ends that pruning, and `dropped_tree_errors` covers its target.
     """
     pins = CARRIED_PATH_PINS if pins is None else pins
     errors = [
@@ -1156,23 +1167,96 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
         for p in sorted(baseline_paths - pins)
     ]
     settled = {p for p, kind in fleet_gaps.items() if kind in ("retire", "accepted")}
-    seen = {
-        p
-        for p in tracked
-        if tree_carrying(trees, p, "source") is None
-        and not any(
-            pathlib.PurePosixPath(r) in pathlib.PurePosixPath(p).parents for r in owned_roots
-        )
-    }
+    seen = audit_visible_paths(tracked, trees, owned_roots)
     for p in sorted(pins - baseline_paths - settled - seen):
         remedy = (
             f"Change its '{fleet_gaps[p]}' gaps row"
             if p in fleet_gaps
             else "Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos"
         )
+        if tree_carrying(trees, p, "target") or tree_carrying(trees, p, "source"):
+            choice = "Use 'accepted' to leave the copies, since a tree carries this path and 'retire' would tell carriers to delete a file the tree's check requires"
+        else:
+            choice = "Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
         errors.append(
-            f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}. Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
+            f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}. {choice}"
         )
+    return errors
+
+
+def dropped_tree_errors(tree_targets, fleet_gaps, pins=None):
+    """Each declared tree target is pinned, and each pinned target the manifest dropped has an `accepted` row.
+
+    A dropped declaration ends the pruning of its target.
+    The fleet-wide row records the decision to leave the copies.
+    `retire` is refused, since the audit compares a retired row to downstream file paths and a directory row deletes nothing.
+    The pins are every target the manifest has ever declared, and a pin is never removed.
+    """
+    pins = CARRIED_TREE_PINS if pins is None else pins
+    errors = [
+        f"files.json: tree target '{t}' has no line in spec/validate.py CARRIED_TREE_PINS, so a later drop of it goes unseen"
+        for t in sorted(set(tree_targets) - pins)
+    ]
+    for t in sorted(pins - set(tree_targets)):
+        kind = fleet_gaps.get(t)
+        if t not in fleet_gaps:
+            errors.append(
+                f"files.json: tree target '{t}' was declared and the manifest dropped it, so its downstream copies are now unreported. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos, with disposition 'accepted' to record the decision to leave them"
+            )
+        elif kind == "retire":
+            errors.append(
+                f"divergences.json: gap '{t}' is retired, but 'retire' is refused for a tree target, since the audit compares retired rows to downstream file paths only and a directory row would delete nothing. Use 'accepted'"
+            )
+        elif kind != "accepted":
+            errors.append(
+                f"divergences.json: gap '{t}' is a dropped tree target, so its row must be 'accepted', not '{kind}'"
+            )
+    return errors
+
+
+def under_owned_root(path, owned_roots):
+    """Whether `path` lies below a repo-owned tree's source root."""
+    parents = pathlib.PurePosixPath(path).parents
+    return any(pathlib.PurePosixPath(r) in parents for r in owned_roots)
+
+
+def audit_visible_paths(tracked, trees, owned_roots):
+    """The tracked paths the audit reads, those outside every tree source and every repo-owned tree."""
+    return {
+        p
+        for p in tracked
+        if tree_carrying(trees, p, "source") is None and not under_owned_root(p, owned_roots)
+    }
+
+
+def retired_path_errors(gaps, fleet_gaps, baseline_paths, tracked, trees, owned_roots):
+    """The `gaps` rows whose disposition the audit would misread or never act on.
+
+    A fleet-wide `retire` row has carriers delete the path, so a path a tree carries needs `accepted`.
+    A repo-owned path is the repositories' own, so no deletion is owed and the row is dropped.
+    A scoped row keeps a copy the audit reports, a path some fleet-wide `retire` row or the hub itself hosts.
+    """
+    errors = []
+    for p, kind in sorted(fleet_gaps.items()):
+        if kind != "retire":
+            continue
+        if tree_carrying(trees, p, "target") or tree_carrying(trees, p, "source"):
+            errors.append(
+                f"divergences.json: gap '{p}' is retired, but a tree carries the path, so retiring it would tell carriers to delete a file the tree's check requires. Use 'accepted'"
+            )
+        elif under_owned_root(p, owned_roots):
+            errors.append(
+                f"divergences.json: gap '{p}' is retired, but the path is the repositories' own, so no deletion is owed. Drop the row"
+            )
+    retired = {p for p, kind in fleet_gaps.items() if kind == "retire"}
+    hosted = audit_visible_paths(tracked, trees, owned_roots) - baseline_paths
+    for g in gaps:
+        if not (isinstance(g, dict) and isinstance(g.get("path"), str) and "repos" in g):
+            continue
+        if g["path"] not in retired | hosted:
+            errors.append(
+                f"divergences.json: gap '{g['path']}' is scoped by repos, but no fleet-wide retire row or hub file makes the audit report it, so the row does nothing"
+            )
     return errors
 
 
@@ -2158,6 +2242,7 @@ def main(argv=()):
     # Validate the divergence ledger in spec/divergences.json when present, so a mistyped repo name or disposition fails CI rather than silently dropping a burn-down row.
     dispositions = ("re-vendor", "track", "accepted", "upstream-candidate", "investigate", "retire")
     fleet_gaps = {}
+    div_gaps = []
     if (ROOT / "spec/divergences.json").exists():
         div = load("spec/divergences.json")
         repo_names = {r.get("name") for r in repos["repos"] if isinstance(r, dict)}
@@ -2246,23 +2331,24 @@ def main(argv=()):
             "files.json: could not list the hub's tracked files with git ls-files, so no dropped carry was checked"
         )
     else:
+        baseline_paths = {
+            i["path"] for i in baseline if isinstance(i, dict) and isinstance(i.get("path"), str)
+        }
+        owned_roots = [
+            o["source"]
+            for o in owned_trees
+            if isinstance(o, dict) and isinstance(o.get("source"), str)
+        ]
         errors.extend(
-            dropped_carry_errors(
-                {
-                    i["path"]
-                    for i in baseline
-                    if isinstance(i, dict) and isinstance(i.get("path"), str)
-                },
-                fleet_gaps,
-                tracked,
-                validated_trees,
-                [
-                    o["source"]
-                    for o in owned_trees
-                    if isinstance(o, dict) and isinstance(o.get("source"), str)
-                ],
+            dropped_carry_errors(baseline_paths, fleet_gaps, tracked, validated_trees, owned_roots)
+        )
+        errors.extend(
+            retired_path_errors(
+                div_gaps, fleet_gaps, baseline_paths, tracked, validated_trees, owned_roots
             )
         )
+
+    errors.extend(dropped_tree_errors([t["target"] for t in validated_trees], fleet_gaps))
 
     errors.extend(check_registry_errors(load("spec/checks.json"), types, repos))
 
