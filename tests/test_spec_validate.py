@@ -2784,7 +2784,7 @@ class DroppedCarryCase(unittest.TestCase):
         self.assertEqual(
             self.errors({"KEPT.md"}, {}),
             [
-                "files.json: 'GONE.md' was a carried file, and the manifest and the hub both dropped it, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
+                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the hub holds no file there, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
             ],
         )
 

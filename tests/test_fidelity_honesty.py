@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import io
 import pathlib
 import sys
 import unittest
@@ -125,6 +127,29 @@ class ManifestGapPassCase(unittest.TestCase):
             self.gaps_for([{"path": "gone.md", "disposition": "retire", "reason": "r"}, keep]),
             ({"hosted.sh": ["Fixture"]}, {"gone.md": ["Fixture"]}),
         )
+
+
+class ConsoleKeptCase(unittest.TestCase):
+    """The console names a kept copy rather than reading as though no repository carries one."""
+
+    def console(self, gaps: dict[str, list[str]], kept: dict[str, list[str]]) -> str:
+        out = io.StringIO()
+        with (
+            mock.patch.object(fidelity_honesty, "load_spec", lambda: {"divergences": {}}),
+            mock.patch.object(fidelity_honesty, "fidelity_pass", lambda spec: ([], [], [])),
+            mock.patch.object(fidelity_honesty, "manifest_gap_pass", lambda spec: (gaps, [], kept)),
+            contextlib.redirect_stdout(out),
+        ):
+            fidelity_honesty.main([])
+        return out.getvalue()
+
+    def test_a_kept_copy_is_named_and_the_none_line_is_not_printed(self) -> None:
+        out = self.console({}, {"gone.md": ["Fixture"]})
+        self.assertIn("KEPT gone.md :: Fixture", out)
+        self.assertNotIn("no cataloged repo carries", out)
+
+    def test_no_carrier_at_all_prints_the_none_line(self) -> None:
+        self.assertIn("no cataloged repo carries", self.console({}, {}))
 
 
 class ScopedKeepReportCase(unittest.TestCase):

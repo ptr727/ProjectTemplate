@@ -1087,7 +1087,7 @@ def gap_scope_errors(gaps, repo_names):
 
 
 def dropped_carry_errors(baseline_paths, fleet_gaps, root, pins=None):
-    """Each baseline path is pinned, and each pinned path dropped from both the manifest and the hub is settled.
+    """Each baseline path is pinned, and each pinned path the manifest dropped and the hub holds no file at is settled.
 
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
     A retire row has the audit report the copies, and an accepted row records the decision to leave them.
@@ -1107,7 +1107,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, root, pins=None):
     for p in sorted(pins - baseline_paths - settled):
         if not (root / p).exists():
             errors.append(
-                f"files.json: '{p}' was a carried file, and the manifest and the hub both dropped it, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
+                f"files.json: '{p}' was a carried file, and the manifest dropped it while the hub holds no file there, so the audit reports no downstream copy. Add a spec/divergences.json 'gaps' row: 'retire' to delete the copies, or 'accepted' to leave them"
             )
     return errors
 

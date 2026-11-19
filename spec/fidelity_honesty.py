@@ -459,10 +459,12 @@ def main(argv=()):
     print(
         "\n== Manifest gap: hub-tracked files NOT in the manifest, or retired ones, that a repo carries anyway =="
     )
-    if not gaps:
+    if not gaps and not kept:
         print("   none - no cataloged repo carries a hub-hosted or retired file")
     for path, repos in gaps.items():
         print(f"   GAP  {path} :: {', '.join(repos)}")
+    for path, repos in kept.items():
+        print(f"   KEPT {path} :: {', '.join(repos)}")
     if unreadable:
         print(f"   tree unreadable, gap unmeasured: {', '.join(unreadable)}")
     return 0
