@@ -2772,13 +2772,13 @@ class PlaceholderErrorsCase(unittest.TestCase):
 class DroppedCarryCase(unittest.TestCase):
     """A carried file the manifest and the hub both drop owes a gaps row, since nothing else reports its copies."""
 
-    PINS = frozenset({"KEPT.md", "GONE.md", "HOSTED.md"})
+    PINS = frozenset({"KEPT.md", "GONE.md", "HOSTED.md", "lib/fleet/moved.sh"})
 
     def errors(self, baseline: set[str], gaps: dict[str, str]) -> list[str]:
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             (root / "HOSTED.md").write_text("still tracked\n", encoding="utf-8")
-            return validate.dropped_carry_errors(baseline, gaps, root, self.PINS)
+            return validate.dropped_carry_errors(baseline, gaps, root, ["lib/fleet"], self.PINS)
 
     def test_a_drop_the_hub_also_deleted_needs_a_row(self) -> None:
         self.assertEqual(
@@ -2803,6 +2803,10 @@ class DroppedCarryCase(unittest.TestCase):
             ],
         )
 
+    def test_a_path_a_tree_now_carries_is_not_a_drop(self) -> None:
+        """lib/fleet/moved.sh left the baseline for a tree whose target holds it, so the tree owns the copy."""
+        self.assertEqual(self.errors({"KEPT.md"}, {"GONE.md": "retire"}), [])
+
     def test_an_unpinned_baseline_path_is_reported(self) -> None:
         self.assertEqual(
             self.errors({"KEPT.md", "GONE.md", "NEW.md"}, {}),
@@ -2816,7 +2820,8 @@ class DroppedCarryCase(unittest.TestCase):
         _, fleet = validate.gap_scope_errors(
             validate.load("spec/divergences.json")["gaps"], set(), set()
         )
-        self.assertEqual(validate.dropped_carry_errors(baseline, fleet, validate.ROOT), [])
+        targets = [t["target"] for t in validate.load("spec/files.json")["trees"]]
+        self.assertEqual(validate.dropped_carry_errors(baseline, fleet, validate.ROOT, targets), [])
 
 
 class GapScopeCase(unittest.TestCase):

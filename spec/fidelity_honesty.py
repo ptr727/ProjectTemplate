@@ -213,7 +213,7 @@ def _fmt(repos):
     return ", ".join(sorted(repos)) if repos else "-"
 
 
-def render_report(spreads, promote, gaps, unreadable, ledger, kept=None):
+def render_report(spreads, promote, gaps, unreadable, ledger, kept):
     """Join the live passes against the curated ledger into the checked-in burn-down Markdown.
 
     A recorded disposition still matching a live divergence is a burn-down row. A live divergence (a
@@ -288,7 +288,7 @@ def render_report(spreads, promote, gaps, unreadable, ledger, kept=None):
             by_disp.setdefault(g["disposition"], []).append((g, None, None, None))
     for g in scoped_gaps:
         named = set(g["repos"])
-        live = sorted(named & set((kept or {}).get(g["path"], [])))
+        live = sorted(named & set(kept.get(g["path"], [])))
         unk = sorted(named & set(unreadable))
         if not live and not unk:
             resolved.append(g)

@@ -1093,10 +1093,11 @@ def gap_scope_errors(gaps, repo_names, cataloged):
     return errors, fleet
 
 
-def dropped_carry_errors(baseline_paths, fleet_gaps, root, pins=None):
+def dropped_carry_errors(baseline_paths, fleet_gaps, root, tree_targets, pins=None):
     """Each baseline path is pinned, and each pinned path the manifest dropped and the hub holds no file at is settled.
 
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
+    A path below a declared tree's target is the tree's copy rather than a drop, so it is left out.
     A retire row has the audit report the copies, and an accepted row records the decision to leave them.
 
     The pins are every path the baseline has ever declared, a table since a shallow clone has no revision to compare.
@@ -1112,7 +1113,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, root, pins=None):
     ]
     settled = {p for p, kind in fleet_gaps.items() if kind in ("retire", "accepted")}
     for p in sorted(pins - baseline_paths - settled):
-        if not (root / p).exists():
+        if not (root / p).exists() and not any(p.startswith(f"{t}/") for t in tree_targets):
             remedy = (
                 f"Change its '{fleet_gaps[p]}' gaps row"
                 if p in fleet_gaps
@@ -2211,6 +2212,11 @@ def main(argv=()):
                 },
                 fleet_gaps,
                 ROOT,
+                [
+                    t["target"].rstrip("/")
+                    for t in (trees if isinstance(trees, list) else [])
+                    if isinstance(t, dict) and isinstance(t.get("target"), str)
+                ],
             )
         )
 
