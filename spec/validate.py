@@ -1171,7 +1171,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots
             else "Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos"
         )
         errors.append(
-            f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
+            f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}. Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
         )
     return errors
 

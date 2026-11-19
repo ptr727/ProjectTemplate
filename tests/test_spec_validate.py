@@ -2793,7 +2793,7 @@ class DroppedCarryCase(unittest.TestCase):
         self.assertEqual(
             self.errors({"KEPT.md"}, {}),
             [
-                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos: 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
+                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos. Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
             ],
         )
 
@@ -2808,7 +2808,7 @@ class DroppedCarryCase(unittest.TestCase):
         self.assertEqual(
             [e.split(". ", 1)[1] for e in self.errors({"KEPT.md"}, {"GONE.md": "investigate"})],
             [
-                "Change its 'investigate' gaps row: 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
+                "Change its 'investigate' gaps row. Use 'retire' to delete the copies, or 'accepted' to leave them, as for a file moved into a tree"
             ],
         )
 
@@ -2846,6 +2846,31 @@ class DroppedCarryCase(unittest.TestCase):
         self.assertEqual(
             validate.dropped_carry_errors(baseline, fleet, tracked, files["trees"], owned), []
         )
+
+
+class HubTrackedPathsCase(unittest.TestCase):
+    """The drop check reads regular files, as the audit does, and reports a tree git cannot list."""
+
+    def test_only_regular_files_are_listed(self) -> None:
+        listing = (
+            b"100644 " + b"0" * 40 + b" 0\tREADME.md\0"
+            b"100755 " + b"0" * 40 + b" 0\trun.sh\0"
+            b"120000 " + b"0" * 40 + b" 0\tlink.md\0"
+            b"160000 " + b"0" * 40 + b" 0\tsub\0"
+        )
+        done = subprocess.CompletedProcess([], 0, stdout=listing, stderr=b"")
+        with unittest.mock.patch.object(validate.subprocess, "run", return_value=done):
+            self.assertEqual(validate.hub_tracked_paths(validate.ROOT), {"README.md", "run.sh"})
+
+    def test_a_tree_git_cannot_list_is_reported_rather_than_checked(self) -> None:
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(validate, "hub_tracked_paths", return_value=None),
+            contextlib.redirect_stdout(out),
+        ):
+            status = validate.main([])
+        self.assertEqual(status, 1)
+        self.assertIn("could not list the hub's tracked files with git ls-files", out.getvalue())
 
 
 class GapScopeCase(unittest.TestCase):
