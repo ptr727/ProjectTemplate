@@ -157,34 +157,35 @@ def deletion_candidates(spec, rev=None):
     return hub_only_paths(spec, rev) | retired_paths(spec)
 
 
-def gap_dispositions(spec):
-    """The curated ledger's fleet-wide manifest-gap dispositions, as path -> (disposition, reason).
+def gap_rows(ledger):
+    """The ledger's well-formed `gaps` rows, split into fleet-wide rows and rows scoped by `repos`.
 
-    A row scoped by `repos` is one repository's keep decision rather than the fleet's, so `repo_kept_paths` reads it.
+    A scoped row is those repositories' keep decision rather than the fleet's.
     """
-    out = {}
-    for g in spec.get("divergences", {}).get("gaps", []):
+    fleet, scoped = [], []
+    for g in ledger.get("gaps", []):
         if (
             isinstance(g, dict)
             and isinstance(g.get("path"), str)
             and isinstance(g.get("disposition"), str)
-            and "repos" not in g
         ):
-            out[g["path"]] = (g["disposition"], g.get("reason", ""))
-    return out
+            if "repos" not in g:
+                fleet.append(g)
+            elif isinstance(g["repos"], list):
+                scoped.append(g)
+    return fleet, scoped
+
+
+def gap_dispositions(spec):
+    """The curated ledger's fleet-wide manifest-gap dispositions, as path -> (disposition, reason)."""
+    fleet, _ = gap_rows(spec.get("divergences", {}))
+    return {g["path"]: (g["disposition"], g.get("reason", "")) for g in fleet}
 
 
 def repo_kept_paths(spec, name):
     """The paths whose `accepted` gap rows scoped by `repos` let the named repository keep its own copy."""
-    return {
-        g["path"]
-        for g in spec.get("divergences", {}).get("gaps", [])
-        if isinstance(g, dict)
-        and isinstance(g.get("path"), str)
-        and g.get("disposition") == "accepted"
-        and isinstance(g.get("repos"), list)
-        and name in g["repos"]
-    }
+    _, scoped = gap_rows(spec.get("divergences", {}))
+    return {g["path"] for g in scoped if g["disposition"] == "accepted" and name in g["repos"]}
 
 
 def repo_tree_blobs(slug, ground_head):
@@ -2613,16 +2614,14 @@ def check_hubonly_carried(run):
         kind = disp.get(path, ("", ""))[0]
         if kind == "accepted":
             continue
-        copy = None
-        if kind == "retire" and path not in hub_tracked(None):
+        if kind == "retire" and path in hub_tracked(None):
+            text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
+        elif kind == "retire":
             copy = run.read_text(path)
             if copy is None:  # never read, so neither a match nor this repo's own edit is known
                 findings.append(run.unread("hub-only", path, "compare it with past hub versions"))
                 continue
-        if kind == "retire":
-            if path in hub_tracked(None):
-                text = f"hub-only: delete this repo's {path} - the hub hosts it and no repo carries it (spec/divergences.json 'gaps' records why, and what to reach instead)"
-            elif matches_hub_history(copy, path):
+            if matches_hub_history(copy, path):
                 text = f"hub-only: delete this repo's {path} - the fleet retired it, nothing replaces it, and this copy matches a past hub version (spec/divergences.json 'gaps' records why)"
             else:
                 text = f"hub-only: {path} - the fleet retired it, but this copy matches no past hub version, so report it to the maintainer rather than deleting it (spec/divergences.json 'gaps' records why)"

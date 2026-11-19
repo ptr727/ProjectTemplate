@@ -7,7 +7,7 @@ import base64
 import pathlib
 import sys
 import unittest
-from typing import Any
+from typing import Any, ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
@@ -86,7 +86,9 @@ class FidelityPassReadCase(unittest.TestCase):
 class ManifestGapPassCase(unittest.TestCase):
     """manifest_gap_pass reads the ledger, so a path the fleet retired outright still names its carriers."""
 
-    def gaps_for(self, rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    def gaps_for(
+        self, rows: list[dict[str, Any]]
+    ) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
         spec = {
             "registry": {"repos": [ENTRY], "defaults": {}},
             "files": {"baseline": [{"path": "kept.md"}]},
@@ -106,23 +108,46 @@ class ManifestGapPassCase(unittest.TestCase):
                 audit, "repo_tree", lambda slug, br: {"kept.md", "gone.md", "hosted.sh", "own.md"}
             ),
         ):
-            gaps, unreadable = fidelity_honesty.manifest_gap_pass(spec)
+            gaps, unreadable, kept = fidelity_honesty.manifest_gap_pass(spec)
         self.assertEqual(unreadable, [])
-        return gaps
+        return gaps, kept
 
     def test_a_retired_path_the_hub_no_longer_tracks_names_its_carrier(self) -> None:
         self.assertEqual(
             self.gaps_for([{"path": "gone.md", "disposition": "retire", "reason": "r"}]),
-            {"gone.md": ["Fixture"], "hosted.sh": ["Fixture"]},
+            ({"gone.md": ["Fixture"], "hosted.sh": ["Fixture"]}, {}),
         )
 
-    def test_a_scoped_keep_drops_that_repository_as_a_carrier(self) -> None:
+    def test_a_scoped_keep_moves_that_repository_to_the_kept_carriers(self) -> None:
         """The report agrees with the audit, which reports no copy a scoped keep row covers."""
         keep = {"path": "gone.md", "disposition": "accepted", "reason": "r", "repos": ["Fixture"]}
         self.assertEqual(
             self.gaps_for([{"path": "gone.md", "disposition": "retire", "reason": "r"}, keep]),
-            {"hosted.sh": ["Fixture"]},
+            ({"hosted.sh": ["Fixture"]}, {"gone.md": ["Fixture"]}),
         )
+
+
+class ScopedKeepReportCase(unittest.TestCase):
+    """A scoped keep row renders while a kept repo still carries the path, and reads resolved once none does."""
+
+    KEEP: ClassVar[dict[str, Any]] = {
+        "path": "gone.md",
+        "disposition": "accepted",
+        "reason": "kept on purpose",
+        "repos": ["Fixture"],
+    }
+
+    def report(self, kept: dict[str, list[str]]) -> str:
+        return fidelity_honesty.render_report([], [], {}, [], {"gaps": [self.KEEP]}, kept)
+
+    def test_a_kept_copy_still_carried_is_a_burn_down_row(self) -> None:
+        out = self.report({"gone.md": ["Fixture"]})
+        self.assertIn("- **gone.md** - Fixture - kept on purpose", out)
+        self.assertNotIn("## Resolved", out)
+
+    def test_a_keep_no_repository_still_carries_reads_resolved(self) -> None:
+        out = self.report({})
+        self.assertIn("- **gone.md** - Fixture (accepted)", out)
 
     def test_main_spec_carries_the_ledger_retired_paths(self) -> None:
         """Without the ledger in the spec, every path retired outright drops out of the gap pass."""
