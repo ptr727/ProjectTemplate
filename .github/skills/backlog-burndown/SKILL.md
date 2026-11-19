@@ -268,15 +268,10 @@ for, and it binds harder than any throughput target.
   repository. It also covers the claim comments of every group still holding a branch, parked
   groups from earlier rounds included. It covers too the claim of each group dispatched whose
   worker has not yet ended. A worker creates its branch only once it runs. A worker handed back
-  for review has not ended, since the same worker is continued. It covers too the claim of each
-  group stopped or parked on a question, until that claim records a release. Such a group keeps
-  its claim per "Raising a Blocked Question". That holds even where it stopped before creating its
-  branch. The orchestrator reads
+  for review has not ended, since the same worker is continued. The orchestrator reads
   that set from the assignments and outcomes its working notes hold, per "Run State". A refill
   planner's brief names the groups in it. A claim comment alone cannot say, since a merged group's cleanup
-  leaves its claim reading like one whose worker has yet to start. A stopped or parked group is
-  the exception, since its claim comment records the stop or the park. So that one is read from
-  the comment, which reaches a group stopped in an earlier round or run.
+  leaves its claim reading like one whose worker has yet to start.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
   `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
@@ -652,8 +647,7 @@ rather than a decision.
   group blocking the promotion pull request, never arrive at all. Where several groups stop
   close together, their questions go in one prompt, which is batching without deferral.
 - **The question is also written on its issue, and so is the answer**, so both survive the session that asked it.
-- **A stopped group keeps its branch and its claim.** Record the stop in its claim comment, keeping
-  the comment's `**Backlog burndown claim` opening, as a park is recorded. Its worktree is left exactly as it stands
+- **A stopped group keeps its branch and its claim.** Its worktree is left exactly as it stands
   while the question is open, since the answer may be that the work in it continues. Say in the
   prompt whether that worktree holds uncommitted work, by `repo-worktree` "Listing and Cleanup"'s
   hand-removal read. For a standalone clone, say also whether its
@@ -666,8 +660,7 @@ rather than a decision.
   clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read. Otherwise apply what the answer said about its uncommitted work, then remove it. A
   standalone clone draws no such refusal and is retired all the same, so two checkouts never hold
   one branch. It is retired per "Cleanup Is the Orchestrator's", once its tip equals the remote
-  tip. Only then edit the claim comment to drop the stop or park it records, so the group is an
-  ordinary claim again. Then dispatch, into a slot per "The Round" step 6. This is the
+  tip. Only then dispatch, into a slot per "The Round" step 6. This is the
   same retire-then-dispatch shape "Bounding the Wait on a Worker" uses, and
   no worker ever inherits another's tree.
 
@@ -980,9 +973,7 @@ leaves the work findable.
    its claim and its branch, and "Ranking" holds its issue back as stopped.
 
 A parked group stops that group and nothing else. Once its `decision` issue's answer is
-recorded, per "Ranking", the planner returns the group as resuming, unless "Ranking" still holds it.
-The planner drops the park from its claim comment as it does, as an attended resume drops a stop.
-The worker it dispatches follows the answer. It
+recorded, per "Ranking", the planner returns the group as resuming, unless "Ranking" still holds it. The worker it dispatches follows the answer. It
 records the release in the claim comment once its pull request merges to develop. Where the answer
 ends the work with nothing to merge, it records the release, stating that the answer ended the work with nothing to merge. It
 also closes any pull request the answer retires. Where the answer also drops the issue itself, the worker closes the issue, citing the
@@ -1061,15 +1052,13 @@ The run ends at the first of these, each an ending of its own:
 Every ending but the session's own first drops every waiting dispatch retry and stops its timer.
 From then, a dispatch that fails is not retried and ends nothing. That holds for a reviewer and
 for continuing a handed-back worker alike. The ending names that worker as uncollected, leaves its
-branch as it stands, and goes on. It records the state in the group's claim comment, as a stop is
-recorded. A later run then holds the issue back as stopped until the maintainer releases the claim. It names a worker whose dropped retry it needed the
+branch and claim as they stand, and goes on. It names a worker whose dropped retry it needed the
 same way. Where the error left unclear whether the dispatch started, it marks that seat as one
 that may be live. Every ending but
 the session's own and a dispatch failure then collects each worker still in flight. It cleans up each such
 group per "The Lean Orchestrator" steps 4 and 5, and refills no slot. Such an ending also waits
 for a refill planner still running. An ending releases no claim it did not clean up. "Grouping and File Claims"
-counts no claim in flight that has neither a branch nor a live worker, unless its group stopped
-or parked on a question. Every ending but
+counts no claim in flight that has neither a branch nor a live worker. Every ending but
 the session's own names each claim the run recorded for a group with no outcome. It also names
 each planner that ended returning nothing, since the claims it wrote are unknown. A run ended by a
 dispatch failure names each worker and any refill planner still in flight, the claims such a
@@ -1077,7 +1066,7 @@ planner writes being unknown. Where its error left unclear whether the failed di
 marks that seat as one that may have. Where that seat was a planner, its claims are unknown too. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree.
-It is also a worker named as uncollected, since only the maintainer releases its claim. It
+It is also a worker named as uncollected, since no later run resumes its group. It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a
