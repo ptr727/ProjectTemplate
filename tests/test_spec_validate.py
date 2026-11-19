@@ -2770,20 +2770,33 @@ class PlaceholderErrorsCase(unittest.TestCase):
 
 
 class DroppedCarryCase(unittest.TestCase):
-    """A carried file the manifest drops and the hub does not track owes a gaps row, since nothing else reports its copies."""
+    """A carried file the manifest drops and the audit cannot see owes a gaps row, since nothing else reports its copies."""
 
     PINS = frozenset({"KEPT.md", "GONE.md", "HOSTED.md", "lib/fleet/moved.sh"})
-    TREE: ClassVar[dict[str, Any]] = {"target": "lib/fleet", "include": ["**/*"], "prune": True}
+    TREE: ClassVar[dict[str, Any]] = {
+        "source": "src",
+        "target": "lib/fleet",
+        "include": ["**/*"],
+        "prune": True,
+    }
 
-    def errors(self, baseline: set[str], gaps: dict[str, str], prune: bool = True) -> list[str]:
+    def errors(
+        self,
+        baseline: set[str],
+        gaps: dict[str, str],
+        prune: bool = True,
+        pins: frozenset[str] = PINS,
+    ) -> list[str]:
         trees = [{**self.TREE, "prune": prune}]
-        return validate.dropped_carry_errors(baseline, gaps, {"HOSTED.md"}, trees, self.PINS)
+        return validate.dropped_carry_errors(
+            baseline, gaps, {"HOSTED.md", "src/SHADOW.md", "tests/OWNED.md"}, trees, ["tests"], pins
+        )
 
     def test_a_drop_the_hub_also_deleted_needs_a_row(self) -> None:
         self.assertEqual(
             self.errors({"KEPT.md"}, {}),
             [
-                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the hub tracks no file there, so the audit reports no downstream copy. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos: 'retire' to delete the copies, or 'accepted' to leave them"
+                "files.json: 'GONE.md' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos: 'retire' to delete the copies, or 'accepted' to leave them"
             ],
         )
 
@@ -2811,6 +2824,11 @@ class DroppedCarryCase(unittest.TestCase):
         got = self.errors({"KEPT.md"}, {"GONE.md": "retire"}, prune=False)
         self.assertEqual([e.split("'")[1] for e in got], ["lib/fleet/moved.sh"])
 
+    def test_a_tracked_path_the_audit_skips_is_still_a_drop(self) -> None:
+        """A tree source or a repo-owned tree keeps a hub path out of the audit's hub-only set."""
+        got = self.errors(set(), {}, pins=frozenset({"src/SHADOW.md", "tests/OWNED.md"}))
+        self.assertEqual([e.split("'")[1] for e in got], ["src/SHADOW.md", "tests/OWNED.md"])
+
     def test_an_unpinned_baseline_path_is_reported(self) -> None:
         self.assertEqual(
             self.errors({"KEPT.md", "GONE.md", "NEW.md"}, {}),
@@ -2827,8 +2845,11 @@ class DroppedCarryCase(unittest.TestCase):
         tracked = validate.hub_tracked_paths(validate.ROOT)
         self.assertIsNotNone(tracked)
         assert tracked is not None
-        trees = validate.load("spec/files.json")["trees"]
-        self.assertEqual(validate.dropped_carry_errors(baseline, fleet, tracked, trees), [])
+        files = validate.load("spec/files.json")
+        owned = [o["source"] for o in files["repoOwnedTrees"]]
+        self.assertEqual(
+            validate.dropped_carry_errors(baseline, fleet, tracked, files["trees"], owned), []
+        )
 
 
 class GapScopeCase(unittest.TestCase):

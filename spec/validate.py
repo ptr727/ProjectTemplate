@@ -1095,27 +1095,33 @@ def gap_scope_errors(gaps, repo_names, cataloged):
 
 
 def hub_tracked_paths(root):
-    """Every path git tracks at `root`, the fact the audit reads, or None where git cannot list them.
+    """Every regular file git tracks at `root`, the files the audit reads, or None where git cannot list them.
 
     A shallow clone still lists its one commit's tree, which is all this needs.
+    A scratch tree outside git is None rather than a raise, so the gate reports it.
     """
     try:
         listed = subprocess.run(
-            ["git", "-C", str(root), "ls-files", "-z"],
+            ["git", "-C", str(root), "ls-files", "-s", "-z"],
             capture_output=True,
             check=True,
             timeout=60,
         ).stdout
     except (OSError, subprocess.SubprocessError):
         return None
-    return {p.decode("utf-8") for p in listed.split(b"\0") if p}
+    paths = set()
+    for entry in listed.split(b"\0"):
+        meta, _, path = entry.partition(b"\t")
+        if path and meta.split(b" ", 1)[0] in (b"100644", b"100755"):
+            paths.add(path.decode("utf-8"))
+    return paths
 
 
-def tree_carrying(trees, path):
-    """The declared tree whose target and include patterns carry `path`, or None."""
+def tree_carrying(trees, path, end="target"):
+    """The declared tree whose `end` root and include patterns cover `path`, or None."""
     candidate = pathlib.PurePosixPath(path)
     for tree in trees:
-        target_root = pathlib.PurePosixPath(tree["target"])
+        target_root = pathlib.PurePosixPath(tree[end])
         include = tree.get("include")
         if target_root not in candidate.parents or not is_str_list(include):
             continue
@@ -1130,9 +1136,10 @@ def tree_carrying(trees, path):
     return None
 
 
-def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, pins=None):
-    """Each baseline path is pinned, and each pinned path the manifest dropped and the hub does not track is settled.
+def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, owned_roots, pins=None):
+    """Each baseline path is pinned, and each pinned path the manifest dropped and the audit cannot see is settled.
 
+    The audit sees a tracked regular file outside every tree source and every repo-owned tree.
     A settled path has a fleet-wide `retire` or `accepted` gaps row.
     A path a pruned tree carries is the tree's copy rather than a drop, so it is left out.
     A retire row has the audit report the copies, and an accepted row records the decision to leave them.
@@ -1149,7 +1156,15 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, pins=None):
         for p in sorted(baseline_paths - pins)
     ]
     settled = {p for p, kind in fleet_gaps.items() if kind in ("retire", "accepted")}
-    for p in sorted(pins - baseline_paths - settled - tracked):
+    seen = {
+        p
+        for p in tracked
+        if tree_carrying(trees, p, "source") is None
+        and not any(
+            pathlib.PurePosixPath(r) in pathlib.PurePosixPath(p).parents for r in owned_roots
+        )
+    }
+    for p in sorted(pins - baseline_paths - settled - seen):
         tree = tree_carrying(trees, p)
         if tree is not None and tree.get("prune") is True:
             continue
@@ -1159,7 +1174,7 @@ def dropped_carry_errors(baseline_paths, fleet_gaps, tracked, trees, pins=None):
             else "Add a fleet-wide spec/divergences.json 'gaps' row, one with no repos"
         )
         errors.append(
-            f"files.json: '{p}' was a carried file, and the manifest dropped it while the hub tracks no file there, so the audit reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them"
+            f"files.json: '{p}' was a carried file, and the manifest dropped it while the audit sees no hub file there, so it reports no downstream copy. {remedy}: 'retire' to delete the copies, or 'accepted' to leave them"
         )
     return errors
 
@@ -2242,6 +2257,11 @@ def main(argv=()):
                     fleet_gaps,
                     tracked,
                     validated_trees,
+                    [
+                        o["source"]
+                        for o in owned_trees
+                        if isinstance(o, dict) and isinstance(o.get("source"), str)
+                    ],
                 )
             )
 
