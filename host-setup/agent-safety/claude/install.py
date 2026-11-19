@@ -1046,11 +1046,12 @@ def subagent_force(env_block, environ=None):
 def subagent_model_state(held, recorded, default):
     """How the kit treats a held `CLAUDE_CODE_SUBAGENT_MODEL`, as one of four states.
 
-    "absent" is no key, `held` being MISSING. "current" is the default itself. "outdated" is the
-    value this kit last recorded writing, where the default has since changed. "foreign" is anything
-    else, which is the host's own and is never overwritten.
+    "absent" is no key, `held` being MISSING, or an empty or null value, which sets no default either.
+    "current" is the default itself. "outdated" is the value this kit last recorded writing, where
+    the default has since changed. "foreign" is anything else, which is the host's own and is never
+    overwritten.
     """
-    if held is MISSING:
+    if held is MISSING or held is None or held == "":
         return "absent"
     if held == default:
         return "current"

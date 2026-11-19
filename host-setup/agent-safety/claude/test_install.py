@@ -2473,6 +2473,12 @@ class TestDefaultSubagentModel(StampCase):
         self.install()
         self.assertEqual(self._held(), self.default)
 
+    def test_an_empty_value_sets_no_default_so_it_is_filled(self):
+        self._write({"env": {install.SUBAGENT_VAR: ""}})
+        self.install()
+        self.assertEqual(self._held(), self.default)
+        self.assertEqual(self._recorded(), self.default)
+
     def test_the_force_switch_in_settings_is_reported_and_nothing_changes(self):
         self._write({"env": {install.SUBAGENT_FORCE_VAR: "1"}})
         r = self.install()
@@ -2512,7 +2518,8 @@ class TestDefaultSubagentModel(StampCase):
         self.assertEqual(state("m", None, "m"), "current")
         self.assertEqual(state("old", "old", "m"), "outdated")
         self.assertEqual(state("old", None, "m"), "foreign")
-        self.assertEqual(state(None, None, "m"), "foreign")
+        self.assertEqual(state(None, None, "m"), "absent")
+        self.assertEqual(state("", None, "m"), "absent")
 
 
 class TestContainmentCapable(unittest.TestCase):
