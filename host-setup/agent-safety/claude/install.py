@@ -634,6 +634,8 @@ def source_ref():
     """The hub commit this installer is running from, and whether the tree is dirty.
 
     A dirty tree is reported rather than hidden.
+    An untracked payload file counts whatever status.showUntrackedFiles says, since its bytes are installed too.
+    Each payload path is given relative to the kit, since an absolute pathspec under `git -C` can match nothing and read clean.
     The SHA still names a commit, but the bytes installed are not that commit's.
     A stamp that claims otherwise is the thing this exists to prevent. A checkout that is not a git tree at all (an extracted tarball) says so.
 
@@ -699,7 +701,14 @@ def source_ref():
         )
     else:
         status = git(
-            "status", "--porcelain", "--", *(str(payload_source(n)) for n in PAYLOAD_FILES)
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            *(
+                pathlib.Path(os.path.relpath(payload_source(n), HERE)).as_posix()
+                for n in PAYLOAD_FILES
+            ),
         )
         ref["dirty"] = bool(status)
     return ref
