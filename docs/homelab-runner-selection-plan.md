@@ -247,7 +247,7 @@ Static workflow verification also covers action pinning, actionlint custom label
 
 Live verification covers both selection branches. Only a live run can prove runner registration and Copilot integration.
 Before the runner-group checkpoint is complete, capture live API evidence for the exact runner group. The evidence covers `visibility: selected`, a selected repository set exactly equal to `ptr727/ProjectTemplate`, and `restricted_to_workflows: true`. It also covers a `selected_workflows` set containing only the approved workflow path pinned to the protected ref, and `allows_public_repositories` equal to the documented opt-in. Reject extra or missing selected repositories and workflows. Assert the restriction flag and selected-workflow value together because GitHub ignores the value when the flag is false. Run negative canaries that prove direct-label and unapproved-ref requests cannot reach the group. Link provisioning evidence from the owning CloudInit repository rather than inferring it from this plan.
-Run a live negative canary that proves the GitHub-hosted output cannot select a homelab runner.
+Run a live negative canary that proves the GitHub-hosted output cannot select a homelab runner. The maintainer runs each live canary, since a verification run never makes a state-changing call.
 
 ## Planned Repository Surfaces
 
