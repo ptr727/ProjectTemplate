@@ -76,10 +76,10 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 
 - **The repository**, with its owner, name, and visibility.
 - **The GitHub App installed on it.** An App that is created but not installed does not work, per [`repo-config/README.md`][repo-config-readme].
-- **The value file of each repository-scoped secret the repo's registry entry lists in `requiredSecrets`**, at the name [`repo-config/README.md`][repo-config-readme] "Provisioning From `~/.secrets/`" gives, with mode `600`. A fleet-scoped name needs nothing here, since its one file serves every repository that owes it. Step 4's `apply` is the step that writes both secret stores from these files, so neither store is set by hand. `spec/resolve_secrets.py scaffold` can pre-create the files empty once the entry exists. It reads the registry of the hub checkout it runs from rather than `main`'s. So run from a checkout at `develop` once the entry has merged there, it covers the new repo. It skips a repo whose ground branch it cannot read yet, creating nothing for it.
+- **The value file of each repository-scoped secret the repo will owe**, at the name [`repo-config/README.md`][repo-config-readme] "Provisioning From `~/.secrets/`" gives, with mode `600`. Section 1 settles that list when it writes the entry's `requiredSecrets`, which names `CODECOV_TOKEN` for a csharp or python repo carrying tests. A fleet-scoped name needs nothing here, since its one file serves every repository that owes it. Step 4's `apply` is the step that writes both secret stores from these files, so neither store is set by hand. `spec/resolve_secrets.py scaffold` can pre-create the files empty once the entry exists. It reads the registry of the hub checkout it runs from rather than `main`'s. So run from a checkout at `develop` once the entry has merged there, it covers the new repo. It skips a repo whose ground branch it cannot read yet, creating nothing for it.
 - **Every publish credential and environment the repo uses.** Outside a site deploy, the repo's mechanisms in [`spec/secrets.json`][secrets] declare the publish credentials, and a mechanism's `workflowNeeds` names any environment its publish job binds. Step 1 records the environment names in the `environments` of the repo's [`registry/repos.json`][repos] entry. For a site deploy, the hub's [`.github/workflows/deploy-site-task.yml`][deploy-site-task] fixes both the environment names it accepts and the variable and secret names it reads. The maintainer supplies the values of the variables and secrets the repo uses.
 
-**A repo with no remote is not partially stood up. It is not started.** Steps 0 through 3 complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo. So the one instrument that detects this condition is unavailable exactly while it holds.
+**A repo with no remote is not partially stood up. It is not started.** Steps 0 through 1B complete locally and report progress with no repository in existence, so local progress is not evidence of onboarding progress. [`AUDIT.md`][audit] is the check that would catch it, and it reads a live repo. So the one instrument that detects this condition is unavailable exactly while it holds.
 
 **Escalate a blocking prerequisite the moment it is found, rather than carrying it.** In a task list a pending task and a blocking prerequisite look identical, and the second quietly becomes the first as work continues around it. Stop at the step that needs the missing input and say which input it is.
 
@@ -90,7 +90,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 1. **Create `main` carrying nothing.** A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit. Section 0's signing window applies to it like any other.
 2. **Create `develop` from `main`**, also carrying nothing, so the two start level.
 3. **Create the first feature branch from `develop`** and run every step below on it, through the audit in step 5.
-4. **Add the repository on GitHub and apply the configuration while still on that branch**, which is step 4 and needs no branch of its own.
+4. **Push `main` and `develop` to the new repository before section 2**, as the paragraph after the block says. Section 4 applies its configuration while the work is still on the feature branch, with no branch of its own.
 5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
 
 Steps 1 through 3 are the block below, run before the repository exists on GitHub, except in the guarded session described after it. It carries the procedure's only `git init`. So section 0 is read as its `--global` checks running ahead of this block and its two repository-scoped checks sitting inside it. Section 0 is not read as an init of its own to run first.
@@ -208,7 +208,7 @@ A caller stub copied from a snippet carries that snippet's minimum known-good hu
 
 ## 4. Apply Settings, Rulesets, and Secrets
 
-**Read the remote and the repository before running anything else here**. That is because this is the first step needing either and every step before it passes without both. The commands follow:
+**Read the remote and the repository before running anything else here**. That is because this is the first step reading the repository itself, where section 2 reads only `origin` and its `develop` branch. The commands follow:
 
 ```shell
 git remote get-url origin                                 # expect a URL, not an error
@@ -219,7 +219,7 @@ The placeholder is quoted because an unquoted `<` is input redirection, so the l
 
 Three conditions fail here, and the two commands together are what separate them:
 
-- **No `origin`.** The checkout has nowhere to push even where the repository exists, and it is the state a local-only standup reaches with every step reporting success.
+- **No `origin`.** The checkout has nowhere to push even where the repository exists, and it is the state a local-only standup reaches.
 - **No repository.** It surfaces as a resolution error against whatever `configure.sh` calls first. That error reads as a permissions or naming problem rather than as the missing prerequisite it is.
 - **The two disagree.** Neither command checks this, so compare the `origin` URL against `nameWithOwner` and confirm they name the same repository.
 
