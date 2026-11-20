@@ -247,7 +247,7 @@ jobs:
             quiet_since=$SECONDS
             while ((SECONDS - quiet_since < SETTLE_SECONDS)); do
               if ((SECONDS >= deadline)); then
-                echo "::error::The base branch did not settle within the watch window, so auto-merge stays disabled: $reason"
+                echo "::error::The watch window ended before the base branch settled, so auto-merge stays disabled: $reason"
                 exit 1
               fi
               sleep "$POLL_SECONDS"

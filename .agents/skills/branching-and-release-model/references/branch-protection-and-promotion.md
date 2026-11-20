@@ -83,7 +83,7 @@ during long-running develop features. Codegen content can also be production-cri
 So both branches need fresh codegen on their own cadence.
 
 **Maintainer-pushed commits on a bot PR auto-disable auto-merge.** The merge-bot's
-`merge-dependabot` and `merge-app` jobs only fire on `opened`/`reopened` events. Its
+`merge-dependabot` and `merge-app` jobs arm auto-merge only on `opened`/`reopened` events. Its
 `watch-auto-merge` job leaves the disable below in place until the bot itself pushes again. A maintainer may push commits to a bot's branch. Such a push is a `synchronize`
 event with an actor that isn't the same bot. When it happens, the merge-bot's
 `disable-auto-merge-on-maintainer-push` job fires and calls `gh pr merge --disable-auto`. The
