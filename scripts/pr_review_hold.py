@@ -121,21 +121,36 @@ def grace_note(pr: dict, nodes: list[dict], now: datetime) -> str:
     """A note on the grace for a `wait` that returns 0, empty where no grace applies.
 
     An open one is reported because `merge` refuses it. An ended one is reported because it
-    released the merge with no hosted reviewer's check on the head.
+    released the merge with no hosted reviewer's review check on the head. A SKIPPED placeholder
+    is named apart, so it does not read as a reviewer that never registered.
     """
     if (window := hosted_grace(pr, nodes)) is None:
         return ""
     if now < window[1]:
         return (
-            "note: no hosted reviewer's check answering this head's newest push or review ask "
-            "has registered yet, and the registration grace "
+            "note: no hosted reviewer's review check answering this head's newest push or "
+            "review ask has registered yet, and the registration grace "
             f"holds the merge until {stamp(window[1])}, so `merge` refuses until then: wait again"
+            + skipped_note(nodes)
         )
     return (
-        f"note: no hosted reviewer's check registered within {HOSTED_GRACE}s of "
+        f"note: no hosted reviewer's review check registered within {HOSTED_GRACE}s of "
         f"{stamp(window[0])}, the latest of the head's push, its last check settling, and its "
-        "newest review ask, so the grace released the merge without one"
+        "newest review ask, so the grace released the merge without one" + skipped_note(nodes)
     )
+
+
+def skipped_note(nodes: list[dict]) -> str:
+    """Names each hosted check on the head that concluded SKIPPED, a reviewer declining to review."""
+    skipped = sorted(
+        {
+            n.get("name") or login
+            for n in nodes
+            for vocab, login in HOSTED_REVIEWERS.items()
+            if reviewer_check(n, vocab, login) and n.get("conclusion") == "SKIPPED"
+        }
+    )
+    return f" (skipped, not a review: {', '.join(skipped)})" if skipped else ""
 
 
 def _unmet_note(pr: dict, required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:

@@ -8355,6 +8355,10 @@ class TestRegistrationGrace(unittest.TestCase):
         later = NOW + timedelta(seconds=pr_review_hold.HOSTED_GRACE)
         self.assertIsNone(pr_review_hold.grace_open(pr, nodes, later))
         self.assertIn("released the merge without one", pr_review_hold.grace_note(pr, nodes, later))
+        placeholder = check(name="CodeRabbit", conclusion="SKIPPED", slug="coderabbitai")
+        skipped = payload([review()], checks=[settled, placeholder])
+        note = pr_review_hold.grace_note(skipped, pr_review_checks.check_nodes(skipped), later)
+        self.assertIn("(skipped, not a review: CodeRabbit)", note)
         hosted = check(name="CodeRabbit", slug="coderabbitai")
         reviewed = payload([review()], checks=[settled, hosted])
         self.assertEqual(
