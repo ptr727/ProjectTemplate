@@ -399,6 +399,7 @@ class DockerLintCase(unittest.TestCase):
             "real = docker_lint.lint\n"
             "docker_lint.lint = lambda root, timeout, selected: real(root, timeout, selected, hang)\n"
             f"sys.argv = ['docker_lint.py', '--root', {str(self.root)!r}, '--linter', 'markdownlint']\n"
+            "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
             "status = docker_lint.main()\n"
             "if isinstance(status, signal.Signals):\n"
             "    docker_lint.reraise(status)\n"
@@ -631,6 +632,26 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(90, run.call_args_list[0].kwargs["timeout"])
         self.assertEqual(["docker", "rm", "--force", "bounded-lint"], run.call_args_list[1].args[0])
         self.assertEqual(30, run.call_args_list[1].kwargs["timeout"])
+
+    def test_an_interrupted_container_is_removed_and_the_interrupt_unwinds(self) -> None:
+        """A signal that reached this process alone kills the client and leaves its container."""
+        command = ["docker", "run", "--name", "bounded-lint", "image"]
+        cleanup: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(["docker", "rm"], 0)
+        with (
+            mock.patch.object(subprocess, "run", side_effect=[KeyboardInterrupt, cleanup]) as run,
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            docker_lint.run_command(command, 90)
+        self.assertEqual(["docker", "rm", "--force", "bounded-lint"], run.call_args_list[1].args[0])
+        self.assertEqual(30, run.call_args_list[1].kwargs["timeout"])
+
+    def test_a_failed_removal_still_lets_the_interrupt_unwind(self) -> None:
+        command = ["docker", "run", "--name", "bounded-lint", "image"]
+        with (
+            mock.patch.object(subprocess, "run", side_effect=[KeyboardInterrupt, OSError("gone")]),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            docker_lint.run_command(command, 90)
 
     def test_cleanup_start_failure_remains_a_timeout_result(self) -> None:
         command = ["docker", "run", "--name", "bounded-lint", "image"]

@@ -117,7 +117,11 @@ class CommandTimedOut(CommandFailed):
 def run_command(
     command: Sequence[str], timeout: int, *, capture_output: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    """Run one command and preserve its output for the caller."""
+    """Run one command and preserve its output for the caller.
+
+    A timed-out or interrupted `docker run` has its container removed. Killing the client alone
+    leaves the container running, where a signal reached this process and not the client.
+    """
     try:
         return subprocess.run(
             command,
@@ -151,6 +155,17 @@ def run_command(
                     f"(exit {cleanup.returncode})"
                 ) from error
         raise CommandTimedOut(f"timed out after {timeout}s") from error
+    except KeyboardInterrupt:
+        if command[:2] == ["docker", "run"] and "--name" in command:
+            name = command[command.index("--name") + 1]
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["docker", "rm", "--force", name],
+                    check=False,
+                    capture_output=True,
+                    timeout=min(timeout, 30),
+                )
+        raise
     except OSError as error:
         raise CommandFailed(f"could not start command: {error}") from error
 

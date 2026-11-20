@@ -626,6 +626,7 @@ class TestInterrupt(Case):
             "spec.loader.exec_module(module)\n"
             f"{self.SLOW_RUN}"
             "module.run = slow_run\n"
+            "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
             "print('ready', flush=True)\n"
             "status = module.main()\n"
             "if isinstance(status, signal.Signals):\n"
