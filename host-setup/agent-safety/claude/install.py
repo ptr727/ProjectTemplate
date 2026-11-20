@@ -8,7 +8,7 @@ user settings.json. On a host with a systemd user manager it also sets the prefi
 It merges the permission rules this kit owns into the same file. It merges the `autoMode`
 rules this kit owns there too, each found by its tag. It sets the AGENTS.md plugin to read
 CLAUDE.md and AGENTS.md both. It sets `attribution.sessionUrl` to false where the host holds no
-value there, so Claude Code adds no session link. It renders the user
+value there, so a web or Remote Control session adds no session link. It renders the user
 CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is self-tested
 before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
@@ -309,10 +309,38 @@ INSTRUCTION_FILES_SHAPE = (
     ),
 )
 
-# Claude Code adds a link to the session to the commits and pull requests it writes unless this key is false.
+# Claude Code adds a session link to the commits and pull requests a web or Remote Control session writes unless this key is false.
 # Fleet text never carries a session link, so the kit writes false here and no other `attribution` key.
 # A value the host already holds is its own, and a re-run leaves it as it stands.
 SESSION_URL_PATH = "attribution/sessionUrl"
+
+
+def session_url_state(data):
+    """How settings.json leaves the session link, as `absent`, `off`, or `foreign`, with the held value in words.
+
+    One reader for the install's write and the report's verdict, so the two cannot class a value differently.
+    Claude Code reads `attribution: false` as every attribution hidden, and `attribution: true` as the key left out.
+    """
+    attribution = data.get("attribution", MISSING)
+    if attribution is False:
+        return (
+            "off",
+            "attribution is false, which hides every attribution, the session link included",
+        )
+    if attribution is True:
+        return "foreign", "attribution is true, which Claude Code reads as the key left out"
+    if attribution is not MISSING and not isinstance(attribution, dict):
+        return "foreign", (
+            f"attribution holds {type(attribution).__name__}, where Claude Code reads an object or "
+            "a boolean"
+        )
+    held = at(data, SESSION_URL_PATH)
+    if held is MISSING:
+        return "absent", "attribution.sessionUrl is absent"
+    if held is False:
+        return "off", "attribution.sessionUrl is false"
+    return "foreign", f"attribution.sessionUrl is {held!r}"
+
 
 # Claude Code reads `autoMode` from user or managed settings alone, so a host-wide block nobody owns can carry one repository's rules.
 # The kit owns an entry by this leading tag rather than by its text, so a reworded rule still replaces the version before it.
@@ -1586,14 +1614,11 @@ def registration_problems(claude_home):
                 f"pluginConfigs.{plugin}.options.instructionFiles {why} rather than "
                 f"{INSTRUCTION_FILES}, so a CLAUDE.local.md stops AGENTS.md loading"
             )
-    # Only an absence is drift, since a value the host set is one a re-run leaves alone.
-    attribution = data.get("attribution", MISSING)
-    if attribution is MISSING or (
-        isinstance(attribution, dict) and at(data, SESSION_URL_PATH) is MISSING
-    ):
+    # Only an absence is drift, since a value the host set is one a re-run leaves alone, which the report notes instead.
+    if session_url_state(data)[0] == "absent":
         out.append(
-            "attribution.sessionUrl is absent rather than false, so Claude Code adds a session "
-            "link to the commits and pull requests it writes"
+            "attribution.sessionUrl is absent rather than false, so a web or Remote Control "
+            "session adds a session link to the commits and pull requests it writes"
         )
     misshape = auto_mode_misshape(data)
     if misshape is not None:
@@ -1749,6 +1774,13 @@ def report(claude_home):
         )
     for note in subagent_model_findings(env_block, claude_home)[1]:
         print(f"Note: {note}")
+    if isinstance(settings_data, dict):
+        state, words = session_url_state(settings_data)
+        if state == "foreign":
+            print(
+                f"Note: {words}, which this kit does not own, so this kit does not turn the "
+                "session link off."
+            )
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
     problems.extend(marker_corruption(claude_home / "CLAUDE.md"))
@@ -2211,23 +2243,14 @@ def main():
         )
 
     # Step 3c writes the session-link opt-out only where the host holds no value of its own.
-    attribution = data.get("attribution", MISSING)
-    held = at(data, SESSION_URL_PATH)
-    if attribution is not MISSING and not isinstance(attribution, dict):
-        done.append(
-            f"attribution left as it is, since it holds {type(attribution).__name__} where an "
-            "object is required, so this kit does not stop Claude Code adding a session link"
-        )
-    elif held is MISSING:
+    state, words = session_url_state(data)
+    if state == "absent":
         data.setdefault("attribution", {})["sessionUrl"] = False
         done.append("attribution.sessionUrl false: set, so Claude Code adds no session link")
-    elif held is False:
-        done.append("attribution.sessionUrl false: already current")
+    elif state == "off":
+        done.append(f"{words}: already current")
     else:
-        done.append(
-            f"attribution.sessionUrl left as {held!r}, which this host set, so this kit does not "
-            "stop Claude Code adding a session link"
-        )
+        done.append(f"{words}, which this host set, so this kit leaves it and adds no opt-out")
 
     # 4. The autoMode rules, stripped by their tag and appended again.
     # A list the kit creates splices in the built-ins, and a list that exists is made to lead with the splice.

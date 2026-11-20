@@ -1568,7 +1568,7 @@ class TestRegistration(StampCase):
         self.assertEqual(self._settings()["attribution"], {"sessionUrl": False})
         self.assertIn("attribution.sessionUrl false: set", r.stdout)
         again = self.install()
-        self.assertIn("attribution.sessionUrl false: already current", again.stdout)
+        self.assertIn("attribution.sessionUrl is false: already current", again.stdout)
         self.assertEqual(run(self.home, "--report").returncode, 0)
 
     def test_the_session_link_setting_keeps_the_hosts_own_attribution_keys(self):
@@ -1587,21 +1587,33 @@ class TestRegistration(StampCase):
                 self.assertEqual(
                     self._settings()["attribution"], {"sessionUrl": held, "commit": "x"}
                 )
-                self.assertIn(f"attribution.sessionUrl left as {held!r}", r.stdout)
+                self.assertIn(f"attribution.sessionUrl is {held!r}, which this host set", r.stdout)
                 report = run(self.home, "--report")
                 self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
+                self.assertIn(f"Note: attribution.sessionUrl is {held!r}", report.stdout)
 
     def test_a_non_object_attribution_is_left_as_it_stands(self):
-        """The key is the host's own, so the install goes ahead without it rather than refusing the file."""
-        for held in ([], "x", None):
+        """The key is the host's own, so the install goes ahead without it rather than refusing the file.
+
+        Claude Code reads `false` as every attribution hidden, so that one already turns the link off.
+        """
+        for held, words, foreign in (
+            (False, "attribution is false, which hides every attribution", False),
+            (True, "attribution is true, which Claude Code reads as the key left out", True),
+            ([], "attribution holds list", True),
+            ("x", "attribution holds str", True),
+            (None, "attribution holds NoneType", True),
+        ):
             with self.subTest(held=held):
                 self.home.mkdir(parents=True, exist_ok=True)
                 self._write({"attribution": held})
                 r = self.install()
                 self.assertEqual(self._settings()["attribution"], held)
-                self.assertIn("attribution left as it is", r.stdout)
+                self.assertIn(words, r.stdout)
+                self.assertIn("which this host set" if foreign else "already current", r.stdout)
                 report = run(self.home, "--report")
                 self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
+                self.assertEqual(f"Note: {words}" in report.stdout, foreign)
 
     def test_a_host_installed_before_the_session_link_setting_reports_it_absent(self):
         for strip in ("attribution", "sessionUrl"):
