@@ -45,6 +45,7 @@ except ImportError:
 PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[1] / ".github/actions/prose-gate/prose_lint.py"
 sys.path.insert(0, str(PROSE_LINT_SCRIPT.parent))
 import prose_lint
+from pygments.lexers import get_all_lexers
 
 REPO = Path(__file__).resolve().parent.parent
 COMMENT_AND_DOC_STYLE_SKILL = REPO / ".agents" / "skills" / "comment-and-doc-style" / "SKILL.md"
@@ -4440,6 +4441,11 @@ class TestLexerDispatch(BaitCase):
             (".gitignore", "bash"),
             ("x.md", "markdown"),
             ("X.MD", "markdown"),
+            ("x.html.j2", "html+django"),
+            ("x.yaml.j2", "yaml+jinja"),
+            ("x.j2", "django"),
+            ("x.jinja", "django"),
+            ("x.jinja2", "django"),
         ):
             with self.subTest(name=name):
                 self.assertEqual(lexer, prose_lint.lexer_name(Path(name), ""))
@@ -4479,6 +4485,21 @@ class TestLexerDispatch(BaitCase):
     def test_a_file_name_outranks_a_shebang(self) -> None:
         self.assertEqual("python", prose_lint.lexer_name(Path("x.py"), "#!/bin/bash"))
 
+    def test_a_shebang_outranks_a_template_suffix(self) -> None:
+        """A template of a script keeps the script's own comments, which the template lexer drops."""
+        self.assertEqual("bash", prose_lint.lexer_name(Path("run.sh.j2"), "#!/bin/bash"))
+        self.assertEqual("django", prose_lint.lexer_name(Path("run.sh.j2"), ""))
+
+    def test_every_jinja_lexer_pygments_knows_names_a_language(self) -> None:
+        """Pygments picks a template's lexer by its inner suffix, before the data's template map."""
+        names = [
+            a[0] for _, a, _, _ in get_all_lexers() if any("django" in n or "jinja" in n for n in a)
+        ]
+        self.assertIn("html+django", names)
+        for lexer in names:
+            with self.subTest(lexer=lexer):
+                self.assertIsNotNone(prose_lint.language_of(lexer))
+
     def test_a_format_holding_no_comments_is_plain_without_a_note(self) -> None:
         """A lock file or a table has no comment syntax at all, so nothing is missing from it."""
         for name in ("data.lock", "data.csv", "notes.txt", "image.svg"):
@@ -4511,6 +4532,7 @@ class TestLexerDispatch(BaitCase):
             *files["suffix"].values(),
             *files["name"].values(),
             *files["runner"].values(),
+            *files["template"].values(),
             files["extensionless"],
         ]
         for lexer in named:
@@ -5175,6 +5197,109 @@ class TestMarkupLanguage(BaitCase):
         """A comment opening on no marker the language declares belongs to an embedded language."""
         text = "<script>\n// Two things. Here.\n</script>\n<style>/* Two things. Here. */</style>\n"
         self.assertEqual([], self.flag("a.html", text))
+
+
+class TestJinjaLanguage(BaitCase):
+    """Jinja templates, whose `{# ... #}` comments are read and whose tags and expressions are not.
+
+    An HTML, XML, or YAML template's own comments are read as well.
+    A CSS, JavaScript, or SQL template's own comments are left out, as an embedded language's are.
+    Pygments names a lexer for a template whose inner suffix it knows, such as `.html.j2`.
+    A bare `.j2` has none, so the data file names one.
+    """
+
+    TEMPLATES = (
+        "a.j2",
+        "a.jinja",
+        "a.jinja2",
+        "a.html.j2",
+        "a.xml.j2",
+        "a.yaml.j2",
+        "a.css.j2",
+        "a.js.j2",
+        "a.sql.j2",
+    )
+
+    def test_two_sentences_on_one_comment_line_are_a_violation(self) -> None:
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                text = f"{{{{ value }}}}\n{{# {self.BAIT} #}}\n"
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+    def test_a_sentence_over_the_cap_is_a_violation(self) -> None:
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                text = f"{{% if value %}}\n{{# {self.over().capitalize()} #}}\n{{% endif %}}\n"
+                self.assertEqual([(2, "sentence-length")], self.found(text, name))
+
+    def test_a_sentence_at_the_cap_is_clean(self) -> None:
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                self.assertEqual([], self.found(f"{{# {self.at_cap().capitalize()} #}}\n", name))
+
+    def test_a_wrapped_comment_sentence_is_a_violation(self) -> None:
+        text = "{# The page draws each section on its own, and a reader opens\n   only one. #}\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.html.j2", text))
+
+    def test_a_whitespace_control_marker_is_not_comment_text(self) -> None:
+        """A `-` trims the whitespace beside its tag, on either end or both."""
+        for opener, closer in (("{#-", "-#}"), ("{#-", "#}"), ("{#", "-#}")):
+            with self.subTest(opener=opener, closer=closer):
+                clean = f"{opener} The value is read once. {closer}\n"
+                found = self.comments("a.j2", clean)
+                self.assertEqual([(1, "The value is read once.", True)], found)
+                bait = f"{opener} {self.BAIT} {closer}\n"
+                self.assertEqual(["comment-wrap"], self.flag("a.j2", bait))
+
+    def test_markup_and_expressions_raise_nothing(self) -> None:
+        """Only a comment is prose, so text that would fail as one passes as markup or code."""
+        text = (
+            f"<p>{{{{ {self.BAIT} }}}}</p>\n"
+            f"{{% set note = '{self.BAIT} {self.over()}' %}}\n"
+            f"<div>{{% if a; b %}}{self.BAIT} {self.over()} - x{{% endif %}}</div>\n"
+        )
+        rules = set(prose_lint.DEFAULT_RULES) - {"comment-added"}
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                self.assertEqual([], self.kinds(text, rules, name=name))
+
+    def test_an_html_comment_in_an_html_template_is_still_read(self) -> None:
+        text = f"<p>{{{{ value }}}}</p><!-- {self.BAIT} -->\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.html.j2", text))
+
+    def test_a_yaml_comment_in_a_yaml_template_is_still_read(self) -> None:
+        for name in ("a.yaml.j2", "a.sls"):
+            with self.subTest(file=name):
+                text = f"key: {{{{ value }}}}  # {self.BAIT}\n"
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+    def test_a_host_comment_in_a_code_template_is_left_out(self) -> None:
+        for name, comment in (
+            ("a.css.j2", f"/* {self.BAIT} */"),
+            ("a.js.j2", f"// {self.BAIT}"),
+            ("a.sql.j2", f"-- {self.BAIT}"),
+        ):
+            with self.subTest(file=name):
+                self.assertEqual([], self.flag(name, f"{{{{ value }}}}\n{comment}\n"))
+
+    def test_the_gate_fails_a_template_comment_at_a_commit_and_against_a_base(self) -> None:
+        """The commit hook diffs against what the commit adds to, and CI against the base branch."""
+        root = self.tmp / "repo"
+        git_as_gate(self.tmp, "init", "-q", "-b", "develop", str(root))
+        (root / "base.txt").write_text("base\n", encoding="utf-8")
+        git_as_gate(root, "add", "base.txt")
+        git_as_gate(root, "commit", "-qm", "base")
+        base = git_as_gate(root, "rev-parse", "HEAD")
+        page = root / "page.html.j2"
+        page.write_text(f"<p>{{{{ value }}}}</p>\n{{# {self.BAIT} #}}\n", encoding="utf-8")
+        git_as_gate(root, "add", "page.html.j2")
+        for flags, commit in ((["--diff-commit"], True), (["--diff", base], False)):
+            with self.subTest(flags=flags):
+                status, said = run_gate(["--check", "comment-wrap", *flags, "--", str(page)])
+                self.assertEqual(1, status, said)
+                self.assertIn("comment-wrap", said)
+            if commit:
+                git_as_gate(root, "commit", "-qm", "page")
 
 
 class TestIniLanguage(BaitCase):
@@ -8228,6 +8353,14 @@ def git_as_gate(root: Path, *args: str, check: bool = True) -> str:
     ).stdout.strip()
 
 
+def run_gate(argv: list[str]) -> tuple[int, str]:
+    """The gate's exit status on `argv`, run in process, and everything it printed."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status = prose_lint.main(argv)
+    return status, out.getvalue() + err.getvalue()
+
+
 class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
     """A pull request is gated on its own change, whatever base the event recorded.
 
@@ -8451,11 +8584,8 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
     def gate(
         self, *flags: str, check: str = "comment-added", glob: str = "*.py"
     ) -> tuple[int, str]:
-        out, err = io.StringIO(), io.StringIO()
         paths = sorted(str(p) for p in self.root.glob(glob))
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = prose_lint.main(["--check", check, *flags, "--", *paths])
-        return status, out.getvalue() + err.getvalue()
+        return run_gate(["--check", check, *flags, "--", *paths])
 
     def moved_doc(self) -> None:
         """`docs/a.md` links `gone.py`, which `docs/` holds and the top level once held."""
