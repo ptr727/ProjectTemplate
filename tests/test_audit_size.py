@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hold the audit engine and its Markdown module under their size ceilings."""
+"""Hold the audit engine and its Markdown and pin modules under their size ceilings."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 SPEC = Path(__file__).resolve().parents[1] / "spec"
-CEILINGS = {"audit.py": 3000, "audit_markdown.py": 1000}
+CEILINGS = {"audit.py": 3000, "audit_markdown.py": 1000, "audit_pins.py": 500}
 
 
 class AuditSizeCase(unittest.TestCase):

@@ -6,8 +6,9 @@
 """Live fleet audit: the deterministic subset of AUDIT.md, run from the hub with gh and the libraries above.
 
 Compares each cataloged registry repo against the ground truth in this repo and never modifies a target.
-Findings are DEFECT, LETTER (a required file is absent, intent unverified), DRIFT (non-breaking divergence), and ERROR
-(a gh call failed). It exits non-zero when any repo has a DEFECT, LETTER, or ERROR finding.
+Findings are DEFECT, LETTER (a required file is absent, intent unverified), DRIFT (non-breaking divergence),
+ADVISORY (reported, never converged on), and ERROR (a gh call failed).
+It exits non-zero when any repo has a DEFECT, LETTER, or ERROR finding.
 
 Usage: uv run --no-project --script spec/audit.py [RepoName ...] [--branch REF]
 --branch overrides each repo's registry groundTruthBranch for the run.
@@ -31,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import audit_pins
 import validate  # sibling, import-safe (its main is guarded)
 import yaml
 from audit_markdown import (
@@ -2365,6 +2367,11 @@ def check_dependabot_ecosystems(run):
     ]
 
 
+def check_pins_age(run):
+    hub = f"{run.slug.split('/')[0]}/{hub_repo_name()}"
+    return audit_pins.pin_age_findings(run.entry, hub, run.tree, run.read_text, gh)
+
+
 def check_files_presence(run, path):
     content, text, findings = baseline_file_findings(
         run.slug, run.ground, path, run.baseline[path][0], run.ref
@@ -2722,7 +2729,7 @@ def check_cspell_workspace(run):
 
 
 def check_registry_driftnotes(run):
-    return driftnote_findings(run.entry, run.spec, len(run.findings))
+    return driftnote_findings(run.entry, run.spec, sum(k != "ADVISORY" for k, _ in run.findings))
 
 
 def _selftest_cases():
@@ -2787,6 +2794,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     blocking = [(k, t) for k, t in findings if k in ("DEFECT", "LETTER")]
     drift = [t for k, t in findings if k == "DRIFT"]
     errors = [t for k, t in findings if k == "ERROR"]
+    advisory = [t for k, t in findings if k == "ADVISORY"]
     title = f"Converge {name} with the hub baseline ({len(findings)} detected finding{'' if len(findings) == 1 else 's'})"
 
     out = []
@@ -2827,6 +2835,11 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         for t in drift:
             w(f"- {t}")
         w("")
+    if advisory:
+        w(
+            "## Advisory\n\nReported for awareness rather than converged on, so none counts as open work.\n"
+        )
+        out.extend([f"- {t}" for t in advisory] + [""])
     if errors:
         w("## Could not verify")
         w("")
