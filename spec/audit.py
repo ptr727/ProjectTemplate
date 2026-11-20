@@ -66,7 +66,6 @@ from secret_names import (  # noqa: F401  # re-exported, since the tests and hel
     is_python_test_module,
     read_tree_blobs,
     resolve_secret_stores,
-    tree_blobs,
 )
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
