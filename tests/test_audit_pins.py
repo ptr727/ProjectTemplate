@@ -150,9 +150,9 @@ class PinFindingsCase(unittest.TestCase):
         got = findings(pin(SHA_MID), ("Held for a regression (pins.age).",))
         self.assertEqual([k for k, _ in got], ["ADVISORY"])
 
-    def test_an_unparsed_workflow_is_an_advisory_that_keeps_a_hold(self) -> None:
+    def test_an_unparsed_workflow_is_drift_that_keeps_a_hold(self) -> None:
         got = findings({".github/workflows/a.yml": None}, ("Held (pins.age).",))
-        self.assertEqual([k for k, _ in got], ["ADVISORY"])
+        self.assertEqual([k for k, _ in got], ["DRIFT"])
         self.assertIn("does not parse as YAML", got[0][1])
 
     def test_a_hold_is_not_stale_while_a_pin_s_age_is_unread(self) -> None:

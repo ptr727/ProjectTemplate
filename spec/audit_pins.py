@@ -134,7 +134,7 @@ def pin_findings(
     for path, refs in sorted(pins.items()):
         if refs is None:
             unread = True
-            out.append(("ADVISORY", f"pins: {path} does not parse as YAML, so its pins are unread"))
+            out.append(("DRIFT", f"pins: {path} does not parse as YAML, so its pins are unread"))
             continue
         for ref, tasks in refs.items():
             named = f"{path} pins {', '.join(tasks)} at `{ref}`"
