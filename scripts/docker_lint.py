@@ -173,8 +173,19 @@ def run_command(
     except KeyboardInterrupt:
         name = container_name(command)
         if name is not None:
-            with contextlib.suppress(OSError, subprocess.SubprocessError):
-                remove_container(name, timeout, capture_output=True)
+            try:
+                cleanup = remove_container(name, timeout, capture_output=True)
+            except (OSError, subprocess.SubprocessError) as cleanup_error:
+                print(
+                    f"interrupted; cleanup could not run for {name}: {cleanup_error}",
+                    file=sys.stderr,
+                )
+            else:
+                if cleanup.returncode != 0:
+                    print(
+                        f"interrupted; cleanup failed for {name} (exit {cleanup.returncode})",
+                        file=sys.stderr,
+                    )
         raise
     except OSError as error:
         raise CommandFailed(f"could not start command: {error}") from error
