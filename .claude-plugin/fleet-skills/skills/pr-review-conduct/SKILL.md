@@ -73,7 +73,11 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    or Qodo check on the head has neither passed nor failed, `merge` refuses as `CHECKS_PENDING`,
    whatever the merge state reads. `wait` holds an attested head then too. A reviewer whose newest
    output is a rate limit posted since the check began posts no review, so its check holds
-   nothing.
+   nothing. The registration grace is not an absence either. A CodeRabbit or Qodo reviewer asked
+   by comment registers its check only after the ask. The grace runs 90 seconds from the latest
+   of the head's push, its last check settling, and its newest review ask. While it runs and no
+   check answering that push or ask has registered, `merge` refuses as `CHECKS_PENDING`. Its line
+   names when the grace ends. `wait` holds an attested head then too.
    `pr_review.py`'s `review_on_head` names Copilot's own coverage specifically, not "no review of
    any kind covers this head". An advisory reviewer carrying the exact head under
    `other_reviewed`, with an empty review body and no new threads, is not a missing review. It is

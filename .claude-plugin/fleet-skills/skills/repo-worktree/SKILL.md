@@ -224,14 +224,19 @@ in the new tree.
   checkout of the repository, the maintainer's own included. Rewriting a setting to the value it
   already holds, as the Husky.Net step above does, changes nothing and is not this case. Switching
   installers is the same act, since `prek install` over a pre-commit framework hook moves the original aside and chains to it. That chaining has left every commit in every checkout failing on the
-  chained script. A missing or wrong shared hook is reported to the maintainer, not repaired from
-  the worktree.
+  chained script. A missing or wrong shared hook is put to the maintainer per `GOVERNANCE.md`
+  "Communicating with the User", not repaired from the worktree. A dispatched worker hands it to
+  its dispatcher in its report. An away run lists it in its end-of-run report under what needs
+  the maintainer, per `backlog-burndown` "Ending an Away Run". The task does not wait for the
+  repair, and CI stays the gate meanwhile. No agent runs an installer that changes the shared
+  hooks directory or its setting, from any checkout, since the maintainer repairs it by hand.
 - **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The exception is that none of them may change a shared hook or setting
   from a linked worktree, per the bullet above. Do not infer a replacement command from
   the language alone.
 
 Treat hook preparation as worktree setup, not as recovery after a rejected commit. If setup
-fails, report that boundary and fix the setup. Never bypass the hook to make the commit succeed.
+fails, report that boundary and fix the setup this tree owns, routing a shared hook as the
+bullet above says. Never bypass the hook to make the commit succeed.
 A commit-time `core.hooksPath` override, `git -c core.hooksPath=<dir> commit`, is a bypass too,
 since git then runs whatever that directory holds, and nothing where it holds nothing.
 
