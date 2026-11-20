@@ -45,6 +45,7 @@ except ImportError:
 PROSE_LINT_SCRIPT = Path(__file__).resolve().parents[1] / ".github/actions/prose-gate/prose_lint.py"
 sys.path.insert(0, str(PROSE_LINT_SCRIPT.parent))
 import prose_lint
+from pygments.lexers import get_all_lexers
 
 REPO = Path(__file__).resolve().parent.parent
 COMMENT_AND_DOC_STYLE_SKILL = REPO / ".agents" / "skills" / "comment-and-doc-style" / "SKILL.md"
@@ -4483,9 +4484,20 @@ class TestLexerDispatch(BaitCase):
     def test_a_file_name_outranks_a_shebang(self) -> None:
         self.assertEqual("python", prose_lint.lexer_name(Path("x.py"), "#!/bin/bash"))
 
-    def test_a_template_suffix_outranks_a_shebang(self) -> None:
-        """A rendered script still holds template syntax, whose comments the shell lexer misreads."""
-        self.assertEqual("django", prose_lint.lexer_name(Path("run.sh.j2"), "#!/bin/bash"))
+    def test_a_shebang_outranks_a_template_suffix(self) -> None:
+        """A template of a script keeps the script's own comments, which the template lexer drops."""
+        self.assertEqual("bash", prose_lint.lexer_name(Path("run.sh.j2"), "#!/bin/bash"))
+        self.assertEqual("django", prose_lint.lexer_name(Path("run.sh.j2"), ""))
+
+    def test_every_jinja_lexer_pygments_knows_names_a_language(self) -> None:
+        """Pygments picks a template's lexer by its inner suffix, before the data's template map."""
+        names = [
+            a[0] for _, a, _, _ in get_all_lexers() if any("django" in n or "jinja" in n for n in a)
+        ]
+        self.assertIn("html+django", names)
+        for lexer in names:
+            with self.subTest(lexer=lexer):
+                self.assertIsNotNone(prose_lint.language_of(lexer))
 
     def test_a_format_holding_no_comments_is_plain_without_a_note(self) -> None:
         """A lock file or a table has no comment syntax at all, so nothing is missing from it."""
@@ -5193,7 +5205,16 @@ class TestJinjaLanguage(BaitCase):
     A bare `.j2` has none, so the data file names one.
     """
 
-    TEMPLATES = ("a.j2", "a.jinja2", "a.html.j2", "a.xml.j2", "a.yaml.j2")
+    TEMPLATES = (
+        "a.j2",
+        "a.jinja2",
+        "a.html.j2",
+        "a.xml.j2",
+        "a.yaml.j2",
+        "a.css.j2",
+        "a.js.j2",
+        "a.sql.j2",
+    )
 
     def test_two_sentences_on_one_comment_line_are_a_violation(self) -> None:
         for name in self.TEMPLATES:
@@ -5255,14 +5276,7 @@ class TestJinjaLanguage(BaitCase):
         git_as_gate(root, "add", "page.html.j2")
         for flags, commit in ((["--diff-commit"], True), (["--diff", base], False)):
             with self.subTest(flags=flags):
-                out, err = io.StringIO(), io.StringIO()
-                with (
-                    contextlib.chdir(root),
-                    contextlib.redirect_stdout(out),
-                    contextlib.redirect_stderr(err),
-                ):
-                    status = prose_lint.main(["--check", "comment-wrap", *flags, "--", str(page)])
-                said = out.getvalue() + err.getvalue()
+                status, said = run_gate(["--check", "comment-wrap", *flags, "--", str(page)])
                 self.assertEqual(1, status, said)
                 self.assertIn("comment-wrap", said)
             if commit:
@@ -8320,6 +8334,14 @@ def git_as_gate(root: Path, *args: str, check: bool = True) -> str:
     ).stdout.strip()
 
 
+def run_gate(argv: list[str]) -> tuple[int, str]:
+    """The gate's exit status on `argv`, run in process, and everything it printed."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        status = prose_lint.main(argv)
+    return status, out.getvalue() + err.getvalue()
+
+
 class TestTheGateDiffsAgainstTheMergeCommitsOwnBase(unittest.TestCase):
     """A pull request is gated on its own change, whatever base the event recorded.
 
@@ -8543,11 +8565,8 @@ class TestDiffCommitChoosesTheBaseACommitAddsTo(unittest.TestCase):
     def gate(
         self, *flags: str, check: str = "comment-added", glob: str = "*.py"
     ) -> tuple[int, str]:
-        out, err = io.StringIO(), io.StringIO()
         paths = sorted(str(p) for p in self.root.glob(glob))
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-            status = prose_lint.main(["--check", check, *flags, "--", *paths])
-        return status, out.getvalue() + err.getvalue()
+        return run_gate(["--check", check, *flags, "--", *paths])
 
     def moved_doc(self) -> None:
         """`docs/a.md` links `gone.py`, which `docs/` holds and the top level once held."""

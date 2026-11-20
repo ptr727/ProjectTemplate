@@ -674,9 +674,8 @@ def language_of(lexer: str | None) -> dict[str, Any] | None:
 def lexer_name(path: Path, first: str) -> str | None:
     """The lexer a file reads through, `markdown`, or None for a format holding no comments.
 
-    The data file's own mapping wins, then Pygments by file name, then a template suffix.
-    The shebang comes last.
-    A template suffix follows Pygments, which names the markup a `.html.j2` holds.
+    The data file's own mapping wins, then Pygments by file name, then the shebang.
+    A template suffix comes last, since Pygments names the markup a `.html.j2` holds.
     A shebang naming a runner, such as `uv run`, selects the interpreter that runner runs.
     """
     files = BASE["files"]
@@ -690,13 +689,13 @@ def lexer_name(path: Path, first: str) -> str | None:
     for candidate in (path.name, path.name.lower()):
         with contextlib.suppress(ClassNotFound):
             return get_lexer_for_filename(candidate).aliases[0]
-    if suffix in files["template"]:
-        return files["template"][suffix]
     if m := SHEBANG.match(first):
         program = m.group(2) if m.group(1) == "env" and m.group(2) else m.group(1)
         program = files["runner"].get(program, program)
         with contextlib.suppress(ClassNotFound):
             return get_lexer_by_name(program.rstrip("0123456789.")).aliases[0]
+    if suffix in files["template"]:
+        return files["template"][suffix]
     return None if suffix else files["extensionless"]
 
 
