@@ -73,9 +73,10 @@ jobs:
             echo "::error::Unsupported base branch: $BASE_REF"
             exit 1
           fi
-          gh pr merge --auto "$MERGE_METHOD" "$PR_URL"
+          gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
@@ -89,7 +90,7 @@ jobs:
       (
         github.event.action == 'opened' ||
         github.event.action == 'reopened' ||
-        github.event.action == 'auto_merge_disabled'
+        (github.event.action == 'auto_merge_disabled' && github.event.pull_request.state == 'open')
       ) &&
       github.event.pull_request.user.login == inputs.app-login &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -152,9 +153,10 @@ jobs:
             echo "::error::Unsupported base branch: $BASE_REF"
             exit 1
           fi
-          gh pr merge --auto "$MERGE_METHOD" "$PR_URL"
+          gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
@@ -169,6 +171,7 @@ jobs:
       !cancelled() &&
       (needs.merge-app.result == 'success' || needs.merge-app.result == 'skipped') &&
       github.event.action == 'auto_merge_disabled' &&
+      github.event.pull_request.state == 'open' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (
         github.event.pull_request.user.login == 'dependabot[bot]' ||
@@ -197,9 +200,12 @@ jobs:
                 headRefOid
                 baseRef { target { oid } }
                 autoMergeRequest { enabledAt }
-                commits(last: 1) { nodes { commit { committedDate author { user { login } } } } }
+                headRef { target { ... on Commit { committedDate author { user { login } } } } }
                 timelineItems(last: 20, itemTypes: [AUTO_MERGE_DISABLED_EVENT]) {
                   nodes { ... on AutoMergeDisabledEvent { createdAt reason reasonCode disabler { login } } }
+                }
+                pushes: timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
+                  nodes { ... on HeadRefForcePushedEvent { actor { __typename login } afterCommit { oid } } }
                 }
               }
             }
@@ -218,7 +224,7 @@ jobs:
             echo "::error::Reading the pull request failed three times, so the disable is unanswered"
             exit 1
           }
-          # Ends the run where the disable needs no answer from this job, and leaves the latest disable in disabler and reason.
+          # Read again before acting, since a close, an arming, or a push can land while the settle waits.
           check_pr() {
             if [[ $(jq -r .state <<<"$pr") != OPEN ]]; then
               echo "The pull request is no longer open, so there is nothing to re-arm"
@@ -240,9 +246,13 @@ jobs:
               echo "::notice::$disabler disabled auto-merge, so it stays off: $reason"
               exit 0
             fi
-            # The maintainer-push job also disables under the App, and the head commit is then the maintainer's rather than the bot's.
-            if [[ $(jq -r '.commits.nodes[0].commit.author.user.login // ""' <<<"$pr") != "$PR_AUTHOR" ]]; then
-              echo "::notice::The head carries a commit the bot did not author, so auto-merge stays off: $reason"
+            # The maintainer-push job also disables under the App, so the head has to be the bot's own.
+            # An amend or rebase keeps the bot as author, so a force push onto this head must also be the bot's.
+            if [[ $(jq -r --arg author "$PR_AUTHOR" '.headRefOid as $head
+              | (.headRef.target.author.user.login // "") == $author
+                and ([.pushes.nodes[] | select(.afterCommit.oid == $head)
+                      | select(.actor.__typename != "Bot" or ((.actor.login // "") + "[bot]") != $author)] | length) == 0' <<<"$pr") != true ]]; then
+              echo "::notice::The head is not the bot's own push, so auto-merge stays off: $reason"
               exit 0
             fi
           }
@@ -271,7 +281,7 @@ jobs:
           read_pr
           check_pr
           # Once means one re-arm per head, so a second App-recorded disable since the head's commit is the one this job does not answer.
-          disables=$(jq -r --arg app "$APP_BOT" '.commits.nodes[0].commit.committedDate as $since
+          disables=$(jq -r --arg app "$APP_BOT" '.headRef.target.committedDate as $since
             | [.timelineItems.nodes[] | select(.disabler.login == $app and .reasonCode != "closed" and .createdAt > $since)] | length' <<<"$pr")
           if ((disables > 1)); then
             echo "::error::GitHub disabled auto-merge again after the re-arm: $reason"
