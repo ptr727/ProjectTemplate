@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import audit_contract
 import audit_pins
 import validate  # sibling, import-safe (its main is guarded)
 import yaml
@@ -1334,6 +1335,7 @@ def check_interface(path, contract, text):
         findings.append(
             ("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff")
         )
+    findings += audit_contract.require_tokens_findings(path, contract, code_view(root))
     # An absent job is already a requiredJobKeys finding, so its tokens are not reported again.
     for job, toks in contract.get("requireTokensInJob", {}).items():
         if job in jobs:

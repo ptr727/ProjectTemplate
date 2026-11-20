@@ -776,6 +776,49 @@ class ForbiddenTokenCase(unittest.TestCase):
         self.assertEqual(len(audit.check_interface("wf", contract, text)), 1)
 
 
+MERGE_BOT_STUB = (
+    "on:\n  pull_request_target:\n    types: [opened, closed{extra}]\n"
+    "jobs:\n  merge-bot:\n    uses: acme/hub/.github/workflows/merge-bot-task.yml@x\n"
+)
+REQUIRE_TOKENS_CONTRACT = {"requireTokens": ["auto_merge_disabled"]}
+
+
+class RequireTokensCase(unittest.TestCase):
+    """A `requireTokens` entry is read against the whole file's code, outside every job included."""
+
+    def test_a_subscribed_event_type_passes(self) -> None:
+        text = MERGE_BOT_STUB.format(extra=", auto_merge_disabled")
+        self.assertEqual(audit.check_interface("wf", REQUIRE_TOKENS_CONTRACT, text), [])
+
+    def test_a_missing_event_type_is_drift(self) -> None:
+        text = MERGE_BOT_STUB.format(extra="")
+        self.assertEqual(
+            audit.check_interface("wf", REQUIRE_TOKENS_CONTRACT, text),
+            [("DRIFT", "interface: wf missing required 'auto_merge_disabled'")],
+        )
+
+    def test_a_comment_naming_the_token_does_not_satisfy_it(self) -> None:
+        text = "# also auto_merge_disabled\n" + MERGE_BOT_STUB.format(extra="")
+        self.assertEqual(len(audit.check_interface("wf", REQUIRE_TOKENS_CONTRACT, text)), 1)
+
+    def test_shipped_merge_bot_stubs_meet_the_carried_contract(self) -> None:
+        root = pathlib.Path(__file__).resolve().parent.parent
+        spec = json.loads((root / "spec/files.json").read_text(encoding="utf-8"))
+        path = ".github/workflows/merge-bot-pull-request.yml"
+        contract = next(
+            unit["contract"]
+            for units in spec.values()
+            if isinstance(units, list)
+            for unit in units
+            if isinstance(unit, dict) and unit.get("path") == path
+        )
+        self.assertIn("auto_merge_disabled", contract["requireTokens"])
+        for stub in (path, "catalog/snippets/workflows/merge-bot-pull-request.yml"):
+            with self.subTest(stub):
+                text = (root / stub).read_text(encoding="utf-8")
+                self.assertEqual(audit.check_interface(stub, contract, text), [])
+
+
 class SplitJobsCase(unittest.TestCase):
     """Holds the split_jobs edge cases."""
 
