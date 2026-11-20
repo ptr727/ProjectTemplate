@@ -11,7 +11,7 @@ CEILINGS = {"audit.py": 3000, "audit_markdown.py": 1000, "audit_pins.py": 500}
 
 
 class AuditSizeCase(unittest.TestCase):
-    """Tests live in tests/ and parsing is a library's, so neither file has a reason to grow back."""
+    """Tests live in tests/ and parsing is a library's, so no module here has a reason to grow back."""
 
     def test_each_file_stays_under_its_ceiling(self) -> None:
         for name, ceiling in CEILINGS.items():
