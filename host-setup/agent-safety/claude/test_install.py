@@ -223,10 +223,12 @@ class TestSourceRef(unittest.TestCase):
         self.assertTrue(install.source_ref()["dirty"])
 
 
-class TestSourceRefFromAnArchive(unittest.TestCase):
-    """A tree git cannot answer for records the commit its loader handed in, and only a full one."""
+class KitTreeCase(unittest.TestCase):
+    """A throwaway kit directory under a temp tree, with install.HERE and the environment restored.
 
-    COMMIT = "0123456789abcdef0123456789abcdef01234567"
+    Every GIT_ variable is dropped. A git hook running the suite sets ones that point each git
+    read and write at the hook's repository rather than at the temp tree.
+    """
 
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
@@ -240,8 +242,16 @@ class TestSourceRefFromAnArchive(unittest.TestCase):
         env = mock.patch.dict(os.environ)
         env.start()
         self.addCleanup(env.stop)
+        for name in [k for k in os.environ if k.startswith("GIT_")]:
+            del os.environ[name]
         os.environ.pop("AGENT_SAFETY_SOURCE_COMMIT", None)
         os.environ.pop("AGENT_SAFETY_DIRTY_OVERRIDE", None)
+
+
+class TestSourceRefFromAnArchive(KitTreeCase):
+    """A tree git cannot answer for records the commit its loader handed in, and only a full one."""
+
+    COMMIT = "0123456789abcdef0123456789abcdef01234567"
 
     def test_a_full_commit_is_recorded_as_a_clean_archive(self):
         os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
@@ -319,36 +329,22 @@ class TestSourceRefFromAnArchive(unittest.TestCase):
         self.assertEqual(install.source_ref()["vcs"], "archive")
 
 
-class TestSourceRefUntrackedPayload(unittest.TestCase):
+class TestSourceRefUntrackedPayload(KitTreeCase):
     """An untracked payload file stamps dirty even where git is set to hide untracked files.
 
     Reads the real git status of a throwaway tree, with AGENT_SAFETY_DIRTY_OVERRIDE unset, rather
     than this checkout. So the verdict does not depend on whether the kit is mid-edit while the
-    suite runs. Every GIT_ variable is dropped, since a git hook running the suite sets ones that
-    point each read at the hook's repository. The data files resolve to the hub's spec/ at import,
-    so they move into the tree with the kit.
+    suite runs. The data files resolve to the hub's spec/ at import, so they move into the tree
+    with the kit.
     """
 
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        super().setUp()
         self.tree = self.tmp / "tree"
-        kit = self.tree / "host-setup" / "agent-safety" / "claude"
-        kit.mkdir(parents=True)
-        env = mock.patch.dict(os.environ)
-        env.start()
-        self.addCleanup(env.stop)
-        for name in [k for k in os.environ if k.startswith("GIT_")]:
-            del os.environ[name]
-        os.environ.pop("AGENT_SAFETY_DIRTY_OVERRIDE", None)
-        os.environ.pop("AGENT_SAFETY_SOURCE_COMMIT", None)
         data = {name: self.tree / "spec" / name for name in install.DEPLOYED_DATA}
-        for patcher in (
-            mock.patch.object(install, "HERE", kit),
-            mock.patch.object(install, "DEPLOYED_DATA", data),
-        ):
-            patcher.start()
-            self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(install, "DEPLOYED_DATA", data)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.untracked = install.payload_source(install.GUARD_NAME)
         for name in install.PAYLOAD_FILES:
             path = install.payload_source(name)

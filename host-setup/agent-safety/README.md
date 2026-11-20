@@ -79,7 +79,7 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
 
    An agent session that a bounded command starts is nested in the session that ran it. Its commands
    run in groups of its own, each under its own ceilings, rather than inside its parent's group. A
-   shared ceiling would let one heavy build in the parent end the nested agent instead. Every group in
+   shared ceiling would let one heavy command end the nested agent instead. Every group in
    a chain of nested sessions also sits under one total task and memory ceiling for the whole tree. So
    a chain of agents starting agents meets that ceiling however little each level adds.
 
