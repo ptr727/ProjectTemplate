@@ -64,6 +64,7 @@ from secret_names import (  # noqa: F401  # re-exported, since the tests and hel
     in_test_directory,
     is_csharp_test_project,
     is_python_test_module,
+    read_tree_blobs,
     resolve_secret_stores,
     tree_blobs,
 )
@@ -194,9 +195,7 @@ def repo_tree_blobs(slug, ground_head):
     sha = (((ground_head or {}).get("commit") or {}).get("commit") or {}).get("tree", {}).get("sha")
     if not sha:
         return None
-    if sha == EMPTY_TREE_SHA:
-        return {}
-    return tree_blobs(gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True))
+    return read_tree_blobs(sha, lambda s: gh(f"repos/{slug}/git/trees/{s}?recursive=1", ok404=True))
 
 
 def blob_field(blobs, index):

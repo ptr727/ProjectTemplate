@@ -9,6 +9,7 @@ imports are absent.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 STORES = ("actions", "dependabot")
@@ -56,7 +57,6 @@ def tree_blobs(tree: Any) -> dict[str, tuple[Any, Any]] | None:
 
     A response that is empty, holds no `tree` list, or is truncated is unreadable.
     A truncated tree would silently drop names, so both callers refuse it rather than use part of it.
-    GitHub answers a read of EMPTY_TREE_SHA, the tree of a commit holding no file, with 404, so both callers check for it before reading.
     """
     if not tree or not isinstance(tree, dict) or not isinstance(tree.get("tree"), list):
         return None
@@ -65,6 +65,17 @@ def tree_blobs(tree: Any) -> dict[str, tuple[Any, Any]] | None:
     return {
         n["path"]: (n.get("sha"), n.get("mode")) for n in tree["tree"] if n.get("type") == "blob"
     }
+
+
+def read_tree_blobs(sha: str, read: Callable[[str], Any]) -> dict[str, tuple[Any, Any]] | None:
+    """tree_blobs() of the tree SHA names, fetched through read, which both callers give their own gh read.
+
+    GitHub answers a read of the empty tree, the tree of a commit holding no file, with 404.
+    So that tree is answered as holding no file, without a read.
+    """
+    if sha == EMPTY_TREE_SHA:
+        return {}
+    return tree_blobs(read(sha))
 
 
 def in_test_directory(path: str) -> bool:

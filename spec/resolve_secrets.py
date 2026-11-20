@@ -142,10 +142,9 @@ def read_tree(slug: str, branch: str) -> set[str]:
         if e.status in ("404", "409"):
             raise BranchMissing(f"the {branch} branch of {slug} does not exist yet") from e
         raise
-    if sha == secret_names.EMPTY_TREE_SHA:
-        return set()
-    tree = gh_json(["gh", "api", f"repos/{slug}/git/trees/{sha}?recursive=1"], slug)
-    blobs = secret_names.tree_blobs(tree)
+    blobs = secret_names.read_tree_blobs(
+        sha, lambda s: gh_json(["gh", "api", f"repos/{slug}/git/trees/{s}?recursive=1"], slug)
+    )
     if blobs is None:
         raise ResolveError(f"{slug}: the {branch} tree is unreadable or truncated")
     return set(blobs)
