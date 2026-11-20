@@ -323,7 +323,7 @@ jobs:
               continue
             fi
             if ((SECONDS >= deadline)); then
-              echo "::error::No merge within $WATCH_MINUTES minutes of arming auto-merge, so a required check may have failed or still be running"
+              echo "::error::No merge within $WATCH_MINUTES minutes of this watch starting, so a required check may have failed or still be running"
               exit 1
             fi
             sleep "$POLL_SECONDS"
