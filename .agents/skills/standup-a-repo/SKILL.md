@@ -46,11 +46,11 @@ maintainer can supply what section 0A lists.
    `develop` empty, off one signed empty root commit, then run every step below on a feature
    branch off `develop`. Never commit standup work directly onto `develop`. `non_fast_forward` on
    both branch payloads, or the missing blocking rule on an operational repo's `develop` ruleset,
-   makes that mistake either unrecoverable or silently unprotected. Push `main` and `develop`
-   once the repository exists, before step 6, since `scripts/carry.py` needs `origin/develop`. In
-   a session running the fleet's agent-safety kit that push is the maintainer's step. Hand the
-   maintainer the exact `git push -u origin main develop` right after the repository exists, and
-   wait for it to land.
+   makes that mistake either unrecoverable or silently unprotected. Point `origin` at the
+   repository once it exists, then push `main` and `develop` before step 6, since
+   `scripts/carry.py` needs `origin/develop`. In a session running the fleet's agent-safety kit
+   that push is the maintainer's step. Hand the maintainer the exact
+   `git push -u origin main develop` right after the repository exists, and wait for it to land.
 
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
