@@ -89,7 +89,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 
 1. **Create `main` carrying nothing.** A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit. Section 0's signing window applies to it like any other.
 2. **Create `develop` from `main`**, also carrying nothing, so the two start level.
-3. **Create the first feature branch from `develop`** and run every step below on it, through the audit in step 5.
+3. **Create the first feature branch from `develop`** and run each target-repository step below on it, through the audit in step 5.
 4. **Push `main` and `develop` to the new repository before section 2**, as the paragraph after the block says. Section 4 applies its configuration while the work is still on the feature branch, with no branch of its own.
 5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
 
@@ -114,7 +114,7 @@ git remote add origin "<url>"     # The repository the maintainer created.
 git push -u origin main develop   # Seeds both branches before any ruleset exists.
 ```
 
-Wait until the push lands. Then create the feature branch as a linked worktree, which the kit does not refuse. Edits to the target repository run in that worktree, and hub commands (`scripts/`, `repo-config/configure.sh`) run from the hub checkout:
+Wait until the push lands. Then create the feature branch as a linked worktree, which the kit does not refuse. Work on the target repository, edits and git commands, runs in that worktree. Hub commands (`scripts/`, `repo-config/configure.sh`) run from a clean hub checkout, and a hub-side edit such as the registry entry lands through a hub pull request:
 
 ```shell
 git worktree add -b "<feature-branch>" "<path>" develop   # Target-repository edits below run here.

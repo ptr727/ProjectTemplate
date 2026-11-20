@@ -43,7 +43,7 @@ maintainer can supply what section 0A lists.
    under the wrong identity or unsigned cannot be cleanly repaired afterward.
 
 2. **Branches, before the first standup commit.** STANDUP.md section 0B: create `main` and
-   `develop` empty, off one signed empty root commit, then run every step below on a feature
+   `develop` empty, off one signed empty root commit. Then run each later repository step on a feature
    branch off `develop`. Never commit standup work directly onto `develop`. `non_fast_forward` on
    both branch payloads, or the missing blocking rule on an operational repo's `develop` ruleset,
    makes that mistake either unrecoverable or silently unprotected. Point `origin` at the
@@ -55,7 +55,7 @@ maintainer can supply what section 0A lists.
    identity and signing output per step 1 before anything is pushed. Then hand over
    `git remote add origin "<url>"` and `git push -u origin main develop`. Wait for the push to
    land. Then create the feature branch as a linked worktree with
-   `git worktree add -b "<feature-branch>" "<path>" develop`. Later target-repository edits run there, and hub commands run from the hub checkout.
+   `git worktree add -b "<feature-branch>" "<path>" develop`. Later work on the target repository runs there. Hub commands run from a clean hub checkout, and a hub-side edit such as the registry entry lands through a hub pull request.
 
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
