@@ -7,7 +7,8 @@ user settings.json. On a host with a systemd user manager it also sets the prefi
 `env`. It sets the default subagent model there too, the model of the mapping's default tier.
 It merges the permission rules this kit owns into the same file. It merges the `autoMode`
 rules this kit owns there too, each found by its tag. It sets the AGENTS.md plugin to read
-CLAUDE.md and AGENTS.md both. It renders the user
+CLAUDE.md and AGENTS.md both. It sets `attribution.sessionUrl` to false where the host holds no
+value there, so Claude Code adds no session link. It renders the user
 CLAUDE.md whole from the kit's blocks and the host-local instruction file. Each hook is self-tested
 before it is registered.
 The bash and PowerShell wrappers both call this, so every OS runs one tested code path.
@@ -307,6 +308,11 @@ INSTRUCTION_FILES_SHAPE = (
         for tail in ("", "/options")
     ),
 )
+
+# Claude Code adds a link to the session to the commits and pull requests it writes unless this key is false.
+# Fleet text never carries a session link, so the kit writes false here and no other `attribution` key.
+# A value the host already holds is its own, and a re-run leaves it as it stands.
+SESSION_URL_PATH = "attribution/sessionUrl"
 
 # Claude Code reads `autoMode` from user or managed settings alone, so a host-wide block nobody owns can carry one repository's rules.
 # The kit owns an entry by this leading tag rather than by its text, so a reworded rule still replaces the version before it.
@@ -1580,6 +1586,15 @@ def registration_problems(claude_home):
                 f"pluginConfigs.{plugin}.options.instructionFiles {why} rather than "
                 f"{INSTRUCTION_FILES}, so a CLAUDE.local.md stops AGENTS.md loading"
             )
+    # Only an absence is drift, since a value the host set is one a re-run leaves alone.
+    attribution = data.get("attribution", MISSING)
+    if attribution is MISSING or (
+        isinstance(attribution, dict) and at(data, SESSION_URL_PATH) is MISSING
+    ):
+        out.append(
+            "attribution.sessionUrl is absent rather than false, so Claude Code adds a session "
+            "link to the commits and pull requests it writes"
+        )
     misshape = auto_mode_misshape(data)
     if misshape is not None:
         where, held, want = misshape
@@ -2193,6 +2208,25 @@ def main():
             action = f"changed from {held!r}"
         done.append(
             f"pluginConfigs.{plugin}.options.instructionFiles {INSTRUCTION_FILES}: {action}"
+        )
+
+    # Step 3c writes the session-link opt-out only where the host holds no value of its own.
+    attribution = data.get("attribution", MISSING)
+    held = at(data, SESSION_URL_PATH)
+    if attribution is not MISSING and not isinstance(attribution, dict):
+        done.append(
+            f"attribution left as it is, since it holds {type(attribution).__name__} where an "
+            "object is required, so this kit does not stop Claude Code adding a session link"
+        )
+    elif held is MISSING:
+        data.setdefault("attribution", {})["sessionUrl"] = False
+        done.append("attribution.sessionUrl false: set, so Claude Code adds no session link")
+    elif held is False:
+        done.append("attribution.sessionUrl false: already current")
+    else:
+        done.append(
+            f"attribution.sessionUrl left as {held!r}, which this host set, so this kit does not "
+            "stop Claude Code adding a session link"
         )
 
     # 4. The autoMode rules, stripped by their tag and appended again.
