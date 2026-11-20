@@ -28,10 +28,11 @@ cold-start self-test.
 
 ## Before starting
 
-Read STANDUP.md section 0A first. Nothing in this procedure creates the GitHub repository, its
-App, or its secrets. Each is an outward-facing write that needs the maintainer's explicit permission
-and inputs. So hand that checklist over before step 1 rather than discovering the gap partway
-through. A repo with no remote is not partially stood up, it is not started, and only the
+Read STANDUP.md section 0A first. Nothing in this procedure creates the GitHub repository or
+installs its App. Each is an outward-facing write that needs the maintainer's explicit permission
+and inputs. Only the maintainer can supply a repository-scoped secret's value file, which section
+4 reads to set both secret stores. So hand that checklist over before step 1 rather than
+discovering the gap partway through. A repo with no remote is not partially stood up, it is not started, and only the
 maintainer can supply what section 0A lists.
 
 ## Apply, in order
@@ -45,7 +46,11 @@ maintainer can supply what section 0A lists.
    `develop` empty, off one signed empty root commit, then run every step below on a feature
    branch off `develop`. Never commit standup work directly onto `develop`. `non_fast_forward` on
    both branch payloads, or the missing blocking rule on an operational repo's `develop` ruleset,
-   makes that mistake either unrecoverable or silently unprotected.
+   makes that mistake either unrecoverable or silently unprotected. Push `main` and `develop`
+   once the repository exists, before step 6, since `scripts/carry.py` needs `origin/develop`. In
+   a session running the fleet's agent-safety kit that push is the maintainer's step. Hand the
+   maintainer the exact `git push -u origin main develop` right after the repository exists, and
+   wait for it to land.
 
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
