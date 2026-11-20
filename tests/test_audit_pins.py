@@ -6,6 +6,7 @@ from __future__ import annotations
 import pathlib
 import sys
 import unittest
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest import mock
@@ -42,7 +43,7 @@ SHAS = {SHA_OLD: "1.0.1", SHA_MID: "1.0.2", SHA_NEW: "1.0.3"}
 
 
 def findings(
-    pins: dict[str, dict[str, list[str]]], notes: tuple[str, ...] = ()
+    pins: Mapping[str, Mapping[str, list[str]] | None], notes: tuple[str, ...] = ()
 ) -> list[tuple[str, str]]:
     entry = {"name": "Widget", "driftNotes": list(notes)}
     return audit_pins.pin_findings(entry, pins, RELEASES, SHAS, NOW)
@@ -81,11 +82,13 @@ class HubPinsCase(unittest.TestCase):
             ),
             ("no ref", "jobs:\n  a:\n    uses: acme/hub/.github/workflows/validate-task.yml\n"),
             ("a local call", "jobs:\n  a:\n    uses: ./.github/workflows/validate-task.yml\n"),
-            ("unparsed YAML", "jobs:\n  - [\n"),
             ("no jobs mapping", "jobs: []\n"),
         ):
             with self.subTest(label):
                 self.assertEqual(audit_pins.hub_pins(text, HUB), {})
+
+    def test_an_unparsed_workflow_is_none(self) -> None:
+        self.assertIsNone(audit_pins.hub_pins("jobs:\n  - [\n", HUB))
 
     def test_only_files_directly_under_workflows_are_read(self) -> None:
         tree = {
@@ -146,6 +149,11 @@ class PinFindingsCase(unittest.TestCase):
     def test_a_hold_on_a_pin_still_within_the_bound_is_not_stale(self) -> None:
         got = findings(pin(SHA_MID), ("Held for a regression (pins.age).",))
         self.assertEqual([k for k, _ in got], ["ADVISORY"])
+
+    def test_an_unparsed_workflow_is_an_advisory_that_keeps_a_hold(self) -> None:
+        got = findings({".github/workflows/a.yml": None}, ("Held (pins.age).",))
+        self.assertEqual([k for k, _ in got], ["ADVISORY"])
+        self.assertIn("does not parse as YAML", got[0][1])
 
     def test_a_hold_is_not_stale_while_a_pin_s_age_is_unread(self) -> None:
         got = findings(pin("main"), ("Held for a regression (pins.age).",))

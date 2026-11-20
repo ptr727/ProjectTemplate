@@ -4,12 +4,13 @@ A pin behind the newest release is an ADVISORY, since Dependabot moves it within
 A pin a newer release has superseded for longer than PIN_AGE_DAYS is DRIFT, since by then the update
 mechanism has stalled. The age runs from the release that first superseded the pin, so a pin is never
 late before a newer release exists. A registry driftNote naming `(pins.age)` holds such a pin back on
-purpose, and the pin then reports as an ADVISORY. The note is stale once no pin is behind at all.
+purpose, and the pin then reports as an ADVISORY. The note is stale once every pin's age reads and no
+pin is behind the newest release.
 """
 
 import functools
 import posixpath
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -30,16 +31,16 @@ def workflow_paths(tree: Iterable[str]) -> list[str]:
     )
 
 
-def hub_pins(text: str, hub: str) -> dict[str, list[str]]:
+def hub_pins(text: str, hub: str) -> dict[str, list[str]] | None:
     """`{ref: [task file, ...]}` for each job-level `uses:` reaching one of `hub`'s reusable workflows.
 
     `hub` is `<owner>/<repo>`, matched without regard to case, as GitHub matches it.
-    A workflow that does not parse reports nothing, since the interface checks already report it.
+    A workflow that does not parse is None, since its pins are unread rather than absent.
     """
     try:
         doc = yaml.safe_load(text)
     except yaml.YAMLError:
-        return {}
+        return None
     jobs = doc.get("jobs") if isinstance(doc, dict) else None
     if not isinstance(jobs, dict):
         return {}
@@ -115,12 +116,15 @@ def hub_releases(read: Callable[[str], Any], hub: str) -> tuple[dict[str, Releas
 
 def pin_findings(
     entry: dict[str, Any],
-    pins: dict[str, dict[str, list[str]]],
+    pins: Mapping[str, Mapping[str, list[str]] | None],
     releases: dict[str, Release],
     shas: dict[str, str],
     now: datetime,
 ) -> list[Finding]:
-    """The findings for `pins`, `{workflow path: {ref: [task file, ...]}}`, against the hub's releases."""
+    """The findings for `pins`, `{workflow path: {ref: [task file, ...]}}`, against the hub's releases.
+
+    A path mapped to None is a workflow that does not parse, so its pins are unread.
+    """
     held = any(f"({CHECK_ID})" in n for n in entry.get("driftNotes", []))
     stable = [(v, r) for r in releases.values() if not r[2] and (v := version_key(r[0]))]
     newest = max(stable)[1][0] if stable else None
@@ -128,6 +132,10 @@ def pin_findings(
     out: list[Finding] = []
     trailing = unread = False
     for path, refs in sorted(pins.items()):
+        if refs is None:
+            unread = True
+            out.append(("ADVISORY", f"pins: {path} does not parse as YAML, so its pins are unread"))
+            continue
         for ref, tasks in refs.items():
             named = f"{path} pins {', '.join(tasks)} at `{ref}`"
             pinned = releases.get(ref) or releases.get(shas.get(ref.casefold(), ""))
@@ -194,13 +202,13 @@ def pin_age_findings(
     """
     if tree is None:
         return []
-    pins = {}
+    pins: dict[str, dict[str, list[str]] | None] = {}
     try:
         for path in workflow_paths(tree):
             found = hub_pins(_workflow_text(path, content.get(path), read_text), hub)
-            if found:
+            if found != {}:
                 pins[path] = found
-        releases, shas = hub_releases(read, hub) if pins else ({}, {})
+        releases, shas = hub_releases(read, hub) if any(pins.values()) else ({}, {})
     except RuntimeError as e:
         return [("ERROR", f"pins: could not read the caller pins or {hub}'s releases: {e}")]
     return pin_findings(entry, pins, releases, shas, now or datetime.now(UTC))
