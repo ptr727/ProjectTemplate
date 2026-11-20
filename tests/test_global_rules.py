@@ -597,21 +597,41 @@ class TestArguments(Case):
 
 @unittest.skipIf(sys.platform == "win32", "Windows cannot deliver SIGINT or SIGTERM to a script")
 class TestInterrupt(Case):
-    """The script holds no lock, temporary path, or child, so the check is the exit status and the one line."""
+    """The script holds no lock, temporary path, or child, so the check is the death by signal and the one line."""
 
-    def interrupted(self, signum: int) -> subprocess.CompletedProcess[str]:
-        """Starts the real entry point with the run replaced by a sleep, then signals it mid-run."""
+    SLOW_RUN = (
+        "def slow_run(args):\n"
+        "    try:\n"
+        "        time.sleep(30)\n"
+        "    finally:\n"
+        "        if second:\n"
+        "            os.kill(os.getpid(), signal.SIGTERM)\n"
+        "            time.sleep(0.5)\n"
+        "        print('cleaned', flush=True)\n"
+    )
+
+    def interrupted(self, signum: int, *, second: bool = False) -> subprocess.CompletedProcess[str]:
+        """Starts the real entry point with the run replaced by a sleep, then signals it mid-run.
+
+        With `second`, the run's cleanup signals the script again with SIGTERM, then prints a line once it completes.
+        """
         self.install_both()
         driver = (
-            "import importlib.util, sys, time\n"
+            "import importlib.util, os, signal, sys, time\n"
+            f"second = {second!r}\n"
             f"sys.argv = [{str(SCRIPT)!r}]\n"
             f"spec = importlib.util.spec_from_file_location('gr', {str(SCRIPT)!r})\n"
             "module = importlib.util.module_from_spec(spec)\n"
             "sys.modules['gr'] = module\n"
             "spec.loader.exec_module(module)\n"
-            "module.run = lambda args: time.sleep(30)\n"
+            f"{self.SLOW_RUN}"
+            "module.run = slow_run\n"
+            "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
             "print('ready', flush=True)\n"
-            "sys.exit(module.main())\n"
+            "status = module.main()\n"
+            "if isinstance(status, signal.Signals):\n"
+            "    module.reraise(status)\n"
+            "sys.exit(status)\n"
         )
         process = subprocess.Popen(
             [sys.executable, "-c", driver],
@@ -633,19 +653,41 @@ class TestInterrupt(Case):
                 process.wait()
         return subprocess.CompletedProcess(process.args, process.returncode, out, err)
 
-    def test_sigint_exits_130_with_one_line_and_no_traceback(self) -> None:
+    def test_sigint_dies_by_sigint_with_one_line_and_no_traceback(self) -> None:
         result = self.interrupted(signal.SIGINT)
-        self.assertEqual(result.returncode, 130, result.stderr)
+        self.assertEqual(result.returncode, -signal.SIGINT, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(len(result.stderr.strip().splitlines()), 1)
         self.assertIn("SIGINT", result.stderr)
 
-    def test_sigterm_exits_143_with_one_line_and_no_traceback(self) -> None:
+    def test_sigterm_dies_by_sigterm_with_one_line_and_no_traceback(self) -> None:
         result = self.interrupted(signal.SIGTERM)
-        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertEqual(result.returncode, -signal.SIGTERM, result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         self.assertEqual(len(result.stderr.strip().splitlines()), 1)
         self.assertIn("SIGTERM", result.stderr)
+
+    def test_a_later_signal_does_not_cut_the_cleanup_short(self) -> None:
+        """A SIGTERM after the first SIGINT, as `uv run` forwards one, is passed over."""
+        result = self.interrupted(signal.SIGINT, second=True)
+        self.assertEqual(result.returncode, -signal.SIGINT, result.stderr)
+        self.assertIn("cleaned", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+        self.assertIn("SIGINT", result.stderr)
+
+    def test_a_sigint_inherited_as_ignored_stays_ignored(self) -> None:
+        previous = {signum: signal.getsignal(signum) for signum in (signal.SIGINT, signal.SIGTERM)}
+        for signum, handler in previous.items():
+            self.addCleanup(signal.signal, signum, handler)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        with (
+            mock.patch.object(sys, "argv", [str(SCRIPT), "--report"]),
+            mock.patch.object(global_rules, "run", return_value=0),
+        ):
+            self.assertEqual(global_rules.main(), 0)
+        self.assertIs(signal.getsignal(signal.SIGINT), signal.SIG_IGN)
+        self.assertIs(signal.getsignal(signal.SIGTERM), global_rules.on_signal)
 
     def test_no_stray_file_is_left_behind(self) -> None:
         self.interrupted(signal.SIGTERM)

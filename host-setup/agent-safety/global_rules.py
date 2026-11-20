@@ -22,6 +22,7 @@ Usage: python3 global_rules.py                 (write the file of each present a
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import importlib.util
 import os
@@ -40,9 +41,6 @@ KIT_INSTALL = HERE / "claude" / "install.py"
 # What a file written by this script opens with.
 # A prior file without it was written by a person or another tool, so it is backed up before it is replaced.
 WRITER_MARKER = "<!-- Written by ProjectTemplate host-setup/agent-safety/global_rules.py"
-
-EXIT_SIGINT = 130
-EXIT_SIGTERM = 143
 
 
 @dataclass(frozen=True)
@@ -311,23 +309,52 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    received: list[int] = []
+received: list[int] = []
 
-    # SIGTERM takes the path SIGINT takes, so one handler below releases what the run holds and reports it.
-    def on_sigterm(signum: int, _frame: FrameType | None) -> None:
-        received.append(signum)
-        raise KeyboardInterrupt
 
-    signal.signal(signal.SIGTERM, on_sigterm)
+def on_signal(signum: int, _frame: FrameType | None) -> None:
+    """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
+    `uv run` forwards to a process group the terminal's SIGINT already reached.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def main() -> int | signal.Signals:
+    """Run the script, returning its status, or the signal that interrupted it.
+
+    A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    """
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
     args = build_parser().parse_args()
     try:
         return run(args)
     except KeyboardInterrupt:
-        name = "SIGTERM" if received else "SIGINT"
-        sys.stderr.write(f"Interrupted by {name}, no further file was written.\n")
-        return EXIT_SIGTERM if received else EXIT_SIGINT
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
+        sys.stderr.write(f"Interrupted by {signum.name}, no further file was written.\n")
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    status = main()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)
