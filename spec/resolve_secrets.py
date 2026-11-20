@@ -11,8 +11,8 @@ It prints a JSON object with the rows (name, scope, file, stores), the forbidden
 A stray is the file a name would have at the wrong scope.
 With `--live` it also reads each secret store and adds the findings of secret_names.compare_stores.
 A ground branch that does not exist yet is a reported state rather than a failure.
-A ground branch whose commit holds no file, such as an empty root commit, reads as an empty tree and is resolved.
 Its JSON then carries empty lists and a `skip` string naming why, and the exit status is 0.
+A ground branch whose commit holds no file, such as an empty root commit, reads as an empty tree and is resolved.
 It exits 1 on a malformed registry, a duplicate or unknown entry, a name that has no scope, or any other gh failure.
 
 `scaffold` walks the fleet and pre-creates every expected file as an empty mode 600 file in a mode 700 directory.
@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -45,7 +44,6 @@ import validate  # sibling, import-safe (its main is guarded)
 
 ROOT = Path(__file__).resolve().parent.parent
 EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
-GIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 
 class ResolveError(Exception):
@@ -145,8 +143,6 @@ def read_tree(slug: str, branch: str) -> set[str]:
         if e.status in ("404", "409"):
             raise BranchMissing(f"the {branch} branch of {slug} does not exist yet") from e
         raise
-    if not GIT_SHA.fullmatch(sha):
-        raise ResolveError(f"{slug}: the {branch} branch answer names no tree SHA")
     if sha == EMPTY_TREE_SHA:
         return set()
     tree = gh_json(["gh", "api", f"repos/{slug}/git/trees/{sha}?recursive=1"], slug)

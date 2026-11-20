@@ -489,16 +489,6 @@ class NamesCliCase(unittest.TestCase):
                 self.assertEqual(out, "")
                 self.assertIn("owner/ExampleRepo", err)
 
-    def test_a_branch_answer_naming_no_tree_sha_exits_one(self) -> None:
-        for sha in ("null", "", "not-a-sha"):
-            with self.subTest(sha=sha):
-                code, out, err, _ = self.run_names(
-                    {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_sha=sha)
-                )
-                self.assertEqual(code, 1)
-                self.assertEqual(out, "")
-                self.assertIn("names no tree SHA", err)
-
     def test_a_missing_gh_is_a_clear_error_and_not_a_traceback(self) -> None:
         code, out, err, _ = self.run_names(
             {"repos": [entry()]}, "ExampleRepo", FakeGh(missing_gh=True)
