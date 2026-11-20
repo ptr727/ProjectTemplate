@@ -27,6 +27,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 INSTALL = HERE / "install.py"
 
 sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent.parent.parent / "spec"))
+import git_env
 import install
 
 # Held before any case patches `shutil.which`, which is the same object `install` reads.
@@ -226,8 +228,9 @@ class TestSourceRef(unittest.TestCase):
 class KitTreeCase(unittest.TestCase):
     """A throwaway kit directory under a temp tree, with install.HERE and the environment restored.
 
-    Every GIT_ variable is dropped. A git hook running the suite sets ones that point each git
-    read and write at the hook's repository rather than at the temp tree.
+    Git's location variables are cleared, since a git hook running the suite sets ones that point
+    each git call at the hook's repository. Global and system config read an empty file. So a
+    host's hooks path, template, or fsmonitor never reaches a temp-tree commit.
     """
 
     def setUp(self):
@@ -242,10 +245,23 @@ class KitTreeCase(unittest.TestCase):
         env = mock.patch.dict(os.environ)
         env.start()
         self.addCleanup(env.stop)
-        for name in [k for k in os.environ if k.startswith("GIT_")]:
-            del os.environ[name]
+        self.enterContext(git_env.git_location_cleared())
+        empty = self.tmp / "empty.gitconfig"
+        empty.touch()
+        os.environ["GIT_CONFIG_GLOBAL"] = str(empty)
+        os.environ["GIT_CONFIG_SYSTEM"] = str(empty)
         os.environ.pop("AGENT_SAFETY_SOURCE_COMMIT", None)
         os.environ.pop("AGENT_SAFETY_DIRTY_OVERRIDE", None)
+
+    def git(self, root, *args):
+        return subprocess.run(
+            ["git", "-C", str(root), "-c", "user.name=T", "-c", "user.email=t@example.com", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+            timeout=30,
+        ).stdout
 
 
 class TestSourceRefFromAnArchive(KitTreeCase):
@@ -306,24 +322,16 @@ class TestSourceRefFromAnArchive(KitTreeCase):
         self.assertIn("unknown", install.stamp_line({"source": install.source_ref()}))
 
     def test_a_git_tree_ignores_the_variable(self):
-        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
-        subprocess.run(
-            ["git", "-C", str(self.tmp), "-c", "user.name=T", "-c", "user.email=t@example.com",
-             "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"],
-            check=True,
-        )  # fmt: skip
+        self.git(self.tmp, "init", "-q")
+        self.git(self.tmp, "commit", "-q", "--allow-empty", "-m", "x")
         os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
         ref = install.source_ref()
         self.assertEqual(ref["vcs"], "git")
         self.assertNotEqual(ref["commit"], self.COMMIT)
 
     def test_a_tree_the_bootstrap_extracted_is_not_asked_of_an_enclosing_repository(self):
-        subprocess.run(["git", "init", "-q", str(self.tmp)], check=True)
-        subprocess.run(
-            ["git", "-C", str(self.tmp), "-c", "user.name=T", "-c", "user.email=t@example.com",
-             "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"],
-            check=True,
-        )  # fmt: skip
+        self.git(self.tmp, "init", "-q")
+        self.git(self.tmp, "commit", "-q", "--allow-empty", "-m", "x")
         (self.tmp / "tree" / ".bootstrap-owned").touch()
         os.environ["AGENT_SAFETY_SOURCE_COMMIT"] = self.COMMIT
         self.assertEqual(install.source_ref()["vcs"], "archive")
@@ -351,29 +359,16 @@ class TestSourceRefUntrackedPayload(KitTreeCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             if path != self.untracked:
                 path.write_text(f"{name}\n", encoding="utf-8")
-        self.git("init", "-q")
-        self.git("add", "--", ".")
-        self.git(
-            "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
-            "commit", "-q", "-m", "x",
-        )  # fmt: skip
-        self.git("config", "status.showUntrackedFiles", "no")
-
-    def git(self, *args):
-        return subprocess.run(
-            ["git", "-C", str(self.tree), *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=True,
-            timeout=30,
-        ).stdout
+        self.git(self.tree, "init", "-q")
+        self.git(self.tree, "add", "--", ".")
+        self.git(self.tree, "commit", "-q", "-m", "x")
+        self.git(self.tree, "config", "status.showUntrackedFiles", "no")
 
     def test_an_untracked_payload_file_is_dirty_where_status_hides_untracked_files(self):
         """A plain status read prints nothing here, so the verdict rests on the installer's own flag."""
         self.assertIs(install.source_ref()["dirty"], False)
         self.untracked.write_text("not in any commit\n", encoding="utf-8")
-        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.git(self.tree, "status", "--porcelain"), "")
         ref = install.source_ref()
         self.assertEqual(ref["vcs"], "git")
         self.assertIs(ref["dirty"], True)

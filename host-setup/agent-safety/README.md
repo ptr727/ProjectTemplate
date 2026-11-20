@@ -81,7 +81,9 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
    run in groups of its own, each under its own ceilings, rather than inside its parent's group. A
    shared ceiling would let one heavy command end the nested agent instead. Every group in
    a chain of nested sessions also sits under one total task and memory ceiling for the whole tree. So
-   a chain of agents starting agents meets that ceiling however little each level adds.
+   a chain of agents starting agents meets that ceiling however little each level adds. Where the
+   tree's ceiling cannot be put on, a command still runs under its own group's ceilings and says the
+   tree has none.
 
    Name each group for the session that ran it, and record in it the agent that ran it. At the end of
    the session, stop every group its commands left running, then report what was stopped. This stop
