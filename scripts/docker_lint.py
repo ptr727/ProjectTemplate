@@ -114,13 +114,32 @@ class CommandTimedOut(CommandFailed):
     """Report a Docker command that exceeded its bound."""
 
 
+def container_name(command: Sequence[str]) -> str | None:
+    """Return the name a `docker run` command gives its container, or None for any other command."""
+    if command[:2] != ["docker", "run"] or "--name" not in command:
+        return None
+    return command[command.index("--name") + 1]
+
+
+def remove_container(
+    name: str, timeout: int, *, capture_output: bool = False
+) -> subprocess.CompletedProcess[bytes]:
+    """Force-remove a container within a bound shorter than its run's."""
+    return subprocess.run(
+        ["docker", "rm", "--force", name],
+        check=False,
+        capture_output=capture_output,
+        timeout=min(timeout, 30),
+    )
+
+
 def run_command(
     command: Sequence[str], timeout: int, *, capture_output: bool = False
 ) -> subprocess.CompletedProcess[str]:
     """Run one command and preserve its output for the caller.
 
-    A timed-out or interrupted `docker run` has its container removed. Killing the client alone
-    leaves the container running, where a signal reached this process and not the client.
+    A timed-out or interrupted `docker run` has its container removed, since killing the client
+    alone leaves the container running. An interrupt can reach this process and not the client.
     """
     try:
         return subprocess.run(
@@ -132,14 +151,10 @@ def run_command(
             capture_output=capture_output,
         )
     except subprocess.TimeoutExpired as error:
-        if command[:2] == ["docker", "run"] and "--name" in command:
-            name = command[command.index("--name") + 1]
+        name = container_name(command)
+        if name is not None:
             try:
-                cleanup = subprocess.run(
-                    ["docker", "rm", "--force", name],
-                    check=False,
-                    timeout=min(timeout, 30),
-                )
+                cleanup = remove_container(name, timeout)
             except subprocess.TimeoutExpired as cleanup_error:
                 raise CommandTimedOut(
                     f"timed out after {timeout}s; cleanup timed out for {name}"
@@ -156,15 +171,10 @@ def run_command(
                 ) from error
         raise CommandTimedOut(f"timed out after {timeout}s") from error
     except KeyboardInterrupt:
-        if command[:2] == ["docker", "run"] and "--name" in command:
-            name = command[command.index("--name") + 1]
+        name = container_name(command)
+        if name is not None:
             with contextlib.suppress(OSError, subprocess.SubprocessError):
-                subprocess.run(
-                    ["docker", "rm", "--force", name],
-                    check=False,
-                    capture_output=True,
-                    timeout=min(timeout, 30),
-                )
+                remove_container(name, timeout, capture_output=True)
         raise
     except OSError as error:
         raise CommandFailed(f"could not start command: {error}") from error
