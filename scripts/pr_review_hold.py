@@ -85,19 +85,28 @@ def hosted_grace(pr: dict, nodes: list[dict]) -> tuple[datetime, datetime] | Non
     review ask. An asked reviewer registers only after the ask, and an ask can follow the checks
     by minutes. A hosted reviewer's own check, Copilot's included, is left out of the settling, so
     its conclusion never restarts the window. None where nothing anchors it. None also where a
-    CodeRabbit or Qodo check that did not conclude SKIPPED is on the head, since its own hold then
-    decides. A SKIPPED one is the reviewer declining an automatic review, which an ask can follow.
+    CodeRabbit or Qodo check that did not conclude SKIPPED began at or after the newest ask. Its
+    own hold then decides. One older than the ask answers an earlier request, so it ends
+    nothing. A SKIPPED one is the reviewer declining an automatic review, which an ask can follow.
     """
+    asks = [n.get("createdAt") or "" for body in ASK_BODIES for n in side_asks(pr, body)]
+    newest = max((a for a in map(utc_instant, asks) if a is not None), default=None)
+
+    def since_ask(node: dict) -> bool:
+        since = utc_instant(node.get("since") or "")
+        return newest is None or since is None or since >= newest
+
     if any(
-        reviewer_check(n, vocab, login) and (n.get("conclusion") or "") != "SKIPPED"
+        reviewer_check(n, vocab, login)
+        and (n.get("conclusion") or "") != "SKIPPED"
+        and since_ask(n)
         for n in nodes
         if not n.get("unreadable")
         for vocab, login in HOSTED_REVIEWERS.items()
     ):
         return None
     settled = [n.get("done") or "" for n in nodes if not hosted_check(n)]
-    asked = [n.get("createdAt") or "" for body in ASK_BODIES for n in side_asks(pr, body)]
-    stamps = [utc_instant(s) for s in (head_arrived(pr), *settled, *asked)]
+    stamps = [utc_instant(s) for s in (head_arrived(pr), *settled, *asks)]
     anchor = max((s for s in stamps if s is not None), default=None)
     return None if anchor is None else (anchor, anchor + timedelta(seconds=HOSTED_GRACE))
 

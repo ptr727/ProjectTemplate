@@ -8334,6 +8334,17 @@ class TestRegistrationGrace(unittest.TestCase):
                 )
                 self.assertEqual(ends, self.window([check(), hosted]) is None)
 
+    def test_a_hosted_check_older_than_the_newest_ask_leaves_the_window_open(self) -> None:
+        """A finished review answers an earlier request, so a re-ask still waits for its check."""
+        settled = {**check(started=ago(900)), "completedAt": ago(600)}
+        for started, ends in ((ago(300), False), (ago(60), True)):
+            with self.subTest(started=started):
+                reviewed = check(name="CodeRabbit", slug="coderabbitai", started=started)
+                got = self.window([settled, reviewed], [self.ask(ago(120))])
+                self.assertEqual(ends, got is None)
+                if got is not None:
+                    self.assertEqual(ago(120), pr_review_hold.stamp(got[0]))
+
     def test_the_grace_is_open_until_its_end_and_noted_either_way(self) -> None:
         settled = {**check(started=ago(900)), "completedAt": ago(30)}
         pr = payload([review()], checks=[settled])
