@@ -106,8 +106,14 @@ class RearmPusherCase(unittest.TestCase):
         )
 
     def test_a_person_pushing_a_bot_authored_head_leaves_auto_merge_off(self) -> None:
+        # Newest first: the bot pushed the head, a person pushed past it, then force-pushed back to it.
+        person = {"login": "example-maintainer"}
         result, calls = self.rearm(
-            [{"after": HEAD, "activity_type": "push", "actor": {"login": "example-maintainer"}}]
+            [
+                {"after": HEAD, "activity_type": "force_push", "actor": person},
+                {"after": OTHER, "activity_type": "push", "actor": person},
+                {"after": HEAD, "activity_type": "push", "actor": {"login": AUTHOR}},
+            ]
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn(
