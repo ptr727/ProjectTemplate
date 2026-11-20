@@ -275,13 +275,13 @@ class AuditWiringCase(unittest.TestCase):
         self.assertTrue(audit.is_suppression_id({"types": ["docs"]}, "pins.age"))
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "pins.age"))
 
-    def test_an_advisory_is_one_a_pending_driftnote_may_describe(self) -> None:
-        entry = {"name": "Widget", "driftNotes": ["Pin held behind for a regression (pins.age)."]}
+    def test_an_advisory_is_not_an_open_finding_for_the_driftnote_check(self) -> None:
+        entry = {"name": "Widget", "driftNotes": ["Rollout still owed."]}
         run = audit.Run(entry, {"types": {"types": {}}}, "o/r", "main", {}, None, None)
-        run.findings = [("ADVISORY", "pins: behind, held by a driftNote (pins.age)")]
+        run.findings = [("ADVISORY", "pins: behind")]
         got = audit.check_registry_driftnotes(run)
         self.assertEqual(len(got), 1)
-        self.assertIn("while 1 finding(s) are open", got[0][1])
+        self.assertIn("but the audit is clean", got[0][1])
 
     def test_the_issue_lists_advisories_in_their_own_section(self) -> None:
         found = [("DRIFT", "a drift"), ("ADVISORY", "pins: an advisory")]

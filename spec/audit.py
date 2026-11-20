@@ -7,7 +7,7 @@
 
 Compares each cataloged registry repo against the ground truth in this repo and never modifies a target.
 Findings are DEFECT, LETTER (a required file is absent, intent unverified), DRIFT (non-breaking divergence),
-ADVISORY (reported, never converged on), and ERROR (a gh call failed).
+ADVISORY (reported, never counted), and ERROR (a gh call failed).
 It exits non-zero when any repo has a DEFECT, LETTER, or ERROR finding.
 
 Usage: uv run --no-project --script spec/audit.py [RepoName ...] [--branch REF]
@@ -2729,7 +2729,7 @@ def check_cspell_workspace(run):
 
 
 def check_registry_driftnotes(run):
-    return driftnote_findings(run.entry, run.spec, len(run.findings))
+    return driftnote_findings(run.entry, run.spec, sum(k != "ADVISORY" for k, _ in run.findings))
 
 
 def _selftest_cases():
