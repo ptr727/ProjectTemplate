@@ -254,7 +254,8 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
             (
                 "CHECKS_PENDING",
                 (
-                    "no hosted reviewer's check is on the head yet, and the registration grace "
+                    "no hosted reviewer's check answering the head's newest push or review ask has "
+                    "registered yet, and the registration grace "
                     f"of {HOSTED_GRACE}s after the head's push, its last check settling, and its "
                     f"newest review ask holds the merge until {stamp(until)}, so run `merge` "
                     "again once that time has passed"

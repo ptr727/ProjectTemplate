@@ -127,7 +127,8 @@ def grace_note(pr: dict, nodes: list[dict], now: datetime) -> str:
         return ""
     if now < window[1]:
         return (
-            "note: no hosted reviewer's check is on this head yet, and the registration grace "
+            "note: no hosted reviewer's check answering this head's newest push or review ask "
+            "has registered yet, and the registration grace "
             f"holds the merge until {stamp(window[1])}, so `merge` refuses until then: wait again"
         )
     return (
