@@ -1562,6 +1562,75 @@ class TestRegistration(StampCase):
         self.assertIn("a re-run refuses the file", r.stdout)
         self.assertNotIn("is absent rather than", r.stdout)
 
+    def test_the_session_link_is_turned_off_and_no_other_attribution_key_is_written(self):
+        """`commit` and `pr` stay at Claude Code's defaults, which an absent key is."""
+        r = self.install()
+        self.assertEqual(self._settings()["attribution"], {"sessionUrl": False})
+        self.assertIn("attribution.sessionUrl false: set", r.stdout)
+        again = self.install()
+        self.assertIn("attribution.sessionUrl is false: already current", again.stdout)
+        self.assertEqual(run(self.home, "--report").returncode, 0)
+
+    def test_the_session_link_setting_keeps_the_hosts_own_attribution_keys(self):
+        self.home.mkdir(parents=True)
+        own = {"commit": "Example trailer", "pr": ""}
+        self._write({"attribution": dict(own)})
+        self.install()
+        self.assertEqual(self._settings()["attribution"], {**own, "sessionUrl": False})
+
+    def test_a_session_link_setting_the_host_made_is_left_as_it_stands(self):
+        for held in (True, "yes", None):
+            with self.subTest(held=held):
+                self.home.mkdir(parents=True, exist_ok=True)
+                self._write({"attribution": {"sessionUrl": held, "commit": "x"}})
+                r = self.install()
+                self.assertEqual(
+                    self._settings()["attribution"], {"sessionUrl": held, "commit": "x"}
+                )
+                self.assertIn(f"attribution.sessionUrl is {held!r}, which this host set", r.stdout)
+                report = run(self.home, "--report")
+                self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
+                self.assertIn(f"Note: attribution.sessionUrl is {held!r}", report.stdout)
+
+    def test_a_non_object_attribution_is_left_as_it_stands(self):
+        """The key is the host's own, so the install goes ahead without it rather than refusing the file.
+
+        Claude Code reads `false` as every attribution hidden, so that one already turns the link off.
+        """
+        for held, words, foreign in (
+            (False, "attribution is false, which hides every attribution", False),
+            (True, "attribution is true, which Claude Code reads as the key left out", True),
+            ([], "attribution holds list", True),
+            ("x", "attribution holds str", True),
+            (None, "attribution holds NoneType", True),
+        ):
+            with self.subTest(held=held):
+                self.home.mkdir(parents=True, exist_ok=True)
+                self._write({"attribution": held})
+                r = self.install()
+                self.assertEqual(self._settings()["attribution"], held)
+                self.assertIn(words, r.stdout)
+                self.assertIn("which this host set" if foreign else "already current", r.stdout)
+                report = run(self.home, "--report")
+                self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
+                self.assertEqual(f"Note: {words}" in report.stdout, foreign)
+
+    def test_a_host_installed_before_the_session_link_setting_reports_it_absent(self):
+        for strip in ("attribution", "sessionUrl"):
+            with self.subTest(strip=strip):
+                self.install()
+                data = self._settings()
+                if strip == "attribution":
+                    del data["attribution"]
+                else:
+                    data["attribution"] = {"commit": "x"}
+                self._write(data)
+                r = run(self.home, "--report")
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("attribution.sessionUrl is absent rather than false", r.stdout)
+                self.install()
+                self.assertEqual(run(self.home, "--report").returncode, 0)
+
     def test_a_duplicated_hook_registration_reports_stale(self):
         self.install()
         data = self._settings()

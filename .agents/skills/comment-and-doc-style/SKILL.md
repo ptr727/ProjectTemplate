@@ -378,7 +378,10 @@ name the hub to do its job, and a pointer to a hub-hosted tool the reader runs.
   that negates it. So `does not fix #N` closes #N. Write a reference to an issue left open with no
   keyword beside it, as in `#N stays open`.
 - **Rules**: no vague titles (`update stuff`, `wip`). Dependabot's default `Bump X from Y to Z`
-  titles are fine as-is. No `Co-Authored-By:` lines unless the developer explicitly asks. No
+  titles are fine as-is. A `Co-Authored-By:` line is allowed unless the developer disallows it,
+  and a repository's own rules may change that default. A link to the agent's session, such as a
+  `Claude-Session:` trailer, is never allowed in a commit message or a pull request. Neither the
+  developer nor a repository's rules can allow one. No
   release-bump magnitude in the title ("minor", "patch", "release v0.2.0"), Nerdbank.GitVersioning
   computes the next version from `version.json` and git history. A dependency version in a
   dependency-bump title is fine and expected. US English spelling, and title case with lowercase
