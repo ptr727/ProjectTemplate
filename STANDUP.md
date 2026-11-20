@@ -89,7 +89,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 
 1. **Create `main` carrying nothing.** A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit. Section 0's signing window applies to it like any other.
 2. **Create `develop` from `main`**, also carrying nothing, so the two start level.
-3. **Create the first feature branch from `develop`** and run every step below on it, through the audit in step 5.
+3. **Create the first feature branch from `develop`** and run each target-repository step below on it, through the audit in step 5.
 4. **Push `main` and `develop` to the new repository before section 2**, as the paragraph after the block says. Section 4 applies its configuration while the work is still on the feature branch, with no branch of its own.
 5. **Open a normal pull request into `develop`** when the standup is done, and let it squash like any other change.
 
@@ -102,7 +102,7 @@ git commit --allow-empty --message "Initial commit"             # The one signed
 git log -1 --format='%G? author=%an <%ae> committer=%cn <%ce>'  # Section 0's verification of that commit.
 git branch -M main                                              # Renames whichever branch git init produced, in a repo holding only it.
 git branch develop                                              # From main, so the two start level.
-git checkout -b "<feature-branch>" develop                      # Every step below runs here.
+git checkout -b "<feature-branch>" develop                      # Target-repository edits below run here.
 ```
 
 The rename runs unconditionally rather than behind a test of `init.defaultBranch`. That is because forcing it is correct whether the host produced `master` or `main` and a conditional is one more thing to get wrong. What makes the force safe is where the block runs, in a repository holding one branch and one commit. So it is a rename with nothing to collide with rather than a general-purpose one. In a repository that already carries a `main` the same line overwrites that branch. That is why this block belongs to a fresh `git init` and never to a repair. The rename is written `-M` rather than `--move --force` because `git branch` gained those long options later than the short one. So the long spelling would add a version floor for nothing. `git switch` and `git init --initial-branch` are newer still, which is why neither appears here. It is worth the care because [`docs/host-setup.md`][host-setup] checks that `git` is present and states no floor of its own. The placeholder is quoted for the reason step 4 gives, that an unquoted `<` is input redirection. Both of section 0's checks sit in the block rather than beside it. They are placed where that section requires them rather than left to a reader to interpolate. Each is read as section 0 reads it. On the second line the finding is the printed value and never the exit status, so the passing case is empty output. Reading `$?` there answers nothing. That is because `git config --get` exits non-zero on the unset key that is the wanted result, and the tolerant tail then returns zero regardless. That tail is what keeps a copy of the block inside a `set -e` script from aborting on the expected case. On the fourth the passing result is `G` beside the noreply address in the author and the committer both. That reads the empty root commit as the first commit the signing window covers rather than as an exception to it. Once the repository exists, point `origin` at it with `git remote add origin "<url>"`. Then push `main` and `develop`, **before** section 2 runs `scripts/carry.py`. The carry tool fetches `origin develop` and refuses a feature branch that does not contain it. That also puts the push before step 4 applies the rulesets, which it has to precede. That is because [`repo-config/main.json`][repo-config-main] carries a `pull_request` rule. So an applied ruleset blocks the direct push that would otherwise seed the branch. Ordering it this way rather than relying on a bypass is deliberate. That is because who may bypass a ruleset is a human decision no payload declares. It is also because `repo-config/configure.sh` reads the live list and preserves it rather than asserting one. So an agent cannot know from the payload whether a bypass exists.
@@ -114,10 +114,10 @@ git remote add origin "<url>"     # The repository the maintainer created.
 git push -u origin main develop   # Seeds both branches before any ruleset exists.
 ```
 
-Wait until the push lands. Then create the feature branch as a linked worktree, which the kit does not refuse. Every later step runs in that worktree:
+Wait until the push lands. Then create the feature branch as a linked worktree, which the kit does not refuse. Work on the target repository, edits and git commands, runs in that worktree. Hub commands (`scripts/`, `spec/`, `repo-config/configure.sh`) run from a clean hub checkout:
 
 ```shell
-git worktree add -b "<feature-branch>" "<path>" develop   # Every step below runs here.
+git worktree add -b "<feature-branch>" "<path>" develop   # Target-repository edits below run here.
 ```
 
 **Committing onto `develop` and squashing afterwards does not work**. That is because `non_fast_forward` is set on both `develop` payloads, and rewriting that history is exactly what the rule rejects. This is not hypothetical. A repo stood up that way was correctly blocked at the point the history needed rewriting. Its standup was already written into the branch it had to be lifted off.
