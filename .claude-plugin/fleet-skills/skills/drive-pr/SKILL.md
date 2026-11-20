@@ -276,7 +276,8 @@ bullet calls identifying data.
      told. A thread raising a recorded finding is answered with a pointer to its body line and
      resolved. Every observed secret also goes to the maintainer for revocation, whatever else its
      case requires, naming only the repository and the kind of data. A seat that cannot reach the
-     maintainer hands that notice to whoever dispatched it, and its case's own route continues.
+     maintainer hands that notice to whoever dispatched it. The notice is not an escalation, so it
+     stops nothing, and its case's own route continues.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
