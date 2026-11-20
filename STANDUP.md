@@ -164,7 +164,7 @@ uv run --no-project --script scripts/carry.py check "<Repo>" --target /path/to/w
 uv run --no-project --script scripts/carry.py apply "<Repo>" --target /path/to/worktree
 ```
 
-Read every extra-path report before `apply` prunes it. Finish with another `check`. It uses the same comparison as `apply` and must report clean. Then commit the carried tree as a commit of its own.
+A `check` failing on a git command about `origin` or `develop` meets a condition section 4 opens with. Section 4's two commands tell those conditions apart. Read every extra-path report before `apply` prunes it. Finish with another `check`. It uses the same comparison as `apply` and must report clean. Then commit the carried tree as a commit of its own.
 
 Copy every [`spec/files.json`][files] entry whose `appliesTo` matches the repo's **selector set**, **adapted, not cloned**. The selector set is the repo's `types` plus its `workflowModel`, `releaseTrigger`, and `consumerModel`. So filtering on type alone silently drops the entries a non-type selector carries ([`spec/scope-model.md`][scope-model] defines the four namespaces and how they resolve). The prose files (`CODESTYLE.md`, `README.md`, and the like) describe the repo's own toolchain. So adapt them to reality rather than propagating template specifics verbatim (see the "Adapt before propagating" callout in [`CODESTYLE.md`][codestyle]). That is because a verbatim copy that misdescribes the repo is rejected in review. The baseline covers `WORKFLOW.md`, `version.json`, `.github/dependabot.yml`, `.editorconfig`, `.gitattributes`, `host-tools.json`, the linter configs, and the per-type files (`.vscode/tasks.json` from the language's snippet, `.codecov.yml`, `.dockerignore`, `Docker/README.md`). Repository settings and ruleset payloads stay in the hub's `repo-config/` directory.
 
@@ -219,7 +219,7 @@ The placeholder is quoted because an unquoted `<` is input redirection, so the l
 
 Three conditions fail here, and the two commands together are what separate them:
 
-- **No `origin`.** The checkout has nowhere to push even where the repository exists, and it is the state a local-only standup reaches.
+- **No `origin`.** The checkout has nowhere to push even where the repository exists.
 - **No repository.** It surfaces as a resolution error against whatever `configure.sh` calls first. That error reads as a permissions or naming problem rather than as the missing prerequisite it is.
 - **The two disagree.** Neither command checks this, so compare the `origin` URL against `nameWithOwner` and confirm they name the same repository.
 
