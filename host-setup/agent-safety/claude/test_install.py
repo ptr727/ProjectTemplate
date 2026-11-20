@@ -319,6 +319,70 @@ class TestSourceRefFromAnArchive(unittest.TestCase):
         self.assertEqual(install.source_ref()["vcs"], "archive")
 
 
+class TestSourceRefUntrackedPayload(unittest.TestCase):
+    """An untracked payload file stamps dirty even where git is set to hide untracked files.
+
+    Reads the real git status of a throwaway tree, with AGENT_SAFETY_DIRTY_OVERRIDE unset, rather
+    than this checkout. So the verdict does not depend on whether the kit is mid-edit while the
+    suite runs. Every GIT_ variable is dropped, since a git hook running the suite sets ones that
+    point each read at the hook's repository. The data files resolve to the hub's spec/ at import,
+    so they move into the tree with the kit.
+    """
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tree = self.tmp / "tree"
+        kit = self.tree / "host-setup" / "agent-safety" / "claude"
+        kit.mkdir(parents=True)
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        for name in [k for k in os.environ if k.startswith("GIT_")]:
+            del os.environ[name]
+        os.environ.pop("AGENT_SAFETY_DIRTY_OVERRIDE", None)
+        os.environ.pop("AGENT_SAFETY_SOURCE_COMMIT", None)
+        data = {name: self.tree / "spec" / name for name in install.DEPLOYED_DATA}
+        for patcher in (
+            mock.patch.object(install, "HERE", kit),
+            mock.patch.object(install, "DEPLOYED_DATA", data),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.untracked = install.payload_source(install.GUARD_NAME)
+        for name in install.PAYLOAD_FILES:
+            path = install.payload_source(name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path != self.untracked:
+                path.write_text(f"{name}\n", encoding="utf-8")
+        self.git("init", "-q")
+        self.git("add", "--", ".")
+        self.git(
+            "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+            "commit", "-q", "-m", "x",
+        )  # fmt: skip
+        self.git("config", "status.showUntrackedFiles", "no")
+
+    def git(self, *args):
+        return subprocess.run(
+            ["git", "-C", str(self.tree), *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=True,
+            timeout=30,
+        ).stdout
+
+    def test_an_untracked_payload_file_is_dirty_where_status_hides_untracked_files(self):
+        """A plain status read prints nothing here, so the verdict rests on the installer's own flag."""
+        self.assertIs(install.source_ref()["dirty"], False)
+        self.untracked.write_text("not in any commit\n", encoding="utf-8")
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        ref = install.source_ref()
+        self.assertEqual(ref["vcs"], "git")
+        self.assertIs(ref["dirty"], True)
+
+
 class TestArchiveNote(StampCase):
     COMMIT = "0123456789abcdef0123456789abcdef01234567"
 

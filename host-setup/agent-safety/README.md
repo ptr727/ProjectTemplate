@@ -77,10 +77,20 @@ Requirements 1 to 7 judge a command's text, read the way a simple lexer reads it
    the foreground wait. So the ceiling still holds after the tool moves a timed-out command to the background
    and after the command's own shell has exited.
 
-   Name each group for the session that ran it. At the end of the session, stop every group its
-   commands left running, then report what was stopped. This stop needs none of requirement 8's
-   judgment about what a process is, since the group's name proves which session started it. Report
-   a failure to list or to stop a group as loudly as a finding.
+   An agent session that a bounded command starts is nested in the session that ran it. Its commands
+   run in groups of its own, each under its own ceilings, rather than inside its parent's group. A
+   shared ceiling would let one heavy build in the parent end the nested agent instead. Every group in
+   a chain of nested sessions also sits under one total task and memory ceiling for the whole tree. So
+   a chain of agents starting agents meets that ceiling however little each level adds.
+
+   Name each group for the session that ran it, and record in it the agent that ran it. At the end of
+   the session, stop every group its commands left running, then report what was stopped. This stop
+   needs none of requirement 8's judgment about what a process is, since the group's name proves which
+   session started it. Then stop a group named for another session only where it is in this session's
+   tree and the agent it records has ended. That ends a nested session's groups where stopping its
+   parent's group ended the nested agent before its own stop ran. This stop is bounded by the tree and
+   the recorded agent, and it judges nothing about the group's own processes. Report a failure to list
+   or to stop a group as loudly as a finding.
 
    A hook the agent runs, a guard above included, is not placed in a group. A group that fails to
    start fails the command, and a guard that fails that way is a guard that did not run. Nor is a
