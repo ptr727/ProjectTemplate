@@ -164,6 +164,7 @@ jobs:
     # A merge GitHub refuses, such as one writing workflow content the App may not write, disables auto-merge with every check green.
     # That disable is re-armed once the base settles, and a second one, or a window ending with no merge, fails this job.
     # The watch holds the caller's per-PR concurrency group, so it ends on any head push and the queued run for that push takes over.
+    # The armed outputs are the gate rather than a success/skipped allowlist, since each is set only after its arming call succeeded.
     if: >-
       !cancelled() &&
       (
@@ -223,16 +224,13 @@ jobs:
             exit 1
           }
           arm() {
-            if [[ -z "$MERGE_METHOD" ]]; then
-              echo "::error::Unsupported base branch: $BASE_REF"
-              exit 1
-            fi
             if ! gh pr merge --auto "$MERGE_METHOD" "$PR_URL"; then
               echo "::error::Re-arming auto-merge failed after GitHub disabled it: $reason"
               exit 1
             fi
           }
           # Siblings merging into the same base are what moves it, so re-arming waits for a quiet window rather than racing them.
+          # A close, a merge, a head push, or another arming ends the wait early, and the loop's own checks act on it.
           settle_base() {
             local last now quiet_since
             last=$(jq -r '.baseRef.target.oid // ""' <<<"$pr")
@@ -244,6 +242,9 @@ jobs:
               fi
               sleep "$POLL_SECONDS"
               read_pr
+              if [[ $(jq -r --arg head "$HEAD_SHA" '.state != "OPEN" or .headRefOid != $head or .autoMergeRequest != null' <<<"$pr") == true ]]; then
+                return 0
+              fi
               now=$(jq -r '.baseRef.target.oid // ""' <<<"$pr")
               if [[ "$now" != "$last" ]]; then
                 last=$now
@@ -257,8 +258,9 @@ jobs:
           handled=""
           reason=""
           read_pr
-          # A disable the App is recorded for stays this run's to re-arm, since the watch that saw it ended when this push moved the head.
-          if [[ "$EVENT_ACTION" == synchronize && $(jq -r --arg app "$APP_LOGIN" '.autoMergeRequest == null and (.timelineItems.nodes[0].disabler.login // "") != $app' <<<"$pr") == true ]]; then
+          # A disable the App is recorded for is this run's to re-arm.
+          # An earlier watch may have ended on this push, or the maintainer-push job made it.
+          if [[ "$EVENT_ACTION" == synchronize && $(jq -r --arg app "$APP_BOT" '.autoMergeRequest == null and (.timelineItems.nodes[0].disabler.login // "") != $app' <<<"$pr") == true ]]; then
             echo "Auto-merge is not armed on this head, so there is nothing to watch"
             exit 0
           fi
@@ -288,7 +290,7 @@ jobs:
                 exit 1
               fi
               # GitHub records the App that armed auto-merge as the disabler of a refused merge, so any other disabler is a person's choice.
-              if [[ "$disabler" != "$APP_LOGIN" ]]; then
+              if [[ "$disabler" != "$APP_BOT" ]]; then
                 echo "::warning::$disabler disabled auto-merge, so it stays off: $reason"
                 exit 0
               fi
@@ -296,7 +298,7 @@ jobs:
                 echo "::error::GitHub disabled auto-merge again after the re-arm: $reason"
                 exit 1
               fi
-              echo "::warning::GitHub disabled auto-merge, re-arming once the base settles: $reason"
+              echo "::warning::Auto-merge was disabled under the App, re-arming once the base settles: $reason"
               disabled_at=$(jq -r '.timelineItems.nodes[0].createdAt' <<<"$pr")
               settle_base
               read_pr
@@ -324,7 +326,8 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
           EVENT_ACTION: ${{ github.event.action }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-          APP_LOGIN: ${{ inputs.app-login }}
+          # The App that minted the arming token, which a caller's app-login input need not name.
+          APP_BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
           WATCH_MINUTES: 30
           SETTLE_SECONDS: 60
           POLL_SECONDS: 20
