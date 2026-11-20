@@ -2369,7 +2369,7 @@ def check_dependabot_ecosystems(run):
 
 def check_pins_age(run):
     hub = f"{run.slug.split('/')[0]}/{hub_repo_name()}"
-    return audit_pins.pin_age_findings(run.entry, hub, run.tree, run.read_text, gh)
+    return audit_pins.pin_age_findings(run.entry, hub, run.tree, run.read_text, gh, run.content)
 
 
 def check_files_presence(run, path):
@@ -2729,7 +2729,7 @@ def check_cspell_workspace(run):
 
 
 def check_registry_driftnotes(run):
-    return driftnote_findings(run.entry, run.spec, sum(k != "ADVISORY" for k, _ in run.findings))
+    return driftnote_findings(run.entry, run.spec, len(run.findings))
 
 
 def _selftest_cases():
@@ -2837,9 +2837,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
             w(f"- {t}")
         w("")
     if advisory:
-        w(
-            "## Advisory\n\nNot counted as findings, since each normally clears on its own. RESYNC.md says when a resync acts on one.\n"
-        )
+        w("## Advisory\n\nNot counted as findings. RESYNC.md says when a resync acts on one.\n")
         out.extend([f"- {t}" for t in advisory] + [""])
     if errors:
         w("## Could not verify")

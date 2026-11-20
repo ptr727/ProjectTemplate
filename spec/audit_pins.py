@@ -4,7 +4,7 @@ A pin behind the newest release is an ADVISORY, since Dependabot moves it within
 A pin a newer release has superseded for longer than PIN_AGE_DAYS is DRIFT, since by then the update
 mechanism has stalled. The age runs from the release that first superseded the pin, so a pin is never
 late before a newer release exists. A registry driftNote naming `(pins.age)` holds such a pin back on
-purpose, and the pin then reports as an ADVISORY. The note is stale once no pin is past the bound.
+purpose, and the pin then reports as an ADVISORY. The note is stale once no pin is behind at all.
 """
 
 import functools
@@ -111,7 +111,7 @@ def pin_findings(
     newest = max(stable)[1][0] if stable else None
     bound = timedelta(days=PIN_AGE_DAYS)
     out: list[Finding] = []
-    late = unread = False
+    trailing = unread = False
     for path, refs in sorted(pins.items()):
         for ref, tasks in refs.items():
             named = f"{path} pins {', '.join(tasks)} at `{ref}`"
@@ -126,12 +126,12 @@ def pin_findings(
             newer = [r for v, r in stable if v > version]
             if not newer:
                 continue
+            trailing = True
             age = now - min(r[1] for r in newer)
             behind = f"{named} ({pinned[0]}), {len(newer)} release(s) behind {newest}"
             if age <= bound:
                 out.append(("ADVISORY", f"pins: {behind}"))
                 continue
-            late = True
             past = f"superseded {age.days} days ago, past the {PIN_AGE_DAYS}-day bound"
             if held:
                 out.append(
@@ -148,13 +148,13 @@ def pin_findings(
                         ),
                     )
                 )
-    if held and not late and not unread:
+    if held and not trailing and not unread:
         out.append(
             (
                 "DRIFT",
                 (
-                    f"registry: a driftNote holds a pin back ({CHECK_ID}), but no pin is past "
-                    f"the {PIN_AGE_DAYS}-day bound. Delete the note."
+                    f"registry: a driftNote holds a pin back ({CHECK_ID}), but no pin is behind "
+                    "the newest hub release. Delete the note."
                 ),
             )
         )
@@ -167,11 +167,13 @@ def pin_age_findings(
     tree: Iterable[str] | None,
     read_text: Callable[[str], str | None],
     read: Callable[[str], Any],
+    content: dict[str, str | None],
     now: datetime | None = None,
 ) -> list[Finding]:
     """The `pins.age` findings for one repository, reading the hub's releases only where it pins one.
 
-    `read_text` reads a file at the audited commit and `read` is the audit's `gh` call.
+    `read_text` reads a file at the audited commit and `read` is the audit's `gh` call. A file the
+    baseline stage already read into `content` is taken from there instead.
     A failed read is one ERROR, so it never discards the repository's other findings. An unread
     tree reports nothing, since `tree.readable` reports it and a hold could not be judged stale.
     """
@@ -180,7 +182,7 @@ def pin_age_findings(
     pins = {}
     try:
         for path in workflow_paths(tree):
-            found = hub_pins(read_text(path) or "", hub)
+            found = hub_pins(content.get(path) or read_text(path) or "", hub)
             if found:
                 pins[path] = found
         releases, shas = hub_releases(read, hub) if pins else ({}, {})

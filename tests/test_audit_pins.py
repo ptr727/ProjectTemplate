@@ -136,12 +136,16 @@ class PinFindingsCase(unittest.TestCase):
         self.assertEqual([k for k, _ in got], ["ADVISORY"])
         self.assertIn("held by a driftNote", got[0][1])
 
-    def test_a_hold_with_no_pin_past_the_bound_is_stale(self) -> None:
-        for label, pins in (("a current pin", pin(SHA_MID)), ("no pin at all", {})):
+    def test_a_hold_with_no_pin_behind_is_stale(self) -> None:
+        for label, pins in (("a pin on the newest release", pin(SHA_NEW)), ("no pin at all", {})):
             with self.subTest(label):
                 got = findings(pins, ("Held for a regression (pins.age).",))
-                self.assertEqual(got[-1][0], "DRIFT")
+                self.assertEqual(got, [("DRIFT", got[-1][1])])
                 self.assertIn("Delete the note", got[-1][1])
+
+    def test_a_hold_on_a_pin_still_within_the_bound_is_not_stale(self) -> None:
+        got = findings(pin(SHA_MID), ("Held for a regression (pins.age).",))
+        self.assertEqual([k for k, _ in got], ["ADVISORY"])
 
     def test_a_hold_is_not_stale_while_a_pin_s_age_is_unread(self) -> None:
         got = findings(pin("main"), ("Held for a regression (pins.age).",))
@@ -198,7 +202,19 @@ class PinAgeReadsCase(unittest.TestCase):
 
     def run_check(self, read: Any, tree: set[str] | None, text: str, notes: tuple[str, ...] = ()):
         entry = {"name": "Widget", "driftNotes": list(notes)}
-        return audit_pins.pin_age_findings(entry, HUB, tree, lambda _: text, read, NOW)
+        return audit_pins.pin_age_findings(entry, HUB, tree, lambda _: text, read, {}, NOW)
+
+    def test_a_workflow_the_baseline_read_is_not_read_again(self) -> None:
+        read = self.reader([[self.release("1.0.1", 60), self.release("1.0.3", 40)]], [])
+        path = ".github/workflows/test.yml"
+
+        def read_text(name: str) -> str:
+            raise AssertionError(name)
+
+        entry: dict[str, Any] = {"name": "Widget"}
+        content: dict[str, str | None] = {path: caller(SHA_OLD)}
+        got = audit_pins.pin_age_findings(entry, HUB, {path}, read_text, read, content, NOW)
+        self.assertEqual([k for k, _ in got], ["DRIFT"])
 
     def test_releases_page_until_a_short_page_and_drafts_drop_out(self) -> None:
         calls: list[str] = []
@@ -244,8 +260,8 @@ class AuditWiringCase(unittest.TestCase):
         run.__dict__["tree"] = {".github/workflows/test.yml"}
         seen: list[Any] = []
 
-        def fake(entry: Any, hub: str, tree: Any, read_text: Any, read: Any) -> list[Any]:
-            seen.append((hub, tree, read is audit.gh))
+        def fake(entry: Any, hub: str, tree: Any, text: Any, read: Any, content: Any) -> list[Any]:
+            seen.append((hub, tree, read is audit.gh, content is run.content))
             return []
 
         with (
@@ -253,19 +269,19 @@ class AuditWiringCase(unittest.TestCase):
             mock.patch.object(audit.audit_pins, "pin_age_findings", fake),
         ):
             self.assertEqual(audit.check_pins_age(run), [])
-        self.assertEqual(seen, [(HUB, {".github/workflows/test.yml"}, True)])
+        self.assertEqual(seen, [(HUB, {".github/workflows/test.yml"}, True, True)])
 
     def test_a_hold_is_a_suppression_on_every_repository(self) -> None:
         self.assertTrue(audit.is_suppression_id({"types": ["docs"]}, "pins.age"))
         self.assertTrue(audit.is_suppression_id({"types": ["python"]}, "pins.age"))
 
-    def test_an_advisory_is_not_an_open_finding_for_the_driftnote_check(self) -> None:
-        entry = {"name": "Widget", "driftNotes": ["Rollout still owed."]}
+    def test_an_advisory_is_one_a_pending_driftnote_may_describe(self) -> None:
+        entry = {"name": "Widget", "driftNotes": ["Pin held behind for a regression (pins.age)."]}
         run = audit.Run(entry, {"types": {"types": {}}}, "o/r", "main", {}, None, None)
-        run.findings = [("ADVISORY", "pins: behind")]
+        run.findings = [("ADVISORY", "pins: behind, held by a driftNote (pins.age)")]
         got = audit.check_registry_driftnotes(run)
         self.assertEqual(len(got), 1)
-        self.assertIn("but the audit is clean", got[0][1])
+        self.assertIn("while 1 finding(s) are open", got[0][1])
 
     def test_the_issue_lists_advisories_in_their_own_section(self) -> None:
         found = [("DRIFT", "a drift"), ("ADVISORY", "pins: an advisory")]
