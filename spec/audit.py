@@ -2795,7 +2795,8 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
     drift = [t for k, t in findings if k == "DRIFT"]
     errors = [t for k, t in findings if k == "ERROR"]
     advisory = [t for k, t in findings if k == "ADVISORY"]
-    title = f"Converge {name} with the hub baseline ({len(findings)} detected finding{'' if len(findings) == 1 else 's'})"
+    count = len(findings) - len(advisory)
+    title = f"Converge {name} with the hub baseline ({count} detected finding{'' if count == 1 else 's'})"
 
     out = []
     w = out.append
@@ -2808,7 +2809,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         f"here, and the cross-cutting dimensions are covered only in part, so the full letter and intent verdict lives in AUDIT.md section 4."
     )
     w("")
-    if not findings:
+    if not count:
         w("The deterministic checks are clean - nothing to converge from them.")
         w("")
     if blocking:
@@ -2837,7 +2838,7 @@ def render_issue(entry, findings, ground, audited_sha, run_utc, hub_sha):
         w("")
     if advisory:
         w(
-            "## Advisory\n\nReported for awareness rather than converged on, so none counts as open work.\n"
+            "## Advisory\n\nNot counted as findings, since each normally clears on its own. RESYNC.md says when a resync acts on one.\n"
         )
         out.extend([f"- {t}" for t in advisory] + [""])
     if errors:
@@ -2977,7 +2978,7 @@ def main(argv=None):
             findings, audited_sha = [("ERROR", str(e))], ""
         stamp = f" @ {ground}@{audited_sha[:7]}" if audited_sha else ""
         print(f"== {entry['name']} ({', '.join(declared_types(entry))}; {model}){stamp} ==")
-        if not findings:
+        if all(k == "ADVISORY" for k, _ in findings):
             print(
                 "  clean (deterministic checks only; no project-type check in spec/project-types.json runs here, and the cross-cutting ones are covered only in part - AUDIT.md section 4)"
             )

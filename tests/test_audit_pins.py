@@ -143,11 +143,30 @@ class PinFindingsCase(unittest.TestCase):
                 self.assertEqual(got[-1][0], "DRIFT")
                 self.assertIn("Delete the note", got[-1][1])
 
+    def test_a_hold_is_not_stale_while_a_pin_s_age_is_unread(self) -> None:
+        got = findings(pin("main"), ("Held for a regression (pins.age).",))
+        self.assertEqual([k for k, _ in got], ["ADVISORY"])
+
+    def test_releases_order_by_version_not_by_publish_time(self) -> None:
+        rows = releases(("1.0.9", 50, False), ("1.0.10", 45, False), ("1.0.8", 1, False))
+        entry: dict[str, Any] = {"name": "Widget"}
+        self.assertEqual(audit_pins.pin_findings(entry, pin("1.0.10"), rows, {}, NOW), [])
+        got = audit_pins.pin_findings(entry, pin("1.0.8"), rows, {}, NOW)
+        self.assertEqual([k for k, _ in got], ["DRIFT"])
+        self.assertIn("2 release(s) behind 1.0.10, superseded 50 days ago", got[0][1])
+
+    def test_a_tag_of_another_shape_is_unread(self) -> None:
+        self.assertEqual(audit_pins.version_key("2.0.1509"), (2, 0, 1509))
+        self.assertEqual(audit_pins.version_key("1.0.59-gad39ee1061"), (1, 0, 59))
+        self.assertIsNone(audit_pins.version_key("v1.0"))
+        got = audit_pins.pin_findings({}, pin("v1.0"), releases(("v1.0", 50, False)), {}, NOW)
+        self.assertIn("no hub release", got[0][1])
+
     def test_a_prerelease_is_never_the_release_a_pin_trails(self) -> None:
-        rows = releases(("1.0.1", 10, False), ("1.0.2-pre", 50, True), ("2.0.0-pre", 1, True))
+        rows = releases(("1.0.1", 10, False), ("1.0.0-pre", 50, True), ("2.0.0-pre", 1, True))
         entry: dict[str, Any] = {"name": "Widget"}
         self.assertEqual(audit_pins.pin_findings(entry, pin("1.0.1"), rows, {}, NOW), [])
-        got = audit_pins.pin_findings(entry, pin("1.0.2-pre"), rows, {}, NOW)
+        got = audit_pins.pin_findings(entry, pin("1.0.0-pre"), rows, {}, NOW)
         self.assertEqual([k for k, _ in got], ["ADVISORY"])
         self.assertIn("1 release(s) behind 1.0.1", got[0][1])
 
@@ -250,11 +269,18 @@ class AuditWiringCase(unittest.TestCase):
 
     def test_the_issue_lists_advisories_in_their_own_section(self) -> None:
         found = [("DRIFT", "a drift"), ("ADVISORY", "pins: an advisory")]
-        _, body = audit.render_issue({"name": "Widget"}, found, "main", "c0ffee", "now", "hub")
+        title, body = audit.render_issue({"name": "Widget"}, found, "main", "c0ffee", "now", "hub")
+        self.assertIn("(1 detected finding)", title)
         advisory = body.index("## Advisory")
         self.assertGreater(advisory, body.index("## Converge"))
         self.assertIn("- pins: an advisory\n", body[advisory:])
         self.assertNotIn("an advisory", body[:advisory])
+
+    def test_a_repository_with_only_advisories_reads_clean(self) -> None:
+        found = [("ADVISORY", "pins: an advisory")]
+        title, body = audit.render_issue({"name": "Widget"}, found, "main", "c0ffee", "now", "hub")
+        self.assertIn("(0 detected findings)", title)
+        self.assertIn("The deterministic checks are clean", body)
 
 
 if __name__ == "__main__":

@@ -60,6 +60,16 @@ def _published(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def version_key(tag: str) -> tuple[int, ...] | None:
+    """A release tag's numeric version, ignoring any `-suffix`, or None for a tag of another shape.
+
+    Releases are ordered by this rather than by publish time, since a re-run can publish an older
+    version after a newer one.
+    """
+    parts = tag.split("-", 1)[0].split(".")
+    return tuple(int(p) for p in parts) if all(p.isdigit() for p in parts) else None
+
+
 @functools.cache
 def hub_releases(read: Callable[[str], Any], hub: str) -> tuple[dict[str, Release], dict[str, str]]:
     """`({tag: (tag, published, prerelease)}, {commit sha: tag})` for `hub`'s published releases.
@@ -97,24 +107,26 @@ def pin_findings(
 ) -> list[Finding]:
     """The findings for `pins`, `{workflow path: {ref: [task file, ...]}}`, against the hub's releases."""
     held = any(f"({CHECK_ID})" in n for n in entry.get("driftNotes", []))
-    stable = sorted((r for r in releases.values() if not r[2]), key=lambda r: r[1])
-    newest = stable[-1][0] if stable else None
+    stable = [(v, r) for r in releases.values() if not r[2] and (v := version_key(r[0]))]
+    newest = max(stable)[1][0] if stable else None
     bound = timedelta(days=PIN_AGE_DAYS)
     out: list[Finding] = []
-    late = False
+    late = unread = False
     for path, refs in sorted(pins.items()):
         for ref, tasks in refs.items():
             named = f"{path} pins {', '.join(tasks)} at `{ref}`"
             pinned = releases.get(ref) or releases.get(shas.get(ref.casefold(), ""))
-            if pinned is None:
+            version = version_key(pinned[0]) if pinned else None
+            if pinned is None or version is None:
+                unread = True
                 out.append(
                     ("ADVISORY", f"pins: {named}, which is no hub release, so its age is unread")
                 )
                 continue
-            newer = [r for r in stable if r[1] > pinned[1]]
+            newer = [r for v, r in stable if v > version]
             if not newer:
                 continue
-            age = now - newer[0][1]
+            age = now - min(r[1] for r in newer)
             behind = f"{named} ({pinned[0]}), {len(newer)} release(s) behind {newest}"
             if age <= bound:
                 out.append(("ADVISORY", f"pins: {behind}"))
@@ -136,7 +148,7 @@ def pin_findings(
                         ),
                     )
                 )
-    if held and not late:
+    if held and not late and not unread:
         out.append(
             (
                 "DRIFT",
