@@ -54,6 +54,7 @@ from fidelity_text import (
     strip_sections,
 )
 from secret_names import (  # noqa: F401  # re-exported, since the tests and helpers name them on audit
+    EMPTY_TREE_SHA,
     compare_stores,
     coverage_candidate_types,
     coverage_claiming_types,
@@ -193,6 +194,8 @@ def repo_tree_blobs(slug, ground_head):
     sha = (((ground_head or {}).get("commit") or {}).get("commit") or {}).get("tree", {}).get("sha")
     if not sha:
         return None
+    if sha == EMPTY_TREE_SHA:
+        return {}
     return tree_blobs(gh(f"repos/{slug}/git/trees/{sha}?recursive=1", ok404=True))
 
 

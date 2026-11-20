@@ -29,6 +29,7 @@ SPEC = HUB / "spec"
 LIBRARY = HUB / "lib" / "sh" / "secrets.sh"
 sys.path.insert(0, str(SPEC))
 import resolve_secrets
+import secret_names
 
 SECRETS = json.loads((SPEC / "secrets.json").read_text(encoding="utf-8"))
 
@@ -520,7 +521,7 @@ class LoadNamesCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             fix = Fixture(tmp, tree=("tests/test_a.py",))
             (fix.gh_dir / "branch.sha").write_text(
-                f"{resolve_secrets.EMPTY_TREE_SHA}\n", encoding="utf-8"
+                f"{secret_names.EMPTY_TREE_SHA}\n", encoding="utf-8"
             )
             result = self.load(fix)
             self.assertEqual(result.returncode, 0, result.stderr)

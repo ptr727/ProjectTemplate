@@ -43,7 +43,6 @@ import secret_names
 import validate  # sibling, import-safe (its main is guarded)
 
 ROOT = Path(__file__).resolve().parent.parent
-EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 class ResolveError(Exception):
@@ -143,7 +142,7 @@ def read_tree(slug: str, branch: str) -> set[str]:
         if e.status in ("404", "409"):
             raise BranchMissing(f"the {branch} branch of {slug} does not exist yet") from e
         raise
-    if sha == EMPTY_TREE_SHA:
+    if sha == secret_names.EMPTY_TREE_SHA:
         return set()
     tree = gh_json(["gh", "api", f"repos/{slug}/git/trees/{sha}?recursive=1"], slug)
     blobs = secret_names.tree_blobs(tree)

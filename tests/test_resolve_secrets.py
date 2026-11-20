@@ -157,6 +157,25 @@ class AuditAgreementCase(unittest.TestCase):
                         from_plan[store].add(row["name"])
                 self.assertEqual(self.audit_missing(e, tree), from_plan)
 
+    def test_an_empty_root_commit_reads_as_the_same_tree_in_the_audit_and_the_resolver(
+        self,
+    ) -> None:
+        empty_head = {"commit": {"commit": {"tree": {"sha": secret_names.EMPTY_TREE_SHA}}}}
+        with unittest.mock.patch.object(audit, "gh", lambda path, ok404=False: None):
+            audited = audit.repo_tree("owner/ExampleRepo", empty_head)
+        gh = FakeGh(("tests/test_a.py",), tree_sha=secret_names.EMPTY_TREE_SHA)
+        with unittest.mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh):
+            resolved = resolve_secrets.read_tree("owner/ExampleRepo", "main")
+        self.assertEqual(audited, resolved)
+        assert audited is not None
+        plan = secret_names.secret_plan(SECRETS, entry(), resolved, "ExampleRepo")
+        from_plan: dict[str, set[str]] = {"actions": set(), "dependabot": set()}
+        for row in plan["rows"]:
+            for store in row["stores"]:
+                from_plan[store].add(row["name"])
+        self.assertEqual(self.audit_missing(entry(), audited), from_plan)
+        self.assertNotIn("CODECOV_TOKEN", from_plan["actions"])
+
     def test_audit_and_the_cli_get_the_same_findings_for_one_set_of_live_stores(self) -> None:
         e = entry(publish=[{"target": "docker"}])
         live = {
@@ -280,7 +299,7 @@ class FakeGh:
             sha = endpoint.removeprefix("repos/owner/ExampleRepo/git/trees/").removesuffix(
                 "?recursive=1"
             )
-            if sha != self.tree_sha or sha == resolve_secrets.EMPTY_TREE_SHA:
+            if sha != self.tree_sha or sha == secret_names.EMPTY_TREE_SHA:
                 return gh_failure("404")
             payload = {
                 "tree": [{"type": "blob", "path": p} for p in self.tree],
@@ -449,7 +468,7 @@ class NamesCliCase(unittest.TestCase):
 
     def test_an_empty_root_commit_is_resolved_as_a_tree_holding_no_file(self) -> None:
         e = entry(publish=[{"target": "docker"}], requiredSecrets=["NUGET_USERNAME"])
-        gh = FakeGh(("tests/test_a.py",), tree_sha=resolve_secrets.EMPTY_TREE_SHA)
+        gh = FakeGh(("tests/test_a.py",), tree_sha=secret_names.EMPTY_TREE_SHA)
         code, out, err, gh = self.run_names({"repos": [e]}, "ExampleRepo", gh)
         self.assertEqual(code, 0, err)
         plan = json.loads(out)

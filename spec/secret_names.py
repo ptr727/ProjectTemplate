@@ -21,6 +21,8 @@ SECRET_SCOPES = ("fleet", "repository")
 # Every provisioned host secret file name starts with this, and scaffold reads its strays from the files that do.
 FILE_PREFIX = "github_"
 
+EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
 
 class SecretNameError(Exception):
     """A secret declaration the caller must fail loud on rather than read around."""
@@ -54,6 +56,7 @@ def tree_blobs(tree: Any) -> dict[str, tuple[Any, Any]] | None:
 
     A response that is empty, holds no `tree` list, or is truncated is unreadable.
     A truncated tree would silently drop names, so both callers refuse it rather than use part of it.
+    GitHub answers a read of EMPTY_TREE_SHA, the tree of a commit holding no file, with 404, so both callers check for it before reading.
     """
     if not tree or not isinstance(tree, dict) or not isinstance(tree.get("tree"), list):
         return None
