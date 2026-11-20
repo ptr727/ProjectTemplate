@@ -70,18 +70,33 @@ def version_key(tag: str) -> tuple[int, ...] | None:
     return tuple(int(p) for p in parts) if all(p.isdigit() for p in parts) else None
 
 
+def _listed(read: Callable[[str], Any], path: str) -> list[Any]:
+    listed = read(path)
+    if listed is None:
+        raise RuntimeError(f"gh api {path}: returned an empty response")
+    return listed
+
+
+def _workflow_text(path: str, cached: str | None, read_text: Callable[[str], str | None]) -> str:
+    text = cached or read_text(path)
+    if text is None:
+        raise RuntimeError(f"{path}: no inline content returned")
+    return text
+
+
 @functools.cache
 def hub_releases(read: Callable[[str], Any], hub: str) -> tuple[dict[str, Release], dict[str, str]]:
     """`({tag: (tag, published, prerelease)}, {commit sha: tag})` for `hub`'s published releases.
 
-    Read once per run through `read`, the audit's `gh` call. A draft has no tag a pin can reach, so
-    it is left out. An annotated tag resolves to its tag object rather than a commit, so a pin on
+    Read once per run through `read`, the audit's `gh` call. An empty response body raises, as the
+    audit's own repository listing does, since it is a failed read rather than no release. A draft
+    has no tag a pin can reach, so it is left out. An annotated tag resolves to its tag object rather than a commit, so a pin on
     its commit reads as naming no release.
     """
     releases: dict[str, Release] = {}
     page = 1
     while True:
-        batch = read(f"repos/{hub}/releases?per_page=100&page={page}") or []
+        batch = _listed(read, f"repos/{hub}/releases?per_page=100&page={page}")
         for r in batch:
             if not r.get("draft") and r.get("published_at"):
                 tag = r["tag_name"]
@@ -89,7 +104,7 @@ def hub_releases(read: Callable[[str], Any], hub: str) -> tuple[dict[str, Releas
         if len(batch) < 100:
             break
         page += 1
-    refs = read(f"repos/{hub}/git/matching-refs/tags/") or []
+    refs = _listed(read, f"repos/{hub}/git/matching-refs/tags/")
     shas = {}
     for ref in refs:
         tag = ref["ref"].removeprefix("refs/tags/")
@@ -182,7 +197,7 @@ def pin_age_findings(
     pins = {}
     try:
         for path in workflow_paths(tree):
-            found = hub_pins(content.get(path) or read_text(path) or "", hub)
+            found = hub_pins(_workflow_text(path, content.get(path), read_text), hub)
             if found:
                 pins[path] = found
         releases, shas = hub_releases(read, hub) if pins else ({}, {})

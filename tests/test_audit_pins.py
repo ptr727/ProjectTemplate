@@ -243,6 +243,18 @@ class PinAgeReadsCase(unittest.TestCase):
         got = self.run_check(self.reader([], calls), None, "", ("Held (pins.age).",))
         self.assertEqual((got, calls), ([], []))
 
+    def test_an_empty_response_or_unread_workflow_is_one_error(self) -> None:
+        tree = {".github/workflows/test.yml"}
+        empty = self.run_check(lambda _: None, tree, caller(SHA_OLD))
+        self.assertEqual([k for k, _ in empty], ["ERROR"])
+        self.assertIn("returned an empty response", empty[0][1])
+        entry: dict[str, Any] = {"name": "Widget"}
+        unread = audit_pins.pin_age_findings(
+            entry, HUB, tree, lambda _: None, self.reader([], []), {}, NOW
+        )
+        self.assertEqual([k for k, _ in unread], ["ERROR"])
+        self.assertIn("no inline content", unread[0][1])
+
     def test_a_failed_read_is_one_error(self) -> None:
         def read(path: str) -> Any:
             raise RuntimeError(f"gh api {path}: HTTP 502")
