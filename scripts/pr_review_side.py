@@ -18,22 +18,18 @@ from subprocess import CompletedProcess
 
 import pr_review_policy as review_policy
 from pr_review_checks import (
-    HOSTED_REVIEWERS,
     age,
     check_nodes,
     check_shape,
     checks_settling,
-    head_commit,
-    reviewer_check,
     runs_open,
     utc_instant,
 )
+from pr_review_hold import PUSHED_KEY, head_arrived, hosted_check, side_asks, side_command
 from pr_review_payload import bot_entry, default_branch
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     QODO_LOGIN,
-    READS_AS_REVIEWER,
-    TRUSTED_ASSOCIATIONS,
     head_nodes,
     page_flag,
     qodo_comment,
@@ -43,25 +39,7 @@ from pr_review_rounds import (
 
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
-PUSHED_KEY = "_headPushedAt"
 PUSHED_JQ = 'map(select(.after == "{}") | .timestamp) | max // empty'
-
-
-def side_command(name: str, command: str = "review") -> str:
-    """The exact comment body that asks `name` for a round, `command` naming CodeRabbit's kind."""
-    return f"@coderabbitai {command}" if name == "coderabbit" else "/review"
-
-
-def head_arrived(pr: dict) -> str:
-    """When the head reached the pull request, read as its earliest check suite's creation.
-
-    GitHub creates a head's suites at the push, so a commit's own older timestamp never stands in.
-    Empty while no suite exists yet, which every reader here takes as a head that just arrived.
-    """
-    suites = (head_commit(pr).get("checkSuites") or {}).get("nodes") or []
-    stamps = [n["createdAt"] for n in suites if n.get("createdAt")]
-    stamps += [n["since"] for n in check_nodes(pr) if n.get("since")]
-    return min(stamps) if stamps else ""
 
 
 def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
@@ -91,27 +69,6 @@ def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
     return "PENDING" if not nodes and (since is None or since <= grace) else ""
 
 
-def hosted_check(node: dict) -> bool:
-    """Whether a check is a hosted reviewer's own, Copilot's review run included."""
-    name = (node.get("name") or "").casefold()
-    return bool(READS_AS_REVIEWER.search(name)) or any(
-        reviewer_check(node, vocab, login) for vocab, login in HOSTED_REVIEWERS.items()
-    )
-
-
-def side_asks(pr: dict, body: str) -> list[dict]:
-    """Each trusted, shown comment whose whole body is the request `body`, oldest first."""
-    nodes = (pr.get("comments") or {}).get("nodes") or []
-    asks = [
-        n
-        for n in nodes
-        if (n.get("authorAssociation") or "") in TRUSTED_ASSOCIATIONS
-        and not n.get("isMinimized")
-        and (n.get("body") or "").strip() == body
-    ]
-    return sorted(asks, key=lambda n: n.get("createdAt") or "")
-
-
 def pushed(pr: dict, rest: Callable[[str, str], CompletedProcess]) -> dict:
     """`pr` carrying when GitHub logged the push that left its head on its branch, empty if unread.
 
@@ -124,6 +81,27 @@ def pushed(pr: dict, rest: Callable[[str, str], CompletedProcess]) -> dict:
     query = urllib.parse.urlencode({"ref": f"refs/heads/{branch}", "per_page": 100})
     proc = rest(f"repos/{where}/activity?{query}", PUSHED_JQ.format(head)) if placed else None
     return {**pr, PUSHED_KEY: proc.stdout.strip() if proc and proc.returncode == 0 else ""}
+
+
+def push_log(rest: Callable[[str, str], CompletedProcess]) -> Callable[[dict], dict]:
+    """`pushed` keeping each head's stamp once read, for a poll that judges one head many times.
+
+    The stamp does not move while the head holds. A read that failed or found no entry is not
+    kept, so a later poll still asks. The log can record a push after the poll began.
+    """
+    found: dict[tuple, str] = {}
+
+    def read(pr: dict) -> dict:
+        where = (pr.get("headRepository") or {}).get("nameWithOwner")
+        key = (where, pr.get("headRefName"), pr.get("headRefOid"))
+        if key in found:
+            return {**pr, PUSHED_KEY: found[key]}
+        stamped = pushed(pr, rest)
+        if stamped[PUSHED_KEY]:
+            found[key] = stamped[PUSHED_KEY]
+        return stamped
+
+    return read
 
 
 def side_asked_on_head(pr: dict, body: str) -> bool:
@@ -307,8 +285,10 @@ def ask(
     rest: Callable[[str, str], CompletedProcess],
     phase: str,
     poll: Callable[[], str] | None = None,
-) -> None:
+) -> bool:
     """Send and print the `phase` requests, where `pr` is a payload whose policy asks any.
+
+    Returns whether any request was sent, since a sent one moves the registration grace's anchor.
 
     `poll` waits out the checks an after-checks ask waits on, as `await_green` does on the wait's
     own clock. So a head whose checks outlast the Copilot poll is still asked once they pass, and
@@ -316,7 +296,7 @@ def ask(
     polls, so the ask holds no wait that stops without polling.
     """
     if not isinstance(pr, dict) or not asks_any(pr):
-        return
+        return False
 
     def post(body: str) -> tuple[dict, bool]:
         return post_comment(send, dig, body)
@@ -324,8 +304,10 @@ def ask(
     def checks_now() -> str:
         return checks_hold(read(), datetime.now(UTC), args.check_grace, args.check_stall)
 
-    for line in request_side_reviews(lambda: pushed(read(), rest), poll or checks_now, post, phase):
+    lines = request_side_reviews(lambda: pushed(read(), rest), poll or checks_now, post, phase)
+    for line in lines:
         print(line)
+    return any(line.startswith("auto-request:") for line in lines)
 
 
 def checks_note(held: str) -> str:

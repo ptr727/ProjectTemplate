@@ -428,5 +428,25 @@ class AuditRepoHubOnlyCase(unittest.TestCase):
         self.assertEqual(self.hub_only_findings(findings), [])
 
 
+class RepoTreeEmptyRootCase(unittest.TestCase):
+    """A ground branch holding only an empty root commit is a tree with no file, not an unread one."""
+
+    def test_the_empty_tree_is_read_as_holding_no_file_without_a_tree_read(self) -> None:
+        reads: list[str] = []
+
+        def gh(path: str, ok404: bool = False) -> Any:
+            reads.append(path)
+            if not ok404:
+                raise AssertionError(f"a tree read must tolerate 404: {path}")
+            return None
+
+        empty_head = {"commit": {"commit": {"tree": {"sha": audit.EMPTY_TREE_SHA}}}}
+        with mock.patch.object(audit, "gh", gh):
+            self.assertEqual(audit.repo_tree_blobs(SLUG, empty_head), {})
+            self.assertEqual(audit.repo_tree(SLUG, empty_head), set())
+            self.assertIsNone(audit.repo_tree_blobs(SLUG, HEAD))
+        self.assertEqual(reads, [f"repos/{SLUG}/git/trees/feed?recursive=1"])
+
+
 if __name__ == "__main__":
     unittest.main()
