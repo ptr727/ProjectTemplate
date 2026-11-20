@@ -53,19 +53,20 @@ PUSHED_KEY = "_headPushedAt"
 
 
 def head_arrived(pr: dict) -> str:
-    """When the head reached the pull request, read as the push log's stamp where one is attached.
+    """When the head reached the pull request, the later of its push and its earliest suite.
 
-    The log's newest push ending at the head counts, so a push back to a commit checked before
-    reads as that push. Without it the head's earliest check suite's creation stands in. GitHub
-    creates a head's suites at the push, and a commit's own older timestamp never stands in.
-    Empty while neither exists yet, which every reader here takes as a head that just arrived.
+    The push is the log's newest one ending at the head, where a stamp is attached. So a push back
+    to a commit checked before reads as that push. A suite is created at the push, or at the
+    opening where only the pull request runs checks. So it is never earlier than the arrival it
+    marks. A commit's own older timestamp never stands in. Empty while neither exists yet, which
+    every reader here takes as a head that just arrived.
     """
-    if utc_instant(pr.get(PUSHED_KEY) or "") is not None:
-        return pr[PUSHED_KEY]
     suites = (head_commit(pr).get("checkSuites") or {}).get("nodes") or []
     stamps = [n["createdAt"] for n in suites if n.get("createdAt")]
     stamps += [n["since"] for n in check_nodes(pr) if n.get("since")]
-    return min(stamps) if stamps else ""
+    first = min(stamps) if stamps else ""
+    known = [s for s in (first, pr.get(PUSHED_KEY) or "") if utc_instant(s) is not None]
+    return max(known, key=lambda s: utc_instant(s) or datetime.min) if known else first
 
 
 def hosted_check(node: dict) -> bool:

@@ -5125,10 +5125,13 @@ class TestCli(GqlCase):
                 self.answer(pr)
                 self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
                 with (
-                    mock.patch.object(pr_review, "gh_rest", side_effect=rest),
+                    mock.patch.object(pr_review, "gh_rest", side_effect=rest) as read,
+                    mock.patch.object(pr_review.side, "ask", return_value=True),
                     mock.patch.object(pr_review.time, "sleep"),
                 ):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
+                logs = [c for c in read.call_args_list if "/activity?" in c.args[0]]
+                self.assertEqual(2, len(logs), "the held poll's reads of one head, then full_read")
 
     def test_a_rate_limited_hosted_review_does_not_hold_an_attested_head(self) -> None:
         """The marker and both reply shapes end the wait, and the digest still reports the limit."""
@@ -8414,12 +8417,15 @@ class TestRegistrationGrace(unittest.TestCase):
     def test_the_push_log_stamp_dates_the_head_over_its_older_suites(self) -> None:
         """A push back to a commit checked before keeps that commit's suites, which predate it.
 
-        A stamp that does not parse is no stamp, so the suites stand in as they do without one.
+        A push older than the suites is a branch the pull request opened on later, so the suites
+        stand in. A stamp that does not parse is no stamp, so they stand in then as well.
         """
         settled = {**check(started=ago(900)), "completedAt": ago(600)}
         pr = payload([review()], checks=[settled])
         nodes = pr_review_checks.check_nodes(pr)
         self.assertEqual(ago(900), pr_review_hold.head_arrived(pr))
+        early = {**pr, pr_review_hold.PUSHED_KEY: ago(1200)}
+        self.assertEqual(ago(900), pr_review_hold.head_arrived(early))
         for logged, want in ((ago(30), ago(30)), ("not a stamp", ago(600)), ("", ago(600))):
             with self.subTest(logged=logged):
                 pushed = {**pr, pr_review_hold.PUSHED_KEY: logged}
