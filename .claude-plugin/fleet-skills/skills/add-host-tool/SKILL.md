@@ -42,5 +42,6 @@ Update the platform installers, `spec/host-tools.json`, `docs/host-setup.md`, an
 2. Run the repository's formatting, lint, type, and test gates required by the changed files.
 3. On the current native platform, exercise list and report first.
 4. Exercise install and upgrade dry runs.
-5. Apply the install, repeat it to prove idempotence, and run the host gate.
+5. Hand the operator the exact native commands for the install, a repeat install proving
+   idempotence, and the host gate, with the expected observations. Verify what the operator reports.
 6. Record untested platforms explicitly and leave cross-platform verification open.
