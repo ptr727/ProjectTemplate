@@ -28,10 +28,11 @@ cold-start self-test.
 
 ## Before starting
 
-Read STANDUP.md section 0A first. Nothing in this procedure creates the GitHub repository, its
-App, or its secrets. Each is an outward-facing write that needs the maintainer's explicit permission
-and inputs. So hand that checklist over before step 1 rather than discovering the gap partway
-through. A repo with no remote is not partially stood up, it is not started, and only the
+Read STANDUP.md section 0A first. Nothing in this procedure creates the GitHub repository or
+installs its App. Each is an outward-facing write that needs the maintainer's explicit permission
+and inputs. Only the maintainer can supply a repository-scoped secret's value file, which section
+4 reads to set both secret stores. So hand that checklist over before step 1 rather than
+discovering the gap partway through. A repo with no remote is not partially stood up, it is not started, and only the
 maintainer can supply what section 0A lists.
 
 ## Apply, in order
@@ -45,7 +46,16 @@ maintainer can supply what section 0A lists.
    `develop` empty, off one signed empty root commit, then run every step below on a feature
    branch off `develop`. Never commit standup work directly onto `develop`. `non_fast_forward` on
    both branch payloads, or the missing blocking rule on an operational repo's `develop` ruleset,
-   makes that mistake either unrecoverable or silently unprotected.
+   makes that mistake either unrecoverable or silently unprotected. Point `origin` at the
+   repository once it exists. Push `main` and `develop` before step 6, since `scripts/carry.py`
+   needs `origin/develop`. The fleet's agent-safety kit refuses a commit, a push, and a
+   `git checkout -b` in the primary checkout a fresh `git init` makes. So in a session running
+   it, the branch block and the seed push are the maintainer's hand-over. Once the repository
+   exists, hand the maintainer section 0B's block through `git branch develop`. Read its
+   identity and signing output per step 1 before anything is pushed. Then hand over
+   `git remote add origin "<url>"` and `git push -u origin main develop`. Wait for the push to
+   land. Then create the feature branch as a linked worktree with
+   `git worktree add -b "<feature-branch>" "<path>" develop`. Every later step runs there.
 
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
