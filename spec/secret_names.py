@@ -9,6 +9,7 @@ imports are absent.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 STORES = ("actions", "dependabot")
@@ -20,6 +21,8 @@ SECRET_SCOPES = ("fleet", "repository")
 
 # Every provisioned host secret file name starts with this, and scaffold reads its strays from the files that do.
 FILE_PREFIX = "github_"
+
+EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
 class SecretNameError(Exception):
@@ -62,6 +65,17 @@ def tree_blobs(tree: Any) -> dict[str, tuple[Any, Any]] | None:
     return {
         n["path"]: (n.get("sha"), n.get("mode")) for n in tree["tree"] if n.get("type") == "blob"
     }
+
+
+def read_tree_blobs(sha: str, read: Callable[[str], Any]) -> dict[str, tuple[Any, Any]] | None:
+    """tree_blobs() of the tree SHA names, fetched through read, which both callers give their own gh read.
+
+    GitHub answers a read of the empty tree, the tree of a commit holding no file, with 404.
+    So that tree is answered as holding no file, without a read.
+    """
+    if sha == EMPTY_TREE_SHA:
+        return {}
+    return tree_blobs(read(sha))
 
 
 def in_test_directory(path: str) -> bool:

@@ -29,6 +29,7 @@ SPEC = HUB / "spec"
 LIBRARY = HUB / "lib" / "sh" / "secrets.sh"
 sys.path.insert(0, str(SPEC))
 import resolve_secrets
+import secret_names
 
 SECRETS = json.loads((SPEC / "secrets.json").read_text(encoding="utf-8"))
 
@@ -66,6 +67,17 @@ PLAN = (
 GH_STUB = """#!/bin/sh
 printf '%s\\n' "$*" >>"$GH_DIR/argv"
 case "$*" in
+"api repos/owner/ExampleRepo/branches/"*" --jq .commit.commit.tree.sha")
+    if [ -f "$GH_DIR/branch.status" ]; then
+        echo "gh: error (HTTP $(cat "$GH_DIR/branch.status"))" >&2
+        exit 1
+    fi
+    cat "$GH_DIR/branch.sha"
+    ;;
+"api repos/owner/ExampleRepo/git/trees/4b825dc642cb6eb9a060e54bf8d69288fbee4904?recursive=1")
+    echo "gh: error (HTTP 404)" >&2
+    exit 1
+    ;;
 "api repos/owner/ExampleRepo/git/trees/"*"?recursive=1")
     if [ -f "$GH_DIR/tree.status" ]; then
         echo "gh: error (HTTP $(cat "$GH_DIR/tree.status"))" >&2
@@ -101,7 +113,11 @@ def sentinel(name: str) -> str:
 
 
 class Fixture:
-    """A scratch tree: a secrets directory, a stub gh, and the resolver's plan for ExampleRepo."""
+    """A scratch tree: a secrets directory, a stub gh, and the resolver's plan for ExampleRepo.
+
+    The branch read answers a synthetic SHA standing for any tree that holds files.
+    The stub answers a read of the empty tree with 404, as GitHub does.
+    """
 
     def __init__(self, tmp: str, tree: tuple[str, ...] = ("tests/test_a.py",)) -> None:
         self.root = Path(tmp)
@@ -117,6 +133,9 @@ class Fixture:
         self.registry = self.root / "repos.json"
         self.registry.write_text(json.dumps(REGISTRY), encoding="utf-8")
         self.live: dict[str, set[str]] | None = None
+        (self.gh_dir / "branch.sha").write_text(
+            "1234567890abcdef1234567890abcdef12345678\n", encoding="utf-8"
+        )
         self.write_tree(tree)
         for store in ("actions", "dependabot"):
             (self.gh_dir / f"list.{store}").write_text("", encoding="utf-8")
@@ -498,6 +517,20 @@ class LoadNamesCase(unittest.TestCase):
             names = [r["name"] for r in json.loads(self.load(fix).stdout)["rows"]]
             self.assertNotIn("CODECOV_TOKEN", names)
 
+    def test_an_empty_root_commit_loads_its_names_rather_than_a_skip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            fix = Fixture(tmp, tree=("tests/test_a.py",))
+            (fix.gh_dir / "branch.sha").write_text(
+                f"{secret_names.EMPTY_TREE_SHA}\n", encoding="utf-8"
+            )
+            result = self.load(fix)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            plan = json.loads(result.stdout)
+            self.assertNotIn("skip", plan)
+            names = [r["name"] for r in plan["rows"]]
+            self.assertIn("CODEGEN_APP_CLIENT_ID", names)
+            self.assertNotIn("CODECOV_TOKEN", names)
+
     def test_a_truncated_tree_fails_rather_than_dropping_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fix = Fixture(tmp)
@@ -509,20 +542,20 @@ class LoadNamesCase(unittest.TestCase):
     def test_the_tree_is_read_on_the_registry_ground_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fix = Fixture(tmp)
-            self.assertIn("git/trees/main?recursive=1", self.load_and_log(fix))
+            self.assertIn("branches/main --jq", self.load_and_log(fix))
             registry: dict[str, object] = {
                 "repos": [{**REGISTRY["repos"][0], "groundTruthBranch": "trunk"}]
             }
             fix.registry.write_text(json.dumps(registry), encoding="utf-8")
-            self.assertIn("git/trees/trunk?recursive=1", self.load_and_log(fix))
+            self.assertIn("branches/trunk --jq", self.load_and_log(fix))
             registry = {"repos": REGISTRY["repos"], "defaults": {"groundTruthBranch": "develop"}}
             fix.registry.write_text(json.dumps(registry), encoding="utf-8")
-            self.assertIn("git/trees/develop?recursive=1", self.load_and_log(fix))
+            self.assertIn("branches/develop --jq", self.load_and_log(fix))
 
     def test_a_missing_ground_branch_loads_as_a_skip_and_not_a_failure(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             fix = Fixture(tmp)
-            (fix.gh_dir / "tree.status").write_text("404", encoding="utf-8")
+            (fix.gh_dir / "branch.status").write_text("404", encoding="utf-8")
             result = self.load(fix)
             self.assertEqual(result.returncode, 0, result.stderr)
             plan = json.loads(result.stdout)
@@ -530,7 +563,7 @@ class LoadNamesCase(unittest.TestCase):
             self.assertEqual(
                 plan["skip"], "the main branch of owner/ExampleRepo does not exist yet"
             )
-            (fix.gh_dir / "tree.status").write_text("500", encoding="utf-8")
+            (fix.gh_dir / "branch.status").write_text("500", encoding="utf-8")
             self.assertIn("LOAD_FAILED", self.load(fix).stdout)
 
     def load_and_log(self, fix: Fixture) -> str:
