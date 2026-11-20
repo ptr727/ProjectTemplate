@@ -155,6 +155,12 @@ class PinFindingsCase(unittest.TestCase):
         self.assertEqual([k for k, _ in got], ["DRIFT"])
         self.assertIn("does not parse as YAML", got[0][1])
 
+    def test_an_unparsed_baseline_workflow_is_left_to_its_interface_check(self) -> None:
+        path = ".github/workflows/a.yml"
+        entry = {"name": "Widget", "driftNotes": ["Held (pins.age)."]}
+        got = audit_pins.pin_findings(entry, {path: None}, RELEASES, SHAS, NOW, {path})
+        self.assertEqual(got, [])
+
     def test_a_hold_is_not_stale_while_a_pin_s_age_is_unread(self) -> None:
         got = findings(pin("main"), ("Held for a regression (pins.age).",))
         self.assertEqual([k for k, _ in got], ["ADVISORY"])

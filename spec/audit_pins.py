@@ -10,7 +10,7 @@ pin is behind the newest release.
 
 import functools
 import posixpath
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -120,10 +120,12 @@ def pin_findings(
     releases: dict[str, Release],
     shas: dict[str, str],
     now: datetime,
+    reported: Collection[str] = (),
 ) -> list[Finding]:
     """The findings for `pins`, `{workflow path: {ref: [task file, ...]}}`, against the hub's releases.
 
-    A path mapped to None is a workflow that does not parse, so its pins are unread.
+    A path mapped to None is a workflow that does not parse, so its pins are unread. That is DRIFT
+    unless the path is in `reported`, the baseline workflows whose interface check reports it.
     """
     held = any(f"({CHECK_ID})" in n for n in entry.get("driftNotes", []))
     stable = [(v, r) for r in releases.values() if not r[2] and (v := version_key(r[0]))]
@@ -134,7 +136,10 @@ def pin_findings(
     for path, refs in sorted(pins.items()):
         if refs is None:
             unread = True
-            out.append(("DRIFT", f"pins: {path} does not parse as YAML, so its pins are unread"))
+            if path not in reported:
+                out.append(
+                    ("DRIFT", f"pins: {path} does not parse as YAML, so its pins are unread")
+                )
             continue
         for ref, tasks in refs.items():
             named = f"{path} pins {', '.join(tasks)} at `{ref}`"
@@ -211,4 +216,4 @@ def pin_age_findings(
         releases, shas = hub_releases(read, hub) if any(pins.values()) else ({}, {})
     except RuntimeError as e:
         return [("ERROR", f"pins: could not read the caller pins or {hub}'s releases: {e}")]
-    return pin_findings(entry, pins, releases, shas, now or datetime.now(UTC))
+    return pin_findings(entry, pins, releases, shas, now or datetime.now(UTC), set(content))
