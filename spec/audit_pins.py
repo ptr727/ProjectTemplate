@@ -62,13 +62,17 @@ def _published(value: str) -> datetime:
 
 
 def version_key(tag: str) -> tuple[int, ...] | None:
-    """A release tag's numeric version, ignoring any `-suffix`, or None for a tag of another shape.
+    """A release tag's version, or None for a tag of another shape.
 
-    Releases are ordered by this rather than by publish time, since a re-run can publish an older
-    version after a newer one.
+    A final element ranks a `-suffix` prerelease (0) below its stable release (1), so a pin on
+    `1.0.3-rc` stays behind `1.0.3`. Releases are ordered by this rather than by publish time,
+    since a re-run can publish an older version after a newer one.
     """
-    parts = tag.split("-", 1)[0].split(".")
-    return tuple(int(p) for p in parts) if all(p.isdigit() for p in parts) else None
+    base, dash, _ = tag.partition("-")
+    parts = base.split(".")
+    if not all(p.isdigit() for p in parts):
+        return None
+    return (*(int(p) for p in parts), 0 if dash else 1)
 
 
 def _listed(read: Callable[[str], Any], path: str) -> list[Any]:
@@ -79,7 +83,7 @@ def _listed(read: Callable[[str], Any], path: str) -> list[Any]:
 
 
 def _workflow_text(path: str, cached: str | None, read_text: Callable[[str], str | None]) -> str:
-    text = cached or read_text(path)
+    text = cached if cached is not None else read_text(path)
     if text is None:
         raise RuntimeError(f"{path}: no inline content returned")
     return text

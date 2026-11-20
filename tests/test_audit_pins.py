@@ -173,9 +173,20 @@ class PinFindingsCase(unittest.TestCase):
         self.assertEqual([k for k, _ in got], ["DRIFT"])
         self.assertIn("2 release(s) behind 1.0.10, superseded 50 days ago", got[0][1])
 
+    def test_a_prerelease_orders_below_its_stable_release(self) -> None:
+        key = audit_pins.version_key
+        self.assertLess(key("1.0.3-rc") or (), key("1.0.3") or ())
+        self.assertGreater(key("1.0.3-rc") or (), key("1.0.2") or ())
+
+    def test_a_cached_empty_workflow_is_not_read_again(self) -> None:
+        read = mock.Mock(return_value="on: push")
+        self.assertEqual(audit_pins._workflow_text("w.yml", "", read), "")
+        read.assert_not_called()
+        self.assertEqual(audit_pins._workflow_text("w.yml", None, read), "on: push")
+
     def test_a_tag_of_another_shape_is_unread(self) -> None:
-        self.assertEqual(audit_pins.version_key("2.0.1509"), (2, 0, 1509))
-        self.assertEqual(audit_pins.version_key("1.0.59-gad39ee1061"), (1, 0, 59))
+        self.assertEqual(audit_pins.version_key("2.0.1509"), (2, 0, 1509, 1))
+        self.assertEqual(audit_pins.version_key("1.0.59-gad39ee1061"), (1, 0, 59, 0))
         self.assertIsNone(audit_pins.version_key("v1.0"))
         got = audit_pins.pin_findings({}, pin("v1.0"), releases(("v1.0", 50, False)), {}, NOW)
         self.assertIn("no hub release", got[0][1])

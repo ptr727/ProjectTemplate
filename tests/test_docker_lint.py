@@ -653,6 +653,18 @@ class DockerLintCase(unittest.TestCase):
         ):
             docker_lint.run_command(command, 90)
 
+    def test_a_failed_interrupt_cleanup_is_reported_beside_the_interrupt(self) -> None:
+        command = ["docker", "run", "--name", "bounded-lint", "image"]
+        failed: subprocess.CompletedProcess[str] = subprocess.CompletedProcess(["docker", "rm"], 1)
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(subprocess, "run", side_effect=[KeyboardInterrupt, failed]),
+            mock.patch.object(sys, "stderr", stderr),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            docker_lint.run_command(command, 90)
+        self.assertIn("cleanup failed for bounded-lint (exit 1)", stderr.getvalue())
+
     def test_cleanup_start_failure_remains_a_timeout_result(self) -> None:
         command = ["docker", "run", "--name", "bounded-lint", "image"]
         timed_out = subprocess.TimeoutExpired(command, 90)
