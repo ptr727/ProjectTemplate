@@ -328,9 +328,20 @@ def snapshot_parent(root: Path) -> Path:
     return Path(os.fsdecode(result.stdout).rstrip("\n"))
 
 
-def exit_on_sigterm(signum: int, _frame: object) -> None:
-    """Turn a termination signal into an exit, so the snapshot is still removed."""
-    raise SystemExit(128 + signum)
+received: list[int] = []
+
+
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal and raise KeyboardInterrupt, so every signal unwinds one path.
+
+    The unwinding removes the snapshot. A later signal is passed over, since it would cut the
+    unwinding short. One is the SIGTERM that `uv run` forwards to a process group the terminal's
+    SIGINT already reached.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
 
 
 def lock_owner(handle: IO[str], *, wait: bool) -> bool:
@@ -415,22 +426,29 @@ def remove_stale_snapshots(parent: Path) -> int:
 
 @contextlib.contextmanager
 def owned_snapshot(parent: Path) -> Iterator[Path]:
-    """Create an empty snapshot directory, held by a locked owner file beside it until removed."""
+    """Create an empty snapshot directory, held by a locked owner file beside it until removed.
+
+    The owner file is unlinked once its handle is closed, since Windows cannot unlink an open file.
+    That unlink is in a finally clause, so an interrupt's unwinding removes it too.
+    """
     descriptor, name = tempfile.mkstemp(prefix=SNAPSHOT_PREFIX, suffix=OWNER_SUFFIX, dir=parent)
     owner = Path(name)
-    with os.fdopen(descriptor, "r+", encoding="utf-8") as handle:
-        lock_owner(handle, wait=True)
-        handle.write(f"{os.getpid()}\n")
-        handle.flush()
-        snapshot = owner.with_name(owner.name.removesuffix(OWNER_SUFFIX))
-        snapshot.mkdir()
-        try:
-            yield snapshot
-        finally:
-            removed = remove_snapshot(snapshot)
-            unlock_owner(handle)
-    if removed:
-        owner.unlink(missing_ok=True)
+    removed = False
+    try:
+        with os.fdopen(descriptor, "r+", encoding="utf-8") as handle:
+            lock_owner(handle, wait=True)
+            handle.write(f"{os.getpid()}\n")
+            handle.flush()
+            snapshot = owner.with_name(owner.name.removesuffix(OWNER_SUFFIX))
+            snapshot.mkdir()
+            try:
+                yield snapshot
+            finally:
+                removed = remove_snapshot(snapshot)
+                unlock_owner(handle)
+    finally:
+        if removed:
+            owner.unlink(missing_ok=True)
 
 
 def stage_snapshot(root: Path, snapshot: Path) -> int:
@@ -697,19 +715,44 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the command-line entry point."""
+def main(argv: Sequence[str] | None = None) -> int | signal.Signals:
+    """Run the command-line entry point, returning its status, or the signal that interrupted it.
+
+    A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    """
     args = parse_args(argv)
-    signal.signal(signal.SIGTERM, exit_on_sigterm)
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
     # Closing a VS Code task's terminal sends SIGHUP rather than SIGTERM.
     if hasattr(signal, "SIGHUP"):
-        signal.signal(signal.SIGHUP, exit_on_sigterm)
+        signal.signal(signal.SIGHUP, on_signal)
     if args.timeout <= 0:
         raise SystemExit("--timeout must be greater than zero")
     root = args.root.resolve()
     selected = set(args.linter or (linter.name for linter in LINTERS))
-    return lint(root, args.timeout, selected)
+    try:
+        return lint(root, args.timeout, selected)
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
+        print(f"docker_lint.py: interrupted by {signum.name}.", file=sys.stderr)
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    status = main()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)

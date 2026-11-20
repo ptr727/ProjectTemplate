@@ -383,46 +383,102 @@ class DockerLintCase(unittest.TestCase):
         shellcheck = next(linter for linter in docker_lint.LINTERS if linter.name == "shellcheck")
         self.assertEqual(["run"], docker_lint.tracked_files(self.root, shellcheck))
 
-    def test_sigterm_during_execution_still_removes_the_snapshot(self) -> None:
+    def interrupted(self, signum: int) -> tuple[subprocess.CompletedProcess[str], Path]:
+        """Run the real entry point with a container that hangs, then signal it mid-run."""
         self.track("README.md")
-        sources: list[Path] = []
+        driver = (
+            "import signal, subprocess, sys, time\n"
+            f"sys.path.insert(0, {str(Path(docker_lint.__file__).parent)!r})\n"
+            "import docker_lint\n"
+            "def hang(command, timeout, *, capture_output=False):\n"
+            "    if command[:2] == ['docker', 'run']:\n"
+            "        print(next(a for a in command if a.startswith('type=bind')), flush=True)\n"
+            "        time.sleep(30)\n"
+            "    out = 'example@sha256:123\\n' if command[:3] == ['docker', 'image', 'inspect'] else ''\n"
+            "    return subprocess.CompletedProcess(command, 0, out, '')\n"
+            "real = docker_lint.lint\n"
+            "docker_lint.lint = lambda root, timeout, selected: real(root, timeout, selected, hang)\n"
+            f"sys.argv = ['docker_lint.py', '--root', {str(self.root)!r}, '--linter', 'markdownlint']\n"
+            "status = docker_lint.main()\n"
+            "if isinstance(status, signal.Signals):\n"
+            "    docker_lint.reraise(status)\n"
+            "sys.exit(status)\n"
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-c", driver],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            assert process.stdout is not None
+            mount = ""
+            while not mount.startswith("type=bind"):
+                line = process.stdout.readline()
+                self.assertTrue(line, "the run ended before its container started")
+                mount = line.strip()
+            source = MOUNT_SOURCE.search(mount)
+            assert source is not None
+            snapshot = Path(source.group(1))
+            self.assertTrue(snapshot.is_dir())
+            process.send_signal(signum)
+            out, err = process.communicate(timeout=20)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        return subprocess.CompletedProcess(process.args, process.returncode, out, err), snapshot
 
-        def terminated(
-            command: list[str], timeout: int, *, capture_output: bool = False
-        ) -> subprocess.CompletedProcess[str]:
-            for argument in command:
-                source = MOUNT_SOURCE.search(argument)
-                if source:
-                    sources.append(Path(source.group(1)))
-                    docker_lint.exit_on_sigterm(15, None)
-            return FakeRunner()(command, timeout, capture_output=capture_output)
+    @unittest.skipIf(
+        sys.platform == "win32", "Windows cannot deliver SIGINT or SIGTERM to a script"
+    )
+    def test_a_signal_mid_run_removes_the_snapshot_and_dies_by_that_signal(self) -> None:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(signal=signum.name):
+                result, snapshot = self.interrupted(signum)
+                self.assertEqual(-signum, result.returncode, result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(
+                    [f"docker_lint.py: interrupted by {signum.name}."],
+                    result.stderr.strip().splitlines(),
+                )
+                self.assertFalse(snapshot.exists())
+                parent = docker_lint.snapshot_parent(self.root)
+                self.assertEqual([], sorted(parent.glob(f"{docker_lint.SNAPSHOT_PREFIX}*")))
 
-        with (
-            contextlib.redirect_stdout(io.StringIO()),
-            self.assertRaises(SystemExit) as raised,
-        ):
-            docker_lint.lint(self.root, 17, {"markdownlint"}, terminated)
-        self.assertEqual(143, raised.exception.code)
-        self.assertEqual(1, len(sources))
-        self.assertFalse(sources[0].exists())
+    def test_a_later_signal_is_passed_over(self) -> None:
+        received: list[int] = []
+        with mock.patch.object(docker_lint, "received", received):
+            with self.assertRaises(KeyboardInterrupt):
+                docker_lint.on_signal(signal.SIGINT, None)
+            docker_lint.on_signal(signal.SIGTERM, None)
+        self.assertEqual([signal.SIGINT], received)
 
-    def test_main_registers_the_sigterm_handler(self) -> None:
-        previous = signal.getsignal(signal.SIGTERM)
-        self.addCleanup(signal.signal, signal.SIGTERM, previous)
+    def restore_handlers(self) -> None:
+        for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+            if hasattr(signal, name):
+                signum = getattr(signal, name)
+                self.addCleanup(signal.signal, signum, signal.getsignal(signum))
+
+    def test_main_registers_one_handler_for_every_signal(self) -> None:
+        """Closing a VS Code task's terminal sends SIGHUP, which would otherwise kill at once."""
+        self.restore_handlers()
+        signal.signal(signal.SIGINT, signal.default_int_handler)
         with mock.patch.object(docker_lint, "lint", return_value=0) as lint:
             self.assertEqual(0, docker_lint.main(["--root", str(self.root)]))
         lint.assert_called_once()
-        self.assertIs(docker_lint.exit_on_sigterm, signal.getsignal(signal.SIGTERM))
+        self.assertIs(docker_lint.on_signal, signal.getsignal(signal.SIGTERM))
+        self.assertIs(docker_lint.on_signal, signal.getsignal(signal.SIGINT))
+        if hasattr(signal, "SIGHUP"):
+            self.assertIs(docker_lint.on_signal, signal.getsignal(signal.SIGHUP))
 
-    def test_main_registers_the_sighup_handler(self) -> None:
-        """Closing a VS Code task's terminal sends SIGHUP, which would otherwise kill at once."""
-        if not hasattr(signal, "SIGHUP"):
-            self.skipTest("this platform has no SIGHUP")
-        previous = signal.getsignal(signal.SIGHUP)
-        self.addCleanup(signal.signal, signal.SIGHUP, previous)
+    def test_a_sigint_inherited_as_ignored_stays_ignored(self) -> None:
+        self.restore_handlers()
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         with mock.patch.object(docker_lint, "lint", return_value=0):
             self.assertEqual(0, docker_lint.main(["--root", str(self.root)]))
-        self.assertIs(docker_lint.exit_on_sigterm, signal.getsignal(signal.SIGHUP))
+        self.assertIs(signal.SIG_IGN, signal.getsignal(signal.SIGINT))
 
     def ended_run(self, body: str = "4242\n") -> tuple[Path, Path]:
         """A snapshot and owner file as a killed run leaves them, the lock gone with the process."""
