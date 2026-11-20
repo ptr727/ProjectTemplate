@@ -51,7 +51,8 @@ maintainer can supply what section 0A lists.
    needs `origin/develop`. The fleet's agent-safety kit refuses a commit, a push, and a
    `git checkout -b` in the primary checkout a fresh `git init` makes. So in a session running
    it, the branch block and the seed push are the maintainer's hand-over. Once the repository
-   exists, hand the maintainer section 0B's block through `git branch develop`, then
+   exists, hand the maintainer section 0B's block through `git branch develop`. Read its
+   identity and signing output per step 1 before anything is pushed. Then hand over
    `git remote add origin "<url>"` and `git push -u origin main develop`. Wait for the push to
    land. Then create the feature branch as a linked worktree with
    `git worktree add -b "<feature-branch>" "<path>" develop`. Every later step runs there.
