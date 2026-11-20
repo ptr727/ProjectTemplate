@@ -64,9 +64,9 @@ def head_arrived(pr: dict) -> str:
     suites = (head_commit(pr).get("checkSuites") or {}).get("nodes") or []
     stamps = [n["createdAt"] for n in suites if n.get("createdAt")]
     stamps += [n["since"] for n in check_nodes(pr) if n.get("since")]
-    first = min(stamps) if stamps else ""
-    known = [s for s in (first, pr.get(PUSHED_KEY) or "") if utc_instant(s) is not None]
-    return max(known, key=lambda s: utc_instant(s) or datetime.min) if known else first
+    first, pushed = (min(stamps) if stamps else ""), pr.get(PUSHED_KEY) or ""
+    known = [(at, s) for s in (first, pushed) if (at := utc_instant(s)) is not None]
+    return max(known)[1] if known else first
 
 
 def hosted_check(node: dict) -> bool:

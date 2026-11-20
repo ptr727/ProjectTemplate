@@ -1605,7 +1605,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         and (copilot is None or a.request or copilot.requests())
     )
     read_held = functools.partial(gql, Q_HELD, owner, repo, a.number)
-    logged = functools.cache(gh_rest)
+    logged = side.push_log(gh_rest)
     await_green = functools.partial(side.await_green, read_held, start, a, backoff)
     send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
     ask = functools.partial(side.ask, read_held, a, send, mutated, may_request and pr, gh_rest)
@@ -1676,10 +1676,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                         a.check_stall,
                         required_for(polled, owner, repo),
                     )
-                    or (
-                        registration
-                        and grace_open(side.pushed(polled, logged), nodes, now) is not None
-                    )
+                    or (registration and grace_open(logged(polled), nodes, now) is not None)
                 )
             )
 

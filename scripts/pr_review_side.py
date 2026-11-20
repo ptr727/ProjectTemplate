@@ -83,6 +83,27 @@ def pushed(pr: dict, rest: Callable[[str, str], CompletedProcess]) -> dict:
     return {**pr, PUSHED_KEY: proc.stdout.strip() if proc and proc.returncode == 0 else ""}
 
 
+def push_log(rest: Callable[[str, str], CompletedProcess]) -> Callable[[dict], dict]:
+    """`pushed` keeping each head's stamp once read, for a poll that judges one head many times.
+
+    The stamp does not move while the head holds. A read that failed or found no entry is not
+    kept, so a later poll still asks. The log can record a push after the poll began.
+    """
+    found: dict[tuple, str] = {}
+
+    def read(pr: dict) -> dict:
+        where = (pr.get("headRepository") or {}).get("nameWithOwner")
+        key = (where, pr.get("headRefName"), pr.get("headRefOid"))
+        if key in found:
+            return {**pr, PUSHED_KEY: found[key]}
+        stamped = pushed(pr, rest)
+        if stamped[PUSHED_KEY]:
+            found[key] = stamped[PUSHED_KEY]
+        return stamped
+
+    return read
+
+
 def side_asked_on_head(pr: dict, body: str) -> bool:
     """Whether a request `body` was posted since the head was pushed, both stamps GitHub's own.
 

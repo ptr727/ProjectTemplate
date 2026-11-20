@@ -5114,7 +5114,7 @@ class TestCli(GqlCase):
         done = {**check(started=real_ago(900)), "completedAt": real_ago(600)}
         pr = self.into(payload([review(oid=OLD)], checks=[done]), attest=True)
         pr = {**pr, "headRefName": "feature", "headRepository": {"nameWithOwner": "o/r"}}
-        for logged, code in ((real_ago(10), 30), ("", 0)):
+        for logged, code, reads in ((real_ago(10), 30, 2), ("", 0, 3)):
             with self.subTest(logged=logged):
 
                 def rest(path: str, *_: object, logged: str = logged, **__: object) -> object:
@@ -5131,7 +5131,7 @@ class TestCli(GqlCase):
                 ):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
                 logs = [c for c in read.call_args_list if "/activity?" in c.args[0]]
-                self.assertEqual(2, len(logs), "the held poll's reads of one head, then full_read")
+                self.assertEqual(reads, len(logs), "a found stamp is kept, a miss asked again")
 
     def test_a_rate_limited_hosted_review_does_not_hold_an_attested_head(self) -> None:
         """The marker and both reply shapes end the wait, and the digest still reports the limit."""
@@ -8432,6 +8432,22 @@ class TestRegistrationGrace(unittest.TestCase):
                 got = pr_review_hold.hosted_grace(pushed, nodes)
                 assert got is not None
                 self.assertEqual(want, pr_review_hold.stamp(got[0]))
+
+    def test_the_push_log_keeps_a_found_stamp_and_asks_again_after_a_miss(self) -> None:
+        """A held poll reads one head many times, and the log can record its push mid-poll."""
+        answers = iter(
+            [
+                subprocess.CompletedProcess([], 1, "", "rate limited"),
+                subprocess.CompletedProcess([], 0, ago(30), ""),
+            ]
+        )
+        rest = mock.Mock(side_effect=lambda *_: next(answers))
+        read = pr_review.side.push_log(rest)
+        pr = {**payload([review()]), "headRefName": "feature"}
+        pr["headRepository"] = {"nameWithOwner": "o/r"}
+        got = [read(pr)[pr_review_hold.PUSHED_KEY] for _ in range(3)]
+        self.assertEqual(["", ago(30), ago(30)], got)
+        self.assertEqual(2, rest.call_count)
 
     def test_the_grace_is_open_until_its_end_and_noted_either_way(self) -> None:
         settled = {**check(started=ago(900)), "completedAt": ago(30)}
