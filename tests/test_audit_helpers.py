@@ -21,9 +21,11 @@ from collections.abc import Callable
 from typing import Any
 from unittest import mock
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "spec"))
 import audit
 import audit_markdown
+import validate
 import workflow_reuse
 from git_env import git_location_cleared
 
@@ -739,27 +741,31 @@ class CheckInterfaceCase(unittest.TestCase):
                     self.assertIn(want, message)
 
 
+def carried_contract(path: str) -> dict[str, Any]:
+    """The contract spec/files.json gives the carried interface unit at `path`."""
+    spec = json.loads((REPO_ROOT / "spec/files.json").read_text(encoding="utf-8"))
+    return next(
+        unit["contract"]
+        for units in spec.values()
+        if isinstance(units, list)
+        for unit in units
+        if isinstance(unit, dict) and unit.get("path") == path
+    )
+
+
 class ShippedPullRequestStubCase(unittest.TestCase):
     """Every pull request stub the hub ships passes the contract spec/files.json gives a carried one."""
 
     def test_shipped_stubs_meet_the_carried_contract(self) -> None:
-        root = pathlib.Path(__file__).resolve().parent.parent
-        spec = json.loads((root / "spec/files.json").read_text(encoding="utf-8"))
         path = ".github/workflows/test-pull-request.yml"
-        contract = next(
-            unit["contract"]
-            for units in spec.values()
-            if isinstance(units, list)
-            for unit in units
-            if isinstance(unit, dict) and unit.get("path") == path
-        )
+        contract = carried_contract(path)
         for stub in (
             path,
             "catalog/snippets/workflows/test-pull-request.yml",
             "catalog/snippets/workflows/test-pull-request-smoke.yml",
         ):
             with self.subTest(stub):
-                text = (root / stub).read_text(encoding="utf-8")
+                text = (REPO_ROOT / stub).read_text(encoding="utf-8")
                 self.assertEqual(audit.check_interface(stub, contract, text), [])
                 self.assertIn(PR_ONLY_EXPRESSION, text)
 
@@ -774,6 +780,65 @@ class ForbiddenTokenCase(unittest.TestCase):
         )
         contract = {"forbidTokensInJob": {"deploy": ["\n    environment:"]}}
         self.assertEqual(len(audit.check_interface("wf", contract, text)), 1)
+
+
+MERGE_BOT_STUB = (
+    "on:\n  pull_request_target:\n    types: [opened, closed{extra}]\n"
+    "jobs:\n  merge-bot:\n    uses: acme/hub/.github/workflows/merge-bot-task.yml@x\n"
+)
+REQUIRE_TOKENS_CONTRACT = {"requireTokens": ["auto_merge_disabled"]}
+
+
+class RequireTokensCase(unittest.TestCase):
+    """A `requireTokens` entry is read against the whole file's code, outside every job included."""
+
+    def test_a_subscribed_event_type_passes(self) -> None:
+        text = MERGE_BOT_STUB.format(extra=", auto_merge_disabled")
+        self.assertEqual(audit.check_interface("wf", REQUIRE_TOKENS_CONTRACT, text), [])
+
+    def test_a_missing_event_type_is_drift(self) -> None:
+        text = MERGE_BOT_STUB.format(extra="")
+        self.assertEqual(
+            audit.check_interface("wf", REQUIRE_TOKENS_CONTRACT, text),
+            [("DRIFT", "interface: wf missing required 'auto_merge_disabled'")],
+        )
+
+    def test_a_comment_naming_the_token_does_not_satisfy_it(self) -> None:
+        text = "# also auto_merge_disabled\n" + MERGE_BOT_STUB.format(extra="")
+        self.assertEqual(len(audit.check_interface("wf", REQUIRE_TOKENS_CONTRACT, text)), 1)
+
+    def test_shipped_merge_bot_stubs_meet_the_carried_contract(self) -> None:
+        path = ".github/workflows/merge-bot-pull-request.yml"
+        contract = carried_contract(path)
+        self.assertIn("auto_merge_disabled", contract["requireTokens"])
+        for stub in (path, "catalog/snippets/workflows/merge-bot-pull-request.yml"):
+            with self.subTest(stub):
+                text = (REPO_ROOT / stub).read_text(encoding="utf-8")
+                self.assertEqual(audit.check_interface(stub, contract, text), [])
+
+    def test_the_validator_refuses_a_single_string(self) -> None:
+        """A string would pass the audit unread, each of its characters found in any stub."""
+        path = ".github/workflows/merge-bot-pull-request.yml"
+        load = validate.load
+
+        def manifest_with_a_string(rel: str) -> Any:
+            data = load(rel)
+            if rel == "spec/files.json":
+                for unit in data["baseline"]:
+                    if unit.get("path") == path:
+                        unit["contract"]["requireTokens"] = "auto_merge_disabled"
+            return data
+
+        out = io.StringIO()
+        with (
+            mock.patch.object(validate, "load", side_effect=manifest_with_a_string),
+            contextlib.redirect_stdout(out),
+        ):
+            status = validate.main([])
+        self.assertEqual(status, 1)
+        self.assertIn(
+            f"files.json: {path} contract.requireTokens must be an array of strings", out.getvalue()
+        )
 
 
 class SplitJobsCase(unittest.TestCase):

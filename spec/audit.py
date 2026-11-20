@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import audit_contract
 import audit_pins
 import validate  # sibling, import-safe (its main is guarded)
 import yaml
@@ -1329,28 +1330,8 @@ def check_interface(path, contract, text):
                 f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
             )
         )
-    tok = contract.get("artifactNameToken")
-    if tok and tok not in code_view(root):
-        findings.append(
-            ("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff")
-        )
-    # An absent job is already a requiredJobKeys finding, so its tokens are not reported again.
-    for job, toks in contract.get("requireTokensInJob", {}).items():
-        if job in jobs:
-            view = f"  {job}:\n{code_view(jobs[job], 2)}"
-            for t in toks:
-                if t not in view:
-                    findings.append(
-                        ("DRIFT", f"interface: {path} job '{job}' missing required '{t}'")
-                    )
-    for job, toks in contract.get("forbidTokensInJob", {}).items():
-        if job in jobs:
-            view = f"  {job}:\n{code_view(jobs[job], 2)}"
-            for t in toks:
-                if t in view:
-                    findings.append(
-                        ("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}'")
-                    )
+    job_views = {job: f"  {job}:\n{code_view(node, 2)}" for job, node in jobs.items()}
+    findings += audit_contract.token_findings(path, contract, code_view(root), job_views)
     return findings
 
 

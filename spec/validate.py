@@ -235,6 +235,7 @@ CONTRACT_KEYS = {
     "requiredJobKeys",
     "requiredCheckName",
     "artifactNameToken",
+    "requireTokens",
     "requireTokensInJob",
     "forbidTokensInJob",
     "verbatimJobs",
@@ -2142,7 +2143,7 @@ def main(argv=()):
                         f"files.json: {path} contract has unknown key(s): {', '.join(sorted(unknown))}"
                     )
                 # The engine trusts these value types (CI runs no schema validation), so verify them here.
-                for k in ("requiredJobKeys", "verbatimJobs"):
+                for k in ("requiredJobKeys", "requireTokens", "verbatimJobs"):
                     if k in contract and not is_str_list(contract[k]):
                         errors.append(
                             f"files.json: {path} contract.{k} must be an array of strings"
