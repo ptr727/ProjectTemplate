@@ -4440,6 +4440,10 @@ class TestLexerDispatch(BaitCase):
             (".gitignore", "bash"),
             ("x.md", "markdown"),
             ("X.MD", "markdown"),
+            ("x.html.j2", "html+django"),
+            ("x.yaml.j2", "yaml+jinja"),
+            ("x.j2", "django"),
+            ("x.jinja2", "django"),
         ):
             with self.subTest(name=name):
                 self.assertEqual(lexer, prose_lint.lexer_name(Path(name), ""))
@@ -4479,6 +4483,10 @@ class TestLexerDispatch(BaitCase):
     def test_a_file_name_outranks_a_shebang(self) -> None:
         self.assertEqual("python", prose_lint.lexer_name(Path("x.py"), "#!/bin/bash"))
 
+    def test_a_template_suffix_outranks_a_shebang(self) -> None:
+        """A rendered script still holds template syntax, whose comments the shell lexer misreads."""
+        self.assertEqual("django", prose_lint.lexer_name(Path("run.sh.j2"), "#!/bin/bash"))
+
     def test_a_format_holding_no_comments_is_plain_without_a_note(self) -> None:
         """A lock file or a table has no comment syntax at all, so nothing is missing from it."""
         for name in ("data.lock", "data.csv", "notes.txt", "image.svg"):
@@ -4511,6 +4519,7 @@ class TestLexerDispatch(BaitCase):
             *files["suffix"].values(),
             *files["name"].values(),
             *files["runner"].values(),
+            *files["template"].values(),
             files["extensionless"],
         ]
         for lexer in named:
@@ -5175,6 +5184,89 @@ class TestMarkupLanguage(BaitCase):
         """A comment opening on no marker the language declares belongs to an embedded language."""
         text = "<script>\n// Two things. Here.\n</script>\n<style>/* Two things. Here. */</style>\n"
         self.assertEqual([], self.flag("a.html", text))
+
+
+class TestJinjaLanguage(BaitCase):
+    """Jinja templates, whose `{# ... #}` comments are read and whose markup and expressions are not.
+
+    Pygments names a lexer for a template whose inner suffix it knows, such as `.html.j2`.
+    A bare `.j2` has none, so the data file names one.
+    """
+
+    TEMPLATES = ("a.j2", "a.jinja2", "a.html.j2", "a.xml.j2", "a.yaml.j2")
+
+    def test_two_sentences_on_one_comment_line_are_a_violation(self) -> None:
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                text = f"{{{{ value }}}}\n{{# {self.BAIT} #}}\n"
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+    def test_a_sentence_over_the_cap_is_a_violation(self) -> None:
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                text = f"{{% if value %}}\n{{# {self.over().capitalize()} #}}\n{{% endif %}}\n"
+                self.assertEqual([(2, "sentence-length")], self.found(text, name))
+
+    def test_a_sentence_at_the_cap_is_clean(self) -> None:
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                self.assertEqual([], self.found(f"{{# {self.at_cap().capitalize()} #}}\n", name))
+
+    def test_a_wrapped_comment_sentence_is_a_violation(self) -> None:
+        text = "{# The page draws each section on its own, and a reader opens\n   only one. #}\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.html.j2", text))
+
+    def test_a_whitespace_control_marker_is_not_comment_text(self) -> None:
+        """A `-` trims the whitespace beside its tag, on either end or both."""
+        for opener, closer in (("{#-", "-#}"), ("{#-", "#}"), ("{#", "-#}")):
+            with self.subTest(opener=opener, closer=closer):
+                clean = f"{opener} The value is read once. {closer}\n"
+                found = self.comments("a.j2", clean)
+                self.assertEqual([(1, "The value is read once.", True)], found)
+                bait = f"{opener} {self.BAIT} {closer}\n"
+                self.assertEqual(["comment-wrap"], self.flag("a.j2", bait))
+
+    def test_markup_and_expressions_raise_nothing(self) -> None:
+        """Only a comment is prose, so text that would fail as one passes as markup or code."""
+        text = (
+            f"<p>{{{{ {self.BAIT} }}}}</p>\n"
+            f"{{% set note = '{self.BAIT} {self.over()}' %}}\n"
+            f"<div>{{% if a; b %}}{self.BAIT} {self.over()} - x{{% endif %}}</div>\n"
+        )
+        rules = set(prose_lint.DEFAULT_RULES) - {"comment-added"}
+        for name in self.TEMPLATES:
+            with self.subTest(file=name):
+                self.assertEqual([], self.kinds(text, rules, name=name))
+
+    def test_an_html_comment_in_an_html_template_is_still_read(self) -> None:
+        text = f"<p>{{{{ value }}}}</p><!-- {self.BAIT} -->\n"
+        self.assertEqual(["comment-wrap"], self.flag("a.html.j2", text))
+
+    def test_the_gate_fails_a_template_comment_at_a_commit_and_against_a_base(self) -> None:
+        """The commit hook diffs against what the commit adds to, and CI against the base branch."""
+        root = self.tmp / "repo"
+        git_as_gate(self.tmp, "init", "-q", "-b", "develop", str(root))
+        (root / "base.txt").write_text("base\n", encoding="utf-8")
+        git_as_gate(root, "add", "base.txt")
+        git_as_gate(root, "commit", "-qm", "base")
+        base = git_as_gate(root, "rev-parse", "HEAD")
+        page = root / "page.html.j2"
+        page.write_text(f"<p>{{{{ value }}}}</p>\n{{# {self.BAIT} #}}\n", encoding="utf-8")
+        git_as_gate(root, "add", "page.html.j2")
+        for flags, commit in ((["--diff-commit"], True), (["--diff", base], False)):
+            with self.subTest(flags=flags):
+                out, err = io.StringIO(), io.StringIO()
+                with (
+                    contextlib.chdir(root),
+                    contextlib.redirect_stdout(out),
+                    contextlib.redirect_stderr(err),
+                ):
+                    status = prose_lint.main(["--check", "comment-wrap", *flags, "--", str(page)])
+                said = out.getvalue() + err.getvalue()
+                self.assertEqual(1, status, said)
+                self.assertIn("comment-wrap", said)
+            if commit:
+                git_as_gate(root, "commit", "-qm", "page")
 
 
 class TestIniLanguage(BaitCase):
