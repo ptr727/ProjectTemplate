@@ -260,17 +260,15 @@ from pr_review_checks import (
     CHECK_STALL,
     CHECKS_WINDOW,
     WORKFLOW_KEYS_UNAVAILABLE,
-    _unmet_note,
     check_nodes,
     checks_never_ran,
     checks_settling,
     checks_stuck,
     held_checks_open,
-    hosted_reviews_running,
-    runs_open,
 )
 from pr_review_copilot import has_prose
 from pr_review_digest import digest_refusal, render
+from pr_review_hold import grace_note, grace_open, pending_line
 from pr_review_payload import POLICY_KEY, page_files, page_reviews
 from pr_review_rounds import (
     ACK_MARKER,
@@ -404,7 +402,7 @@ HELD_FIELDS = """
     commits(last:1){ nodes{ commit{ oid statusCheckRollup{ state
       contexts(first:__CHECKS_WINDOW__){ pageInfo{ hasNextPage } nodes{
         __typename
-        ... on CheckRun{ name status conclusion startedAt isRequired(pullRequestNumber:$n)
+        ... on CheckRun{ name status conclusion startedAt completedAt isRequired(pullRequestNumber:$n)
           checkSuite{ databaseId status app{ slug databaseId } workflowRun{ databaseId workflow{ databaseId } } } }
         ... on StatusContext{ context state createdAt isRequired(pullRequestNumber:$n) creator{ login } }
       }}}
@@ -1632,7 +1630,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "note: the newest Copilot review is an error refusal whose run log names a "
                 f"transient fetch failure, so this is its one re-request: {retry}"
             )
-    polls = False
+    polls, regrace = False, None
     if checks_hold:
         print(side.checks_note(checks_hold))
     elif recorded is False:
@@ -1662,33 +1660,38 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
             "still move its merge."
         )
 
-        def still_held(polled: dict) -> bool:
+        def still_held(polled: dict, registration: bool = False) -> bool:
+            """The held poll's test, the grace judged only after the asks, since an ask moves it."""
             return (
                 holds(polled)
                 and local_cover(polled)
                 and not open_on_head(owner, repo, a.number, polled)
-                and held_checks_open(
-                    polled,
-                    check_nodes(polled),
-                    datetime.now(UTC),
-                    a.check_grace,
-                    a.check_stall,
-                    required_for(polled, owner, repo),
+                and (
+                    held_checks_open(
+                        polled,
+                        nodes := check_nodes(polled),
+                        now := datetime.now(UTC),
+                        a.check_grace,
+                        a.check_stall,
+                        required_for(polled, owner, repo),
+                    )
+                    or (registration and grace_open(polled, nodes, now) is not None)
                 )
             )
 
         assert snapshot is not None
         last_full = [snapshot]
 
-        def held_read() -> dict:
+        def held_read(keep: Callable[[dict], bool] = still_held) -> dict:
             polled = gql(Q_HELD, owner, repo, a.number)
-            if still_held(polled):
+            if keep(polled):
                 return polled
             last_full[0] = gql(Q_FULL, owner, repo, a.number)
             return last_full[0]
 
         polled = backoff(last_full[0], held_read, still_held, start, a.timeout)
         final = polled if polled is last_full[0] else None
+        regrace = functools.partial(still_held, registration=True)
     elif stopped and not reviewer_requested(pr):
         print(
             "note: this pull request's newest Copilot review is a refusal naming the account "
@@ -1720,7 +1723,11 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         live = functools.partial(live_state, owner, repo, a.number, a.min_rounds)
         backoff((done, answer, drift), live, lambda s: not any(s), start, a.timeout)
 
-    ask("after-checks", await_green if polls else None)
+    sent = ask("after-checks", await_green if polls else None)
+    if regrace is not None:
+        reread = functools.partial(held_read, regrace)
+        polled = backoff(reread() if sent else polled, reread, regrace, start, a.timeout)
+        final = polled if polled is last_full[0] else None
     # One payload decides the digest and the exit code together, and the digest also prints at the timeout.
     final = full_read(owner, repo, a.number, None if polls else final)
     if not is_open(final):
@@ -1768,26 +1775,11 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "check clears: dispose of each one, then wait again"
             )
             return 46
-        runs = runs_open(final)
-        hosted = hosted_reviews_running(final, checks, now, a.check_grace, a.check_stall)
-        if covered and held_checks_open(
-            final,
-            checks,
-            now,
-            a.check_grace,
-            a.check_stall,
-            required_for(final, owner, repo),
+        windows = (now, a.check_grace, a.check_stall, required_for(final, owner, repo))
+        if covered and (
+            held_checks_open(final, checks, *windows) or grace_open(final, checks, now)
         ):
-            print(
-                "status=CHECKS_PENDING an attested local pass covers this head, and by the "
-                "timeout a check had not concluded, none this can read had posted, a workflow run on the head "
-                "had not completed, a hosted reviewer was still reviewing it, a check the base "
-                "branch requires had not registered or came from another app, or the merge was "
-                "still UNKNOWN, so the merge is not ready yet: wait again, or read the checks above"
-                + _unmet_note(final, required_for(final, owner, repo), checks)
-                + (f" (not completed: {', '.join(runs)})" if runs else "")
-                + (f" (reviewing: {', '.join(hosted)})" if hosted else "")
-            )
+            print(pending_line(final, checks, *windows))
             return 30
         # The rollup carries checks no ruleset requires, and CLEAN proves no gate is outstanding.
         gates = [n.get("name") or "unnamed" for n, _ in stuck if n.get("required")]
@@ -1814,6 +1806,8 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                 "not ready to merge"
             )
             return 45
+        if note := grace_note(final, checks, now):
+            print(note)
         return 0
     # Every refusal and quota state is 41, the kind named by its status line.
     refusal = refusing_review(final)

@@ -84,9 +84,9 @@ def check_nodes(pr: dict) -> list[dict]:
     """The head commit's checks, each a dict with `name`, `state`, `conclusion`, and `since`.
 
     A readable node also carries `required`, false only where the rollup marks `isRequired: false`,
-    and `poster`, the app or login that posted it. A CheckRun carries `app_id`, matched against a
-    rule's `integration_id`. A node of an unrecognized union member has empty values and an
-    `unreadable` key naming its type.
+    and `poster`, the app or login that posted it. It carries `done` too, when it settled, empty
+    until it has. A CheckRun carries `app_id`, matched against a rule's `integration_id`. A node of an unrecognized
+    union member has empty values and an `unreadable` key naming its type.
 
     A CheckRun and a StatusContext spell every field differently, so both are normalized here. Runs
     group by workflow and name, or by app and name where the suite has no workflow run. An
@@ -96,7 +96,8 @@ def check_nodes(pr: dict) -> list[dict]:
 
     A finished check only an older suite carries is marked `superseded`, with `newer_run`, while
     the workflow's newest suite has not completed. The reason is that a cancelled run's
-    aggregator fails over jobs nobody waits on. The head commit's own suites count toward the newest one as well.
+    aggregator fails over jobs nobody waits on. The head commit's own suites count toward the
+    newest one as well.
 
     Every CheckRun carries `run`, its workflow run's id. One still `IN_PROGRESS` whose suite has
     completed is marked `stale`, and counts as finished for superseding, since its run is over.
@@ -142,6 +143,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "required": n.get("isRequired") is not False,
                     "app_id": (suite.get("app") or {}).get("databaseId"),
                     "poster": (suite.get("app") or {}).get("slug") or "",
+                    "done": n.get("completedAt") or "",
                     "stale": n.get("status") == "IN_PROGRESS"
                     and suite.get("status") == "COMPLETED",
                     "run": (suite.get("workflowRun") or {}).get("databaseId"),
@@ -156,6 +158,7 @@ def check_nodes(pr: dict) -> list[dict]:
                     "state": "IN_PROGRESS" if state == "PENDING" else state,
                     "conclusion": state,
                     "since": n.get("createdAt") or "",
+                    "done": "" if state in ("PENDING", *NOT_POSTED) else n.get("createdAt") or "",
                     "required": n.get("isRequired") is not False,
                     "poster": (n.get("creator") or {}).get("login") or "",
                 }
@@ -310,16 +313,15 @@ def held_checks_open(
     """True where a covered head's checks can still move its merge, so a held wait polls on.
 
     A BLOCKED merge with a stuck required check has its exit 44 decided already. A check running
-    long or gated is the exception, since either can still clear. Short of that, a workflow run on the
-    head that has not completed holds, a gated one included. A run's later jobs enter the rollup
+    long or gated is the exception, since either can still clear. Short of that, a workflow run on
+    the head that has not completed holds, a gated one included. A run's later jobs enter the rollup
     only as their `needs:` finish, so a green rollup proves nothing while one is open. A hosted
-    reviewer's check that has neither passed nor failed holds next, a stuck one included, since
-    its findings owe the gate. A CLEAN,
-    UNSTABLE, or HAS_HOOKS merge has no required check outstanding, so an unrequired check does not
-    hold it. Otherwise a required check still settling holds, as does any settling check while no
-    required check has posted. A rollup with no check it can read holds while the merge
-    reads BLOCKED, BEHIND, or DRAFT. An UNKNOWN merge holds whatever the rollup carries, and a pull
-    request no longer open holds nothing.
+    reviewer's check that has neither passed nor failed holds next, a stuck one included, since its
+    findings owe the gate. A CLEAN, UNSTABLE, or HAS_HOOKS merge has no required check outstanding,
+    so an unrequired check does not hold it. Otherwise a required check still settling holds, as
+    does any settling check while no required check has posted. A rollup with no check it can read
+    holds while the merge reads BLOCKED, BEHIND, or DRAFT. An UNKNOWN merge holds whatever the
+    rollup carries, and a pull request no longer open holds nothing.
 
     A BLOCKED merge also holds while a context the base branch requires is unmet, which `required`
     carries as (context, integration id) pairs. An empty `required` holds nothing.
@@ -419,13 +421,6 @@ def required_unregistered(
             )
         }
     )
-
-
-def _unmet_note(pr: dict, required: frozenset[tuple[str, int | None]], nodes: list[dict]) -> str:
-    """Names the required contexts still unmet, so a reader sees what the hold waits on."""
-    unmet = required_unregistered(pr, nodes, required)
-    where = ", which may sit in the rollup's unread part" if checks_unread(nodes) else ""
-    return f" (required, unmet: {', '.join(unmet)}{where})" if unmet else ""
 
 
 def checks_truncated(pr: dict) -> bool:
