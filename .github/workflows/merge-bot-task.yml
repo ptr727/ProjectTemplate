@@ -200,29 +200,30 @@ jobs:
                 headRefOid
                 baseRef { target { oid } }
                 autoMergeRequest { enabledAt }
-                headRef { target { ... on Commit { committedDate author { user { login } } } } }
+                headRef { target { ... on Commit { committedDate } } }
                 timelineItems(last: 20, itemTypes: [AUTO_MERGE_DISABLED_EVENT]) {
                   nodes { ... on AutoMergeDisabledEvent { createdAt reason reasonCode disabler { login } } }
-                }
-                pushes: timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
-                  nodes { ... on HeadRefForcePushedEvent { actor { __typename login } afterCommit { oid } } }
                 }
               }
             }
           }'
           # A read retries, so one transient API error does not fail a run that has seen nothing wrong.
-          read_pr() {
-            local attempt out
+          read_api() {
+            local what=$1 attempt
+            shift
             for attempt in 1 2 3; do
-              if out=$(gh api graphql -f query="$query" -f owner="${REPO%%/*}" -f name="${REPO#*/}" -F number="$NUMBER" --jq .data.repository.pullRequest); then
-                pr=$out
+              if out=$("$@"); then
                 return 0
               fi
-              echo "::warning::Reading the pull request failed on attempt $attempt"
+              echo "::warning::Reading $what failed on attempt $attempt"
               sleep "$POLL_SECONDS"
             done
-            echo "::error::Reading the pull request failed three times, so the disable is unanswered"
+            echo "::error::Reading $what failed three times, so the disable is unanswered"
             exit 1
+          }
+          read_pr() {
+            read_api "the pull request" gh api graphql -f query="$query" -f owner="${REPO%%/*}" -f name="${REPO#*/}" -F number="$NUMBER" --jq .data.repository.pullRequest
+            pr=$out
           }
           # Read again before acting, since a close, an arming, or a push can land while the settle waits.
           check_pr() {
@@ -246,13 +247,19 @@ jobs:
               echo "::notice::$disabler disabled auto-merge, so it stays off: $reason"
               exit 0
             fi
-            # The maintainer-push job also disables under the App, so the head has to be the bot's own.
-            # An amend or rebase keeps the bot as author, so a force push onto this head must also be the bot's.
-            if [[ $(jq -r --arg author "$PR_AUTHOR" '.headRefOid as $head
-              | (.headRef.target.author.user.login // "") == $author
-                and ([.pushes.nodes[] | select(.afterCommit.oid == $head)
-                      | select(.actor.__typename != "Bot" or ((.actor.login // "") + "[bot]") != $author)] | length) == 0' <<<"$pr") != true ]]; then
-              echo "::notice::The head is not the bot's own push, so auto-merge stays off: $reason"
+            # The maintainer-push job also disables under the App, so the push that made the head has to be the bot's own.
+            # The branch activity names the pusher of a fast-forward and a force push alike, where a cherry-pick or a rebase keeps the bot as author.
+            local head pusher
+            head=$(jq -r .headRefOid <<<"$pr")
+            read_api "the head branch activity" gh api -X GET "repos/$REPO/activity" -f ref="refs/heads/$HEAD_REF" -F per_page=30
+            pusher=$(jq -r --arg head "$head" 'first(.[] | select(.after == $head) | .actor.login // "") // ""' <<<"$out")
+            # A head with no recorded push fails rather than passing as a person's, for the same reason as an unreadable disable.
+            if [[ -z "$pusher" ]]; then
+              echo "::error::No push of the head is recorded, so the disable is unanswered: $reason"
+              exit 1
+            fi
+            if [[ "$pusher" != "$PR_AUTHOR" ]]; then
+              echo "::notice::$pusher pushed the head rather than the bot, so auto-merge stays off: $reason"
               exit 0
             fi
           }
@@ -301,6 +308,7 @@ jobs:
           NUMBER: ${{ github.event.pull_request.number }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
           # The App that minted the arming token, which a caller's app-login input need not name.
           APP_BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
           SETTLE_SECONDS: 60
