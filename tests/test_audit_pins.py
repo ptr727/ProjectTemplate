@@ -218,6 +218,19 @@ class PinAgeReadsCase(unittest.TestCase):
         entry = {"name": "Widget", "driftNotes": list(notes)}
         return audit_pins.pin_age_findings(entry, HUB, tree, lambda _: text, read, {}, NOW)
 
+    def test_an_unparsed_workflow_is_drift_unless_the_baseline_read_it(self) -> None:
+        path = ".github/workflows/test.yml"
+        entry: dict[str, Any] = {"name": "Widget"}
+        bad = "jobs:\n  - [\n"
+        read = self.reader([], [])
+        outside = audit_pins.pin_age_findings(entry, HUB, {path}, lambda _: bad, read, {}, NOW)
+        self.assertEqual([k for k, _ in outside], ["DRIFT"])
+        content: dict[str, str | None] = {path: bad}
+        baseline = audit_pins.pin_age_findings(
+            entry, HUB, {path}, lambda _: None, read, content, NOW
+        )
+        self.assertEqual(baseline, [])
+
     def test_a_workflow_the_baseline_read_is_not_read_again(self) -> None:
         read = self.reader([[self.release("1.0.1", 60), self.release("1.0.3", 40)]], [])
         path = ".github/workflows/test.yml"
