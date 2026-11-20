@@ -50,7 +50,7 @@ jobs:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
     # Dependabot PRs from this repo rather than from forks.
-    # Only on opened or reopened, so the disable job stays sticky.
+    # Only on opened or reopened, so a maintainer push's disable holds until the bot itself pushes again.
     if: >-
       (github.event.action == 'opened' || github.event.action == 'reopened') &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
@@ -86,14 +86,20 @@ jobs:
   merge-app:
     name: Merge App pull request job
     runs-on: ubuntu-latest
-    # App PRs from this repo, on opened or reopened so the disable job stays sticky.
+    # App PRs from this repo, arming on opened or reopened, so a maintainer push's disable holds until the bot itself pushes again.
+    # The bot's own push only resolves the rule, so the watch re-arms no head the rules leave unmerged.
     # Which head and base pairs merge is data: the built-in codegen and upstream-version pairs plus the caller's rules.
     if: >-
-      (github.event.action == 'opened' || github.event.action == 'reopened') &&
+      (
+        github.event.action == 'opened' ||
+        github.event.action == 'reopened' ||
+        (github.event.action == 'synchronize' && github.actor == github.event.pull_request.user.login)
+      ) &&
       github.event.pull_request.user.login == inputs.app-login &&
       github.event.pull_request.head.repo.full_name == github.repository
     outputs:
       armed: ${{ steps.merge.outputs.armed }}
+      matched: ${{ steps.rule.outputs.matched }}
 
     steps:
 
@@ -121,19 +127,22 @@ jobs:
                     | select((.head // "") == $head or ((."head-prefix" // "") as $p | $p != "" and ($head | startswith($p)))))
               | length > 0
             end' <<<"$builtin")
-          if [[ "$HEAD_REF" == no-auto-merge-* ]]; then
+          if [[ "$EVENT_ACTION" == synchronize ]]; then
+            :
+          elif [[ "$HEAD_REF" == no-auto-merge-* ]]; then
             echo "::warning::App pull request $HEAD_REF -> $BASE_REF carries the no-auto-merge- marker, not auto-merging"
           elif [[ "$matched" != "true" ]]; then
             echo "::warning::App pull request $HEAD_REF -> $BASE_REF matches no merge rule, not auto-merging"
           fi
           echo "matched=$matched" >>"$GITHUB_OUTPUT"
         env:
+          EVENT_ACTION: ${{ github.event.action }}
           RULES: ${{ inputs.rules }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
 
       - name: Generate GitHub App token step
-        if: ${{ steps.rule.outputs.matched == 'true' }}
+        if: ${{ steps.rule.outputs.matched == 'true' && github.event.action != 'synchronize' }}
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -141,7 +150,7 @@ jobs:
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
       - name: Merge pull request step
-        if: ${{ steps.rule.outputs.matched == 'true' }}
+        if: ${{ steps.rule.outputs.matched == 'true' && github.event.action != 'synchronize' }}
         id: merge
         run: |
           set -Eeuo pipefail
@@ -175,7 +184,7 @@ jobs:
           github.event.pull_request.head.repo.full_name == github.repository &&
           (
             github.event.pull_request.user.login == 'dependabot[bot]' ||
-            github.event.pull_request.user.login == inputs.app-login
+            needs.merge-app.outputs.matched == 'true'
           ) &&
           github.actor == github.event.pull_request.user.login
         )
@@ -224,8 +233,9 @@ jobs:
             exit 1
           }
           arm() {
-            if ! gh pr merge --auto "$MERGE_METHOD" "$PR_URL"; then
-              echo "::error::Re-arming auto-merge failed after GitHub disabled it: $reason"
+            # The head pin keeps a push landing after the last read from being armed in the bot's place.
+            if ! gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"; then
+              echo "::error::Re-arming auto-merge with method '$MERGE_METHOD' failed: $reason"
               exit 1
             fi
           }
@@ -325,7 +335,6 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           EVENT_ACTION: ${{ github.event.action }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
           # The App that minted the arming token, which a caller's app-login input need not name.
           APP_BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
           WATCH_MINUTES: 30
