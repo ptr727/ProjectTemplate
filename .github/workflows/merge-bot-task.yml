@@ -40,6 +40,10 @@ on:
       CODEGEN_APP_PRIVATE_KEY:
         required: true
 
+# One mapping from base to merge method for every job that arms auto-merge, empty for a base no ruleset here covers.
+env:
+  MERGE_METHOD: ${{ github.event.pull_request.base.ref == 'develop' && '--squash' || github.event.pull_request.base.ref == 'main' && '--merge' || '' }}
+
 jobs:
 
   merge-dependabot:
@@ -68,15 +72,11 @@ jobs:
         id: merge
         run: |
           set -Eeuo pipefail
-          case "$BASE_REF" in
-            develop) method=--squash ;;
-            main) method=--merge ;;
-            *)
-              echo "::error::Unsupported base branch: $BASE_REF"
-              exit 1
-              ;;
-          esac
-          gh pr merge --auto "$method" "$PR_URL"
+          if [[ -z "$MERGE_METHOD" ]]; then
+            echo "::error::Unsupported base branch: $BASE_REF"
+            exit 1
+          fi
+          gh pr merge --auto "$MERGE_METHOD" "$PR_URL"
           echo "armed=true" >>"$GITHUB_OUTPUT"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -145,15 +145,11 @@ jobs:
         id: merge
         run: |
           set -Eeuo pipefail
-          case "$BASE_REF" in
-            develop) method=--squash ;;
-            main) method=--merge ;;
-            *)
-              echo "::error::Unsupported base branch: $BASE_REF"
-              exit 1
-              ;;
-          esac
-          gh pr merge --auto "$method" "$PR_URL"
+          if [[ -z "$MERGE_METHOD" ]]; then
+            echo "::error::Unsupported base branch: $BASE_REF"
+            exit 1
+          fi
+          gh pr merge --auto "$MERGE_METHOD" "$PR_URL"
           echo "armed=true" >>"$GITHUB_OUTPUT"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
@@ -164,7 +160,7 @@ jobs:
     name: Watch auto-merge job
     runs-on: ubuntu-latest
     needs: [merge-dependabot, merge-app]
-    # Runs after this run armed auto-merge, or after the bot's own push while it is armed, since a bot rebase ends an earlier watch.
+    # Runs after this run armed auto-merge, or after the bot's own push, since a bot rebase ends an earlier watch.
     # A merge GitHub refuses, such as one writing workflow content the App may not write, disables auto-merge with every check green.
     # That disable is re-armed once the base settles, and a second one, or a window ending with no merge, fails this job.
     # The watch holds the caller's per-PR concurrency group, so it ends on any head push and the queued run for that push takes over.
@@ -204,7 +200,6 @@ jobs:
               pullRequest(number: $number) {
                 state
                 headRefOid
-                baseRefName
                 baseRef { target { oid } }
                 autoMergeRequest { enabledAt }
                 timelineItems(last: 1, itemTypes: [AUTO_MERGE_DISABLED_EVENT]) {
@@ -228,16 +223,11 @@ jobs:
             exit 1
           }
           arm() {
-            local method
-            case "$1" in
-              develop) method=--squash ;;
-              main) method=--merge ;;
-              *)
-                echo "::error::Unsupported base branch: $1"
-                exit 1
-                ;;
-            esac
-            if ! gh pr merge --auto "$method" "$PR_URL"; then
+            if [[ -z "$MERGE_METHOD" ]]; then
+              echo "::error::Unsupported base branch: $BASE_REF"
+              exit 1
+            fi
+            if ! gh pr merge --auto "$MERGE_METHOD" "$PR_URL"; then
               echo "::error::Re-arming auto-merge failed after GitHub disabled it: $reason"
               exit 1
             fi
@@ -267,7 +257,8 @@ jobs:
           handled=""
           reason=""
           read_pr
-          if [[ "$EVENT_ACTION" == synchronize && $(jq -r '.autoMergeRequest == null' <<<"$pr") == true ]]; then
+          # A disable the App is recorded for stays this run's to re-arm, since the watch that saw it ended when this push moved the head.
+          if [[ "$EVENT_ACTION" == synchronize && $(jq -r --arg app "$APP_LOGIN" '.autoMergeRequest == null and (.timelineItems.nodes[0].disabler.login // "") != $app' <<<"$pr") == true ]]; then
             echo "Auto-merge is not armed on this head, so there is nothing to watch"
             exit 0
           fi
@@ -282,14 +273,15 @@ jobs:
                 exit 0
                 ;;
             esac
+            # The disable already re-armed can still read as current just after the re-arm, so only a newer one counts.
+            disabled=$(jq -r --arg handled "$handled" '.autoMergeRequest == null and ($handled == "" or (.timelineItems.nodes[0].createdAt // "") != $handled)' <<<"$pr")
+            disabler=$(jq -r '.timelineItems.nodes[0].disabler.login // ""' <<<"$pr")
+            reason=$(jq -r '.timelineItems.nodes[0] | "\(.reason // "no reason given") (\(.reasonCode // "no reason code"))"' <<<"$pr")
             if [[ $(jq -r .headRefOid <<<"$pr") != "$HEAD_SHA" ]]; then
               echo "::notice::The head moved past $HEAD_SHA, so the run for that push takes over"
               exit 0
             fi
-            # The disable already re-armed can still read as current just after the re-arm, so only a newer one counts.
-            if [[ $(jq -r --arg handled "$handled" '.autoMergeRequest == null and ($handled == "" or (.timelineItems.nodes[0].createdAt // "") != $handled)' <<<"$pr") == true ]]; then
-              disabler=$(jq -r '.timelineItems.nodes[0].disabler.login // ""' <<<"$pr")
-              reason=$(jq -r '.timelineItems.nodes[0] | "\(.reason // "no reason given") (\(.reasonCode // "no reason code"))"' <<<"$pr")
+            if [[ "$disabled" == true ]]; then
               # An unreadable disable fails rather than passing as someone else's, which would hide the stall this job exists to show.
               if [[ -z "$disabler" ]]; then
                 echo "::error::Auto-merge was disabled and the disable event could not be read"
@@ -305,13 +297,14 @@ jobs:
                 exit 1
               fi
               echo "::warning::GitHub disabled auto-merge, re-arming once the base settles: $reason"
-              handled=$(jq -r '.timelineItems.nodes[0].createdAt' <<<"$pr")
+              disabled_at=$(jq -r '.timelineItems.nodes[0].createdAt' <<<"$pr")
               settle_base
               read_pr
               # Anything else that changed during the settle is read by the checks at the top of the loop.
               if [[ $(jq -r --arg head "$HEAD_SHA" '.state == "OPEN" and .headRefOid == $head and .autoMergeRequest == null' <<<"$pr") == true ]]; then
-                arm "$(jq -r .baseRefName <<<"$pr")"
+                arm
                 rearmed=true
+                handled=$disabled_at
               fi
               sleep "$POLL_SECONDS"
               read_pr
@@ -330,6 +323,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           EVENT_ACTION: ${{ github.event.action }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           APP_LOGIN: ${{ inputs.app-login }}
           WATCH_MINUTES: 30
           SETTLE_SECONDS: 60
