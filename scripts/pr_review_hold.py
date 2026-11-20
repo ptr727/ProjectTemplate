@@ -49,16 +49,24 @@ def side_asks(pr: dict, body: str) -> list[dict]:
     return sorted(asks, key=lambda n: n.get("createdAt") or "")
 
 
-def head_arrived(pr: dict) -> str:
-    """When the head reached the pull request, read as its earliest check suite's creation.
+PUSHED_KEY = "_headPushedAt"
 
-    GitHub creates a head's suites at the push, so a commit's own older timestamp never stands in.
-    Empty while no suite exists yet, which every reader here takes as a head that just arrived.
+
+def head_arrived(pr: dict) -> str:
+    """When the head reached the pull request, the later of its push and its earliest suite.
+
+    The push is the log's newest one ending at the head, where a stamp is attached. So a push back
+    to a commit checked before reads as that push. A suite is created at the push, or at the
+    opening where only the pull request runs checks. So it is never earlier than the arrival it
+    marks. A commit's own older timestamp never stands in. Empty while neither exists yet, which
+    every reader here takes as a head that just arrived.
     """
     suites = (head_commit(pr).get("checkSuites") or {}).get("nodes") or []
     stamps = [n["createdAt"] for n in suites if n.get("createdAt")]
     stamps += [n["since"] for n in check_nodes(pr) if n.get("since")]
-    return min(stamps) if stamps else ""
+    first, pushed = (min(stamps) if stamps else ""), pr.get(PUSHED_KEY) or ""
+    known = [(at, s) for s in (first, pushed) if (at := utc_instant(s)) is not None]
+    return max(known)[1] if known else first
 
 
 def hosted_check(node: dict) -> bool:
@@ -87,14 +95,15 @@ def hosted_grace(pr: dict, nodes: list[dict]) -> tuple[datetime, datetime] | Non
     its conclusion never restarts the window. None where nothing anchors it. None also where a
     CodeRabbit or Qodo check that did not conclude SKIPPED began at or after the newest ask. Its
     own hold then decides. One older than the ask answers an earlier request, so it ends
-    nothing. A SKIPPED one is the reviewer declining an automatic review, which an ask can follow.
+    nothing. Nor does one whose start is unread, since nothing shows it answering the ask. A
+    SKIPPED one is the reviewer declining an automatic review, which an ask can follow.
     """
     asks = [n.get("createdAt") or "" for body in ASK_BODIES for n in side_asks(pr, body)]
     newest = max((a for a in map(utc_instant, asks) if a is not None), default=None)
 
     def since_ask(node: dict) -> bool:
         since = utc_instant(node.get("since") or "")
-        return newest is None or since is None or since >= newest
+        return newest is None or (since is not None and since >= newest)
 
     if any(
         reviewer_check(n, vocab, login)

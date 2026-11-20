@@ -25,7 +25,7 @@ from pr_review_checks import (
     runs_open,
     utc_instant,
 )
-from pr_review_hold import head_arrived, hosted_check, side_asks, side_command
+from pr_review_hold import PUSHED_KEY, head_arrived, hosted_check, side_asks, side_command
 from pr_review_payload import bot_entry, default_branch
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -39,7 +39,6 @@ from pr_review_rounds import (
 
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
-PUSHED_KEY = "_headPushedAt"
 PUSHED_JQ = 'map(select(.after == "{}") | .timestamp) | max // empty'
 
 
@@ -82,6 +81,27 @@ def pushed(pr: dict, rest: Callable[[str, str], CompletedProcess]) -> dict:
     query = urllib.parse.urlencode({"ref": f"refs/heads/{branch}", "per_page": 100})
     proc = rest(f"repos/{where}/activity?{query}", PUSHED_JQ.format(head)) if placed else None
     return {**pr, PUSHED_KEY: proc.stdout.strip() if proc and proc.returncode == 0 else ""}
+
+
+def push_log(rest: Callable[[str, str], CompletedProcess]) -> Callable[[dict], dict]:
+    """`pushed` keeping each head's stamp once read, for a poll that judges one head many times.
+
+    The stamp does not move while the head holds. A read that failed or found no entry is not
+    kept, so a later poll still asks. The log can record a push after the poll began.
+    """
+    found: dict[tuple, str] = {}
+
+    def read(pr: dict) -> dict:
+        where = (pr.get("headRepository") or {}).get("nameWithOwner")
+        key = (where, pr.get("headRefName"), pr.get("headRefOid"))
+        if key in found:
+            return {**pr, PUSHED_KEY: found[key]}
+        stamped = pushed(pr, rest)
+        if stamped[PUSHED_KEY]:
+            found[key] = stamped[PUSHED_KEY]
+        return stamped
+
+    return read
 
 
 def side_asked_on_head(pr: dict, body: str) -> bool:
