@@ -774,7 +774,7 @@ def run_log_reading(state: str, line: str) -> str:
 
 
 def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
-    """The full payload with its changed files paged, read again while that list is unread."""
+    """The full payload with its files paged, re-read while they are unread, and its push stamp."""
 
     def read(held: dict | None = None) -> dict:
         fresh = gql(Q_FULL, owner, repo, num) if held is None else held
@@ -782,7 +782,7 @@ def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
         return fresh
 
     pr = backoff(read(pr), read, files_unread, delays=READ_RETRY_DELAYS)
-    return promotion.attach(pr, owner, repo, num, follow)
+    return promotion.attach(side.pushed(pr, gh_rest), owner, repo, num, follow)
 
 
 def reread_json(path: str, jq: str) -> object:
@@ -1608,7 +1608,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
     await_green = functools.partial(side.await_green, read_held, start, a, backoff)
     send = functools.partial(gh_graphql, M_COMMENT, subjectId=pr["id"])
     ask = functools.partial(side.ask, read_held, a, send, mutated, may_request and pr, gh_rest)
-    ask("on-open")
+    asked = ask("on-open")
     waits = owed and side.holds_for_checks(copilot, a.request)
     checks_hold = await_green() if waits else ""
     fresh = gql(Q_LIVE, owner, repo, a.number) if waits and not checks_hold else pr
@@ -1675,7 +1675,10 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
                         a.check_stall,
                         required_for(polled, owner, repo),
                     )
-                    or (registration and grace_open(polled, nodes, now) is not None)
+                    or (
+                        registration
+                        and grace_open(side.pushed(polled, gh_rest), nodes, now) is not None
+                    )
                 )
             )
 
@@ -1723,7 +1726,7 @@ def run_wait(owner: str, repo: str, a: argparse.Namespace, may_request: bool = T
         live = functools.partial(live_state, owner, repo, a.number, a.min_rounds)
         backoff((done, answer, drift), live, lambda s: not any(s), start, a.timeout)
 
-    sent = ask("after-checks", await_green if polls else None)
+    sent = ask("after-checks", await_green if polls else None) or asked
     if regrace is not None:
         reread = functools.partial(held_read, regrace)
         polled = backoff(reread() if sent else polled, reread, regrace, start, a.timeout)

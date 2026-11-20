@@ -49,12 +49,19 @@ def side_asks(pr: dict, body: str) -> list[dict]:
     return sorted(asks, key=lambda n: n.get("createdAt") or "")
 
 
-def head_arrived(pr: dict) -> str:
-    """When the head reached the pull request, read as its earliest check suite's creation.
+PUSHED_KEY = "_headPushedAt"
 
-    GitHub creates a head's suites at the push, so a commit's own older timestamp never stands in.
-    Empty while no suite exists yet, which every reader here takes as a head that just arrived.
+
+def head_arrived(pr: dict) -> str:
+    """When the head reached the pull request, read as the push log's stamp where one is attached.
+
+    The log's newest push ending at the head counts, so a push back to a commit checked before
+    reads as that push. Without it the head's earliest check suite's creation stands in. GitHub
+    creates a head's suites at the push, and a commit's own older timestamp never stands in.
+    Empty while neither exists yet, which every reader here takes as a head that just arrived.
     """
+    if utc_instant(pr.get(PUSHED_KEY) or "") is not None:
+        return pr[PUSHED_KEY]
     suites = (head_commit(pr).get("checkSuites") or {}).get("nodes") or []
     stamps = [n["createdAt"] for n in suites if n.get("createdAt")]
     stamps += [n["since"] for n in check_nodes(pr) if n.get("since")]
@@ -87,14 +94,15 @@ def hosted_grace(pr: dict, nodes: list[dict]) -> tuple[datetime, datetime] | Non
     its conclusion never restarts the window. None where nothing anchors it. None also where a
     CodeRabbit or Qodo check that did not conclude SKIPPED began at or after the newest ask. Its
     own hold then decides. One older than the ask answers an earlier request, so it ends
-    nothing. A SKIPPED one is the reviewer declining an automatic review, which an ask can follow.
+    nothing. Nor does one whose start is unread, since nothing shows it answering the ask. A
+    SKIPPED one is the reviewer declining an automatic review, which an ask can follow.
     """
     asks = [n.get("createdAt") or "" for body in ASK_BODIES for n in side_asks(pr, body)]
     newest = max((a for a in map(utc_instant, asks) if a is not None), default=None)
 
     def since_ask(node: dict) -> bool:
         since = utc_instant(node.get("since") or "")
-        return newest is None or since is None or since >= newest
+        return newest is None or (since is not None and since >= newest)
 
     if any(
         reviewer_check(n, vocab, login)

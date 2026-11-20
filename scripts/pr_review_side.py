@@ -25,7 +25,7 @@ from pr_review_checks import (
     runs_open,
     utc_instant,
 )
-from pr_review_hold import head_arrived, hosted_check, side_asks, side_command
+from pr_review_hold import PUSHED_KEY, head_arrived, hosted_check, side_asks, side_command
 from pr_review_payload import bot_entry, default_branch
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -39,7 +39,6 @@ from pr_review_rounds import (
 
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
-PUSHED_KEY = "_headPushedAt"
 PUSHED_JQ = 'map(select(.after == "{}") | .timestamp) | max // empty'
 
 

@@ -5083,6 +5083,53 @@ class TestCli(GqlCase):
                     self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
                 self.assertEqual(reads, len(gql.call_args_list))
 
+    def test_an_on_open_ask_is_read_back_before_the_grace_is_judged(self) -> None:
+        """An ask sent before the poll moves the anchor too, though the after-checks one sent none.
+
+        The snapshot the poll starts from was read before that ask, so judging it would release.
+        """
+        done = {**check(started=real_ago(900)), "completedAt": real_ago(600)}
+        before = self.into(payload([review(oid=OLD)], checks=[done]), attest=True)
+        ask = {
+            "author": {"login": "maintainer"},
+            "authorAssociation": "OWNER",
+            "createdAt": real_ago(5),
+            "body": "@coderabbitai review",
+        }
+        after = {**before, "comments": {**before["comments"]}}
+        after["comments"]["nodes"] = [*before["comments"]["nodes"], ask]
+        self.answer(before, before, after)
+        gql = self.enterContext(mock.patch.object(pr_review, "gql", side_effect=pr_review.gql))
+        self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+        with (
+            mock.patch.object(pr_review.side, "ask", side_effect=lambda *a: a[6] == "on-open"),
+            mock.patch.object(pr_review.time, "sleep"),
+        ):
+            self.assertEqual(30, self.cli(["wait", "7", "--timeout", "0"]))
+        self.assertEqual(4, len(gql.call_args_list))
+        self.assertIn("(registration grace until: ", self.out.getvalue())
+
+    def test_the_push_log_anchors_the_grace_on_a_head_pushed_again(self) -> None:
+        """A commit checked before keeps its old suites, so only the push log dates its new push."""
+        done = {**check(started=real_ago(900)), "completedAt": real_ago(600)}
+        pr = self.into(payload([review(oid=OLD)], checks=[done]), attest=True)
+        pr = {**pr, "headRefName": "feature", "headRepository": {"nameWithOwner": "o/r"}}
+        for logged, code in ((real_ago(10), 30), ("", 0)):
+            with self.subTest(logged=logged):
+
+                def rest(path: str, *_: object, logged: str = logged, **__: object) -> object:
+                    ok = "/activity?" in path and logged
+                    out = logged if ok else ""
+                    return subprocess.CompletedProcess([], 0 if ok else 1, out, "")
+
+                self.answer(pr)
+                self.wire_history([hist_review(7, OVERVIEW + "\n" + COVERED)])
+                with (
+                    mock.patch.object(pr_review, "gh_rest", side_effect=rest),
+                    mock.patch.object(pr_review.time, "sleep"),
+                ):
+                    self.assertEqual(code, self.cli(["wait", "7", "--timeout", "0"]))
+
     def test_a_rate_limited_hosted_review_does_not_hold_an_attested_head(self) -> None:
         """The marker and both reply shapes end the wait, and the digest still reports the limit."""
         for body in (
@@ -8344,6 +8391,41 @@ class TestRegistrationGrace(unittest.TestCase):
                 self.assertEqual(ends, got is None)
                 if got is not None:
                     self.assertEqual(ago(120), pr_review_hold.stamp(got[0]))
+
+    def test_a_hosted_check_whose_start_is_unread_leaves_an_asked_window_open(self) -> None:
+        """A null `startedAt` cannot show the check answering the ask, so it ends nothing.
+
+        With no ask on record any hosted check on the head still ends the window.
+        """
+        settled = {**check(started=ago(900)), "completedAt": ago(600)}
+        for status, conclusion in (("QUEUED", ""), ("COMPLETED", "SUCCESS")):
+            with self.subTest(status=status):
+                unread = {
+                    **check(
+                        name="CodeRabbit", status=status, conclusion=conclusion, slug="coderabbitai"
+                    ),
+                    "startedAt": None,
+                }
+                got = self.window([settled, unread], [self.ask(ago(120))])
+                assert got is not None
+                self.assertEqual(ago(120), pr_review_hold.stamp(got[0]))
+                self.assertIsNone(self.window([settled, unread]))
+
+    def test_the_push_log_stamp_dates_the_head_over_its_older_suites(self) -> None:
+        """A push back to a commit checked before keeps that commit's suites, which predate it.
+
+        A stamp that does not parse is no stamp, so the suites stand in as they do without one.
+        """
+        settled = {**check(started=ago(900)), "completedAt": ago(600)}
+        pr = payload([review()], checks=[settled])
+        nodes = pr_review_checks.check_nodes(pr)
+        self.assertEqual(ago(900), pr_review_hold.head_arrived(pr))
+        for logged, want in ((ago(30), ago(30)), ("not a stamp", ago(600)), ("", ago(600))):
+            with self.subTest(logged=logged):
+                pushed = {**pr, pr_review_hold.PUSHED_KEY: logged}
+                got = pr_review_hold.hosted_grace(pushed, nodes)
+                assert got is not None
+                self.assertEqual(want, pr_review_hold.stamp(got[0]))
 
     def test_the_grace_is_open_until_its_end_and_noted_either_way(self) -> None:
         settled = {**check(started=ago(900)), "completedAt": ago(30)}
