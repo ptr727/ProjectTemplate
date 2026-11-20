@@ -227,11 +227,13 @@ in the new tree.
   chained script. A missing or wrong shared hook is put to the maintainer per `GOVERNANCE.md`
   "Communicating with the User", not repaired from the worktree. A dispatched worker hands it to
   its dispatcher in its report. An away run lists it in its end-of-run report under what needs
-  the maintainer, per `backlog-burndown` "Ending an Away Run". The task does not wait for the
-  repair, and CI stays the gate meanwhile. No agent repairs it by running an installer against
+  the maintainer, per `backlog-burndown` "Ending an Away Run". The task does not wait for a
+  missing hook's repair, and CI stays the gate meanwhile. A wrong hook that refuses every commit
+  stops the task at its first commit, reported the same way, since it is never bypassed. No agent repairs it by running an installer against
   the shared hooks directory or its setting, from any checkout. The maintainer repairs it by hand.
-- **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The exception is that none of them may change a shared hook or setting
-  from a linked worktree, per the bullet above. Do not infer a replacement command from
+- **Repository override:** Follow a repository's explicit hook-setup instructions when they differ from these standard cases. The exceptions are the bullet above's. None of them
+  may change a shared hook or setting from a linked worktree. None may repair a missing or wrong
+  one from any checkout. Do not infer a replacement command from
   the language alone.
 
 Treat hook preparation as worktree setup, not as recovery after a rejected commit. If setup

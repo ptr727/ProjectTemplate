@@ -387,7 +387,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   another's worktree. That is why "Bounding the Wait on a Worker" removes a dead worker's tree,
   with or without its branch, or leaves that tree untouched for the maintainer. It never passes
   the tree on, for the same reason.
-- **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
+- **The worker reports the path of the checkout it worked in**, with its outcome. It also reports
+  a missing or wrong shared git hook it met, per `repo-worktree` "Preparing Git Hooks". A standalone
   clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So a worker
   choosing that fallback records the clone's directory name, `<Repo>-<task-slug>`, on each of its
   group's claim comments before cloning. Each edit keeps the comment's `**Backlog burndown claim`
