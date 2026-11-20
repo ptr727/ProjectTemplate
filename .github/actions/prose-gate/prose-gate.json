@@ -139,7 +139,7 @@
     "plain": [".csv", ".lock", ".min", ".svg", ".tsv", ".txt"],
     "extensionless": "bash",
     "runner": { "uv": "python" },
-    "template": { ".j2": "django", ".jinja2": "django" },
+    "template": { ".j2": "django", ".jinja": "django", ".jinja2": "django" },
     "suffix": {
       ".code-workspace": "json", ".conf": "ini", ".csproj": "xml", ".gitattributes": "bash", ".gitignore": "bash",
       ".jsonc": "json", ".props": "xml", ".resx": "xml", ".scss": "css", ".slnx": "xml", ".targets": "xml"

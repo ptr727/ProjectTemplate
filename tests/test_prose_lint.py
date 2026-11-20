@@ -4444,6 +4444,7 @@ class TestLexerDispatch(BaitCase):
             ("x.html.j2", "html+django"),
             ("x.yaml.j2", "yaml+jinja"),
             ("x.j2", "django"),
+            ("x.jinja", "django"),
             ("x.jinja2", "django"),
         ):
             with self.subTest(name=name):
@@ -5199,14 +5200,17 @@ class TestMarkupLanguage(BaitCase):
 
 
 class TestJinjaLanguage(BaitCase):
-    """Jinja templates, whose `{# ... #}` comments are read and whose markup and expressions are not.
+    """Jinja templates, whose `{# ... #}` comments are read and whose tags and expressions are not.
 
+    An HTML, XML, or YAML template's own comments are read as well.
+    A CSS, JavaScript, or SQL template's own comments are left out, as an embedded language's are.
     Pygments names a lexer for a template whose inner suffix it knows, such as `.html.j2`.
     A bare `.j2` has none, so the data file names one.
     """
 
     TEMPLATES = (
         "a.j2",
+        "a.jinja",
         "a.jinja2",
         "a.html.j2",
         "a.xml.j2",
@@ -5262,6 +5266,21 @@ class TestJinjaLanguage(BaitCase):
     def test_an_html_comment_in_an_html_template_is_still_read(self) -> None:
         text = f"<p>{{{{ value }}}}</p><!-- {self.BAIT} -->\n"
         self.assertEqual(["comment-wrap"], self.flag("a.html.j2", text))
+
+    def test_a_yaml_comment_in_a_yaml_template_is_still_read(self) -> None:
+        for name in ("a.yaml.j2", "a.sls"):
+            with self.subTest(file=name):
+                text = f"key: {{{{ value }}}}  # {self.BAIT}\n"
+                self.assertEqual(["comment-wrap"], self.flag(name, text))
+
+    def test_a_host_comment_in_a_code_template_is_left_out(self) -> None:
+        for name, comment in (
+            ("a.css.j2", f"/* {self.BAIT} */"),
+            ("a.js.j2", f"// {self.BAIT}"),
+            ("a.sql.j2", f"-- {self.BAIT}"),
+        ):
+            with self.subTest(file=name):
+                self.assertEqual([], self.flag(name, f"{{{{ value }}}}\n{comment}\n"))
 
     def test_the_gate_fails_a_template_comment_at_a_commit_and_against_a_base(self) -> None:
         """The commit hook diffs against what the commit adds to, and CI against the base branch."""
