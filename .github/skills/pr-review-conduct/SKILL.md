@@ -447,7 +447,7 @@ bullet calls identifying data.
      case requires, naming only the repository and the kind of data. A seat that cannot reach the
      maintainer hands that notice to whoever dispatched it. The notice is not an escalation, so it
      stops nothing, and its case's own route continues. A seat with no dispatcher lists it in its
-     final report or handoff.
+     final report, never in a handoff issue.
    - A local pass before the push that opens the pull request can raise a `pre-existing`
      correctness defect in a file the diff already touches. That defect is fixed here under
      outcome 1. That covers wrong behavior and a false or unfollowable instruction, and not a
