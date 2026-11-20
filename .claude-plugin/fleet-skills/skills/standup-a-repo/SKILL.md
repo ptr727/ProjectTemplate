@@ -48,9 +48,13 @@ maintainer can supply what section 0A lists.
    both branch payloads, or the missing blocking rule on an operational repo's `develop` ruleset,
    makes that mistake either unrecoverable or silently unprotected. Point `origin` at the
    repository once it exists, then push `main` and `develop` before step 6, since
-   `scripts/carry.py` needs `origin/develop`. In a session running the fleet's agent-safety kit
-   that push is the maintainer's step. Hand the maintainer the exact
-   `git push -u origin main develop` right after the repository exists, and wait for it to land.
+   `scripts/carry.py` needs `origin/develop`. The fleet's agent-safety kit refuses a commit in
+   the primary checkout a fresh `git init` makes. So in a session running it, the branch block and
+   the seed push are the maintainer's hand-over. Once the repository exists, hand the maintainer
+   section 0B's block through `git branch develop`, then `git remote add origin "<url>"` and
+   `git push -u origin main develop`, and wait for the push to land. Then create the feature
+   branch as a linked worktree with `git worktree add -b "<feature-branch>" "<path>" develop`,
+   and run every later step there.
 
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
