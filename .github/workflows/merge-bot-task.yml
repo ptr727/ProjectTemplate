@@ -2,7 +2,7 @@ name: Merge bot task
 
 # The fleet merge-bot, hosted here once and reached by every repo through a thin pull_request_target caller pinned to a hub commit.
 # Auto-merges in-repo bot PRs (Dependabot, the App's codegen and version-bump PRs): enable on opened/reopened, disable on a maintainer push.
-# Watches an armed PR until it merges, since GitHub can disable auto-merge with every check green and gh pr merge --auto only arms it.
+# Answers auto_merge_disabled on such a PR: re-arms once, or fails, since GitHub can disable auto-merge with every check green.
 # Deletes the head on closed when the caller sets delete-branch to true.
 # - Merge method by base: develop = squash, main = merge, since each base's ruleset allows only that form.
 # - App token, not GITHUB_TOKEN: fires downstream workflows on merge, and grants write on read-only Dependabot PRs.
@@ -50,13 +50,11 @@ jobs:
     name: Merge dependabot pull request job
     runs-on: ubuntu-latest
     # Dependabot PRs from this repo rather than from forks.
-    # Only on opened or reopened, so a maintainer push's disable holds until the bot itself pushes again.
+    # Only on opened or reopened, so the disable job stays sticky.
     if: >-
       (github.event.action == 'opened' || github.event.action == 'reopened') &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    outputs:
-      armed: ${{ steps.merge.outputs.armed }}
 
     steps:
 
@@ -69,7 +67,6 @@ jobs:
 
       # Auto-merge every tier, semver-major included: the required checks are the gate, not the bump magnitude.
       - name: Merge pull request step
-        id: merge
         run: |
           set -Eeuo pipefail
           if [[ -z "$MERGE_METHOD" ]]; then
@@ -77,7 +74,6 @@ jobs:
             exit 1
           fi
           gh pr merge --auto "$MERGE_METHOD" "$PR_URL"
-          echo "armed=true" >>"$GITHUB_OUTPUT"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -86,19 +82,18 @@ jobs:
   merge-app:
     name: Merge App pull request job
     runs-on: ubuntu-latest
-    # App PRs from this repo, arming on opened or reopened, so a maintainer push's disable holds until the bot itself pushes again.
-    # The bot's own push only resolves the rule, so the watch re-arms no head the rules leave unmerged.
+    # App PRs from this repo, arming on opened or reopened so the disable job stays sticky.
+    # On auto_merge_disabled it only resolves the rule, so the re-arm job never arms a head the rules leave unmerged.
     # Which head and base pairs merge is data: the built-in codegen and upstream-version pairs plus the caller's rules.
     if: >-
       (
         github.event.action == 'opened' ||
         github.event.action == 'reopened' ||
-        (github.event.action == 'synchronize' && github.actor == github.event.pull_request.user.login)
+        github.event.action == 'auto_merge_disabled'
       ) &&
       github.event.pull_request.user.login == inputs.app-login &&
       github.event.pull_request.head.repo.full_name == github.repository
     outputs:
-      armed: ${{ steps.merge.outputs.armed }}
       matched: ${{ steps.rule.outputs.matched }}
 
     steps:
@@ -127,7 +122,7 @@ jobs:
                     | select((.head // "") == $head or ((."head-prefix" // "") as $p | $p != "" and ($head | startswith($p)))))
               | length > 0
             end' <<<"$builtin")
-          if [[ "$EVENT_ACTION" == synchronize ]]; then
+          if [[ "$EVENT_ACTION" == auto_merge_disabled ]]; then
             :
           elif [[ "$HEAD_REF" == no-auto-merge-* ]]; then
             echo "::warning::App pull request $HEAD_REF -> $BASE_REF carries the no-auto-merge- marker, not auto-merging"
@@ -142,7 +137,7 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
 
       - name: Generate GitHub App token step
-        if: ${{ steps.rule.outputs.matched == 'true' && github.event.action != 'synchronize' }}
+        if: ${{ steps.rule.outputs.matched == 'true' && github.event.action != 'auto_merge_disabled' }}
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -150,8 +145,7 @@ jobs:
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
       - name: Merge pull request step
-        if: ${{ steps.rule.outputs.matched == 'true' && github.event.action != 'synchronize' }}
-        id: merge
+        if: ${{ steps.rule.outputs.matched == 'true' && github.event.action != 'auto_merge_disabled' }}
         run: |
           set -Eeuo pipefail
           if [[ -z "$MERGE_METHOD" ]]; then
@@ -159,38 +153,29 @@ jobs:
             exit 1
           fi
           gh pr merge --auto "$MERGE_METHOD" "$PR_URL"
-          echo "armed=true" >>"$GITHUB_OUTPUT"
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
-  watch-auto-merge:
-    name: Watch auto-merge job
+  rearm-auto-merge:
+    name: Re-arm auto-merge job
     runs-on: ubuntu-latest
-    needs: [merge-dependabot, merge-app]
-    # Runs after this run armed auto-merge, or after the bot's own push, since a bot rebase ends an earlier watch.
-    # A merge GitHub refuses, such as one writing workflow content the App may not write, disables auto-merge with every check green.
-    # That disable is re-armed once the base settles, and a second one, or a window ending with no merge, fails this job.
-    # The watch holds the caller's per-PR concurrency group, so it ends on any head push and the queued run for that push takes over.
-    # The armed outputs are the gate rather than a success/skipped allowlist, since each is set only after its arming call succeeded.
+    needs: [merge-app]
+    # GitHub can disable auto-merge with every check green, as for a merge writing workflow content the App may not write.
+    # Since gh pr merge --auto only arms the merge, this job answers the caller's auto_merge_disabled event: it re-arms once, or fails.
+    # Runs only for a PR the merge jobs would arm: any in-repo Dependabot PR, or an App PR whose head matches a merge rule.
     if: >-
       !cancelled() &&
+      (needs.merge-app.result == 'success' || needs.merge-app.result == 'skipped') &&
+      github.event.action == 'auto_merge_disabled' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       (
-        needs.merge-dependabot.outputs.armed == 'true' ||
-        needs.merge-app.outputs.armed == 'true' ||
-        (
-          github.event.action == 'synchronize' &&
-          github.event.pull_request.head.repo.full_name == github.repository &&
-          (
-            github.event.pull_request.user.login == 'dependabot[bot]' ||
-            needs.merge-app.outputs.matched == 'true'
-          ) &&
-          github.actor == github.event.pull_request.user.login
-        )
+        github.event.pull_request.user.login == 'dependabot[bot]' ||
+        needs.merge-app.outputs.matched == 'true'
       )
-    # Past the 30-minute watch window, and inside the App token's one-hour life.
-    timeout-minutes: 40
+    # The settle wait below is bounded well inside this.
+    timeout-minutes: 10
 
     steps:
 
@@ -201,7 +186,7 @@ jobs:
           client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
-      - name: Watch auto-merge step
+      - name: Re-arm auto-merge step
         run: |
           set -Eeuo pipefail
           # shellcheck disable=SC2016 # GraphQL variables, expanded by the API rather than the shell
@@ -212,13 +197,14 @@ jobs:
                 headRefOid
                 baseRef { target { oid } }
                 autoMergeRequest { enabledAt }
-                timelineItems(last: 1, itemTypes: [AUTO_MERGE_DISABLED_EVENT]) {
+                commits(last: 1) { nodes { commit { committedDate author { user { login } } } } }
+                timelineItems(last: 20, itemTypes: [AUTO_MERGE_DISABLED_EVENT]) {
                   nodes { ... on AutoMergeDisabledEvent { createdAt reason reasonCode disabler { login } } }
                 }
               }
             }
           }'
-          # A read retries, so one transient API error does not fail a watch that has seen nothing wrong.
+          # A read retries, so one transient API error does not fail a run that has seen nothing wrong.
           read_pr() {
             local attempt out
             for attempt in 1 2 3; do
@@ -229,32 +215,50 @@ jobs:
               echo "::warning::Reading the pull request failed on attempt $attempt"
               sleep "$POLL_SECONDS"
             done
-            echo "::error::Reading the pull request failed three times, so auto-merge is unwatched"
+            echo "::error::Reading the pull request failed three times, so the disable is unanswered"
             exit 1
           }
-          arm() {
-            # The head pin keeps a push landing after the last read from being armed in the bot's place.
-            if ! gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"; then
-              echo "::error::Re-arming auto-merge with method '$MERGE_METHOD' failed: $reason"
+          # Ends the run where the disable needs no answer from this job, and leaves the latest disable in disabler and reason.
+          check_pr() {
+            if [[ $(jq -r .state <<<"$pr") != OPEN ]]; then
+              echo "The pull request is no longer open, so there is nothing to re-arm"
+              exit 0
+            fi
+            if [[ $(jq -r '.autoMergeRequest != null' <<<"$pr") == true ]]; then
+              echo "Auto-merge is armed again, so there is nothing to re-arm"
+              exit 0
+            fi
+            disabler=$(jq -r '.timelineItems.nodes[-1].disabler.login // ""' <<<"$pr")
+            reason=$(jq -r '.timelineItems.nodes[-1] | "\(.reason // "no reason given") (\(.reasonCode // "no reason code"))"' <<<"$pr")
+            # An unreadable disable fails rather than passing as someone else's, which would hide the stall this job exists to show.
+            if [[ -z "$disabler" ]]; then
+              echo "::error::Auto-merge was disabled and the disable event could not be read"
               exit 1
             fi
+            # GitHub records the App that armed auto-merge as the disabler of a refused merge, so any other disabler is a person's choice.
+            if [[ "$disabler" != "$APP_BOT" ]]; then
+              echo "::notice::$disabler disabled auto-merge, so it stays off: $reason"
+              exit 0
+            fi
+            # The maintainer-push job also disables under the App, and the head commit is then the maintainer's rather than the bot's.
+            if [[ $(jq -r '.commits.nodes[0].commit.author.user.login // ""' <<<"$pr") != "$PR_AUTHOR" ]]; then
+              echo "::notice::The head carries a commit the bot did not author, so auto-merge stays off: $reason"
+              exit 0
+            fi
           }
-          # Siblings merging into the same base are what moves it, so re-arming waits for a quiet window rather than racing them.
-          # A close, a merge, a head push, or another arming ends the wait early, and the loop's own checks act on it.
+          # Siblings merging into the same base are what moves it, so the re-arm waits for a quiet window rather than racing them.
           settle_base() {
             local last now quiet_since
             last=$(jq -r '.baseRef.target.oid // ""' <<<"$pr")
             quiet_since=$SECONDS
             while ((SECONDS - quiet_since < SETTLE_SECONDS)); do
               if ((SECONDS >= deadline)); then
-                echo "::error::The watch window ended before the base branch settled, so auto-merge stays disabled: $reason"
+                echo "::error::The base branch kept moving for $SETTLE_LIMIT_SECONDS seconds, so auto-merge stays disabled: $reason"
                 exit 1
               fi
               sleep "$POLL_SECONDS"
               read_pr
-              if [[ $(jq -r --arg head "$HEAD_SHA" '.state != "OPEN" or .headRefOid != $head or .autoMergeRequest != null' <<<"$pr") == true ]]; then
-                return 0
-              fi
+              check_pr
               now=$(jq -r '.baseRef.target.oid // ""' <<<"$pr")
               if [[ "$now" != "$last" ]]; then
                 last=$now
@@ -263,83 +267,35 @@ jobs:
             done
           }
 
-          deadline=$((SECONDS + WATCH_MINUTES * 60))
-          rearmed=false
-          handled=""
-          reason=""
+          deadline=$((SECONDS + SETTLE_LIMIT_SECONDS))
           read_pr
-          # A disable the App is recorded for is this run's to re-arm.
-          # An earlier watch may have ended on this push, or the maintainer-push job made it.
-          if [[ "$EVENT_ACTION" == synchronize && $(jq -r --arg app "$APP_BOT" '.autoMergeRequest == null and (.timelineItems.nodes[0].disabler.login // "") != $app' <<<"$pr") == true ]]; then
-            echo "Auto-merge is not armed on this head, so there is nothing to watch"
-            exit 0
+          check_pr
+          # Once means one re-arm per head, so a second App-recorded disable since the head's commit is the one this job does not answer.
+          disables=$(jq -r --arg app "$APP_BOT" '.commits.nodes[0].commit.committedDate as $since
+            | [.timelineItems.nodes[] | select(.disabler.login == $app and .reasonCode != "closed" and .createdAt > $since)] | length' <<<"$pr")
+          if ((disables > 1)); then
+            echo "::error::GitHub disabled auto-merge again after the re-arm: $reason"
+            exit 1
           fi
-          while true; do
-            case $(jq -r .state <<<"$pr") in
-              MERGED)
-                echo "Merged"
-                exit 0
-                ;;
-              CLOSED)
-                echo "::notice::Closed without merging, so the watch ends"
-                exit 0
-                ;;
-            esac
-            # The disable already re-armed can still read as current just after the re-arm, so only a newer one counts.
-            disabled=$(jq -r --arg handled "$handled" '.autoMergeRequest == null and ($handled == "" or (.timelineItems.nodes[0].createdAt // "") != $handled)' <<<"$pr")
-            disabler=$(jq -r '.timelineItems.nodes[0].disabler.login // ""' <<<"$pr")
-            reason=$(jq -r '.timelineItems.nodes[0] | "\(.reason // "no reason given") (\(.reasonCode // "no reason code"))"' <<<"$pr")
-            if [[ $(jq -r .headRefOid <<<"$pr") != "$HEAD_SHA" ]]; then
-              echo "::notice::The head moved past $HEAD_SHA, so the run for that push takes over"
-              exit 0
-            fi
-            if [[ "$disabled" == true ]]; then
-              # An unreadable disable fails rather than passing as someone else's, which would hide the stall this job exists to show.
-              if [[ -z "$disabler" ]]; then
-                echo "::error::Auto-merge was disabled and the disable event could not be read"
-                exit 1
-              fi
-              # GitHub records the App that armed auto-merge as the disabler of a refused merge, so any other disabler is a person's choice.
-              if [[ "$disabler" != "$APP_BOT" ]]; then
-                echo "::warning::$disabler disabled auto-merge, so it stays off: $reason"
-                exit 0
-              fi
-              if [[ "$rearmed" == true ]]; then
-                echo "::error::GitHub disabled auto-merge again after the re-arm: $reason"
-                exit 1
-              fi
-              echo "::warning::Auto-merge was disabled under the App, re-arming once the base settles: $reason"
-              disabled_at=$(jq -r '.timelineItems.nodes[0].createdAt' <<<"$pr")
-              settle_base
-              read_pr
-              # Anything else that changed during the settle is read by the checks at the top of the loop.
-              if [[ $(jq -r --arg head "$HEAD_SHA" '.state == "OPEN" and .headRefOid == $head and .autoMergeRequest == null' <<<"$pr") == true ]]; then
-                arm
-                rearmed=true
-                handled=$disabled_at
-              fi
-              sleep "$POLL_SECONDS"
-              read_pr
-              continue
-            fi
-            if ((SECONDS >= deadline)); then
-              echo "::error::No merge within $WATCH_MINUTES minutes of this watch starting, so a required check may have failed or still be running"
-              exit 1
-            fi
-            sleep "$POLL_SECONDS"
-            read_pr
-          done
+          echo "::warning::Auto-merge was disabled under the App, re-arming once the base settles: $reason"
+          settle_base
+          head=$(jq -r .headRefOid <<<"$pr")
+          # Where every check is already green, gh merges at once rather than arming, so a refused merge ends here as a failed job.
+          # The head pin keeps a push landing after the last read from being armed or merged in the bot's place.
+          if ! gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$head" "$PR_URL"; then
+            echo "::error::Re-arming auto-merge, or merging at once where every check is green, failed: $reason"
+            exit 1
+          fi
         env:
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-          EVENT_ACTION: ${{ github.event.action }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           # The App that minted the arming token, which a caller's app-login input need not name.
           APP_BOT: ${{ steps.app-token.outputs.app-slug }}[bot]
-          WATCH_MINUTES: 30
           SETTLE_SECONDS: 60
-          POLL_SECONDS: 20
+          SETTLE_LIMIT_SECONDS: 300
+          POLL_SECONDS: 15
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
   disable-auto-merge-on-maintainer-push:
