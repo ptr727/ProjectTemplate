@@ -52,7 +52,7 @@ The flag is off on `main` and on `develop`, for related but distinct reasons.
   and the linearity invariant.
 - **Develop**: the check stalls bot auto-merge when two bot PRs against `develop` land within the
   same window. As soon as the first merges, the second flips to `mergeStateStatus: BEHIND` and
-  GitHub's auto-merge will not fire while strict is on. The merge-bot only *enables* auto-merge on
+  GitHub's auto-merge will not fire while strict is on. The merge-bot arms auto-merge on
   `opened`/`reopened` and never auto-updates bot branches, and Dependabot's rebase isn't real-time.
   So the second PR sits OPEN with all checks green indefinitely. Squash mechanics still rebase the
   diff onto `develop`'s tip on merge, and `required_linear_history` still enforces linearity.
@@ -83,12 +83,19 @@ during long-running develop features. Codegen content can also be production-cri
 So both branches need fresh codegen on their own cadence.
 
 **Maintainer-pushed commits on a bot PR auto-disable auto-merge.** The merge-bot's
-`merge-dependabot` and `merge-codegen` jobs only fire on `opened`/`reopened` events (auto-merge is
-enabled exactly once per PR). A maintainer may push commits to a bot's branch. Such a push is a `synchronize`
+`merge-dependabot` and `merge-app` jobs arm auto-merge only on `opened`/`reopened` events. Its
+`rearm-auto-merge` job leaves the disable below in place, since the head is then not the bot's own push. A maintainer may push commits to a bot's branch. Such a push is a `synchronize`
 event with an actor that isn't the same bot. When it happens, the merge-bot's
 `disable-auto-merge-on-maintainer-push` job fires and calls `gh pr merge --disable-auto`. The
 maintainer's commits stay in the PR but won't auto-merge with the bot's content. Re-enable
 auto-merge manually (`gh pr merge --auto <PR>` or the GitHub UI) when ready.
+
+**A disable GitHub makes is re-armed once, then fails visibly.** GitHub can disable an armed
+auto-merge with every check green. It does so for a merge that would write workflow content the
+App may not write. The caller stub triggers on `auto_merge_disabled`, so the merge-bot's
+`rearm-auto-merge` job answers such a disable. It re-arms once the base branch has settled. Where
+every check is green, `gh` merges at once instead, so a refused merge fails the job. That makes the
+stall visible rather than recovering it. WORKFLOW.md D8.1 is the contract.
 
 ## Codegen determinism
 
