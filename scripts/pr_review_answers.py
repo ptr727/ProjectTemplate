@@ -29,6 +29,7 @@ from pr_review_checks import (
     check_nodes,
     hosted_reviews_running,
 )
+from pr_review_hold import HOSTED_GRACE, grace_open, stamp
 from pr_review_promotion import coverage
 from pr_review_rounds import (
     CARRIED_PARTIAL,
@@ -210,7 +211,8 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
 
     `fields` is the digest's, and `opened` every unresolved thread. A count every item under which
     an acknowledgment answers is met. Shapes no value here names are unread rather than met. A
-    hosted review still running is read off `pr`'s rollup at the current time instead.
+    hosted review still running is read off `pr`'s rollup at the current time instead. So is an
+    open registration grace, while no hosted reviewer's check has registered.
     """
     found: list[tuple[str, str]] = []
     counts, notes, unread = unanswered(pr, fields)
@@ -242,10 +244,23 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
         found.append(("REVIEWER_LOGIN_DRIFT", f"{drifted[0]}, which only a login change clears"))
     if (state := pr.get("mergeStateStatus")) not in MERGE_UNGATED:
         found.append(("MERGE_NOT_CLEAN", f"the merge state reads {state}, not a finished one"))
-    now = datetime.now(UTC)
-    if running := hosted_reviews_running(pr, check_nodes(pr), now, CHECK_GRACE, CHECK_STALL):
+    now, nodes = datetime.now(UTC), check_nodes(pr)
+    if running := hosted_reviews_running(pr, nodes, now, CHECK_GRACE, CHECK_STALL):
         found.append(
             ("CHECKS_PENDING", f"a hosted review of the head is running: {', '.join(running)}")
+        )
+    if until := grace_open(pr, nodes, now):
+        found.append(
+            (
+                "CHECKS_PENDING",
+                (
+                    "no hosted reviewer's review check answering the head's newest push or review "
+                    "ask has registered yet, and the registration grace "
+                    f"of {HOSTED_GRACE}s after the head's push, its last check settling, and its "
+                    f"newest review ask holds the merge until {stamp(until)}, so run `merge` "
+                    "again once that time has passed"
+                ),
+            )
         )
     return found
 
