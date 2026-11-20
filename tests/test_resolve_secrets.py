@@ -227,11 +227,23 @@ class SecretPlanCase(unittest.TestCase):
             secret_names.secret_plan(without, entry(), TESTED, "ExampleRepo")
 
 
+TREE_SHA = "1234567890abcdef1234567890abcdef12345678"
+
+
+def gh_failure(status: str) -> tuple[int, str, str]:
+    """A failed gh call, printing GitHub's HTTP status, or only a bare error for `none`."""
+    if status == "none":
+        return 1, "", "gh: boom\n"
+    return 1, "", f"gh: error (HTTP {status})\n"
+
+
 class FakeGh:
     """Stands in for scripts/gh_graphql.run_subprocess, recording each argv and answering from what it was given.
 
     Nothing is spawned, so the cases below run the same on every platform.
     A spawned stub `gh` cannot, since Windows' CreateProcess finds only a `gh.exe`.
+    The branch read answers tree_sha, TREE_SHA standing for any tree that holds files, and a tree read answers only for that SHA.
+    GitHub answers a tree read of the empty tree with 404, so the stub does too.
     """
 
     def __init__(
@@ -241,12 +253,16 @@ class FakeGh:
         tree_status: str | None = None,
         live: dict[str, tuple[str, ...]] | None = None,
         missing_gh: bool = False,
+        branch_status: str | None = None,
+        tree_sha: str = TREE_SHA,
     ) -> None:
         self.tree = tree
         self.truncated = truncated
         self.tree_status = tree_status
         self.live = live or {}
         self.missing_gh = missing_gh
+        self.branch_status = branch_status
+        self.tree_sha = tree_sha
         self.calls: list[str] = []
 
     def __call__(self, argv: list[str]) -> tuple[int, str, str]:
@@ -254,11 +270,18 @@ class FakeGh:
         if self.missing_gh:
             raise resolve_secrets.gh_graphql_module().GraphQLError("could not run gh: not found")
         endpoint = next(a for a in argv if a.startswith("repos/"))
+        if "/branches/" in endpoint:
+            if self.branch_status is not None:
+                return gh_failure(self.branch_status)
+            return 0, f"{self.tree_sha}\n", ""
         if "/git/trees/" in endpoint:
             if self.tree_status is not None:
-                if self.tree_status == "none":
-                    return 1, "", "gh: boom\n"
-                return 1, "", f"gh: error (HTTP {self.tree_status})\n"
+                return gh_failure(self.tree_status)
+            sha = endpoint.removeprefix("repos/owner/ExampleRepo/git/trees/").removesuffix(
+                "?recursive=1"
+            )
+            if sha != self.tree_sha or sha == resolve_secrets.EMPTY_TREE_SHA:
+                return gh_failure("404")
             payload = {
                 "tree": [{"type": "blob", "path": p} for p in self.tree],
                 "truncated": self.truncated,
@@ -343,7 +366,11 @@ class NamesCliCase(unittest.TestCase):
                 )
                 self.assertEqual(code, 0, err)
                 self.assertEqual(
-                    gh.calls, [f"gh api repos/owner/ExampleRepo/git/trees/{branch}?recursive=1"]
+                    gh.calls,
+                    [
+                        f"gh api repos/owner/ExampleRepo/branches/{branch} --jq .commit.commit.tree.sha",
+                        f"gh api repos/owner/ExampleRepo/git/trees/{TREE_SHA}?recursive=1",
+                    ],
                 )
 
     def test_a_slug_the_entry_does_not_name_is_refused_before_any_tree_read(self) -> None:
@@ -409,8 +436,8 @@ class NamesCliCase(unittest.TestCase):
     def test_a_missing_ground_branch_is_a_reported_state_and_not_a_failure(self) -> None:
         for status in ("404", "409"):
             with self.subTest(status=status):
-                code, out, err, _ = self.run_names(
-                    {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_status=status)
+                code, out, err, gh = self.run_names(
+                    {"repos": [entry()]}, "ExampleRepo", FakeGh(branch_status=status)
                 )
                 self.assertEqual(code, 0, err)
                 plan = json.loads(out)
@@ -418,9 +445,32 @@ class NamesCliCase(unittest.TestCase):
                 self.assertEqual(
                     plan["skip"], "the main branch of owner/ExampleRepo does not exist yet"
                 )
+                self.assertFalse(any("/git/trees/" in c for c in gh.calls))
 
-    def test_every_other_gh_failure_still_exits_one(self) -> None:
-        for status in ("403", "500", "none"):
+    def test_an_empty_root_commit_is_resolved_as_a_tree_holding_no_file(self) -> None:
+        e = entry(publish=[{"target": "docker"}], requiredSecrets=["NUGET_USERNAME"])
+        gh = FakeGh(("tests/test_a.py",), tree_sha=resolve_secrets.EMPTY_TREE_SHA)
+        code, out, err, gh = self.run_names({"repos": [e]}, "ExampleRepo", gh)
+        self.assertEqual(code, 0, err)
+        plan = json.loads(out)
+        self.assertNotIn("skip", plan)
+        self.assertEqual(plan, secret_names.secret_plan(SECRETS, e, set(), "ExampleRepo"))
+        names = {r["name"] for r in plan["rows"]}
+        baseline = {
+            r["name"]
+            for r in secret_names.secret_plan(SECRETS, entry(types=["docs"]), set(), "ExampleRepo")[
+                "rows"
+            ]
+        }
+        self.assertTrue(baseline)
+        self.assertLessEqual(baseline | {"NUGET_USERNAME"}, names)
+        self.assertNotIn("CODECOV_TOKEN", names)
+        self.assertFalse(any("/git/trees/" in c for c in gh.calls))
+
+    def test_a_tree_read_failing_after_the_branch_was_found_is_never_a_missing_branch(
+        self,
+    ) -> None:
+        for status in ("404", "409", "403", "500", "none"):
             with self.subTest(status=status):
                 code, out, err, _ = self.run_names(
                     {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_status=status)
@@ -428,6 +478,26 @@ class NamesCliCase(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertEqual(out, "")
                 self.assertIn("owner/ExampleRepo", err)
+
+    def test_every_other_branch_read_failure_still_exits_one(self) -> None:
+        for status in ("403", "500", "none"):
+            with self.subTest(status=status):
+                code, out, err, _ = self.run_names(
+                    {"repos": [entry()]}, "ExampleRepo", FakeGh(branch_status=status)
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("owner/ExampleRepo", err)
+
+    def test_a_branch_answer_naming_no_tree_sha_exits_one(self) -> None:
+        for sha in ("null", "", "not-a-sha"):
+            with self.subTest(sha=sha):
+                code, out, err, _ = self.run_names(
+                    {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_sha=sha)
+                )
+                self.assertEqual(code, 1)
+                self.assertEqual(out, "")
+                self.assertIn("names no tree SHA", err)
 
     def test_a_missing_gh_is_a_clear_error_and_not_a_traceback(self) -> None:
         code, out, err, _ = self.run_names(
@@ -466,7 +536,7 @@ class NamesCliCase(unittest.TestCase):
 
     def test_a_skipped_branch_reads_no_store(self) -> None:
         code, out, _, gh = self.run_names(
-            {"repos": [entry()]}, "ExampleRepo", FakeGh(tree_status="404"), live=True
+            {"repos": [entry()]}, "ExampleRepo", FakeGh(branch_status="404"), live=True
         )
         self.assertEqual(code, 0)
         self.assertNotIn("findings", json.loads(out))

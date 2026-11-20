@@ -11,6 +11,7 @@ It prints a JSON object with the rows (name, scope, file, stores), the forbidden
 A stray is the file a name would have at the wrong scope.
 With `--live` it also reads each secret store and adds the findings of secret_names.compare_stores.
 A ground branch that does not exist yet is a reported state rather than a failure.
+A ground branch whose commit holds no file, such as an empty root commit, reads as an empty tree and is resolved.
 Its JSON then carries empty lists and a `skip` string naming why, and the exit status is 0.
 It exits 1 on a malformed registry, a duplicate or unknown entry, a name that has no scope, or any other gh failure.
 
@@ -32,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -42,6 +44,8 @@ import secret_names
 import validate  # sibling, import-safe (its main is guarded)
 
 ROOT = Path(__file__).resolve().parent.parent
+EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+GIT_SHA = re.compile(r"[0-9a-f]{40}")
 
 
 class ResolveError(Exception):
@@ -126,15 +130,26 @@ def ground_branch(entry: dict[str, Any], registry: Any) -> str:
 def read_tree(slug: str, branch: str) -> set[str]:
     """Every blob path on BRANCH of SLUG, raising when the tree cannot be read in full.
 
-    A 404 or a 409 is how GitHub answers for a branch that is not there, or for an empty repo.
+    The branch is read first, since GitHub answers a tree read with 404 both for a missing branch and for an empty tree.
+    A 404 or a 409 on the branch read is how GitHub answers for a branch that is not there, or for an empty repo.
     Either raises BranchMissing, and no other failure does.
+    A branch whose commit holds the empty tree, as a root commit made with --allow-empty does, holds no files.
+    Any other tree is read by the SHA the branch named, so a failure reading it is never a missing branch.
     """
     try:
-        tree = gh_json(["gh", "api", f"repos/{slug}/git/trees/{branch}?recursive=1"], slug)
+        sha = gh_run(
+            ["gh", "api", f"repos/{slug}/branches/{branch}", "--jq", ".commit.commit.tree.sha"],
+            slug,
+        ).strip()
     except GhStatusError as e:
         if e.status in ("404", "409"):
             raise BranchMissing(f"the {branch} branch of {slug} does not exist yet") from e
         raise
+    if not GIT_SHA.fullmatch(sha):
+        raise ResolveError(f"{slug}: the {branch} branch answer names no tree SHA")
+    if sha == EMPTY_TREE_SHA:
+        return set()
+    tree = gh_json(["gh", "api", f"repos/{slug}/git/trees/{sha}?recursive=1"], slug)
     blobs = secret_names.tree_blobs(tree)
     if blobs is None:
         raise ResolveError(f"{slug}: the {branch} tree is unreadable or truncated")
