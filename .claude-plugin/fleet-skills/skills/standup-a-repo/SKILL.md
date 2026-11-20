@@ -55,7 +55,7 @@ maintainer can supply what section 0A lists.
    identity and signing output per step 1 before anything is pushed. Then hand over
    `git remote add origin "<url>"` and `git push -u origin main develop`. Wait for the push to
    land. Then create the feature branch as a linked worktree with
-   `git worktree add -b "<feature-branch>" "<path>" develop`. Later work on the target repository runs there. Hub commands run from a clean hub checkout, and a hub-side edit such as the registry entry lands through a hub pull request.
+   `git worktree add -b "<feature-branch>" "<path>" develop`. Later work on the target repository runs there. Hub commands run from a clean hub checkout.
 
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with

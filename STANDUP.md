@@ -114,7 +114,7 @@ git remote add origin "<url>"     # The repository the maintainer created.
 git push -u origin main develop   # Seeds both branches before any ruleset exists.
 ```
 
-Wait until the push lands. Then create the feature branch as a linked worktree, which the kit does not refuse. Work on the target repository, edits and git commands, runs in that worktree. Hub commands (`scripts/`, `repo-config/configure.sh`) run from a clean hub checkout, and a hub-side edit such as the registry entry lands through a hub pull request:
+Wait until the push lands. Then create the feature branch as a linked worktree, which the kit does not refuse. Work on the target repository, edits and git commands, runs in that worktree. Hub commands (`scripts/`, `spec/`, `repo-config/configure.sh`) run from a clean hub checkout:
 
 ```shell
 git worktree add -b "<feature-branch>" "<path>" develop   # Target-repository edits below run here.
