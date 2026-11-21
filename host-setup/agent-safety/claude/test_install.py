@@ -1590,7 +1590,42 @@ class TestRegistration(StampCase):
                 self.assertIn(f"attribution.sessionUrl is {held!r}, which this host set", r.stdout)
                 report = run(self.home, "--report")
                 self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
-                self.assertIn(f"Note: attribution.sessionUrl is {held!r}", report.stdout)
+                self.assertIn(f"WARNING: attribution.sessionUrl is {held!r}.", report.stdout)
+                self.assertNotIn("STALE", report.stdout)
+
+    def test_the_report_warns_of_a_session_link_the_host_leaves_on_without_a_verdict_change(self):
+        """A host `true` is left in place and warned of, the verdict stays CURRENT, and `false` draws no warning."""
+        for data, warns in (
+            ({"attribution": {"sessionUrl": True}}, True),
+            ({"attribution": True}, True),
+            ({"attribution": False}, False),
+            ({"attribution": {"sessionUrl": False}}, False),
+        ):
+            with self.subTest(data=data):
+                self.home.mkdir(parents=True, exist_ok=True)
+                self._write(data)
+                self.install()
+                self.assertEqual(self._settings()["attribution"], data["attribution"])
+                report = run(self.home, "--report")
+                self.assertEqual(report.returncode, 0, report.stdout)
+                self.assertIn("CURRENT", report.stdout)
+                self.assertEqual("WARNING:" in report.stdout, warns, report.stdout)
+                if warns:
+                    self.assertLess(report.stdout.index("WARNING:"), report.stdout.index("CURRENT"))
+
+    def test_the_session_link_warning_precedes_stale_and_never_follows_a_missing_stamp(self):
+        self.install()
+        data = self._settings()
+        data["attribution"] = {"sessionUrl": True}
+        data["pluginConfigs"]["agents-md@builtin"]["options"]["instructionFiles"] = "other"
+        self._write(data)
+        stale = run(self.home, "--report")
+        self.assertEqual(stale.returncode, 1, stale.stdout + stale.stderr)
+        self.assertLess(stale.stdout.index("WARNING:"), stale.stdout.index("STALE:"))
+        self.stamp.unlink()
+        bare = run(self.home, "--report")
+        self.assertEqual(bare.returncode, 2, bare.stdout + bare.stderr)
+        self.assertNotIn("WARNING:", bare.stdout + bare.stderr)
 
     def test_a_non_object_attribution_is_left_as_it_stands(self):
         """The key is the host's own, so the install goes ahead without it rather than refusing the file.
@@ -1613,7 +1648,7 @@ class TestRegistration(StampCase):
                 self.assertIn("which this host set" if foreign else "already current", r.stdout)
                 report = run(self.home, "--report")
                 self.assertEqual(report.returncode, 0, report.stdout + report.stderr)
-                self.assertEqual(f"Note: {words}" in report.stdout, foreign)
+                self.assertEqual("WARNING: attribution" in report.stdout, foreign)
 
     def test_a_host_installed_before_the_session_link_setting_reports_it_absent(self):
         for strip in ("attribution", "sessionUrl"):
