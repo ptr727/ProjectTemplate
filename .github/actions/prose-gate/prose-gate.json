@@ -151,12 +151,12 @@
     "name": { ".editorconfig": "ini", ".gitattributes": "bash", ".gitignore": "bash", "dockerfile": "bash", "pre-commit": "bash" }
   },
   "commands": {
-    "names": ["apt", "apt-get", "awk", "bash", "brew", "cat", "cd", "chmod", "claude", "codex", "cp", "curl", "docker", "dotnet", "env", "export", "find", "gh", "git", "grep", "jq", "kill", "ln", "ls", "make", "mkdir", "mv", "npm", "npx", "opencode", "pgrep", "pip", "pipx", "pkill", "pre-commit", "prek", "pwsh", "pytest", "python", "python3", "rm", "rsync", "ruff", "scp", "sed", "setsid", "sh", "shellcheck", "shfmt", "source", "ssh", "sudo", "systemctl", "tar", "timeout", "uv", "uvx", "wget", "winget", "wsl", "zsh"],
+    "names": ["apt", "apt-get", "awk", "bash", "brew", "cat", "cd", "chmod", "claude", "codex", "command", "cp", "curl", "diff", "docker", "dotnet", "echo", "env", "exec", "export", "find", "gh", "git", "grep", "head", "jq", "kill", "ln", "ls", "make", "mkdir", "mv", "npm", "npx", "opencode", "pgrep", "pip", "pipx", "pkill", "pre-commit", "prek", "printf", "pwsh", "pytest", "python", "python3", "rm", "rsync", "ruff", "runuser", "scp", "sed", "setsid", "sh", "shellcheck", "shfmt", "sort", "source", "ssh", "su", "sudo", "systemctl", "tail", "tar", "tee", "test", "timeout", "touch", "type", "usermod", "uv", "uvx", "wc", "wget", "which", "winget", "wsl", "xargs", "zsh"],
     "script_suffixes": [".bash", ".ps1", ".py", ".sh"],
     "fences": { "bash": "shell", "ps1": "powershell", "powershell": "powershell", "pwsh": "powershell", "sh": "shell", "shell": "shell", "zsh": "shell" },
     "dialects": {
-      "shell": { "escape": "\\", "shapes": ["angle", "bracket", "alternation"] },
-      "powershell": { "escape": "`", "shapes": ["angle", "alternation"] }
+      "shell": { "lexer": "bash", "shapes": ["angle", "bracket", "alternation"] },
+      "powershell": { "lexer": "powershell", "shapes": ["angle", "alternation"] }
     }
   },
   "languages": {

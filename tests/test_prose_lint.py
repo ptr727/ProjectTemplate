@@ -4449,6 +4449,23 @@ class TestPasteSafeRule(BaitCase):
     def test_a_script_given_an_argument_opens_a_command(self) -> None:
         self.assertEqual(1, len(self.hits("Run `scripts/check.py <target>` here.\n")))
 
+    def test_each_literal_form_is_read_by_the_scanner(self) -> None:
+        """Each pass above has a twin that fails, so none passes by going unread."""
+        for span in (
+            'TASK_ORIGIN="$(git -C <base-clone> remote get-url origin)"',
+            "echo ${list[RepoName]} [RepoName]",
+            "test -f x && [ -n y ] && [[ -z <z> ]]",
+            "git log 'quoted' <bare>",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual(1, len(self.hits(f"Run `{span}` here.\n")))
+
+    def test_a_heredoc_body_is_literal_and_its_opening_line_is_code(self) -> None:
+        for opener in ("<<\\EOF", "<<'EOF'", "<<EOF", "<<-EOF"):
+            with self.subTest(opener=opener):
+                text = f"```sh\ncat {opener} > <out>\n<body>\nEOF\n```\n"
+                self.assertEqual([2], self.lines(text))
+
     def test_a_prompt_and_an_assignment_still_open_a_command(self) -> None:
         for span in ("$ git fetch origin <target>", "GH_PAGER= gh pr view <number>"):
             with self.subTest(span=span):
