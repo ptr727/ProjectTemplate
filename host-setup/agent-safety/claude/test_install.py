@@ -59,11 +59,11 @@ def run(home, *args, dirty=False, contain=True, timeout=None, extra_env=None):
     env = {k: v for k, v in os.environ.items() if k != install.SUBAGENT_FORCE_VAR}
     env.update(
         CLAUDE_HOME=str(home),
+        PYTHONIOENCODING="utf-8",
         AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(home)),
         AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
         AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
         **(extra_env or {}),
-        PYTHONIOENCODING="utf-8",
     )
     return subprocess.run(
         [sys.executable, str(INSTALL), *args],

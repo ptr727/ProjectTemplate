@@ -281,23 +281,33 @@ def _reads(expr: ast.expr, key: str) -> bool:
 
 
 def _in_order(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool | None:
-    """The top-level mapping's effective setting, each entry and `**` unpacking applied in order.
+    """The top-level mapping's effective setting, each entry and unpacking applied in order.
 
     A later write overrides an earlier one, so `{"PYTHONIOENCODING": "utf-8", **os.environ}` ends
-    with whatever `os.environ` holds. That is why the last write decides here. None means the
-    expression is no dictionary display or `dict(...)` call, or writes nothing to the mapping.
+    with whatever `os.environ` holds, and so does `{"PYTHONIOENCODING": "utf-8"} | os.environ`.
+    That is why the last write decides here. An unpacked dictionary display that never names the
+    variable leaves the setting alone. A `dict(...)` keyword is final wherever it sits, since
+    Python refuses a keyword given twice. None means the expression is no dictionary display, `|`
+    merge, or `dict(...)` call, or writes nothing to the mapping.
     """
     name, want = CHILD_ENCODING
     if isinstance(expr, ast.Dict):
         items = list(zip(expr.keys, expr.values, strict=True))
+    elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+        items = [(None, expr.left), (None, expr.right)]
     elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "dict":
+        named = [k.value for k in expr.keywords if k.arg == name]
+        if named:
+            return all(_is_constant(v, want) for v in named)
         items = [(None, a) for a in expr.args[:1]]
-        items += [(ast.Constant(k.arg) if k.arg else None, k.value) for k in expr.keywords]
+        items += [(None, k.value) for k in expr.keywords if k.arg is None]
     else:
         return None
     state: bool | None = None
     for key, value in items:
         if key is None:
+            if isinstance(value, ast.Dict) and not _entries(value) and not _bases(value):
+                continue
             state = carries_child_encoding(value, spawn, seen)
         elif _is_constant(key, name):
             state = _is_constant(value, want)
@@ -684,10 +694,19 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
         source = (
             "import os, subprocess, sys\n"
             'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **os.environ})\n'
-            'subprocess.run([sys.executable], encoding="utf-8", env=dict(PYTHONIOENCODING="utf-8", **os.environ))\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8"} | os.environ)\n'
             'subprocess.run([sys.executable], encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env=os.environ | {"PYTHONIOENCODING": "utf-8"})\n'
         )
-        self.assertEqual([True, True, False], self.verdicts(source))
+        self.assertEqual([True, True, False, False], self.verdicts(source))
+
+    def test_an_unpacked_display_that_never_names_the_variable_leaves_it_alone(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8", **{"LC_ALL": "C"}})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env=dict(PYTHONIOENCODING="utf-8", **os.environ))\n'
+        )
+        self.assertEqual([False, False], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (
