@@ -1856,7 +1856,7 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
             "function info { param([string]$Message) $script:LINES += $Message }\n"
             "function Hide-Home { param([string]$Path) return 'LOG' }\n"
             "function Get-InstallerFailureReason { param([string]$Id, [datetime]$Since) return @{ Log = $null; Entries = @("
-            '"open $h\\AppData\\x.log", "open $h/x.log", "open $h", "open $h: denied", "open ${h}a\\AppData"); WingetEntries = @(); WingetLog = $null; InUse = $false } }\n'
+            '"open $h\\AppData\\x.log", "open $h/x.log", "open $h", "open ${h}: denied", "open ${h}a\\AppData"); WingetEntries = @(); WingetLog = $null; InUse = $false } }\n'
             "function Get-ToolHolder { param([string]$Probe, [string]$Executable) return , @() }\n"
             "Write-InstallFailure -ToolName 't' -Package 'P' -Code 1 -Since (Get-Date) -Probe 't'\n"
             "$script:LINES | Where-Object { $_ -like '  open*' } | ForEach-Object { $_.Replace($h, '<H>') }\n"
