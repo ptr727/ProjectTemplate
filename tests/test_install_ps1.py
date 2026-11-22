@@ -34,7 +34,12 @@ class TestInstallPs1Probe(unittest.TestCase):
         (self.dir / "install.py").write_text("", encoding="utf-8")
 
     def stub(self, name: str, probe: str) -> None:
-        """Writes a candidate: the probe prints `probe` and exits 0, `store` for the alias stub's message and exit 9009, or `real` to run the probe text in this interpreter."""
+        """Writes a candidate named `name`, whose probe is answered by `probe`.
+
+        `ok` and `old` print that word and exit 0.
+        `store` prints the alias stub's message and exits 9009.
+        `real` runs the probe text in this interpreter.
+        """
         if WINDOWS:
             reply = (
                 f'"{sys.executable}" %*\r\nexit /b %errorlevel%'
