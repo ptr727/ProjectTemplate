@@ -84,6 +84,7 @@ class TestInstallPs1Probe(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ["ran:python"])
         self.assertIn("Passed over python3", result.stderr)
+        self.assertIn("Microsoft Store", result.stderr)
 
     def test_the_first_candidate_that_reports_3_11_runs_the_installer(self) -> None:
         self.stub("py", "old")
