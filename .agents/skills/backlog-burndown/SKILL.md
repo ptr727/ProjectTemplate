@@ -428,7 +428,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   it for adjudication under "Grouping and File Claims". There, losing that file parks the group
   rather than narrowing it.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
-  the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
+  the issues this group fixes. On an operational-model repository it also requires a
+  `Reopens on promotion:` line where the group undoes a fix already in the range. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
   It also has the worker draft that body, and each rewrite of it, in a file named for its branch.
   Workers sharing a scratch directory and one file name each publish the other's draft.
@@ -769,8 +770,8 @@ Deriving the set from the range rather than from what this round dispatched is w
 that deferred or parked, contributing none. It also covers an earlier round's work that no
 promotion has yet carried. A fix landing during the freeze changes the range under a body already
 written. So re-read the range when the fix lands. Amend the body where the range calls for a `Fixes`
-line the body lacks, rather than leaving an issue to be closed by hand. Amend it too where a
-`Reopens on promotion:` line now in the range drops a `Fixes` line the body holds. Each amendment replaces
+line the body lacks, rather than leaving an issue to be closed by hand. Amend it too where the range,
+read as above, now drops a `Fixes` line the body holds. Each amendment replaces
 the whole body, and another session may amend it between a read and a write. So build each one
 from a read of the body made immediately before the write. Keep every line that read holds,
 less any the range drops. Then read the body again. Repeat the amendment where it lacks a
