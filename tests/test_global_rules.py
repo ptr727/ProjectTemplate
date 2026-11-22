@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -715,13 +716,23 @@ class TestInterrupt(Case):
             text=True,
             encoding="utf-8",
         )
-        assert process.stdout is not None
-        self.assertEqual(process.stdout.readline().strip(), "ready")
-        time.sleep(0.2)
-        process.send_signal(signum)
+        # A child that stalls before it is ready is killed at the deadline, which ends the read below.
+        deadline = threading.Timer(30, process.kill)
+        deadline.start()
         try:
+            assert process.stdout is not None
+            if process.stdout.readline().strip() != "ready":
+                process.kill()
+                out, err = process.communicate(timeout=20)
+                self.fail(
+                    f"the writer never reported ready, status {process.returncode}\n{out}\n{err}"
+                )
+            deadline.cancel()
+            time.sleep(0.2)
+            process.send_signal(signum)
             out, err = process.communicate(timeout=20)
         finally:
+            deadline.cancel()
             if process.poll() is None:
                 process.kill()
                 process.wait()

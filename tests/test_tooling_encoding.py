@@ -218,6 +218,7 @@ class Write(NamedTuple):
 
     value: ast.expr
     mutates: bool
+    line: float
 
 
 def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
@@ -225,26 +226,49 @@ def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
 
     The scope searched is the one Python would resolve the name in. For an attribute of `self` that
     is the class and each base class this module defines. A shared `setUp` commonly binds what a
-    test method spawns with. For a bare name it is each enclosing function and then the module.
+    test method spawns with. For a bare name it is the innermost enclosing function, then the
+    next one out, then the module. The search stops at the first scope that binds the name. An
+    assignment or a function parameter binds it, so neither inherits an outer scope's value. An
+    item set or an `update` binds nothing, and the search goes on past it.
     An item set or an `update` is returned as the dictionary it writes, so the caller reads every
     kind of write the same way.
     """
     if key.startswith("self."):
-        nodes: list[ast.AST] = [n for c in _class_chain(spawn) for n in ast.walk(c)]
-    else:
-        nodes = [node for scope in (*spawn.functions, spawn.module) for node in _own_nodes(scope)]
+        yield from _node_writes(key, [n for c in _class_chain(spawn) for n in ast.walk(c)])
+        return
+    for scope in (*spawn.functions, spawn.module):
+        found = list(_node_writes(key, list(_own_nodes(scope))))
+        yield from found
+        if any(not w.mutates for w in found) or _is_parameter(key, scope):
+            return
+
+
+def _is_parameter(key: str, scope: ast.AST) -> bool:
+    """Whether this scope is a function taking `key` as a parameter."""
+    if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+        return False
+    args = scope.args
+    names = [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    names += [a.arg for a in (args.vararg, args.kwarg) if a is not None]
+    return key in names
+
+
+def _node_writes(key: str, nodes: list[ast.AST]) -> Iterator[Write]:
     for node in nodes:
+        line = getattr(node, "lineno", 0)
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if _target_key(target) == key:
-                    yield Write(node.value, mutates=False)
+                    yield Write(node.value, mutates=False, line=line)
                 elif isinstance(target, ast.Subscript) and _target_key(target.value) == key:
-                    yield Write(ast.Dict(keys=[target.slice], values=[node.value]), mutates=True)
+                    yield Write(
+                        ast.Dict(keys=[target.slice], values=[node.value]), mutates=True, line=line
+                    )
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             if _target_key(node.target) == key:
-                yield Write(node.value, mutates=False)
+                yield Write(node.value, mutates=False, line=line)
         elif isinstance(node, ast.AugAssign) and _target_key(node.target) == key:
-            yield Write(node.value, mutates=True)
+            yield Write(node.value, mutates=True, line=line)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -252,9 +276,12 @@ def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
             and _target_key(node.func.value) == key
         ):
             for arg in node.args:
-                yield Write(arg, mutates=True)
+                yield Write(arg, mutates=True, line=line)
+            # The keywords apply after the positional mapping, so they sort just after it.
             yield Write(
-                ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords), mutates=True
+                ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords),
+                mutates=True,
+                line=line + 0.5,
             )
 
 
@@ -280,22 +307,65 @@ def _reads(expr: ast.expr, key: str) -> bool:
     return any(_target_key(node) == key for node in ast.walk(expr) if isinstance(node, ast.expr))
 
 
+def _in_order(
+    expr: ast.expr, spawn: Spawn, seen: frozenset[str], held: str | None = None
+) -> bool | None:
+    """The top-level mapping's effective setting, each entry and unpacking applied in order.
+
+    A later write overrides an earlier one, so `{"PYTHONIOENCODING": "utf-8", **os.environ}` ends
+    with whatever `os.environ` holds, and so does `{"PYTHONIOENCODING": "utf-8"} | os.environ`.
+    That is why the last write decides here. An unpacked dictionary display with no unpacking of
+    its own that never names the variable leaves the setting alone. An unpacked name reads as
+    another codec unless it carries the entry, so the gate errs toward flagging. A `dict(...)` keyword is final wherever it sits, since
+    Python refuses a keyword given twice. None means the expression is no dictionary display, `|`
+    merge, or `dict(...)` call, or writes nothing to the mapping.
+    """
+    name, want = CHILD_ENCODING
+    if isinstance(expr, ast.Dict):
+        items = list(zip(expr.keys, expr.values, strict=True))
+    elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+        items = [(None, expr.left), (None, expr.right)]
+    elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "dict":
+        named = [k.value for k in expr.keywords if k.arg == name]
+        if named:
+            return all(_is_constant(v, want) for v in named)
+        items = [(None, a) for a in expr.args[:1]]
+        items += [(None, k.value) for k in expr.keywords if k.arg is None]
+    else:
+        return None
+    state: bool | None = None
+    for key, value in items:
+        if key is None:
+            if isinstance(value, ast.Dict) and None not in value.keys and not _entries(value):
+                continue
+            state = carries_child_encoding(value, spawn, seen, held)
+        elif _is_constant(key, name):
+            state = _is_constant(value, want)
+    return state
+
+
 def carries_child_encoding(
-    expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()
+    expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset(), held: str | None = None
 ) -> bool:
     """Whether this environment expression sets `PYTHONIOENCODING` to `utf-8`.
 
-    An entry the expression writes itself decides, a dictionary entry or a `dict(...)` keyword, and
-    every one has to be the literal `utf-8`. A value the scan cannot read counts as another codec.
+    An entry the expression writes itself decides, a dictionary entry or a `dict(...)` keyword.
+    For a dictionary display, `|` merge, or `dict(...)` call the last write in order decides, as
+    `_in_order` reads it. Any other expression needs every entry to be the literal `utf-8`. A value the scan cannot read counts as another codec.
     Without such an entry, a local name or an attribute of `self` the expression reads decides, as
     `_name_carries` reads it. A function's return value is not followed, so an environment a helper
     builds is read as not carrying it.
     """
+    ordered = _in_order(expr, spawn, seen, held)
+    if ordered is not None:
+        return ordered
     entries = _entries(expr)
     if entries:
         return all(_is_constant(v, CHILD_ENCODING[1]) for v in entries)
     for base in _bases(expr):
         key = _target_key(base)
+        if key is not None and key == held:
+            return True
         if key is not None and key not in seen and _name_carries(key, spawn, seen | {key}):
             return True
     return False
@@ -328,18 +398,44 @@ def _bases(expr: ast.expr) -> list[ast.expr]:
     return []
 
 
+def _silent(expr: ast.expr) -> bool:
+    """Whether a mutation's value is a literal display that cannot write the variable.
+
+    That is a dictionary display or a `dict(...)` call of named keywords with no unpacking in it.
+    Anything else, such as `env.update(os.environ)`, can overwrite what an earlier write set.
+    """
+    if isinstance(expr, ast.Dict):
+        return None not in expr.keys
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "dict":
+        return not expr.args and all(k.arg is not None for k in expr.keywords)
+    return False
+
+
 def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
     """Whether every value this name can hold at the spawn sets the variable, read without flow.
 
     An item set or an `update` changes whatever value the name already holds. So where any of them
-    sets the variable, those decide, and each one has to set it to `utf-8`. Otherwise each
-    rebinding replaces the value. Every rebinding that does not read the name itself has to carry
-    it. So one branch binding a bare environment is not hidden by another binding a full one.
+    sets the variable, those decide, and each one has to set it to `utf-8`. A later write that
+    could replace what they set has to carry the variable too. That is a rebinding, or a mutation
+    that is no literal display. A write reading the name itself keeps what the name held. Otherwise each rebinding replaces
+    the value. Every rebinding that does not read the name itself has to
+    carry it. So one branch binding a bare environment is not hidden by another binding a full one.
     """
     writes = list(_writes(key, spawn))
-    setting = [w.value for w in writes if w.mutates and _entries(w.value)]
+    setting = [w for w in writes if w.mutates and _entries(w.value)]
     if setting:
-        return all(carries_child_encoding(v, spawn, seen) for v in setting)
+        first = min(w.line for w in setting)
+        later = [
+            w
+            for w in writes
+            if w not in setting
+            and w.line > first
+            and (not w.mutates or (not _entries(w.value) and not _silent(w.value)))
+        ]
+        return all(carries_child_encoding(w.value, spawn, seen) for w in setting) and all(
+            carries_child_encoding(w.value, spawn, seen, key if _reads(w.value, key) else None)
+            for w in later
+        )
     fresh = [w.value for w in writes if not w.mutates and not _reads(w.value, key)]
     return bool(fresh) and all(carries_child_encoding(v, spawn, seen) for v in fresh)
 
@@ -652,6 +748,146 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
         )
         self.assertEqual([True], self.verdicts(source))
+
+    def test_a_later_unpacking_overrides_an_earlier_entry(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **os.environ})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8"} | os.environ)\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env=os.environ | {"PYTHONIOENCODING": "utf-8"})\n'
+        )
+        self.assertEqual([True, True, False, False], self.verdicts(source))
+
+    def test_an_unpacked_display_that_never_names_the_variable_leaves_it_alone(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8", **{"LC_ALL": "C"}})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env=dict(PYTHONIOENCODING="utf-8", **os.environ))\n'
+        )
+        self.assertEqual([False, False], self.verdicts(source))
+
+    def test_an_unpacked_copy_of_the_environment_is_not_silent(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **{**os.environ, "LC_ALL": "C"}})\n'
+        )
+        self.assertEqual([True], self.verdicts(source))
+
+    def test_a_parameter_does_not_inherit_the_module_binding(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            "def go(env):\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def other():\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True, False], self.verdicts(source))
+
+    def test_an_unpacked_name_holding_another_codec_overrides_an_earlier_entry(self) -> None:
+        source = (
+            "import subprocess, sys\n"
+            'other = {"PYTHONIOENCODING": "cp1252"}\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **other})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={**other, "PYTHONIOENCODING": "utf-8"})\n'
+        )
+        self.assertEqual([True, False], self.verdicts(source))
+
+    def test_a_replacement_after_an_item_write_defeats_the_call(self) -> None:
+        source = (
+            "import subprocess, sys\n"
+            "def replaced():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            "    env = {}\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def kept():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True, False], self.verdicts(source))
+
+    def test_a_later_self_read_or_literal_write_keeps_the_call_clear(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def copied():\n"
+            "    env = os.environ.copy()\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            '    env = {**env, "LC_ALL": "C"}\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def other_key():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            '    env["LC_ALL"] = "C"\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False, False], self.verdicts(source))
+
+    def test_a_later_update_from_the_environment_defeats_the_call(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def merged():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            "    env.update(os.environ)\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def piped():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            "    env |= os.environ\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True, True], self.verdicts(source))
+
+    def test_a_later_rebinding_that_reads_the_name_is_judged_on_what_it_adds(self) -> None:
+        head = (
+            "import os, subprocess, sys\n"
+            "def go():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+        )
+        tail = '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        for line, verdict in (
+            ('env = {**env, "PYTHONIOENCODING": "cp1252"}', True),
+            ("env = {**env, **os.environ}", True),
+            ('env = dict(env, PYTHONIOENCODING="cp1252")', True),
+            ('env = {**env, "LC_ALL": "C"}', False),
+            ("env = env.copy()", False),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual([verdict], self.verdicts(f"{head}    {line}\n{tail}"))
+
+    def test_an_update_from_the_environment_on_the_setting_line_defeats_the_call(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def go():\n"
+            "    env = {}\n"
+            '    env.update({"PYTHONIOENCODING": "utf-8"}, **os.environ)\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True], self.verdicts(source))
+
+    def test_a_mutation_in_a_function_does_not_hide_the_module_binding(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            "def go():\n"
+            '    env.update({"LC_ALL": "C"})\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False], self.verdicts(source))
+
+    def test_update_keywords_apply_after_the_positional_mapping(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def go():\n"
+            "    env = {}\n"
+            '    env.update(os.environ, PYTHONIOENCODING="utf-8")\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (

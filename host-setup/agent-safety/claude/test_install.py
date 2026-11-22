@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import types
 import unittest
@@ -868,15 +869,25 @@ class TestWholeFileOwnership(StampCase):
             text=True,
             encoding="utf-8",
         )
+        # A child that stalls before it is ready is killed at the deadline, which ends the read below.
+        deadline = threading.Timer(30, process.kill)
+        deadline.start()
         try:
             assert process.stdout is not None
             # The installer prints its own progress first, and the line ends when the process does.
             lines = iter(process.stdout.readline, "")
-            self.assertIn("ready", (line.strip() for line in lines))
+            if "ready" not in (line.strip() for line in lines):
+                process.kill()
+                out, err = process.communicate(timeout=20)
+                self.fail(
+                    f"the writer never reported ready, status {process.returncode}\n{out}\n{err}"
+                )
+            deadline.cancel()
             time.sleep(0.2)
             process.send_signal(signum)
             out, err = process.communicate(timeout=20)
         finally:
+            deadline.cancel()
             if process.poll() is None:
                 process.kill()
                 process.wait()
@@ -906,6 +917,38 @@ class TestWholeFileOwnership(StampCase):
             status, _stderr = self.run_main()
         self.assertEqual(status, signal.SIGINT)
         self.assertEqual(sorted((self.home / "hooks").glob("*.staged")), [])
+
+    def test_a_hook_self_test_child_is_told_to_emit_utf8_whatever_the_parent_sets(self):
+        real_run = subprocess.run
+        seen = []
+
+        def recording(command, *args, **kwargs):
+            if "--selftest" in command:
+                seen.append(kwargs.get("env"))
+            return real_run(command, *args, **kwargs)
+
+        with (
+            mock.patch.dict(os.environ, {"PYTHONIOENCODING": "cp1252"}),
+            mock.patch.object(install.subprocess, "run", side_effect=recording),
+        ):
+            self.run_main()
+        self.assertTrue(seen)
+        for env in seen:
+            self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+
+    def test_a_signal_right_after_a_handler_is_registered_is_still_reported_by_name(self):
+        real_signal = signal.signal
+
+        def registering(signum, handler):
+            previous = real_signal(signum, handler)
+            if signum == signal.SIGTERM and handler is install.on_signal:
+                install.on_signal(signum, None)
+            return previous
+
+        with mock.patch.object(install.signal, "signal", side_effect=registering):
+            status, stderr = self.run_main()
+        self.assertEqual(status, signal.SIGTERM)
+        self.assertIn("Interrupted by SIGTERM", stderr)
 
     def test_a_sigint_mid_write_leaves_the_hand_edit_and_no_temporary_file(self):
         self.assert_signal_mid_write_leaves_the_hand_edit(signal.SIGINT)

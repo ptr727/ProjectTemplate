@@ -27,6 +27,8 @@ Usage: python3 install.py            (installs to ~/.claude).
        AGENT_SAFETY_SOURCE_COMMIT=<40 hex> python3 install.py   (name the commit of a tree git cannot answer for, which the bootstrap sets).
 """
 
+from __future__ import annotations
+
 import argparse
 import contextlib
 import datetime
@@ -45,6 +47,9 @@ import socket
 import stat
 import subprocess
 import sys
+import types
+from collections.abc import Callable
+from typing import NoReturn
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -828,7 +833,9 @@ class NotRegularFile(OSError):
     """A write target that exists and is not a regular file, refused before anything was written."""
 
 
-def write_regular_file(path, data, before=None):
+def write_regular_file(
+    path: str | os.PathLike[str], data: bytes, before: Callable[[], None] | None = None
+) -> None:
     """Replace `path`, a regular file or absent, with a file holding `data`.
 
     The data goes to a temporary file beside the target, and `os.replace` then swaps it in whole.
@@ -1783,7 +1790,7 @@ def report(claude_home):
     return 0
 
 
-def run():
+def run() -> int:
     parser = argparse.ArgumentParser(
         description="Install the agent host-safety kit, or report whether this machine is current."
     )
@@ -1931,6 +1938,7 @@ def run():
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                 check=False,
             )
             if r.returncode != 0:
@@ -2266,10 +2274,10 @@ def run():
     return 0
 
 
-received: "list[int]" = []
+received: list[int] = []
 
 
-def on_signal(signum, _frame):
+def on_signal(signum: int, _frame: types.FrameType | None) -> None:
     """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
 
     A later signal is passed over, since it would cut the unwinding short.
@@ -2280,15 +2288,15 @@ def on_signal(signum, _frame):
     raise KeyboardInterrupt
 
 
-def main():
+def main() -> int | signal.Signals:
     """Run the installer, returning its status, or the signal that interrupted it.
 
     A SIGINT inherited as ignored, as a background child's is, stays ignored.
     """
-    signal.signal(signal.SIGTERM, on_signal)
-    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
-        signal.signal(signal.SIGINT, on_signal)
     try:
+        signal.signal(signal.SIGTERM, on_signal)
+        if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+            signal.signal(signal.SIGINT, on_signal)
         return run()
     except KeyboardInterrupt:
         signum = signal.Signals(received[0] if received else signal.SIGINT)
@@ -2298,7 +2306,7 @@ def main():
         return signum
 
 
-def reraise(signum):
+def reraise(signum: int) -> NoReturn:
     """End this process by `signum`, so a caller sees the signal rather than an exit status."""
     with contextlib.suppress(OSError):
         sys.stdout.flush()
