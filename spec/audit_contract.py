@@ -1,14 +1,14 @@
 """An interface unit's contract tokens, each read against the file's code view or one job's.
 
 `artifactNameToken` and `requireTokens` read the whole file, so a token a stub owes outside every
-job is checked too. A job name can satisfy such a token. `requireTokensOn` reads the `on:` mapping
-alone. A job named for an activity type then stands in for no subscription.
+job is checked too. A job name can satisfy such a token. `requireEventTypes` reads each event's
+`types:` list alone. A job name or a branch filter then stands in for no subscription.
 `requireTokensInJob` and `forbidTokensInJob` read one job each. The merge-bot stub's `on:` types
 must name `auto_merge_disabled`, or the hub task's re-arm job never runs there and a disabled
 auto-merge stalls the pull request.
 """
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 
@@ -17,13 +17,12 @@ def token_findings(
     contract: Mapping[str, Any],
     file_view: str,
     job_views: Mapping[str, str],
-    trigger_view: str = "",
+    event_types: Sequence[str] = (),
 ) -> list[tuple[str, str]]:
     """DRIFT for each contract token the code lacks or forbids.
 
-    `file_view` is the whole file's code view, `trigger_view` its `on:` mapping's alone, and
-    `job_views` each job's own, keyed by job. A job
-    absent from `job_views` is already a requiredJobKeys finding, so its tokens are not reported.
+    `file_view` is the whole file's code view, `event_types` the values of each event's
+    `types:` list, and `job_views` each job's own, keyed by job. A job absent from `job_views` is already a requiredJobKeys finding, so its tokens are not reported.
     """
     findings: list[tuple[str, str]] = []
     tok = contract.get("artifactNameToken")
@@ -37,9 +36,9 @@ def token_findings(
         if t not in file_view
     ]
     findings += [
-        ("DRIFT", f"interface: {path} 'on:' missing required '{t}'")
-        for t in contract.get("requireTokensOn", [])
-        if t not in trigger_view
+        ("DRIFT", f"interface: {path} 'on:' missing required event type '{t}'")
+        for t in contract.get("requireEventTypes", [])
+        if t not in event_types
     ]
     for job, toks in contract.get("requireTokensInJob", {}).items():
         if job in job_views:
