@@ -907,6 +907,24 @@ class TestWholeFileOwnership(StampCase):
         self.assertEqual(status, signal.SIGINT)
         self.assertEqual(sorted((self.home / "hooks").glob("*.staged")), [])
 
+    def test_a_hook_self_test_child_is_told_to_emit_utf8_whatever_the_parent_sets(self):
+        real_run = subprocess.run
+        seen = []
+
+        def recording(command, *args, **kwargs):
+            if "--selftest" in command:
+                seen.append(kwargs.get("env"))
+            return real_run(command, *args, **kwargs)
+
+        with (
+            mock.patch.dict(os.environ, {"PYTHONIOENCODING": "cp1252"}),
+            mock.patch.object(install.subprocess, "run", side_effect=recording),
+        ):
+            self.run_main()
+        self.assertTrue(seen)
+        for env in seen:
+            self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+
     def test_a_sigint_mid_write_leaves_the_hand_edit_and_no_temporary_file(self):
         self.assert_signal_mid_write_leaves_the_hand_edit(signal.SIGINT)
 
