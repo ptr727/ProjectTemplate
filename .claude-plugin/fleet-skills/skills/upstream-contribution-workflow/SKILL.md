@@ -2,16 +2,16 @@
 name: upstream-contribution-workflow
 description: >-
   Governs how the maintainer contributes to a third-party repository he does not control, distinct
-  from the fleet's own branching model: a dirty work branch on his fork for the work and review
-  iteration, its fork-internal PR kept open and never merged, squashed once clean to a second branch
-  carrying only the intended history, that clean branch opened as the upstream PR, and reviewer
-  feedback applied to the dirty branch first, then re-squashed. Use this whenever about to open a
+  from the fleet's own branching model: a dirty work branch on his fork for the iteration, its
+  fork-internal PR kept open and never merged, squashed once clean to a second branch carrying only
+  the intended history, that clean branch opened as the upstream PR, and reviewer feedback applied
+  to the dirty branch first. Use this whenever about to open a
   pull request against a repository outside the ptr727 fleet, whenever forking a third-party project
   to contribute, whenever an upstream reviewer requests changes on a PR opened this way, whenever a
   fork-internal iteration PR looks ready to merge or close, whenever the upstream base branch moves
-  under a contribution in flight, and whenever choosing an issue or PR template for such a
-  repository. Triggers regardless of the target repo's own type or workflow model, whose conventions
-  this skill never assumes match the fleet's.
+  under a contribution in flight, whenever upstream CI rejects merge commits or upstream forbids
+  rewriting a published PR, and whenever choosing such a repository's issue or PR template.
+  Triggers whatever the target repo's type or workflow model, never assumed to match the fleet's.
 ---
 
 # Upstream Contribution Workflow
@@ -56,10 +56,10 @@ fleet's internal model so the two are never conflated.
    required-check history a rewrite would orphan. That rule stays absolute there, with no exception.
    It has no jurisdiction here**. That is because this clean presentation branch lives on the maintainer's own
    fork, outside the fleet entirely, and carries nobody's work but this squash. Force-with-lease
-   is scoped just as tightly regardless. It applies only to this one branch, only on the maintainer's own fork,
-   and never to the dirty work branch. That branch is the append-only iteration log this whole workflow exists
-   to preserve. If force-with-lease is ever refused or unavailable, open a fresh PR from a newly
+   is scoped just as tightly regardless. It applies only to this one branch, only on the maintainer's own fork. The dirty work branch takes it only in the one case "The iteration PR is never merged" below names. That branch is the append-only iteration log this whole workflow exists to preserve. **Each force-with-lease push still waits for the maintainer's explicit, current go-ahead.** Force-pushing is an irreversible step that stays his, per `GOVERNANCE.md` "Communicating with the User", and this skill decides only where one may happen. If force-with-lease is ever refused or unavailable, open a fresh PR from a newly
    named clean branch rather than fighting the push.
+
+   **Where the upstream forbids rewriting a published pull request branch, keep the clean branch append-only instead.** Its contribution guidelines or its reviewers say so. Commit each round's change on top of the clean branch as a new commit, and push it without force. The squash then happens once, at the end or through the upstream's own squash merge. A squash at the end is a force-with-lease push like any other, under the same go-ahead. On every other upstream, the re-squash above is unchanged.
 
 **The dirty branch is always the working copy. The clean branch is always the presentation copy.**
 Never reverse this: never iterate directly on the branch that's open against upstream, and never
@@ -75,9 +75,19 @@ iteration PR is the place where upstream drift is absorbed and its fallout fixed
 upstream PR has to absorb that drift. So merging or closing the iteration PR removes that place.
 
 When the upstream base moves, sync the mirror branch from upstream and merge the mirror branch into
-the dirty branch. In that case, also fix whatever breaks in the iteration PR. Bringing the mirror branch in is a merge rather than a rebase,
-since the dirty branch is append-only and is never force-pushed. Then re-squash onto the new mirror
-tip whenever the clean branch needs to follow, per step 5.
+the dirty branch. In that case, also fix whatever breaks in the iteration PR. Bringing the mirror branch in is a merge rather than a rebase, since the dirty branch is append-only. A dirty branch stacked on another takes the lower branch's changes the same way. Then re-squash onto the new mirror tip whenever the clean branch needs to follow, per step 5.
+
+**Where the upstream's own CI rejects merge commits, rebase the dirty branch instead.** Such a check fails any pull request whose commits include a merge, and stops the rest of the upstream's checks from running. So a merge there costs the iteration PR the CI coverage it exists to provide. The rebase applies only in that case, and only to the dirty branch on the maintainer's own fork. Rebase it onto the mirror branch, or onto the lower branch of a stack. First push its old head to a named backup branch on the fork, and confirm the fork holds it. That backup keeps the replaced iteration log readable. Then push the rebased branch with `--force-with-lease`, pinned to that old head, under the go-ahead step 5 requires:
+
+```sh
+old=$(git rev-parse work/x)
+git push origin "$old:refs/heads/backup/work-x-1"
+git ls-remote origin refs/heads/backup/work-x-1
+git rebase <mirror-branch> work/x
+git push --force-with-lease="work/x:$old" origin work/x
+```
+
+Number the backup branch per rebase, so a later rebase never overwrites an earlier backup.
 
 For example, the fork's mirror branch and upstream both sit at commit `A`, with the iteration PR
 from `work/x` into the mirror branch green. Upstream advances to `B`. The fork syncs its mirror
@@ -85,7 +95,7 @@ branch to `B`, merges `B` into `work/x`, and fixes the breakage in the iteration
 been merged into the mirror branch at `A`, the mirror branch could not have fast-forwarded to `B`.
 
 The contribution ends once the PR of every clean branch the dirty branch feeds is merged or
-closed, with no slice left to cut. Only then close the iteration PR, unmerged, and delete the dirty and clean branches. A merged change then reaches the
+closed, with no slice left to cut. Only then close the iteration PR, unmerged, and delete the dirty, clean, and backup branches. A merged change then reaches the
 mirror branch through the next sync from upstream, the same way anyone else's change does.
 
 ## Use the upstream repo's own conventions, not the fleet's
