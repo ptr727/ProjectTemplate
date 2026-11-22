@@ -387,7 +387,8 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   another's worktree. That is why "Bounding the Wait on a Worker" removes a dead worker's tree,
   with or without its branch, or leaves that tree untouched for the maintainer. It never passes
   the tree on, for the same reason.
-- **The worker reports the path of the checkout it worked in**, with its outcome. A standalone
+- **The worker reports the path of the checkout it worked in**, with its outcome. It also reports
+  a missing or wrong shared git hook it met, per `repo-worktree` "Preparing Git Hooks". A standalone
   clone, the fallback `repo-worktree` allows, appears in no `git worktree list`. So a worker
   choosing that fallback records the clone's directory name, `<Repo>-<task-slug>`, on each of its
   group's claim comments before cloning. Each edit keeps the comment's `**Backlog burndown claim`
@@ -1071,7 +1072,8 @@ planner writes being unknown. Where its error left unclear whether the failed di
 marks that seat as one that may have. Where that seat was a planner, its claims are unknown too. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree.
-It is also a worker named as uncollected, since no later run resumes its group. It
+It is also a worker named as uncollected, since no later run resumes its group. It is also a
+missing or wrong shared git hook a worker reported, per `repo-worktree` "Preparing Git Hooks". It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Each other reason is named as itself, never as a

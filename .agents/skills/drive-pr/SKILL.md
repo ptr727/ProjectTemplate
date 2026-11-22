@@ -145,7 +145,13 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
      outcome per "Disposing of Every Finding". A check still running clears by waiting for it,
      with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`. A hosted
      reviewer's review still running on the head is such a check, refused as `CHECKS_PENDING`.
-     Then run `merge` once more.
+     An open registration grace is refused as `CHECKS_PENDING` too, on a line naming when it
+     ends. The watch above can return before then, so it does not clear the grace alone. On a
+     held head, `wait` holds until the grace ends. On any other head, run the watch above
+     first, since a check settling restarts the grace. Then wait in a background process until
+     the later of the named end and 90 seconds after the watch returned. Then run `merge` once
+     more. A rerun that still refuses on a grace is the blocked merge reported below, naming the
+     end it gives.
    - `next=retry` is a read that did not answer, or a merge `gh` refused on an unchanged head. Run
      `merge` once more as it is.
    - `next=maintainer` is a line no action of this seat can change, or a merge whose `cleanup`

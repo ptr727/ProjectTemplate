@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+import audit_contract
 import audit_pins
 import validate  # sibling, import-safe (its main is guarded)
 import yaml
@@ -1206,6 +1207,15 @@ def _mapping(node):
     return {str(k.value): v for k, v in node.value if isinstance(k, yaml.ScalarNode)}
 
 
+def _plain_list(node):
+    """The scalar values of a sequence node, one for a scalar node, `[]` for any other node."""
+    if isinstance(node, yaml.ScalarNode):
+        return [node.value]
+    if not isinstance(node, yaml.SequenceNode):
+        return []
+    return [c.value for c in node.value if isinstance(c, yaml.ScalarNode)]
+
+
 def _plain(node):
     """The Python value a node constructs, as the safe loader reads it."""
     return yaml.SafeLoader("").construct_object(node, deep=True)
@@ -1329,28 +1339,15 @@ def check_interface(path, contract, text):
                 f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
             )
         )
-    tok = contract.get("artifactNameToken")
-    if tok and tok not in code_view(root):
-        findings.append(
-            ("DRIFT", f"interface: {path} missing the '{tok}<branch>-<target>' artifact handoff")
-        )
-    # An absent job is already a requiredJobKeys finding, so its tokens are not reported again.
-    for job, toks in contract.get("requireTokensInJob", {}).items():
-        if job in jobs:
-            view = f"  {job}:\n{code_view(jobs[job], 2)}"
-            for t in toks:
-                if t not in view:
-                    findings.append(
-                        ("DRIFT", f"interface: {path} job '{job}' missing required '{t}'")
-                    )
-    for job, toks in contract.get("forbidTokensInJob", {}).items():
-        if job in jobs:
-            view = f"  {job}:\n{code_view(jobs[job], 2)}"
-            for t in toks:
-                if t in view:
-                    findings.append(
-                        ("DRIFT", f"interface: {path} job '{job}' uses forbidden '{t}'")
-                    )
+    job_views = {job: f"  {job}:\n{code_view(node, 2)}" for job, node in jobs.items()}
+    event_types = [
+        str(t)
+        for event in _mapping(_mapping(root).get("on")).values()
+        for t in _plain_list(_mapping(event).get("types"))
+    ]
+    findings += audit_contract.token_findings(
+        path, contract, code_view(root), job_views, event_types
+    )
     return findings
 
 
