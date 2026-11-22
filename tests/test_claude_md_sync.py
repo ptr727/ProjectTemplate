@@ -10,36 +10,26 @@ or under `-m unittest discover -s tests` the same way.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import re
 import sys
 import unittest
 from collections.abc import Callable
 from pathlib import Path
-from types import ModuleType
 from typing import Any, ClassVar
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "spec"))
+sys.path.insert(0, str(ROOT / "host-setup" / "agent-safety"))
 import canonical_review as cr
+import global_rules
 
 KIT = ROOT / "host-setup" / "agent-safety" / "claude"
 PINS = KIT / "claude-md-sections.json"
 PINS_REL = PINS.relative_to(ROOT).as_posix()
 
 SYNC_CLAIM = re.compile(r"\bkept in sync\b")
-
-
-def load_kit() -> ModuleType:
-    """The Claude installer module, loaded by path for its block list."""
-    spec = importlib.util.spec_from_file_location("agent_safety_claude_install", KIT / "install.py")
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {KIT / 'install.py'}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def load_pairs() -> list[dict[str, Any]]:
@@ -91,13 +81,10 @@ class LiveTreeCase(unittest.TestCase):
         messages = drift(load_pairs(), read_unit)
         self.assertEqual([], messages, "\n".join(messages))
 
-    def test_every_host_section_exists(self) -> None:
-        missing = [pair["host"] for pair in load_pairs() if read_unit(pair["host"]) is None]
-        self.assertEqual([], missing, f"host sections named in {PINS_REL} that no host block holds")
-
     def test_every_section_claiming_sync_is_pinned(self) -> None:
         blocks = [
-            (KIT / name).relative_to(ROOT).as_posix() for _, name in load_kit().CLAUDE_MD_BLOCKS
+            (KIT / name).relative_to(ROOT).as_posix()
+            for _, name in global_rules.load_kit().CLAUDE_MD_BLOCKS
         ]
         claiming = {
             key
@@ -113,7 +100,9 @@ class LiveTreeCase(unittest.TestCase):
             sorted(claiming - pinned), [], f"host sections claiming sync with no pair in {PINS_REL}"
         )
         self.assertEqual(
-            sorted(pinned - claiming), [], f"pairs in {PINS_REL} whose host section claims no sync"
+            sorted(pinned - claiming),
+            [],
+            f"pairs in {PINS_REL} whose host section is gone or claims no sync",
         )
 
 
