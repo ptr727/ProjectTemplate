@@ -218,6 +218,7 @@ class Write(NamedTuple):
 
     value: ast.expr
     mutates: bool
+    line: int
 
 
 def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
@@ -225,26 +226,48 @@ def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
 
     The scope searched is the one Python would resolve the name in. For an attribute of `self` that
     is the class and each base class this module defines. A shared `setUp` commonly binds what a
-    test method spawns with. For a bare name it is each enclosing function and then the module.
+    test method spawns with. For a bare name it is the innermost enclosing function, then the
+    next one out, then the module. The search stops at the first scope that binds the name. A function
+    parameter binds it, so a parameter never inherits an outer scope's value.
     An item set or an `update` is returned as the dictionary it writes, so the caller reads every
     kind of write the same way.
     """
     if key.startswith("self."):
-        nodes: list[ast.AST] = [n for c in _class_chain(spawn) for n in ast.walk(c)]
-    else:
-        nodes = [node for scope in (*spawn.functions, spawn.module) for node in _own_nodes(scope)]
+        yield from _node_writes(key, [n for c in _class_chain(spawn) for n in ast.walk(c)])
+        return
+    for scope in (*spawn.functions, spawn.module):
+        found = list(_node_writes(key, list(_own_nodes(scope))))
+        if found or _is_parameter(key, scope):
+            yield from found
+            return
+
+
+def _is_parameter(key: str, scope: ast.AST) -> bool:
+    """Whether this scope is a function taking `key` as a parameter."""
+    if not isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
+        return False
+    args = scope.args
+    names = [a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)]
+    names += [a.arg for a in (args.vararg, args.kwarg) if a is not None]
+    return key in names
+
+
+def _node_writes(key: str, nodes: list[ast.AST]) -> Iterator[Write]:
     for node in nodes:
+        line = getattr(node, "lineno", 0)
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if _target_key(target) == key:
-                    yield Write(node.value, mutates=False)
+                    yield Write(node.value, mutates=False, line=line)
                 elif isinstance(target, ast.Subscript) and _target_key(target.value) == key:
-                    yield Write(ast.Dict(keys=[target.slice], values=[node.value]), mutates=True)
+                    yield Write(
+                        ast.Dict(keys=[target.slice], values=[node.value]), mutates=True, line=line
+                    )
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
             if _target_key(node.target) == key:
-                yield Write(node.value, mutates=False)
+                yield Write(node.value, mutates=False, line=line)
         elif isinstance(node, ast.AugAssign) and _target_key(node.target) == key:
-            yield Write(node.value, mutates=True)
+            yield Write(node.value, mutates=True, line=line)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -252,9 +275,11 @@ def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
             and _target_key(node.func.value) == key
         ):
             for arg in node.args:
-                yield Write(arg, mutates=True)
+                yield Write(arg, mutates=True, line=line)
             yield Write(
-                ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords), mutates=True
+                ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords),
+                mutates=True,
+                line=line,
             )
 
 
@@ -371,14 +396,17 @@ def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
     """Whether every value this name can hold at the spawn sets the variable, read without flow.
 
     An item set or an `update` changes whatever value the name already holds. So where any of them
-    sets the variable, those decide, and each one has to set it to `utf-8`. Otherwise each
-    rebinding replaces the value. Every rebinding that does not read the name itself has to carry
-    it. So one branch binding a bare environment is not hidden by another binding a full one.
+    sets the variable, those decide, and each one has to set it to `utf-8`. A rebinding written
+    after the first of them replaces what they set, so it has to carry the variable too. Otherwise
+    each rebinding replaces the value. Every rebinding that does not read the name itself has to
+    carry it. So one branch binding a bare environment is not hidden by another binding a full one.
     """
     writes = list(_writes(key, spawn))
-    setting = [w.value for w in writes if w.mutates and _entries(w.value)]
+    setting = [w for w in writes if w.mutates and _entries(w.value)]
     if setting:
-        return all(carries_child_encoding(v, spawn, seen) for v in setting)
+        first = min(w.line for w in setting)
+        later = [w for w in writes if not w.mutates and w.line > first]
+        return all(carries_child_encoding(w.value, spawn, seen) for w in [*setting, *later])
     fresh = [w.value for w in writes if not w.mutates and not _reads(w.value, key)]
     return bool(fresh) and all(carries_child_encoding(v, spawn, seen) for v in fresh)
 
@@ -716,6 +744,41 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **{**os.environ, "LC_ALL": "C"}})\n'
         )
         self.assertEqual([True], self.verdicts(source))
+
+    def test_a_parameter_does_not_inherit_the_module_binding(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            "def go(env):\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def other():\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True, False], self.verdicts(source))
+
+    def test_an_unpacked_name_holding_another_codec_overrides_an_earlier_entry(self) -> None:
+        source = (
+            "import subprocess, sys\n"
+            'other = {"PYTHONIOENCODING": "cp1252"}\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **other})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={**other, "PYTHONIOENCODING": "utf-8"})\n'
+        )
+        self.assertEqual([True, False], self.verdicts(source))
+
+    def test_a_replacement_after_an_item_write_defeats_the_call(self) -> None:
+        source = (
+            "import subprocess, sys\n"
+            "def replaced():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            "    env = {}\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def kept():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True, False], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (
