@@ -14,9 +14,9 @@ Much of what follows is external product state that the fleet observes rather th
 
 ## Coverage
 
-As of October 2026 both candidates run on their open-source tiers alone. Neither CodeRabbit nor Qodo reviews a private repository, so a private repository has Copilot as its only pull request reviewer. Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. CodeRabbit's open-source tier auto-reviews only a repository with at least ten stars, so on `ProjectTemplate`, which holds fewer, it reviews only on an explicit trigger. Qodo's open-source program auto-reviews only a public repository past a 200-star threshold, so in this fleet it auto-reviews `PlexCleaner` alone. The Claude GitHub App is installed on the account. It is not configured as a reviewer, since the `local-strict-review` Skill already runs a review pass before every push toward a pull request.
+As of November 2026 Qodo runs on its open-source tier alone. CodeRabbit runs on its open-source tier for public repositories and on the Free plan for private ones. On a private repository the Free plan gives CodeRabbit summaries and walkthroughs only, with no line findings, per [CodeRabbit's plan documentation][coderabbit-plans]. A private pull request on which CodeRabbit runs therefore carries a CodeRabbit comment and no CodeRabbit review object. A review loop never waits on a CodeRabbit finding there. Some private pull requests instead carry a "Review limit reached" comment naming the plan's review rate limit. No Qodo comment or review appears on private pull requests, and Qodo's paid app is uninstalled. Copilot's own review budget, a self-configured premium request cap, runs out under concurrent pull requests. CodeRabbit's open-source tier auto-reviews only a repository with at least ten stars, so on `ProjectTemplate`, which holds fewer, it reviews only on an explicit trigger. Qodo's open-source program auto-reviews only a public repository past a 200-star threshold, so in this fleet it auto-reviews `PlexCleaner` alone. The Claude GitHub App is installed on the account. It is not configured as a reviewer, since the `local-strict-review` Skill already runs a review pass before every push toward a pull request.
 
-The consequence a review loop actually needs: **a private repository has Copilot alone**, and no trigger produces a candidate review there. **A public repository below CodeRabbit's star gate still has a CodeRabbit review for the asking**. **A repository below Qodo's star gate gets no automatic Qodo review**, so its absence there is not waited on. `pr-review-conduct` "Which Reviewers a Repository Actually Has" states the rule an agent applies. That rule needs none of the facts above, since the skill is carried into repositories that hold no copy of this file.
+The consequence a review loop actually needs: **a private repository gets no Qodo review and no CodeRabbit line findings**. Copilot is the only reviewer that can produce a finding there. Setting CodeRabbit's trigger to `off` stays acceptable for a private repository where its summary is unwanted, since the summary is all CodeRabbit gives there. **A public repository below CodeRabbit's star gate still has a CodeRabbit review for the asking**. **A repository below Qodo's star gate gets no automatic Qodo review**, so its absence there is not waited on. `pr-review-conduct` "Which Reviewers a Repository Actually Has" states the rule an agent applies. That rule needs none of the facts above, since the skill is carried into repositories that hold no copy of this file.
 
 ## Interaction and Operations
 
@@ -47,6 +47,8 @@ The review body provides an actionable summary and links each finding to an inli
 Automatic review skips a pull request whose base is not the repository default unless `.coderabbit.yaml` lists the base under [`reviews.auto_review.base_branches`][coderabbit-auto-review]. The hub's file does so for `develop`. The default branch is always included, and each entry is a regex. On the open-source tier, automatic review also needs the repository to hold at least ten stars, which `ProjectTemplate` does not. So a review here is triggered by commenting `@coderabbitai review`. Until then CodeRabbit's summary comment says so in place of a review, while its status check reports success.
 
 Its collapsed analysis is verbose and can dominate API output. Its status context reports success while actionable comments remain, so finding state is read from review threads rather than from that check.
+
+A clean pass can leave no pull request review object. After an explicit `@coderabbitai review`, CodeRabbit can rewrite its summary and post "Review finished". It then leaves no review and no inline thread, as on ProjectTemplate pull request 4116, whose summary reads "No actionable comments were generated in the recent review". "Review finished" alone does not prove a clean pass, since it also appears on passes that had findings. Read the summary line, and match the commit range its review details print (`between <sha> and <sha>`) against the current head. A later push leaves the line stale. A count of review objects shows no CodeRabbit round for a clean pass. CodeRabbit reads `.coderabbit.yaml` from the pull request's head branch. Its [configuration guide][coderabbit-yaml] names "the configuration present in the feature branch under review". `pr_review.py` reads the agent policy from the base branch, so the two can disagree.
 
 On the open-source tier it is also rate limited. A rate-limited pull request receives a notice naming when a review can next run, in place of the review. The notice has the same shape as the star-gate skip notice while behaving oppositely. Re-triggering returns the notice again rather than a review.
 
@@ -82,11 +84,11 @@ Each reviewer's behavior is shaped by a committed file rather than accepted as g
 
 ## Plan and Repository Scope
 
-The paid trials are over, and both candidates run on their no-cost open-source tiers. Qodo's paid app is uninstalled rather than suspended, so its `qodo-code-review` identity posts nothing, its billing notice included. Candidate use is therefore limited to public repositories unless the maintainer approves a later plan change.
+The paid trials are over. Qodo runs on its no-cost open-source tier, and CodeRabbit on its open-source tier for public repositories and the Free plan for private ones. Qodo's paid app is uninstalled rather than suspended, so its `qodo-code-review` identity posts nothing, its billing notice included. Qodo use is therefore limited to public repositories unless the maintainer approves a later plan change.
 
-[CodeRabbit's current plan documentation][coderabbit-plans] provides an open-source tier for public repositories with rate limits. Product plans are external state, so confirm the terms again before relying on them.
+[CodeRabbit's current plan documentation][coderabbit-plans] provides an open-source tier for public repositories with rate limits, and a Free plan that gives summaries and walkthroughs only. Product plans are external state, so confirm the terms again before relying on them.
 
-Private repositories remain Copilot-only unless a candidate's approved plan, data terms, and GitHub App permissions receive a separate review.
+Qodo's use on a private repository needs a separate review of its approved plan, data terms, and GitHub App permissions.
 
 <!-- Docs -->
 
@@ -106,6 +108,7 @@ Private repositories remain Copilot-only unless a candidate's approved plan, dat
 [coderabbit-auto-review]: https://docs.coderabbit.ai/configuration/auto-review
 [coderabbit-config]: https://docs.coderabbit.ai/reference/configuration
 [coderabbit-plans]: https://docs.coderabbit.ai/management/plans
+[coderabbit-yaml]: https://docs.coderabbit.ai/getting-started/yaml-configuration
 [copilot-customize]: https://docs.github.com/en/copilot/tutorials/customize-code-review
 [copilot-exclusion]: https://docs.github.com/en/copilot/how-tos/configure-content-exclusion/exclude-content-from-copilot
 [qodo-config]: https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-file
