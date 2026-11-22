@@ -1331,7 +1331,10 @@ def check_interface(path, contract, text):
             )
         )
     job_views = {job: f"  {job}:\n{code_view(node, 2)}" for job, node in jobs.items()}
-    findings += audit_contract.token_findings(path, contract, code_view(root), job_views)
+    trigger_view = code_view(_mapping(root).get("on"), 1)
+    findings += audit_contract.token_findings(
+        path, contract, code_view(root), job_views, trigger_view
+    )
     return findings
 
 

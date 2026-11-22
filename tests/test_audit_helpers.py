@@ -810,11 +810,25 @@ class RequireTokensCase(unittest.TestCase):
     def test_shipped_merge_bot_stubs_meet_the_carried_contract(self) -> None:
         path = ".github/workflows/merge-bot-pull-request.yml"
         contract = carried_contract(path)
-        self.assertIn("auto_merge_disabled", contract["requireTokens"])
+        self.assertIn("auto_merge_disabled", contract["requireTokensOn"])
         for stub in (path, "catalog/snippets/workflows/merge-bot-pull-request.yml"):
             with self.subTest(stub):
                 text = (REPO_ROOT / stub).read_text(encoding="utf-8")
                 self.assertEqual(audit.check_interface(stub, contract, text), [])
+
+    def test_a_job_named_for_the_event_type_is_not_a_subscription(self) -> None:
+        text = (
+            "on:\n  pull_request_target:\n    types: [opened, closed]\n"
+            "jobs:\n  merge-bot:\n    name: Handle auto_merge_disabled\n"
+            "    uses: acme/hub/.github/workflows/merge-bot-task.yml@x\n"
+        )
+        contract = {"requireTokensOn": ["auto_merge_disabled"]}
+        self.assertEqual(
+            audit.check_interface("wf", contract, text),
+            [("DRIFT", "interface: wf 'on:' missing required 'auto_merge_disabled'")],
+        )
+        subscribed = text.replace("[opened, closed]", "[opened, closed, auto_merge_disabled]")
+        self.assertEqual(audit.check_interface("wf", contract, subscribed), [])
 
     def test_the_validator_refuses_a_single_string(self) -> None:
         """A string would pass the audit unread, each of its characters found in any stub."""
