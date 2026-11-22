@@ -386,7 +386,11 @@ class InterruptTests(unittest.TestCase):
         launcher = outside / "launch.py"
         launcher.write_text(INTERRUPT_LAUNCHER, encoding="utf-8")
         env = {k: v for k, v in os.environ.items() if k not in ENV_KEYS}
-        env.update(TMPDIR=str(scratch), PATH=f"{stubs}{os.pathsep}{env.get('PATH', '')}")
+        env.update(
+            TMPDIR=str(scratch),
+            PYTHONIOENCODING="utf-8",
+            PATH=f"{stubs}{os.pathsep}{env.get('PATH', '')}",
+        )
         cmd = [sys.executable, str(launcher), str(SNIPPET), SHA, PROSE_PATH, "."]
         helper = subprocess.Popen(
             cmd,

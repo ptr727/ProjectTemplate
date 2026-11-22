@@ -1332,6 +1332,7 @@ class InterruptTests(unittest.TestCase):
                     **os.environ,
                     "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
                     "GH_READY": str(ready),
+                    "PYTHONIOENCODING": "utf-8",
                 }
                 script = subprocess.Popen(
                     [sys.executable, str(SCRIPTS / "backlog_metrics.py"), "--owner", "o"]

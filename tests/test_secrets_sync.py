@@ -2289,6 +2289,7 @@ class TestInterrupt(unittest.TestCase):
             "TMPDIR": str(self.temp),
             "STUB_DIR": str(self.stub_dir),
             "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONIOENCODING": "utf-8",
         }
 
     def interrupted(self, signum: int, *argv: str) -> tuple[int, str, str]:

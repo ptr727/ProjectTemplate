@@ -77,6 +77,7 @@ class TestAuditHelperSuiteIgnoresAmbientGitDir(unittest.TestCase):
             env = dict(os.environ)
             env["GIT_DIR"] = str(scratch / ".git")
             env["GIT_WORK_TREE"] = str(scratch)
+            env["PYTHONIOENCODING"] = "utf-8"
             proc = subprocess.run(
                 [
                     sys.executable,

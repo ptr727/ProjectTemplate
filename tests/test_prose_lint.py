@@ -2655,7 +2655,7 @@ class TestCommentAddedRule(BaitCase):
                 "comment-added",
             ],
             cwd=self.root,
-            env=os.environ | {"PROSE_ALLOW_COMMENTS": "1"},
+            env=os.environ | {"PROSE_ALLOW_COMMENTS": "1", "PYTHONIOENCODING": "utf-8"},
             text=True,
             encoding="utf-8",
             capture_output=True,
@@ -6494,6 +6494,7 @@ class TestCli(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
+                    env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                     check=False,
                 )
                 self.assertEqual(1, done.returncode)
@@ -6504,7 +6505,7 @@ class TestCli(unittest.TestCase):
     def test_the_local_shim_offers_the_gate_s_own_command_line(self) -> None:
         """The shim builds its parser from the same data, and answers `--help` without uv."""
         shim = REPO / "scripts" / "prose_lint.py"
-        env = dict(os.environ) | {"COLUMNS": "100", "NO_COLOR": "1"}
+        env = dict(os.environ) | {"COLUMNS": "100", "NO_COLOR": "1", "PYTHONIOENCODING": "utf-8"}
         shown = subprocess.run(
             [sys.executable, str(shim), "--help"],
             capture_output=True,
@@ -7578,6 +7579,7 @@ class TestAnEmptyExclusionIsRefused(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             check=False,
         )
 
@@ -7671,6 +7673,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         target = script.parent / "sample.md"
         target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
         env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
+        env["PYTHONIOENCODING"] = "utf-8"
         r = subprocess.run(
             [sys.executable, str(script), "--check", "dead-path", str(target)],
             capture_output=True,
@@ -7763,6 +7766,7 @@ class TestTheVerdictNamesTheCopyThatRaisedIt(unittest.TestCase):
         target.write_text("# Sample\n\nOne clean line.\n", encoding="utf-8")
         env = {k: v for k, v in os.environ.items() if k != "PROSE_GATE_PROVENANCE"}
         env["GIT_DIR"] = str(other / ".git")
+        env["PYTHONIOENCODING"] = "utf-8"
         r = subprocess.run(
             [sys.executable, str(script), "--check", "dead-path", str(target)],
             capture_output=True,
@@ -8823,6 +8827,7 @@ class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
                     stderr=subprocess.PIPE,
                     text=True,
                     encoding="utf-8",
+                    env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                 )
                 try:
                     deadline = time.monotonic() + 60

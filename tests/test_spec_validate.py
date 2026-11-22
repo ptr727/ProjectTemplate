@@ -872,7 +872,7 @@ def run_gate_on_files(overrides: dict[str, object], make_tree=None) -> str:
         files_path.write_text(json.dumps(files), encoding="utf-8")
         result = subprocess.run(
             [sys.executable, str(root / "spec" / "validate.py")],
-            env=without_git_location(),
+            env={**without_git_location(), "PYTHONIOENCODING": "utf-8"},
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -1109,7 +1109,7 @@ class RegistryNameUniquenessCase(unittest.TestCase):
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
-                env=without_git_location(),
+                env={**without_git_location(), "PYTHONIOENCODING": "utf-8"},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1448,7 +1448,13 @@ class RegistryEntryGateCase(unittest.TestCase):
     cannot move the result.
     """
 
-    def run_against(self, entry: dict, defaults: dict | None = None) -> str:
+    def run_against(
+        self, entry: dict, defaults: dict | None = None, console_encoding: str | None = None
+    ) -> str:
+        """The gate's output for one entry, its child writing UTF-8 unless `console_encoding` names another codec.
+
+        A named codec also drops `PYTHONUTF8`, so the child's streams take that codec on every host.
+        """
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             shutil.copytree(validate.ROOT / "spec", root / "spec")
@@ -1464,9 +1470,13 @@ class RegistryEntryGateCase(unittest.TestCase):
             base.update(defaults or {})
             fixture = {"defaults": base, "repos": [entry, marker]}
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
+            env = {**without_git_location(), "PYTHONIOENCODING": "utf-8"}
+            if console_encoding is not None:
+                env = {k: v for k, v in env.items() if k != "PYTHONUTF8"}
+                env["PYTHONIOENCODING"] = console_encoding
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
-                env=without_git_location(),
+                env=env,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1655,12 +1665,7 @@ class RegistryEntryGateCase(unittest.TestCase):
         The child is given cp1252 on every host. Removing the entry point's UTF-8 reconfigure therefore fails this on Linux
         too. The streams are otherwise UTF-8 already on Linux, and no other case here would notice.
         """
-        console = {
-            k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")
-        }
-        console["PYTHONIOENCODING"] = "cp1252"
-        with unittest.mock.patch.dict(os.environ, console, clear=True):
-            output = self.run_against(self.entry(name="Fixture\u200b"))
+        output = self.run_against(self.entry(name="Fixture\u200b"), console_encoding="cp1252")
         self.assertIn("Fixture\u200b", output)
 
     def test_a_non_boolean_has_develop_is_refused(self) -> None:
@@ -1865,7 +1870,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             (root / "registry" / "repos.schema.json").write_bytes(b'{"a": "\x80"}')
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
-                env=without_git_location(),
+                env={**without_git_location(), "PYTHONIOENCODING": "utf-8"},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -1888,7 +1893,7 @@ class RegistryEntryGateCase(unittest.TestCase):
             # No repos.schema.json at all, which raises OSError rather than reaching the wrong-shape case.
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
-                env=without_git_location(),
+                env={**without_git_location(), "PYTHONIOENCODING": "utf-8"},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2535,6 +2540,7 @@ class AuditRepoSlugCase(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
+                    env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                     timeout=60,
                     check=False,
                     cwd=validate.ROOT,
@@ -2549,6 +2555,7 @@ class AuditRepoSlugCase(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=60,
             check=False,
             cwd=validate.ROOT,
@@ -3130,7 +3137,7 @@ class DroppedCarryWithoutLedgerCase(unittest.TestCase):
             subprocess.run(["git", "-C", str(root), "add", "spec"], check=True, timeout=60, env=env)
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
-                env=env,
+                env={**env, "PYTHONIOENCODING": "utf-8"},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -3270,7 +3277,7 @@ class InvestigateTrackingWiringCase(unittest.TestCase):
             )
             result = subprocess.run(
                 [sys.executable, str(root / "spec" / "validate.py")],
-                env=without_git_location(),
+                env={**without_git_location(), "PYTHONIOENCODING": "utf-8"},
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

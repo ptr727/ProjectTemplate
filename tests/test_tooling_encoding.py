@@ -11,6 +11,13 @@ that can meet one answers it with its own `errors`, as `prose_lint.py` and `host
 second matters most, since the tool it runs comes from a declaration a downstream repository can
 extend.
 
+A Python child owes the matching half. Below Python 3.15 its own streams take the locale codec
+too. So a parent decoding as UTF-8 reads a Windows child's ANSI output as bytes UTF-8 rejects.
+`PYTHONIOENCODING=utf-8` in the child's environment reaches all three of its standard streams, so
+every text-mode call spawning one passes it. The scan sees a child whose command starts with
+`sys.executable` or a literal interpreter name. It follows a name bound in the calling function,
+class, or module to find one. An interpreter path found at run time is out of its reach.
+
 A test rather than a lint rule because nothing in this repository's toolchain checks it. `ruff` has
 no rule reaching a subprocess call at all. Its rule for the same omission on `open` and `read_text`,
 `PLW1514`, covers neither. This repository does not select it in any case, because `pyproject.toml`
@@ -23,9 +30,13 @@ Run as `python3 tests/test_tooling_encoding.py`, or under
 from __future__ import annotations
 
 import ast
+import itertools
+import re
 import subprocess
 import unittest
-from pathlib import Path
+from collections.abc import Iterator
+from pathlib import Path, PurePath
+from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -57,6 +68,15 @@ GATE_FILES = (
 
 # A floor on the call count, so a scan that matched nothing cannot report itself as clean.
 MINIMUM_CALLS = 70
+
+# The same floor for the calls whose child is a Python interpreter.
+MINIMUM_PYTHON_CHILDREN = 40
+
+# A command's first word naming an interpreter, matched against its final path component.
+PYTHON_LAUNCHER = re.compile(r"(?:python[0-9.]*|py)(?:\.exe)?", re.IGNORECASE)
+
+# The child-side variable and the one value that matches a parent decoding as UTF-8.
+CHILD_ENCODING = ("PYTHONIOENCODING", "utf-8")
 
 
 def scanned_python_files() -> list[Path]:
@@ -116,22 +136,215 @@ def _is_spawner_call(func: ast.expr, modules: frozenset[str], spawners: frozense
     return False
 
 
-def spawning_calls(tree: ast.AST) -> list[tuple[ast.Call, str]]:
-    """Each call to a subprocess spawner, paired with the name of the function enclosing it."""
+class Spawn(NamedTuple):
+    """One spawning call and the scopes a name it uses can be bound in, innermost first."""
+
+    call: ast.Call
+    enclosing: str
+    functions: tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...]
+    cls: ast.ClassDef | None
+    module: ast.Module
+
+
+def spawning_calls(tree: ast.Module) -> list[Spawn]:
+    """Each call to a subprocess spawner, with the function enclosing it and its other scopes."""
     modules, spawners = _subprocess_bindings(tree)
-    found: list[tuple[ast.Call, str]] = []
+    found: list[Spawn] = []
 
-    def walk(node: ast.AST, enclosing: str) -> None:
+    def walk(
+        node: ast.AST,
+        functions: tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...],
+        cls: ast.ClassDef | None,
+    ) -> None:
         for child in ast.iter_child_nodes(node):
-            name = enclosing
+            inner_functions, inner_cls = functions, cls
             if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                name = child.name
+                inner_functions = (child, *functions)
+            elif isinstance(child, ast.ClassDef):
+                inner_cls = child
             if isinstance(child, ast.Call) and _is_spawner_call(child.func, modules, spawners):
-                found.append((child, name))
-            walk(child, name)
+                enclosing = functions[0].name if functions else ""
+                found.append(Spawn(child, enclosing, functions, cls, tree))
+            walk(child, inner_functions, inner_cls)
 
-    walk(tree, "")
+    walk(tree, (), None)
     return found
+
+
+def _own_nodes(scope: ast.AST) -> Iterator[ast.AST]:
+    """Every node in this scope, leaving out the bodies of the functions and classes it defines."""
+    for child in ast.iter_child_nodes(scope):
+        yield child
+        if not isinstance(
+            child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda
+        ):
+            yield from _own_nodes(child)
+
+
+def _target_key(node: ast.expr) -> str | None:
+    """A local name as itself and an attribute of `self` as `self.<name>`, or None for any other."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    ):
+        return f"self.{node.attr}"
+    return None
+
+
+def _class_chain(spawn: Spawn) -> list[ast.ClassDef]:
+    """The enclosing class and the base classes this module defines for it, at any depth."""
+    defined = {n.name: n for n in spawn.module.body if isinstance(n, ast.ClassDef)}
+    chain: list[ast.ClassDef] = []
+    pending = [spawn.cls] if spawn.cls else []
+    while pending:
+        cls = pending.pop()
+        if cls in chain:
+            continue
+        chain.append(cls)
+        pending.extend(
+            defined[b.id] for b in cls.bases if isinstance(b, ast.Name) and b.id in defined
+        )
+    return chain
+
+
+def _writes(key: str, spawn: Spawn) -> Iterator[ast.expr]:
+    """Each expression stored into the name `key`, an item set on it, and each update applied to it.
+
+    The scope searched is the one Python would resolve the name in. For an attribute of `self` that
+    is the class and each base class this module defines. A shared `setUp` commonly binds what a
+    test method spawns with. For a bare name it is each enclosing function and then the module.
+    An item set or an `update` is returned as the dictionary it writes, so the caller reads every
+    kind of write the same way.
+    """
+    if key.startswith("self."):
+        nodes: list[ast.AST] = [n for c in _class_chain(spawn) for n in ast.walk(c)]
+    else:
+        nodes = [node for scope in (*spawn.functions, spawn.module) for node in _own_nodes(scope)]
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if _target_key(target) == key:
+                    yield node.value
+                elif isinstance(target, ast.Subscript) and _target_key(target.value) == key:
+                    yield ast.Dict(keys=[target.slice], values=[node.value])
+        elif isinstance(node, ast.AnnAssign | ast.AugAssign) and node.value is not None:
+            if _target_key(node.target) == key:
+                yield node.value
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "update"
+            and _target_key(node.func.value) == key
+        ):
+            yield from node.args
+            yield ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords)
+
+
+def _is_constant(node: ast.expr | None, value: str) -> bool:
+    return isinstance(node, ast.Constant) and node.value == value
+
+
+def carries_child_encoding(
+    expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()
+) -> bool:
+    """Whether this environment expression sets `PYTHONIOENCODING` to `utf-8`.
+
+    A dictionary entry and a `dict(...)` keyword both count, wherever they sit in the expression.
+    A local name or an attribute of `self` counts where some write to it does, so a dictionary built
+    over several statements is read whole. A function's return value is not followed, so an
+    environment a helper builds is read as not carrying it.
+    """
+    name, value = CHILD_ENCODING
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values, strict=True):
+                if _is_constant(k, name) and _is_constant(v, value):
+                    return True
+        elif isinstance(node, ast.keyword) and node.arg == name and _is_constant(node.value, value):
+            return True
+        elif isinstance(node, ast.Name | ast.Attribute):
+            key = _target_key(node)
+            if key is None or key in seen:
+                continue
+            if any(carries_child_encoding(w, spawn, seen | {key}) for w in _writes(key, spawn)):
+                return True
+    return False
+
+
+def _is_python_head(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool:
+    """Whether a command's first word names a Python interpreter."""
+    if (
+        isinstance(expr, ast.Attribute)
+        and isinstance(expr.value, ast.Name)
+        and (expr.value.id, expr.attr) == ("sys", "executable")
+    ):
+        return True
+    if isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        return PYTHON_LAUNCHER.fullmatch(PurePath(expr.value).name) is not None
+    key = _target_key(expr)
+    if key is None or key in seen:
+        return False
+    return any(_is_python_head(w, spawn, seen | {key}) for w in _writes(key, spawn))
+
+
+def spawns_python(expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()) -> bool:
+    """Whether this command expression starts with a Python interpreter.
+
+    The command is read through a list or tuple display, a leading `*` unpacking, and a `+`
+    concatenation. A name bound to any of those is followed as far as the scan can see it.
+    """
+    if isinstance(expr, ast.List | ast.Tuple):
+        if not expr.elts:
+            return False
+        head = expr.elts[0]
+        if isinstance(head, ast.Starred):
+            return spawns_python(head.value, spawn, seen)
+        return _is_python_head(head, spawn, seen)
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        return spawns_python(expr.left, spawn, seen)
+    key = _target_key(expr)
+    if key is None or key in seen:
+        return False
+    return any(spawns_python(w, spawn, seen | {key}) for w in _writes(key, spawn))
+
+
+def command_of(call: ast.Call) -> ast.expr | None:
+    """The command a spawning call runs, passed first or as `args`."""
+    if call.args:
+        return call.args[0]
+    return next((k.value for k in call.keywords if k.arg == "args"), None)
+
+
+def _literal_words(command: ast.expr) -> list[str]:
+    """The string literals a command list display holds, in order."""
+    if not isinstance(command, ast.List | ast.Tuple):
+        return []
+    return [
+        e.value for e in command.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
+    ]
+
+
+def python_child_without_encoding(spawn: Spawn) -> bool | None:
+    """None where the child is not Python, else whether it is left to encode by the locale.
+
+    `-X utf8` on the child's own command line clears it too, since UTF-8 Mode sets the same three
+    streams. It is the one way to reach a child run with `-I` or `-E`, which ignores every `PYTHON`
+    variable. So for such a child the environment does not count.
+    """
+    command = command_of(spawn.call)
+    if command is None or not spawns_python(command, spawn):
+        return None
+    words = _literal_words(command)
+    joined = list(itertools.pairwise(words))
+    if ("-X", "utf8") in joined or "-Xutf8" in words:
+        return False
+    if "-I" in words or "-E" in words:
+        return True
+    env = next((k.value for k in spawn.call.keywords if k.arg == "env"), None)
+    return env is None or not carries_child_encoding(env, spawn)
 
 
 def in_text_mode(call: ast.Call) -> bool:
@@ -169,7 +382,9 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
 
     def setUp(self) -> None:
         self.offenders: list[str] = []
+        self.python_offenders: list[str] = []
         self.counted = 0
+        self.python_children = 0
         self.gate_hits: dict[str, int] = {}
         self.exemptions_hit: dict[tuple[str, str], int] = {}
         self.function_name_counts: dict[str, int] = {}
@@ -187,10 +402,11 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
                     self.function_name_counts[node.name] = (
                         self.function_name_counts.get(node.name, 0) + 1
                     )
-            for call, enclosing in spawning_calls(tree):
+            for spawn in spawning_calls(tree):
+                call = spawn.call
                 if not in_text_mode(call):
                     continue
-                key = (rel, enclosing)
+                key = (rel, spawn.enclosing)
                 if key in EXEMPT_FUNCTIONS:
                     self.exemptions_hit[key] = self.exemptions_hit.get(key, 0) + 1
                     continue
@@ -199,6 +415,11 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
                     self.gate_hits[rel] = self.gate_hits.get(rel, 0) + 1
                 if not names_utf8(call):
                     self.offenders.append(f"{rel}:{call.lineno}")
+                unset = python_child_without_encoding(spawn)
+                if unset is not None:
+                    self.python_children += 1
+                    if unset:
+                        self.python_offenders.append(f"{rel}:{call.lineno}")
 
     def test_no_text_mode_spawn_leaves_its_encoding_to_the_locale(self) -> None:
         """A call listed here reads git differently on Windows than it does in CI."""
@@ -208,9 +429,19 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
             'a text-mode call without encoding="utf-8" at: ' + ", ".join(self.offenders),
         )
 
+    def test_no_python_child_is_left_to_encode_by_the_locale(self) -> None:
+        """A call listed here decodes UTF-8 from a child that writes the ANSI code page on Windows."""
+        self.assertEqual(
+            [],
+            self.python_offenders,
+            "a text-mode Python child without PYTHONIOENCODING=utf-8 at: "
+            + ", ".join(self.python_offenders),
+        )
+
     def test_the_scan_reached_the_calls_it_claims_to_cover(self) -> None:
         """A scan that matched nothing passes the case above while proving nothing."""
         self.assertGreaterEqual(self.counted, MINIMUM_CALLS)
+        self.assertGreaterEqual(self.python_children, MINIMUM_PYTHON_CHILDREN)
 
     def test_the_scan_reached_both_named_gates(self) -> None:
         """A path change under `.github/actions/` could drop a gate out of the scan unnoticed."""
@@ -232,6 +463,87 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
                 self.exemptions_hit.get((rel, name), 0),
                 f"the exemption for {rel}:{name} covers exactly one call, and did not",
             )
+
+
+class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
+    """Constructed calls, so a reading that stopped matching one shape fails here and not silently."""
+
+    def verdicts(self, source: str) -> list[bool | None]:
+        tree = ast.parse(source)
+        return [python_child_without_encoding(spawn) for spawn in spawning_calls(tree)]
+
+    def test_a_python_child_with_no_environment_is_flagged(self) -> None:
+        source = 'import subprocess, sys\nsubprocess.run([sys.executable, "-c", "x"], text=True, encoding="utf-8")\n'
+        self.assertEqual([True], self.verdicts(source))
+
+    def test_an_interpreter_named_by_a_string_is_a_python_child(self) -> None:
+        source = 'import subprocess\nsubprocess.run(["/usr/bin/python3.12", "x.py"], encoding="utf-8", env={})\n'
+        self.assertEqual([True], self.verdicts(source))
+
+    def test_an_inline_entry_clears_the_call(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})\n'
+        )
+        self.assertEqual([False], self.verdicts(source))
+
+    def test_a_different_encoding_does_not_clear_the_call(self) -> None:
+        source = (
+            "import subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "cp1252"})\n'
+        )
+        self.assertEqual([True], self.verdicts(source))
+
+    def test_names_are_followed_through_a_function_and_its_class(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "class Case:\n"
+            "    def setUp(self):\n"
+            "        self.env = dict(os.environ)\n"
+            '        self.env["PYTHONIOENCODING"] = "utf-8"\n'
+            "    def go(self):\n"
+            "        argv = [sys.executable, 'x.py']\n"
+            "        env = dict(self.env)\n"
+            '        subprocess.run([*argv, "--flag"], encoding="utf-8", env=env)\n'
+            "    def bare(self):\n"
+            "        env = dict(os.environ)\n"
+            '        subprocess.run([sys.executable] + ["x"], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False, True], self.verdicts(source))
+
+    def test_an_update_keyword_clears_the_call(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def go():\n"
+            "    env = dict(os.environ)\n"
+            '    env.update(PYTHONIOENCODING="utf-8")\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False], self.verdicts(source))
+
+    def test_an_isolated_child_needs_utf8_mode_on_its_command_line(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable, "-I", "-c", "x"], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8"})\n'
+            'subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", "x"], encoding="utf-8")\n'
+        )
+        self.assertEqual([True, False], self.verdicts(source))
+
+    def test_an_attribute_bound_in_a_base_class_is_followed(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "class Base:\n"
+            "    def setUp(self):\n"
+            '        self.env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            "class Case(Base):\n"
+            "    def go(self):\n"
+            '        subprocess.run([sys.executable], encoding="utf-8", env=self.env)\n'
+        )
+        self.assertEqual([False], self.verdicts(source))
+
+    def test_a_child_that_is_not_python_is_not_judged(self) -> None:
+        source = 'import subprocess\nsubprocess.run(["git", "status"], encoding="utf-8")\n'
+        self.assertEqual([None], self.verdicts(source))
 
 
 if __name__ == "__main__":

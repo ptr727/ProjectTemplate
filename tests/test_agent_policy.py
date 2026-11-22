@@ -13,6 +13,7 @@ import contextlib
 import copy
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -745,7 +746,7 @@ class FactsImportCase(unittest.TestCase):
             "sys.exit(1 if bad or rc else 0)"
         )
         done = subprocess.run(
-            [sys.executable, "-I", "-c", code],
+            [sys.executable, "-I", "-X", "utf8", "-c", code],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -808,6 +809,7 @@ class CommandLineCase(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             check=False,
             timeout=60,
         )
