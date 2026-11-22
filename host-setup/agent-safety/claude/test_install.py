@@ -877,6 +877,7 @@ class TestWholeFileOwnership(StampCase):
             # The installer prints its own progress first, and the line ends when the process does.
             lines = iter(process.stdout.readline, "")
             if "ready" not in (line.strip() for line in lines):
+                process.kill()
                 out, err = process.communicate(timeout=20)
                 self.fail(
                     f"the writer never reported ready, status {process.returncode}\n{out}\n{err}"

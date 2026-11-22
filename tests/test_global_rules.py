@@ -722,6 +722,7 @@ class TestInterrupt(Case):
         try:
             assert process.stdout is not None
             if process.stdout.readline().strip() != "ready":
+                process.kill()
                 out, err = process.communicate(timeout=20)
                 self.fail(
                     f"the writer never reported ready, status {process.returncode}\n{out}\n{err}"

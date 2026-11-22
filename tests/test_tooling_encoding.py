@@ -392,20 +392,40 @@ def _bases(expr: ast.expr) -> list[ast.expr]:
     return []
 
 
+def _silent(expr: ast.expr) -> bool:
+    """Whether a mutation's value is a literal display that cannot write the variable.
+
+    That is a dictionary display or a `dict(...)` call of named keywords with no unpacking in it.
+    Anything else, such as `env.update(os.environ)`, can overwrite what an earlier write set.
+    """
+    if isinstance(expr, ast.Dict):
+        return None not in expr.keys
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "dict":
+        return not expr.args and all(k.arg is not None for k in expr.keywords)
+    return False
+
+
 def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
     """Whether every value this name can hold at the spawn sets the variable, read without flow.
 
     An item set or an `update` changes whatever value the name already holds. So where any of them
-    sets the variable, those decide, and each one has to set it to `utf-8`. A rebinding written
-    after the first of them replaces what they set, so it has to carry the variable too. Otherwise
-    each rebinding replaces the value. Every rebinding that does not read the name itself has to
+    sets the variable, those decide, and each one has to set it to `utf-8`. A later write that
+    could replace what they set has to carry the variable too. That is a rebinding, or a mutation
+    that is no literal display, unless it reads the name itself. Otherwise each rebinding replaces
+    the value. Every rebinding that does not read the name itself has to
     carry it. So one branch binding a bare environment is not hidden by another binding a full one.
     """
     writes = list(_writes(key, spawn))
     setting = [w for w in writes if w.mutates and _entries(w.value)]
     if setting:
         first = min(w.line for w in setting)
-        later = [w for w in writes if not w.mutates and w.line > first]
+        later = [
+            w
+            for w in writes
+            if w.line > first
+            and not _reads(w.value, key)
+            and (w.mutates is False or (not _entries(w.value) and not _silent(w.value)))
+        ]
         return all(carries_child_encoding(w.value, spawn, seen) for w in [*setting, *later])
     fresh = [w.value for w in writes if not w.mutates and not _reads(w.value, key)]
     return bool(fresh) and all(carries_child_encoding(v, spawn, seen) for v in fresh)
@@ -779,6 +799,38 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
         )
         self.assertEqual([True, False], self.verdicts(source))
+
+    def test_a_later_self_read_or_literal_write_keeps_the_call_clear(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def copied():\n"
+            "    env = os.environ.copy()\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            '    env = {**env, "LC_ALL": "C"}\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def other_key():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            '    env["LC_ALL"] = "C"\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False, False], self.verdicts(source))
+
+    def test_a_later_update_from_the_environment_defeats_the_call(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def merged():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            "    env.update(os.environ)\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+            "def piped():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+            "    env |= os.environ\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True, True], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (
