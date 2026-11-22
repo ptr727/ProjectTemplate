@@ -48,7 +48,7 @@ Automatic review skips a pull request whose base is not the repository default u
 
 Its collapsed analysis is verbose and can dominate API output. Its status context reports success while actionable comments remain, so finding state is read from review threads rather than from that check.
 
-A clean pass can leave no pull request review object. After an explicit `@coderabbitai review`, CodeRabbit can rewrite its summary and post "Review finished". It then leaves no review and no inline thread, as on ProjectTemplate pull request 4116, whose summary reads "No actionable comments were generated in the recent review". "Review finished" alone does not prove a clean pass, since it also appears on passes that had findings. Read the summary line, and match the commit range its review details print ("between <sha> and <sha>") against the current head. A later push leaves the line stale. A count of review objects shows no CodeRabbit round for a clean pass. CodeRabbit reads `.coderabbit.yaml` from the pull request's head branch. Its [configuration guide][coderabbit-yaml] names "the configuration present in the feature branch under review". `pr_review.py` reads the agent policy from the base branch, so the two can disagree.
+A clean pass can leave no pull request review object. After an explicit `@coderabbitai review`, CodeRabbit can rewrite its summary and post "Review finished". It then leaves no review and no inline thread, as on ProjectTemplate pull request 4116, whose summary reads "No actionable comments were generated in the recent review". "Review finished" alone does not prove a clean pass, since it also appears on passes that had findings. Read the summary line, and match the commit range its review details print (`between <sha> and <sha>`) against the current head. A later push leaves the line stale. A count of review objects shows no CodeRabbit round for a clean pass. CodeRabbit reads `.coderabbit.yaml` from the pull request's head branch. Its [configuration guide][coderabbit-yaml] names "the configuration present in the feature branch under review". `pr_review.py` reads the agent policy from the base branch, so the two can disagree.
 
 On the open-source tier it is also rate limited. A rate-limited pull request receives a notice naming when a review can next run, in place of the review. The notice has the same shape as the star-gate skip notice while behaving oppositely. Re-triggering returns the notice again rather than a review.
 
@@ -107,8 +107,8 @@ Qodo's use on a private repository needs a separate review of its approved plan,
 
 [coderabbit-auto-review]: https://docs.coderabbit.ai/configuration/auto-review
 [coderabbit-config]: https://docs.coderabbit.ai/reference/configuration
-[coderabbit-yaml]: https://docs.coderabbit.ai/getting-started/yaml-configuration
 [coderabbit-plans]: https://docs.coderabbit.ai/management/plans
+[coderabbit-yaml]: https://docs.coderabbit.ai/getting-started/yaml-configuration
 [copilot-customize]: https://docs.github.com/en/copilot/tutorials/customize-code-review
 [copilot-exclusion]: https://docs.github.com/en/copilot/how-tos/configure-content-exclusion/exclude-content-from-copilot
 [qodo-config]: https://docs.qodo.ai/install-and-configure/configuration-overview/configuration-file
