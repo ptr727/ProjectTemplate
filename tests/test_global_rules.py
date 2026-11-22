@@ -484,7 +484,8 @@ class TestInterruptedWrite(Case):
         except OSError as error:
             self.skipTest(f"this host refuses to create a symlink for this user ({error})")
         self.interrupted_write()
-        self.assertEqual(Path(os.readlink(self.target)), destination)
+        self.assertTrue(self.target.is_symlink())
+        self.assertEqual(self.target.resolve(), destination.resolve())
         self.assertEqual(destination.read_bytes(), self.PRIOR)
         self.assertEqual(list(self.root.glob(".*.tmp")), [])
         self.assertEqual(list(self.codex.glob(".*.tmp")), [])
