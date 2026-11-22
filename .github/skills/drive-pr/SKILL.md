@@ -89,14 +89,17 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    "Disposing of Findings". A later push adds its own to any list already there. Step 3 gives
    each one an outcome under the Merge Gate's item 3. Where the
    change writes a code or config comment line, create the PR with `gh pr create --label comments`,
-   or the prose gate refuses it. A label added after the create is missing from the opened event's
-   payload. On a private repository that payload is all the lint job can read until the job holds
+   or the prose gate refuses it. A repository lacking the label can refuse that create, so
+   check `gh label list` first. Where the label is missing, `comment-and-doc-style`
+   says its escape is not yet available there. A label added after the create is missing from the
+   opened event's payload. Where the lint log lacks "Read the pull request's labels live", that
+   payload decides. A private repository's log always lacks it until the lint job holds
    `pull-requests: read`. A label given at the create is still missed there now and then, so read
-   that repository's first lint run. Where a later push first writes a comment line, add the label
-   with `gh pr edit` before that push, so the push's event carries it. Where a public repository's
-   lint log says "Read the pull request's labels live", a rerun of the failed job picks up a label
-   added late. A rerun replays the event's payload. So on a private repository the label reaches
-   the gate only through a fresh event, such as the next push or a close and reopen.
+   the first lint run. Where a later push first writes a comment line, add the label with
+   `gh pr edit` before that push, so the push's event carries it. Where the log reads the labels
+   live, a rerun of the failed job picks up a label added late. Otherwise a rerun replays the
+   payload. So the label then reaches the gate only through a fresh event, such as the next push
+   or a close and reopen.
    A push refused by a `.husky/pre-push` hook is that gate working rather than an obstacle to
    route around. The hub carries such a hook, and a repository has one only if it adds one. That
    skill's refusal table says what each refusal means and what clears it.
