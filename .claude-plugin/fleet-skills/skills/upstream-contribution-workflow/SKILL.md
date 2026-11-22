@@ -105,7 +105,7 @@ git push --force-with-lease="work/x:$old" origin work/x
 if ($LASTEXITCODE -ne 0) { throw 'lease push refused: work/x' }
 ```
 
-Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch. Where the rebase stops on a conflict, resolve it and run `git rebase --continue`. Where the merge check stops, reapply first. Then read the old head back from the backup branch with `git ls-remote origin <backup-ref>`. Run only the lease push, pinned to that value.
+Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch. Where the rebase stops on a conflict, resolve it and run `git rebase --continue`. The merge check did not run in that case, so run `git rev-list --merges "$mirror..$old"` yourself and read any merge it names, as above. Where the merge check stops the chain instead, reapply first. Then read the old head back from the backup branch with `git ls-remote origin <backup-ref>`. Run only the lease push, pinned to that value.
 
 For example, the fork's mirror branch and upstream both sit at commit `A`, with the iteration PR
 from `work/x` into the mirror branch green. Upstream advances to `B`. The fork syncs its mirror

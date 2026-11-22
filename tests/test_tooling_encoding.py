@@ -227,8 +227,9 @@ def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
     The scope searched is the one Python would resolve the name in. For an attribute of `self` that
     is the class and each base class this module defines. A shared `setUp` commonly binds what a
     test method spawns with. For a bare name it is the innermost enclosing function, then the
-    next one out, then the module. The search stops at the first scope that binds the name. A function
-    parameter binds it, so a parameter never inherits an outer scope's value.
+    next one out, then the module. The search stops at the first scope that binds the name. An
+    assignment or a function parameter binds it, so neither inherits an outer scope's value. An
+    item set or an `update` binds nothing, and the search goes on past it.
     An item set or an `update` is returned as the dictionary it writes, so the caller reads every
     kind of write the same way.
     """
@@ -237,8 +238,8 @@ def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
         return
     for scope in (*spawn.functions, spawn.module):
         found = list(_node_writes(key, list(_own_nodes(scope))))
-        if found or _is_parameter(key, scope):
-            yield from found
+        yield from found
+        if any(not w.mutates for w in found) or _is_parameter(key, scope):
             return
 
 
@@ -305,7 +306,9 @@ def _reads(expr: ast.expr, key: str) -> bool:
     return any(_target_key(node) == key for node in ast.walk(expr) if isinstance(node, ast.expr))
 
 
-def _in_order(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool | None:
+def _in_order(
+    expr: ast.expr, spawn: Spawn, seen: frozenset[str], held: str | None = None
+) -> bool | None:
     """The top-level mapping's effective setting, each entry and unpacking applied in order.
 
     A later write overrides an earlier one, so `{"PYTHONIOENCODING": "utf-8", **os.environ}` ends
@@ -334,14 +337,14 @@ def _in_order(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool | None
         if key is None:
             if isinstance(value, ast.Dict) and None not in value.keys and not _entries(value):
                 continue
-            state = carries_child_encoding(value, spawn, seen)
+            state = carries_child_encoding(value, spawn, seen, held)
         elif _is_constant(key, name):
             state = _is_constant(value, want)
     return state
 
 
 def carries_child_encoding(
-    expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()
+    expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset(), held: str | None = None
 ) -> bool:
     """Whether this environment expression sets `PYTHONIOENCODING` to `utf-8`.
 
@@ -352,7 +355,7 @@ def carries_child_encoding(
     `_name_carries` reads it. A function's return value is not followed, so an environment a helper
     builds is read as not carrying it.
     """
-    ordered = _in_order(expr, spawn, seen)
+    ordered = _in_order(expr, spawn, seen, held)
     if ordered is not None:
         return ordered
     entries = _entries(expr)
@@ -360,6 +363,8 @@ def carries_child_encoding(
         return all(_is_constant(v, CHILD_ENCODING[1]) for v in entries)
     for base in _bases(expr):
         key = _target_key(base)
+        if key is not None and key == held:
+            return True
         if key is not None and key not in seen and _name_carries(key, spawn, seen | {key}):
             return True
     return False
@@ -411,7 +416,7 @@ def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
     An item set or an `update` changes whatever value the name already holds. So where any of them
     sets the variable, those decide, and each one has to set it to `utf-8`. A later write that
     could replace what they set has to carry the variable too. That is a rebinding, or a mutation
-    that is no literal display, unless it reads the name itself. Otherwise each rebinding replaces
+    that is no literal display. A write reading the name itself keeps what the name held. Otherwise each rebinding replaces
     the value. Every rebinding that does not read the name itself has to
     carry it. So one branch binding a bare environment is not hidden by another binding a full one.
     """
@@ -422,11 +427,14 @@ def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
         later = [
             w
             for w in writes
-            if w.line > first
-            and not _reads(w.value, key)
-            and (w.mutates is False or (not _entries(w.value) and not _silent(w.value)))
+            if w not in setting
+            and w.line >= first
+            and (not w.mutates or (not _entries(w.value) and not _silent(w.value)))
         ]
-        return all(carries_child_encoding(w.value, spawn, seen) for w in [*setting, *later])
+        return all(carries_child_encoding(w.value, spawn, seen) for w in setting) and all(
+            carries_child_encoding(w.value, spawn, seen, key if _reads(w.value, key) else None)
+            for w in later
+        )
     fresh = [w.value for w in writes if not w.mutates and not _reads(w.value, key)]
     return bool(fresh) and all(carries_child_encoding(v, spawn, seen) for v in fresh)
 
@@ -831,6 +839,44 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
         )
         self.assertEqual([True, True], self.verdicts(source))
+
+    def test_a_later_rebinding_that_reads_the_name_is_judged_on_what_it_adds(self) -> None:
+        head = (
+            "import os, subprocess, sys\n"
+            "def go():\n"
+            "    env = {}\n"
+            '    env["PYTHONIOENCODING"] = "utf-8"\n'
+        )
+        tail = '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        for line, verdict in (
+            ('env = {**env, "PYTHONIOENCODING": "cp1252"}', True),
+            ("env = {**env, **os.environ}", True),
+            ('env = dict(env, PYTHONIOENCODING="cp1252")', True),
+            ('env = {**env, "LC_ALL": "C"}', False),
+            ("env = env.copy()", False),
+        ):
+            with self.subTest(line=line):
+                self.assertEqual([verdict], self.verdicts(f"{head}    {line}\n{tail}"))
+
+    def test_an_update_from_the_environment_on_the_setting_line_defeats_the_call(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def go():\n"
+            "    env = {}\n"
+            '    env.update({"PYTHONIOENCODING": "utf-8"}, **os.environ)\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True], self.verdicts(source))
+
+    def test_a_mutation_in_a_function_does_not_hide_the_module_binding(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            "def go():\n"
+            '    env.update({"LC_ALL": "C"})\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (
