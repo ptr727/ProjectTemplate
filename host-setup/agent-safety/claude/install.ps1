@@ -21,7 +21,14 @@ $candidates = @(
 foreach ($candidate in $candidates) {
     if (-not (Get-Command $candidate.Name -CommandType Application -ErrorAction SilentlyContinue)) { continue }
     $prefix = $candidate.Args
-    $out = & $candidate.Name @prefix -c $probe
+    # A candidate that cannot start at all throws under Stop, so it is caught and passed over like any other mismatch.
+    try {
+        $out = & $candidate.Name @prefix -c $probe
+    } catch {
+        [Console]::Error.WriteLine($_.Exception.Message)
+        $out = $null
+        $global:LASTEXITCODE = 1
+    }
     if ($LASTEXITCODE -eq 0 -and "$out".Trim() -eq "ok") {
         & $candidate.Name @prefix $script @args
         exit $LASTEXITCODE

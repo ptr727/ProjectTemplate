@@ -86,6 +86,17 @@ class TestInstallPs1Probe(unittest.TestCase):
         self.assertIn("Passed over python3", result.stderr)
         self.assertIn("Microsoft Store", result.stderr)
 
+    @unittest.skipIf(WINDOWS, "an unstartable file is written as a POSIX script here")
+    def test_a_candidate_that_cannot_start_is_passed_over(self) -> None:
+        self.stub("py", "old")
+        broken = self.bin / "python3"
+        broken.write_bytes(b"\x00\x01 not an executable\n")
+        broken.chmod(0o755)
+        self.stub("python", "real")
+        result = self.run_wrapper()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), ["ran:python"])
+
     def test_the_first_candidate_that_reports_3_11_runs_the_installer(self) -> None:
         self.stub("py", "old")
         self.stub("python3", "ok")
