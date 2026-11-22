@@ -1078,12 +1078,17 @@ check_interaction() {
         return
     fi
     got="$(jqr '.limit // "none"' <<<"$live")"
-    if [ "$got" != "$interaction_limit" ]; then
-        fail "interaction limit = $interaction_limit (publicInteraction=$interaction), live $got. GitHub removes a lapsed limit silently, so apply sets it again"
+    origin="$(jqr '.origin // "none"' <<<"$live")"
+    # The origin is tested first, since apply refuses to replace a limit the owning account set, so naming apply there would be unfollowable.
+    if [ "$got" != none ] && [ "$origin" != repository ]; then
+        fail "interaction limit $got is set on the owning $origin rather than on the repository, which apply cannot replace. Remove it there, then apply sets $interaction_limit"
         return
     fi
-    origin="$(jqr '.origin // "none"' <<<"$live")"
-    assert "interaction limit = $interaction_limit, set on the repository (origin $origin)" test "$origin" = repository
+    if [ "$got" != "$interaction_limit" ]; then
+        fail "interaction limit = $interaction_limit (publicInteraction=$interaction), live $got. Apply sets it, and GitHub removes a lapsed one silently"
+        return
+    fi
+    pass "interaction limit = $interaction_limit, set on the repository"
     # The days left are computed in jq, so no date dialect is involved.
     # Fractional seconds are dropped first, since fromdateiso8601 parses none.
     if ! left="$(jqr '((.expires_at | sub("\\.[0-9]+"; "") | fromdateiso8601) - now) / 86400 | floor' <<<"$live" 2>/dev/null)" || ! [[ "$left" =~ ^-?[0-9]+$ ]]; then

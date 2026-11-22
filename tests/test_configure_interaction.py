@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Exercise repo-config/configure.sh's interaction-limit policy: its registry resolution, apply write, pre-flight, and check.
 
-The shell is lifted out of the file rather than restated here, so an edit that drops a guard fails these tests.
+The shell is lifted out of the file, through the lift helper test_configure_archived.py already shares, rather than restated here.
+An edit that drops a guard therefore fails these tests.
 Only `gh`, the boundary the functions call out to, is stubbed, and every case runs offline.
 No case reaches a live repository, since the stub answers every call the functions make and refuses any other.
 """
@@ -20,21 +21,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from host_capability import bash_or_skip
+from test_configure_archived import lift, run_bash
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIGURE = ROOT / "repo-config" / "configure.sh"
-TEXT = CONFIGURE.read_text(encoding="utf-8")
-
-
-def lift(pattern: str) -> str:
-    """The one region of configure.sh matching `pattern`, or a failure naming what was missing."""
-    found = re.findall(pattern, TEXT, re.MULTILINE | re.DOTALL)
-    if len(found) != 1:
-        raise AssertionError(
-            f"expected one match in {CONFIGURE.name} for {pattern!r}, found {len(found)}"
-        )
-    return found[0]
 
 
 def function(name: str) -> str:
@@ -42,7 +31,6 @@ def function(name: str) -> str:
     return lift(rf"^({re.escape(name)}\(\) \{{[^\n]*\n.*?\n\}}\n)")
 
 
-OPTIONS = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
 JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
 HELPERS = "".join(
     lift(pattern)
@@ -97,22 +85,12 @@ class Harness(unittest.TestCase):
     """Runs a lifted region under the script's own shell options."""
 
     def setUp(self) -> None:
-        self.bash = bash_or_skip()
-        if shutil.which("jq") is None:
-            raise unittest.SkipTest("no jq on PATH")
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.capture = self.tmp / "put.json"
 
     def run_script(self, body: str) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [self.bash, "-c", f"{OPTIONS}\n{body}"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=30,
-            check=False,
-        )
+        return run_bash(body, "jq")
 
     def resolved(self, interaction: str) -> str:
         """The variables the resolution block derives, set as it would set them."""
@@ -294,12 +272,18 @@ class CheckCase(Harness):
         self.assertIn("ok   interaction limit = existing_users", result.stdout)
         self.assertIn("FAILED=0", result.stdout)
 
-    def test_an_account_wide_limit_fails(self) -> None:
+    def test_an_account_wide_limit_fails_and_names_where_to_remove_it(self) -> None:
         result = self.check("false", self.live(origin="user"))
         self.assertIn(
-            "FAIL interaction limit = collaborators_only, set on the repository (origin user)",
-            result.stdout,
+            "FAIL interaction limit collaborators_only is set on the owning user", result.stdout
         )
+        self.assertIn("FAILED=1", result.stdout)
+
+    def test_an_account_wide_limit_of_the_other_group_never_names_apply_alone(self) -> None:
+        """Apply refuses a non-repository origin, so the check must name the origin, not a re-apply."""
+        result = self.check("false", self.live(limit="existing_users", origin="organization"))
+        self.assertIn("is set on the owning organization", result.stdout)
+        self.assertNotIn("live existing_users", result.stdout)
         self.assertIn("FAILED=1", result.stdout)
 
     def test_an_unreadable_expiry_fails(self) -> None:

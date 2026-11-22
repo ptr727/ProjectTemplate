@@ -292,7 +292,7 @@ A human-readable index of the rules agents enforce, implement, and audit. The au
 
 ## Questions or Issues
 
-File everything at [Issues][issues-link]. That includes a defect in a rule, a procedure that did not survive contact with a real repository, and a proposal for a new rule. An open question that is not yet a defect is filed there too. This repository is public for reference rather than for outside participation. So only its collaborators can open or comment on an issue or a pull request. It has no channel for anyone else to raise one. Anyone can still read the issues and fork the repository. A question an agent parks for the maintainer is not an open question of that kind. It is filed here as an issue carrying the `decision` label, on the terms [GOVERNANCE.md "Communicating with the User"][governance-communicating-with-the-user] sets. This repo ships no application code, so an issue here is about the rules, the spec, the procedures, or the tooling under [`scripts/`][scripts] and [`spec/`][spec]. For the same reason it is never about a downstream project's behavior, which belongs on that project's own tracker.
+File everything at [Issues][issues-link]. That includes a defect in a rule, a procedure that did not survive contact with a real repository, and a proposal for a new rule. An open question that is not yet a defect is filed there too. This repository is public for reference rather than for outside participation. So its registry entry takes the `collaborators` policy that [`repo-config/README.md` "Public Interaction"][repo-config-public-interaction] describes. Under it only collaborators can open or comment on an issue or a pull request. It has no channel for anyone else to raise one. Anyone can still read the issues and fork the repository. A question an agent parks for the maintainer is not an open question of that kind. It is filed here as an issue carrying the `decision` label, on the terms [GOVERNANCE.md "Communicating with the User"][governance-communicating-with-the-user] sets. This repo ships no application code, so an issue here is about the rules, the spec, the procedures, or the tooling under [`scripts/`][scripts] and [`spec/`][spec]. For the same reason it is never about a downstream project's behavior, which belongs on that project's own tracker.
 
 An issue is most useful when it names the ground truth it disagrees with. So include the file and section that states the rule, the repository and branch where the problem was observed, and what you expected instead. A finding measured against a specific commit is worth more than one measured against a memory of the docs, per [GOVERNANCE.md "Verification Discipline"][governance-verification-discipline].
 
@@ -390,6 +390,7 @@ Licensed under the [MIT License][license]\
 [readme-structure]: ./spec/readme-structure.md
 [repo-config]: ./repo-config/
 [repo-config-doc]: ./docs/repo-config.md
+[repo-config-public-interaction]: ./repo-config/README.md#public-interaction
 [reports]: ./reports/
 [repos]: ./registry/repos.json
 [resync]: ./RESYNC.md
