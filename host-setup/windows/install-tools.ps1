@@ -614,7 +614,8 @@ function Write-InstallFailure {
         if ($source.Entries.Count -gt 0) {
             info $source.Heading
             foreach ($entry in $source.Entries) {
-                $shown = if ($HOME) { $entry -ireplace [regex]::Escape($HOME), '%USERPROFILE%' } else { $entry }
+                # The profile ends at a path component, so a sibling folder sharing its prefix is left whole.
+                $shown = if ($HOME) { $entry -ireplace ([regex]::Escape($HOME.TrimEnd('/', '\')) + '(?=[\\/]|$)'), '%USERPROFILE%' } else { $entry }
                 info "  $shown"
             }
         }

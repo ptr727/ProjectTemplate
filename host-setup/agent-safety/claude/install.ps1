@@ -7,26 +7,25 @@ $ErrorActionPreference = "Stop"
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $script = Join-Path $here "install.py"
 
-# Prefer launchers that are unambiguously Python 3.
-# The installer and the hook use Python 3 syntax, so a bare `python`, which is Python 2 on some systems, is the last resort.
-if (Get-Command "py" -ErrorAction SilentlyContinue) {
-    & py -3 $script @args
-} elseif (Get-Command "python3" -ErrorAction SilentlyContinue) {
-    & python3 $script @args
-} elseif (Get-Command "python" -ErrorAction SilentlyContinue) {
-    # Verify a bare `python` is Python 3 before handing it Python 3 syntax.
-    # That is because it is Python 2 on some setups and would fail to parse install.py.
-    # The two branches above are Python 3 by construction, so only this one needs the check.
-    & python -c "import sys; sys.exit(0 if sys.version_info[0] == 3 else 1)" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Found python on PATH but it is not Python 3 (tried py -3, python3, python). Install Python 3."
-        exit 1
+# Try each candidate and take the first that runs and reports Python 3.11 or newer.
+# A name being on PATH is not enough: the WindowsApps `python3` alias stub is found by Get-Command, prints a Store message, and installs nothing.
+# A bare `python` is the last resort, since it is Python 2 on some systems.
+# The probe's stderr stays visible so a candidate that fails says why, and a mismatch falls through to the next.
+$probe = 'import sys; print("ok" if sys.version_info >= (3, 11) else "old")'
+$candidates = @(
+    @{ Name = "py"; Args = @("-3") }
+    @{ Name = "python3"; Args = @() }
+    @{ Name = "python"; Args = @() }
+)
+foreach ($candidate in $candidates) {
+    if (-not (Get-Command $candidate.Name -CommandType Application -ErrorAction SilentlyContinue)) { continue }
+    $prefix = $candidate.Args
+    $out = & $candidate.Name @prefix -c $probe
+    if ($LASTEXITCODE -eq 0 -and "$out".Trim() -eq "ok") {
+        & $candidate.Name @prefix $script @args
+        exit $LASTEXITCODE
     }
-    & python $script @args
-} else {
-    Write-Error "Python 3 is required and was not found on PATH (tried py -3, python3, python)."
-    exit 1
+    [Console]::Error.WriteLine("Passed over $($candidate.Name): it did not report Python 3.11 or newer.")
 }
-
-# Propagate the installer's exit code - a native command's non-zero exit does not stop the script.
-exit $LASTEXITCODE
+Write-Error "Python 3.11+ is required and was not found on PATH (tried py -3, python3, python)."
+exit 1
