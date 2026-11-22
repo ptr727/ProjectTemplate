@@ -1614,7 +1614,8 @@ def registration_problems(claude_home):
                 f"pluginConfigs.{plugin}.options.instructionFiles {why} rather than "
                 f"{INSTRUCTION_FILES}, so a CLAUDE.local.md stops AGENTS.md loading"
             )
-    # Only an absence is drift, since a value the host set is one a re-run leaves alone, which the report notes instead.
+    # Only an absence is drift, since a re-run clears it.
+    # A host-set value is one a re-run leaves alone, so --report warns of it.
     if session_url_state(data)[0] == "absent":
         out.append(
             "attribution.sessionUrl is absent rather than false, so a web or Remote Control "
@@ -1778,8 +1779,13 @@ def report(claude_home):
         state, words = session_url_state(settings_data)
         if state == "foreign":
             print(
-                f"Note: {words}, which this kit does not own, so this kit does not turn the "
-                "session link off."
+                f"WARNING: {words}. The host set it, so a re-run leaves it alone. "
+                "It may leave a session link on the commits and pull requests a web or Remote Control "
+                "session writes, which fleet rules never allow. Claude Code's reading of a value "
+                "that is neither a boolean nor an object is not established here. To fix it, set attribution.sessionUrl "
+                "to false, first replacing attribution with an object where it is not one. Setting "
+                "attribution itself to false also works, but it hides every attribution, the "
+                "commit and pull request ones included."
             )
     # Read from the file rather than compared against the stamp.
     # An install onto a corrupted file writes the corruption into the stamp, and the two then agree.
@@ -2250,7 +2256,9 @@ def main():
     elif state == "off":
         done.append(f"{words}: already current")
     else:
-        done.append(f"{words}, which this host set, so this kit leaves it and adds no opt-out")
+        done.append(
+            f"{words}, which this host set, so this kit leaves it and adds no opt-out, and --report warns of it"
+        )
 
     # 4. The autoMode rules, stripped by their tag and appended again.
     # A list the kit creates splices in the built-ins, and a list that exists is made to lead with the splice.
