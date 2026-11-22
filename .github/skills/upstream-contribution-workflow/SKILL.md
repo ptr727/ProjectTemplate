@@ -90,6 +90,7 @@ old=$(git rev-parse --verify work/x) && bak=refs/heads/backup/work-x-1 &&
 PowerShell equivalent:
 
 ```powershell
+if (-not $mirror) { throw 'set $mirror to the mirror branch first' }
 $old = git rev-parse --verify work/x
 if ($LASTEXITCODE -ne 0) { throw 'branch not found: work/x' }
 $bak = 'refs/heads/backup/work-x-1'
@@ -101,7 +102,7 @@ if ($LASTEXITCODE -ne 0) { throw 'rebase stopped, resolve it before pushing' }
 git push --force-with-lease="work/x:$old" origin work/x
 ```
 
-Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch.
+Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch. Where the rebase stops on a conflict, resolve it and run `git rebase --continue`. Then read the old head back from the backup branch with `git ls-remote origin <backup-ref>`. Run only the lease push, pinned to that value.
 
 For example, the fork's mirror branch and upstream both sit at commit `A`, with the iteration PR
 from `work/x` into the mirror branch green. Upstream advances to `B`. The fork syncs its mirror
