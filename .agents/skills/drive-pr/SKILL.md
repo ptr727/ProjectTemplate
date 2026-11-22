@@ -75,7 +75,12 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 ## The Drive Loop
 
 1. Isolate into a worktree per repo-worktree before the first edit. Base it on the branch that skill's base rule names, develop unless the task is explicitly about main-only content.
-2. Commit the work, then run `local-strict-review` and record its pass in the order that skill
+2. Before any commit that first writes a code or config comment line, check
+   `gh label list --search comments`. Where the label is missing, `comment-and-doc-style` says the
+   escape is not yet available there. So delete the comment line before committing. Where a rule
+   requires the comment, report the missing label to whoever dispatched the drive, or to the
+   maintainer, and do not push.
+   Commit the work, then run `local-strict-review` and record its pass in the order that skill
    gives, its diff receipt following the commit. Where the change also carries the canonical ledger,
    that skill's carried-content records instead precede the commit, because that ledger is tracked.
    A driver that cannot dispatch a subagent follows that skill's "Running It".
@@ -89,11 +94,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    "Disposing of Findings". A later push adds its own to any list already there. Step 3 gives
    each one an outcome under the Merge Gate's item 3. Where the
    change writes a code or config comment line, create the PR with `gh pr create --label comments`,
-   or the prose gate refuses it. A repository lacking the label can refuse that create, so
-   check `gh label list --search comments` before the commit. Where the label is missing,
-   `comment-and-doc-style` says its escape is not yet available there. So delete the comment line
-   before committing, and create the PR without the label. Where a rule requires the comment,
-   report the missing label to whoever dispatched the drive, or to the maintainer, and do not push. A label added after the create is missing from the
+   or the prose gate refuses it. A repository lacking the label can refuse that create, which is
+   why the check above comes first. A label added after the create is missing from the
    opened event's payload. Where the lint log lacks "Read the pull request's labels live", that
    payload decides. A private repository's log always lacks it until the lint job holds
    `pull-requests: read`. A label given at the create is still missed there now and then, so read
