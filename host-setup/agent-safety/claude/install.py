@@ -2266,7 +2266,7 @@ def run():
     return 0
 
 
-received: list[int] = []
+received: "list[int]" = []
 
 
 def on_signal(signum, _frame):
