@@ -169,13 +169,16 @@ def runs_hook(hook, path):
 
     An exec-form entry is read from its `command` and `args` directly.
     It runs the hook only when `args` holds exactly the deployed path, the shape this installer writes.
+    It also needs a `command` to spawn, since an entry with none runs nothing.
     No shell expands `~` or `$HOME` there, so only the literal path counts.
     A `command` naming the hook itself is not accepted, since exec form cannot spawn a `.py` on Windows.
     A shell-form entry, one an older install or a hand edit left, is read by `shell_runs_hook`.
     """
     if not exec_form(hook):
         return shell_runs_hook(hook.get("command"), path)
-    args = hook["args"]
+    command, args = hook.get("command"), hook["args"]
+    if not isinstance(command, str) or not command:
+        return False
     return isinstance(args, list) and len(args) == 1 and literal_path(args[0], path)
 
 
@@ -762,10 +765,7 @@ def registered_launcher(hook, path):
     Any other shape is not run, since what it executes is not decidable from the entry.
     """
     if exec_form(hook):
-        launcher = hook.get("command")
-        if not isinstance(launcher, str) or not launcher:
-            return None
-        return launcher if runs_hook(hook, path) else None
+        return hook["command"] if runs_hook(hook, path) else None
     try:
         words = shlex.split(str(hook.get("command")))
     except ValueError:

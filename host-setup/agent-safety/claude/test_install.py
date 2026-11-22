@@ -2107,6 +2107,8 @@ class TestRegistration(StampCase):
                 {"command": "python3", "args": ["~/.claude/hooks/" + install.GUARD_NAME]},
             ),
             ("args not a list", {"command": "python3", "args": str(guard)}),
+            ("no command", {"args": [str(guard)]}),
+            ("empty command", {"command": "", "args": [str(guard)]}),
             ("another file", {"command": "python3", "args": [str(guard) + ".bak"]}),
         ):
             with self.subTest(shape=label):
