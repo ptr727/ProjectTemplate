@@ -85,8 +85,8 @@ Subcommands
            added, modified, renamed, or deleted with no changed line GitHub counts left out where
            unnamed, `carried:table` where the newest round carrying a table does, `local` where an
            attested local pass covers a head the review policy hands to one, by default off the
-           default, or a head owed a Copilot round whose head rounds carry no table and where no
-           table stands in, `dependabot` where only green Dependabot bumps changed a promotion's
+           default, or a head owed a Copilot round that one covers, none carrying a table and no
+           table standing in, `dependabot` where only green Dependabot bumps changed a promotion's
            files or a table names the rest, and `none` otherwise. A table stands in only where no
            round on record states partial coverage and the whole review history is in view. `none`
            decides no exit code and prints a note, since Merge Gate item 2 in pr-review-conduct
