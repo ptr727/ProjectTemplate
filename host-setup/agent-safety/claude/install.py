@@ -675,7 +675,8 @@ def base_interpreters(path):
     A venv's interpreter goes when the venv does, and a worktree removed with its venv takes it along.
     A hook registered under it would then fail to spawn, a non-blocking error that fails the guard open.
     So the venv's `pyvenv.cfg` is read for the base, each existing one listed in order.
-    The first is `python3` in its `home` directory, the name a minor-version upgrade keeps working.
+    The first is `python3`, or `python.exe` on Windows, in its `home` directory.
+    That is the name a minor-version upgrade keeps working.
     The second is its `executable`, which Python 3.11 and later record.
     That covers a `home` whose `python3` is an older interpreter or absent, as an altinstall leaves it.
     The venv's own path stays the last resort where neither exists.

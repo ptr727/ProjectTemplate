@@ -2617,11 +2617,10 @@ class TestContainmentPrefix(StampCase):
         r = run(self.home, "--report", contain=False)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("cannot contain", r.stdout)
-        # Every hook fails to exec there, so the note that commands run uncontained would contradict it.
         self.assertNotIn("run uncontained", r.stdout)
 
     def test_a_prefix_synced_from_another_host_reports_stale_where_it_cannot_contain(self):
-        """A path this host lacks exits 127 on every hook, which fails the guard open."""
+        """A path this host lacks exits 127 on every Bash tool call and every shell-form hook."""
         self.install(contain=False)
         data = self._settings()
         data["env"] = {install.PREFIX_VAR: "/elsewhere/.claude/hooks/" + install.CONTAIN_NAME}
