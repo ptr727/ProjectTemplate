@@ -751,10 +751,11 @@ gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at !=
 Then read each pull request it prints for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
 ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
-line instead. Read the same places for a `Reopens on promotion:` line, which a change undoing a fix
-carries per `GOVERNANCE.md` "Operational Repositories". Leave out each issue such a line names,
-unless a later commit in the range names it on a `Closes on promotion:` line again. A read that
-exits non-zero stops the assembly and is reported.
+line instead. On an operational-model repository, also read the same places for a
+`Reopens on promotion:` line, which a change undoing a fix carries there per `GOVERNANCE.md`
+"Operational Repositories". Leave out each issue such a line names, unless a later commit in the
+range names it on a `Closes on promotion:` line again. A read that exits non-zero stops the
+assembly and is reported.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral
@@ -768,11 +769,12 @@ Deriving the set from the range rather than from what this round dispatched is w
 that deferred or parked, contributing none. It also covers an earlier round's work that no
 promotion has yet carried. A fix landing during the freeze changes the range under a body already
 written. So re-read the range when the fix lands. Amend the body where the range calls for a `Fixes`
-line the body lacks, rather than leaving an issue to be closed by hand. Each amendment replaces
+line the body lacks, rather than leaving an issue to be closed by hand. Amend it too where a
+`Reopens on promotion:` line now in the range drops a `Fixes` line the body holds. Each amendment replaces
 the whole body, and another session may amend it between a read and a write. So build each one
-from a read of the body made immediately before the write, keeping every line that read holds.
-Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
-range calls for. Checking the whole set rather than only this amendment's own lines is what
+from a read of the body made immediately before the write. Keep every line that read holds,
+less any the range drops. Then read the body again. Repeat the amendment where it lacks a
+`Fixes` line a freshly fetched range calls for, or holds one that range drops. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
 
 Run the mechanical closing-set check that `branching-and-release-model` states in its

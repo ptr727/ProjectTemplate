@@ -68,7 +68,8 @@ rather than guessing from the repo's contents.
   feature PR body or a direct-push commit carries no closing keyword. It names the issues it fixes,
   where it names them, in the inert `Closes on promotion: #N, #M` line. The promotion PR's body
   carries one closing keyword per issue those lines name. In an operational repository that line
-  is required, and a rollback's `Reopens on promotion:` line drops an issue from it, as "Operational repositories (the complete delta)" below sets. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
+  is required, as "Operational repositories (the complete delta)" below sets. That delta also lets
+  a rollback's `Reopens on promotion:` line take an issue out of the promotion body. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
   promotion that already merged without it, or completed work with no promotion imminent. Closing by hand is
   not a repair for a botched promotion. Cite the squash SHA and re-read that commit before closing.
 - **A closing keyword fires inside a sentence that negates it.** GitHub matches the keyword and
