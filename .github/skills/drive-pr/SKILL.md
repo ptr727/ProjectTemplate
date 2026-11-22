@@ -213,6 +213,13 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 6. Drive its review loop the same way. A finding that needs a code change never gets pushed to
    the promotion PR directly, since its head is develop. So land the fix as a fresh pass through
    steps 1 to 4 in its own worktree and branch. Then return here.
+   The promotion's head can read `coverage=none` where a Copilot round covers it and none
+   covering it carries a file table. Then run the local strict review at the `frontier` tier from
+   a clean checkout of that head, `main...develop`. Its target is `main` in every command that
+   skill runs, the `status` and `record` calls included. Then run `pr_review.py attest` from that
+   checkout on the promotion pull request. Merge Gate item 2 in
+   pr-review-conduct then reads `coverage=local`, on the further terms that item states. Each new
+   head owes its own pass and attestation.
 7. The fix landing on develop updates the promotion PR's diff and head SHA on its own. Re-request
    a review on the new head and continue the loop.
 8. Repeat 6 and 7 until the promotion PR meets every pr-review-conduct Merge Gate item except the
