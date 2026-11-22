@@ -1673,8 +1673,8 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
 
 PASTE_SHAPES = {
     "angle": re.compile(r"(?<!<)<[A-Za-z][\w.|-]*(?: [\w.|-]+)*>"),
-    "bracket": re.compile(r"(?<![\w.\[\]$}])\[([A-Za-z][\w./-]*)(?: \.\.\.)?\]"),
-    "alternation": re.compile(r"(?<![\w.|-])[\w.-]+(?:\|[\w.-]+)+(?![\w.|-])"),
+    "bracket": re.compile(r"(?<![\w.\[\]$}^])\[([A-Za-z][\w./-]*)(?: \.\.\.)?\](?![*?+)])"),
+    "alternation": re.compile(r"(?<![\w.|-])[\w.-]+(?:\|[\w.-]+)+(?![\w.|)-])"),
 }
 
 
@@ -1687,11 +1687,12 @@ def shell_literals(text: str, lexer: str) -> str:
 
     That is a quotation, an escape, a comment, a `${...}` expansion, and a heredoc's label and body,
     as the shell's lexer reads them. So a `$(...)` inside a double quotation stays code. A heredoc's
-    opening line past its label is code too.
+    opening line past its label is code too. A line break is added for the lexer, since its
+    comment rule ends on one and a code span has none.
     """
     out: list[str] = []
     depth = 0
-    for kind, value in lexer_for(lexer).get_tokens(text):
+    for kind, value in lexer_for(lexer).get_tokens(text + "\n"):
         opens = kind in String.Interpol and value == "${"
         depth += opens - (depth > 0 and kind in String.Interpol and value == "}")
         if kind in String.Heredoc and (m := re.match(HEREDOC, value)):
@@ -1702,7 +1703,7 @@ def shell_literals(text: str, lexer: str) -> str:
             out.append(blanked(value))
         else:
             out.append(value)
-    return "".join(out)
+    return "".join(out)[: len(text)]
 
 
 def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
@@ -1710,7 +1711,8 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
 
     Each command is a code span opening with a command or a shell fence's content. Each finding is
     reported on the line holding the placeholder. A string handed to a second shell, as `sh -c`
-    takes one, is read as the quotation it is to the first.
+    takes one, is read as the quotation it is to the first. A `case` arm's pattern and a regular
+    expression's bracket are the shell's own syntax, so neither is a placeholder.
     """
     out: list[Finding] = []
     for line in unit.lines:

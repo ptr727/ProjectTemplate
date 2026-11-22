@@ -4433,6 +4433,7 @@ class TestPasteSafeRule(BaitCase):
             "echo ${list[RepoName]}",
             "test -f x && [ -n y ] && [[ -z z ]]",
             "pip install -e .[dev]",
+            "git push origin main  # then open <pr>",
             "cat <in.txt >out.txt",
         ):
             with self.subTest(span=span):
@@ -4487,6 +4488,18 @@ class TestPasteSafeRule(BaitCase):
             "```\n"
         )
         self.assertEqual([10], self.lines(text))
+
+    def test_a_shell_pattern_in_a_fence_is_no_placeholder(self) -> None:
+        text = (
+            "```sh\n"
+            'case "$1" in\n'
+            "  start|stop) run ;;\n"
+            "  [Yy]*) yes ;;\n"
+            "esac\n"
+            "[[ $x =~ ^[A-Za-z]+$ ]] && echo ok\n"
+            "```\n"
+        )
+        self.assertEqual([], self.lines(text))
 
     def test_a_fence_in_another_language_is_not_read(self) -> None:
         for lang in ("text", "yaml", ""):
