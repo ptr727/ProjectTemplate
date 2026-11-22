@@ -66,7 +66,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    The review policy owes a Copilot round to some heads, by default those of a pull request into
    the default branch, a promotion among them. On such a head a file table stays the first route to
    this item. An attested local pass covers it instead, `coverage=local`, only where no Copilot
-   round covering it carries a table of its own. No table above may stand in either. That pass
+   round covering it states coverage or carries a table of its own. No table above may already
+   stand in, since a carried table is read first. That pass
    runs at the `frontier` tier over the whole diff against the pull request's base,
    `main...develop` on a promotion. It holds only where no round on record states partial
    coverage and the whole review history is in view. No refusal on the head may stand against it.
