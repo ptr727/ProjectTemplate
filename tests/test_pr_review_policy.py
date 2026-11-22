@@ -376,20 +376,23 @@ class TestSideReaders(unittest.TestCase):
         self.assertEqual(2, side.side_rounds(both, "coderabbit", body))
 
     def test_a_clean_pass_its_summary_alone_records_answers_the_head(self) -> None:
-        """A clean pass leaves no review object, so only the summary says the head was read."""
+        """A clean pass leaves no review object, so only the summary says the head was read.
+
+        A pass on an earlier head still answers nothing on this one, yet stays a spent round.
+        """
         body = side.side_command("coderabbit", "full review")
-        for comment, answered in (
-            (rabbit_summary(fixtures.HEAD), True),
-            (rabbit_summary(MOVED), False),
-            (rabbit_summary(MOVED, fixtures.HEAD), False),
-            (rabbit_summary(fixtures.HEAD, clean=False), False),
-            (rabbit_summary(fixtures.HEAD, limited=True), False),
-            ({**rabbit_summary(fixtures.HEAD), "author": {"login": "maintainer"}}, False),
+        for comment, answered, spent in (
+            (rabbit_summary(fixtures.HEAD), True, 1),
+            (rabbit_summary(MOVED), False, 1),
+            (rabbit_summary(MOVED, fixtures.HEAD), False, 0),
+            (rabbit_summary(fixtures.HEAD, clean=False), False, 0),
+            (rabbit_summary(fixtures.HEAD, limited=True), False, 0),
+            ({**rabbit_summary(fixtures.HEAD), "author": {"login": "maintainer"}}, False, 0),
         ):
             pr = fixtures.payload([], comments=[comment])
             with self.subTest(body=comment["body"][-120:]):
                 self.assertEqual(answered, side.side_answered(pr, "coderabbit"))
-                self.assertEqual(int(answered), side.side_rounds(pr, "coderabbit", body))
+                self.assertEqual(spent, side.side_rounds(pr, "coderabbit", body))
         self.assertFalse(side.side_answered(pr, "qodo"))
 
     def test_a_clean_summary_beside_a_review_on_the_head_counts_that_head_once(self) -> None:
@@ -459,6 +462,11 @@ class TestRequestSideReviews(SideCase):
         self.assertEqual(0, self.run_requests(pr)[0].call_count)
         pr = self.ruled([rabbit_summary(MOVED)], coderabbit=EXPLICIT_RABBIT)
         self.assertEqual(1, self.run_requests(pr)[0].call_count)
+
+    def test_a_clean_pass_on_an_earlier_head_spends_a_once_only_round(self) -> None:
+        """No ask is on record for it where CodeRabbit ran on its own, so only the summary counts it."""
+        pr = self.ruled([rabbit_summary(MOVED)], coderabbit={**EXPLICIT_RABBIT, "rounds": "once"})
+        self.assertEqual(0, self.run_requests(pr)[0].call_count)
 
     def test_failing_checks_hold_a_bot_that_waits_for_green(self) -> None:
         pr = self.ruled(
