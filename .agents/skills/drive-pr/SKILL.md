@@ -88,10 +88,15 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    finding still open into the pull request's body with its class, per `local-strict-review`
    "Disposing of Findings". A later push adds its own to any list already there. Step 3 gives
    each one an outcome under the Merge Gate's item 3. Where the
-   change writes a code or config comment line, add the `comments` label after creating the PR, or
-   the prose gate refuses it. Where a public repository's lint log says "Read the pull
-   request's labels live", a rerun of the failed job picks the label up. Otherwise it applies to
-   the next push.
+   change writes a code or config comment line, create the PR with `gh pr create --label comments`,
+   or the prose gate refuses it. A label added after the create is missing from the opened event's
+   payload. On a private repository that payload is all the lint job can read until the job holds
+   `pull-requests: read`. A label given at the create is still missed there now and then, so read
+   that repository's first lint run. Where a later push first writes a comment line, add the label
+   with `gh pr edit` before that push, so the push's event carries it. Where a public repository's
+   lint log says "Read the pull request's labels live", a rerun of the failed job picks up a label
+   added late. A rerun replays the event's payload. So on a private repository the label reaches
+   the gate only through a fresh event, such as the next push or a close and reopen.
    A push refused by a `.husky/pre-push` hook is that gate working rather than an obstacle to
    route around. The hub carries such a hook, and a repository has one only if it adds one. That
    skill's refusal table says what each refusal means and what clears it.
