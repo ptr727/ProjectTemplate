@@ -180,7 +180,7 @@ class PreflightCase(Harness):
     def preflight(self, private: str, limit: str | None) -> subprocess.CompletedProcess[str]:
         script = (
             f"repo={REPO}\n{HELPERS}{gh_stub(private, limit, self.capture)}"
-            f"{function('interaction_origin')}"
+            f"{function('interaction_limits')}{function('interaction_origin')}"
             f"cmd_apply() {{\n    local private origin\n{PREFLIGHT}    echo reached-the-writes\n}}\ncmd_apply\n"
         )
         return self.run_script(script)
@@ -224,7 +224,7 @@ class CheckCase(Harness):
     ) -> subprocess.CompletedProcess[str]:
         script = (
             f"repo={REPO}\nFAILED=0\n{self.resolved(interaction)}{HELPERS}"
-            f"{gh_stub(private, limit, self.capture)}{function('check_interaction')}"
+            f"{gh_stub(private, limit, self.capture)}{function('interaction_limits')}{function('check_interaction')}"
             'check_interaction\necho "FAILED=$FAILED"\n'
         )
         return self.run_script(script)
@@ -298,7 +298,7 @@ class CheckCase(Harness):
         result = self.check("false", "[]")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "FAIL live interaction limit for 'ptr727/Fixture' was not one JSON object",
+            "FAIL live interaction limit for 'ptr727/Fixture' could not be read as one JSON object",
             result.stdout,
         )
         self.assertIn("FAILED=1", result.stdout)

@@ -734,8 +734,9 @@ apply_secrets() { # secrets-dir
 
 # ----- Interaction limit (written on a public repo only, shared by apply and check) -----
 # GitHub answers a private repo's interaction-limits read with an error, so a caller reads the visibility first and calls this on a public repo only.
-# It prints the origin of the live limit, or nothing when none is in force.
-interaction_origin() {
+# It prints the live limit as one JSON object, which is {} when none is in force.
+# It fails on a read error or a body of any other shape.
+interaction_limits() {
     local live
     if ! live="$(gh api "repos/$repo/interaction-limits")"; then
         return 1
@@ -743,6 +744,13 @@ interaction_origin() {
     if ! jq_has -s 'length == 1 and (.[0] | type == "object")' <<<"$live"; then
         return 1
     fi
+    printf '%s\n' "$live"
+}
+
+# It prints the origin of the live limit, or nothing when none is in force.
+interaction_origin() {
+    local live
+    live="$(interaction_limits)" || return 1
     jqr '.origin // empty' <<<"$live"
 }
 
@@ -1069,12 +1077,8 @@ check_interaction() {
         note "interaction limit: $repo is private, so none is owed (publicInteraction=$interaction applies only while it is public)"
         return
     fi
-    if ! live="$(gh api "repos/$repo/interaction-limits")"; then
-        fail "interaction limit - could not read it"
-        return
-    fi
-    if ! jq_has -s 'length == 1 and (.[0] | type == "object")' <<<"$live"; then
-        fail "live interaction limit for '$repo' was not one JSON object"
+    if ! live="$(interaction_limits)"; then
+        fail "live interaction limit for '$repo' could not be read as one JSON object"
         return
     fi
     got="$(jqr '.limit // "none"' <<<"$live")"
@@ -1091,7 +1095,7 @@ check_interaction() {
     pass "interaction limit = $interaction_limit, set on the repository"
     # The days left are computed in jq, so no date dialect is involved.
     # Fractional seconds are dropped first, since fromdateiso8601 parses none.
-    if ! left="$(jqr '((.expires_at | sub("\\.[0-9]+"; "") | fromdateiso8601) - now) / 86400 | floor' <<<"$live" 2>/dev/null)" || ! [[ "$left" =~ ^-?[0-9]+$ ]]; then
+    if ! left="$(jqr '((.expires_at | sub("\\.[0-9]+"; "") | fromdateiso8601) - now) / 86400 | floor' <<<"$live" 2>/dev/null)"; then
         fail "interaction limit expiry '$(jqr '.expires_at // "none"' <<<"$live")' could not be read"
         return
     fi
