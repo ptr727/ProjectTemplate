@@ -59,6 +59,10 @@ UNTRACKED_EXCLUDES = tuple(
 # That case proves its cp1252 patch reaches the decoder, and naming an encoding would defeat it.
 EXEMPT_FUNCTIONS = frozenset({("tests/test_prose_lint.py", "locale_patch_bites")})
 
+# One deliberate Python child given the ANSI code page, keyed the same way, and exempt from the child check alone.
+# That case proves the gate's own UTF-8 reconfigure, which a child already writing UTF-8 would hide.
+EXEMPT_CHILDREN = frozenset({("tests/test_spec_validate.py", "gate_on_an_ansi_console")})
+
 # The two production gates this scan was written for, and the ones a maintainer runs locally before a push.
 # So the scan reaching them is asserted by name rather than only by count.
 GATE_FILES = (
@@ -210,7 +214,14 @@ def _class_chain(spawn: Spawn) -> list[ast.ClassDef]:
     return chain
 
 
-def _writes(key: str, spawn: Spawn) -> Iterator[ast.expr]:
+class Write(NamedTuple):
+    """One value a name is given, and whether it changes the value already there or replaces it."""
+
+    value: ast.expr
+    mutates: bool
+
+
+def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
     """Each expression stored into the name `key`, an item set on it, and each update applied to it.
 
     The scope searched is the one Python would resolve the name in. For an attribute of `self` that
@@ -227,24 +238,47 @@ def _writes(key: str, spawn: Spawn) -> Iterator[ast.expr]:
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if _target_key(target) == key:
-                    yield node.value
+                    yield Write(node.value, mutates=False)
                 elif isinstance(target, ast.Subscript) and _target_key(target.value) == key:
-                    yield ast.Dict(keys=[target.slice], values=[node.value])
-        elif isinstance(node, ast.AnnAssign | ast.AugAssign) and node.value is not None:
+                    yield Write(ast.Dict(keys=[target.slice], values=[node.value]), mutates=True)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
             if _target_key(node.target) == key:
-                yield node.value
+                yield Write(node.value, mutates=False)
+        elif isinstance(node, ast.AugAssign) and _target_key(node.target) == key:
+            yield Write(node.value, mutates=True)
         elif (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
             and node.func.attr == "update"
             and _target_key(node.func.value) == key
         ):
-            yield from node.args
-            yield ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords)
+            for arg in node.args:
+                yield Write(arg, mutates=True)
+            yield Write(
+                ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords), mutates=True
+            )
 
 
 def _is_constant(node: ast.expr | None, value: str) -> bool:
     return isinstance(node, ast.Constant) and node.value == value
+
+
+def _entries(expr: ast.expr) -> list[ast.expr]:
+    """The values this expression itself gives `PYTHONIOENCODING`, as a dictionary entry or a keyword."""
+    name = CHILD_ENCODING[0]
+    found: list[ast.expr] = []
+    for node in ast.walk(expr):
+        if isinstance(node, ast.Dict):
+            found.extend(
+                v for k, v in zip(node.keys, node.values, strict=True) if _is_constant(k, name)
+            )
+        elif isinstance(node, ast.keyword) and node.arg == name:
+            found.append(node.value)
+    return found
+
+
+def _reads(expr: ast.expr, key: str) -> bool:
+    return any(_target_key(node) == key for node in ast.walk(expr) if isinstance(node, ast.expr))
 
 
 def carries_child_encoding(
@@ -252,26 +286,38 @@ def carries_child_encoding(
 ) -> bool:
     """Whether this environment expression sets `PYTHONIOENCODING` to `utf-8`.
 
-    A dictionary entry and a `dict(...)` keyword both count, wherever they sit in the expression.
-    A local name or an attribute of `self` counts where some write to it does, so a dictionary built
-    over several statements is read whole. A function's return value is not followed, so an
-    environment a helper builds is read as not carrying it.
+    An entry the expression writes itself decides, a dictionary entry or a `dict(...)` keyword, and
+    every one has to be the literal `utf-8`. A value the scan cannot read counts as another codec.
+    Without such an entry, a local name or an attribute of `self` the expression reads decides, as
+    `_name_carries` reads it. A function's return value is not followed, so an environment a helper
+    builds is read as not carrying it.
     """
-    name, value = CHILD_ENCODING
+    entries = _entries(expr)
+    if entries:
+        return all(_is_constant(v, CHILD_ENCODING[1]) for v in entries)
     for node in ast.walk(expr):
-        if isinstance(node, ast.Dict):
-            for k, v in zip(node.keys, node.values, strict=True):
-                if _is_constant(k, name) and _is_constant(v, value):
-                    return True
-        elif isinstance(node, ast.keyword) and node.arg == name and _is_constant(node.value, value):
+        if not isinstance(node, ast.Name | ast.Attribute):
+            continue
+        key = _target_key(node)
+        if key is not None and key not in seen and _name_carries(key, spawn, seen | {key}):
             return True
-        elif isinstance(node, ast.Name | ast.Attribute):
-            key = _target_key(node)
-            if key is None or key in seen:
-                continue
-            if any(carries_child_encoding(w, spawn, seen | {key}) for w in _writes(key, spawn)):
-                return True
     return False
+
+
+def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
+    """Whether every value this name can hold at the spawn sets the variable, read without flow.
+
+    An item set or an `update` changes whatever value the name already holds. So where any of them
+    sets the variable, those decide, and each one has to set it to `utf-8`. Otherwise each
+    rebinding replaces the value. Every rebinding that does not read the name itself has to carry
+    it. So one branch binding a bare environment is not hidden by another binding a full one.
+    """
+    writes = list(_writes(key, spawn))
+    setting = [w.value for w in writes if w.mutates and _entries(w.value)]
+    if setting:
+        return all(carries_child_encoding(v, spawn, seen) for v in setting)
+    fresh = [w.value for w in writes if not w.mutates and not _reads(w.value, key)]
+    return bool(fresh) and all(carries_child_encoding(v, spawn, seen) for v in fresh)
 
 
 def _is_python_head(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool:
@@ -287,7 +333,7 @@ def _is_python_head(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool:
     key = _target_key(expr)
     if key is None or key in seen:
         return False
-    return any(_is_python_head(w, spawn, seen | {key}) for w in _writes(key, spawn))
+    return any(_is_python_head(w.value, spawn, seen | {key}) for w in _writes(key, spawn))
 
 
 def spawns_python(expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()) -> bool:
@@ -308,7 +354,7 @@ def spawns_python(expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset
     key = _target_key(expr)
     if key is None or key in seen:
         return False
-    return any(spawns_python(w, spawn, seen | {key}) for w in _writes(key, spawn))
+    return any(spawns_python(w.value, spawn, seen | {key}) for w in _writes(key, spawn))
 
 
 def command_of(call: ast.Call) -> ast.expr | None:
@@ -335,7 +381,9 @@ def _literal_words(expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozense
     key = _target_key(expr)
     if key is None or key in seen:
         return []
-    return [word for w in _writes(key, spawn) for word in _literal_words(w, spawn, seen | {key})]
+    return [
+        word for w in _writes(key, spawn) for word in _literal_words(w.value, spawn, seen | {key})
+    ]
 
 
 def python_child_without_encoding(spawn: Spawn) -> bool | None:
@@ -427,7 +475,9 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
                 if not names_utf8(call):
                     self.offenders.append(f"{rel}:{call.lineno}")
                 unset = python_child_without_encoding(spawn)
-                if unset is not None:
+                if unset is not None and key in EXEMPT_CHILDREN:
+                    self.exemptions_hit[key] = self.exemptions_hit.get(key, 0) + 1
+                elif unset is not None:
                     self.python_children += 1
                     if unset:
                         self.python_offenders.append(f"{rel}:{call.lineno}")
@@ -463,7 +513,7 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
 
     def test_the_exemption_still_names_a_case_that_exists(self) -> None:
         """An exemption outliving its test silently widens the hole it was cut for."""
-        for rel, name in EXEMPT_FUNCTIONS:
+        for rel, name in EXEMPT_FUNCTIONS | EXEMPT_CHILDREN:
             self.assertEqual(
                 1,
                 self.function_name_counts.get(name, 0),
@@ -521,6 +571,28 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             '        subprocess.run([sys.executable] + ["x"], encoding="utf-8", env=env)\n'
         )
         self.assertEqual([False, True], self.verdicts(source))
+
+    def test_every_rebinding_has_to_carry_it(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def go(full):\n"
+            "    if full:\n"
+            '        env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            "    else:\n"
+            "        env = {}\n"
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True], self.verdicts(source))
+
+    def test_an_item_set_to_another_codec_defeats_the_call(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def go(codec):\n"
+            '    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            '    env["PYTHONIOENCODING"] = codec\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([True], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (

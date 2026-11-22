@@ -1439,6 +1439,23 @@ class RegistryEnvironmentCase(unittest.TestCase):
                 self.assertEqual(validate.environment_errors_for_repo(repo, repo["name"]), [])
 
 
+def gate_on_an_ansi_console(root: Path) -> subprocess.CompletedProcess[str]:
+    """Run the gate in `root` with its child's streams in cp1252, as a Windows console gives them.
+
+    `PYTHONUTF8` is dropped too, as a host with UTF-8 Mode off runs the child.
+    """
+    env = {k: v for k, v in without_git_location().items() if k != "PYTHONUTF8"}
+    return subprocess.run(
+        [sys.executable, str(root / "spec" / "validate.py")],
+        env={**env, "PYTHONIOENCODING": "cp1252"},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+
+
 class RegistryEntryGateCase(unittest.TestCase):
     """The checks that live inside `main()`, run as the real script against a scratch tree.
 
@@ -1449,13 +1466,9 @@ class RegistryEntryGateCase(unittest.TestCase):
     """
 
     def run_against(
-        self, entry: dict, defaults: dict | None = None, console_encoding: str | None = None
+        self, entry: dict, defaults: dict | None = None, ansi_console: bool = False
     ) -> str:
-        """The gate's output for one entry, its child writing UTF-8 unless `console_encoding` names another codec.
-
-        A named codec reaches all three standard streams. `PYTHONUTF8` is dropped as well, as a host
-        with UTF-8 Mode off would run the child.
-        """
+        """The gate's output for one entry, its child's streams in UTF-8 unless `ansi_console` asks for cp1252."""
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
             shutil.copytree(validate.ROOT / "spec", root / "spec")
@@ -1471,19 +1484,18 @@ class RegistryEntryGateCase(unittest.TestCase):
             base.update(defaults or {})
             fixture = {"defaults": base, "repos": [entry, marker]}
             (root / "registry" / "repos.json").write_text(json.dumps(fixture), encoding="utf-8")
-            env = {**without_git_location(), "PYTHONIOENCODING": "utf-8"}
-            if console_encoding is not None:
-                env = {k: v for k, v in env.items() if k != "PYTHONUTF8"}
-                env["PYTHONIOENCODING"] = console_encoding
-            result = subprocess.run(
-                [sys.executable, str(root / "spec" / "validate.py")],
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=60,
-                check=False,
-            )
+            if ansi_console:
+                result = gate_on_an_ansi_console(root)
+            else:
+                result = subprocess.run(
+                    [sys.executable, str(root / "spec" / "validate.py")],
+                    env={**without_git_location(), "PYTHONIOENCODING": "utf-8"},
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=60,
+                    check=False,
+                )
             output = result.stdout + result.stderr
             self.assertIn(
                 "LoopMarker: url is not a github.com/<owner>/<repo> URL",
@@ -1666,7 +1678,7 @@ class RegistryEntryGateCase(unittest.TestCase):
         The child is given cp1252 on every host. Removing the entry point's UTF-8 reconfigure therefore fails this on Linux
         too. The streams are otherwise UTF-8 already on Linux, and no other case here would notice.
         """
-        output = self.run_against(self.entry(name="Fixture\u200b"), console_encoding="cp1252")
+        output = self.run_against(self.entry(name="Fixture\u200b"), ansi_console=True)
         self.assertIn("Fixture\u200b", output)
 
     def test_a_non_boolean_has_develop_is_refused(self) -> None:
