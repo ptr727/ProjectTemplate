@@ -851,25 +851,28 @@ class RequireTokensCase(unittest.TestCase):
         """A string would pass the audit unread, each of its characters found in any stub."""
         path = ".github/workflows/merge-bot-pull-request.yml"
         load = validate.load
+        for key in ("requireTokens", "requireEventTypes"):
+            with self.subTest(key):
 
-        def manifest_with_a_string(rel: str) -> Any:
-            data = load(rel)
-            if rel == "spec/files.json":
-                for unit in data["baseline"]:
-                    if unit.get("path") == path:
-                        unit["contract"]["requireTokens"] = "auto_merge_disabled"
-            return data
+                def manifest_with_a_string(rel: str, key: str = key) -> Any:
+                    data = load(rel)
+                    if rel == "spec/files.json":
+                        for unit in data["baseline"]:
+                            if unit.get("path") == path:
+                                unit["contract"][key] = "auto_merge_disabled"
+                    return data
 
-        out = io.StringIO()
-        with (
-            mock.patch.object(validate, "load", side_effect=manifest_with_a_string),
-            contextlib.redirect_stdout(out),
-        ):
-            status = validate.main([])
-        self.assertEqual(status, 1)
-        self.assertIn(
-            f"files.json: {path} contract.requireTokens must be an array of strings", out.getvalue()
-        )
+                out = io.StringIO()
+                with (
+                    mock.patch.object(validate, "load", side_effect=manifest_with_a_string),
+                    contextlib.redirect_stdout(out),
+                ):
+                    status = validate.main([])
+                self.assertEqual(status, 1)
+                self.assertIn(
+                    f"files.json: {path} contract.{key} must be an array of strings",
+                    out.getvalue(),
+                )
 
 
 class SplitJobsCase(unittest.TestCase):
