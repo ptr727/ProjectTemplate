@@ -299,9 +299,12 @@ must have done.
   since an advisory reviewer blocks nothing.
 - **Silence is not evidence, and is never read as one on its own.** A reviewer that has posted
   nothing may not have started yet, or may not cover this repository at all. Or it may have
-  reviewed and had nothing to say. That case posts no comment to read, and Merge Gate item 2
-  describes it as its own ordinary shape. Read the reviews themselves rather than the comments alone, since the third
-  case appears only there.
+  reviewed and had nothing to say. That case opens no thread, and where it leaves its record
+  differs by reviewer. It can be a review with an empty body, the shape Merge Gate item 2 calls
+  ordinary. A CodeRabbit clean pass can leave no review object at all. It then shows only in
+  CodeRabbit's summary comment, as a line saying no actionable comments were generated. That line
+  counts only where the commit range the summary's review details print ends at the current head.
+  So read the reviews and the comments both, since either can hold the third case.
 - **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.**
   Merge Gate item 2 requires Copilot's own coverage of the current head. Where the review policy
   hands the head to a local pass, by default off the default branch, an attested local pass stands
