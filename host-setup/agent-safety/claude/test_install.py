@@ -82,6 +82,12 @@ def local_file(home):
     return home.parent / "local.md"
 
 
+def this_launcher():
+    """The launcher `hook_launcher` falls back to for this interpreter, the first base candidate that runs."""
+    candidates = install.base_interpreters(os.path.abspath(sys.executable))
+    return next(c for c in candidates if install.launcher_problem(c) is None)
+
+
 def entry_text(hook):
     """A registration entry's `command` and its exec-form `args`, joined, for a test that finds an entry by a file name."""
     return " ".join([str(hook.get("command", "")), *map(str, hook.get("args") or [])])
@@ -3471,7 +3477,7 @@ class TestLauncher(StampCase):
         self.assertIn("malformed version probe", install.launcher_problem(str(stub)))
         self._path_first(stub.parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, install.base_interpreter(os.path.abspath(sys.executable)))
+        self.assertEqual(launcher, this_launcher())
         self.assertEqual(len(rejected), 1, rejected)
 
     @unittest.skipUnless(shutil.which("bash"), "install.sh is a bash wrapper")
@@ -3493,31 +3499,48 @@ class TestLauncher(StampCase):
         self.assertIn("Passed over python3", r.stderr)
         self.assertFalse(self.home.exists())
 
-    def test_a_python3_inside_a_venv_yields_the_interpreter_it_was_made_from(self):
-        """A venv's interpreter goes when the venv does, which would leave every hook failing to spawn."""
-        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp)) / "base"
-        base.mkdir()
-        (base / "python3").symlink_to(install.base_interpreter(sys.executable))
+    def _venv(self, cfg):
+        """A venv directory holding `bin/python3`, a link to this interpreter, and a `pyvenv.cfg` of `cfg`."""
         venv = pathlib.Path(tempfile.mkdtemp(dir=self.tmp)) / "venv"
         (venv / "bin").mkdir(parents=True)
-        (venv / "bin" / "python3").symlink_to(base / "python3")
-        (venv / "pyvenv.cfg").write_text(f"home = {base}\nversion = 3\n", encoding="utf-8")
+        (venv / "bin" / "python3").symlink_to(this_launcher())
+        (venv / "pyvenv.cfg").write_text(cfg, encoding="utf-8")
+        return venv
+
+    def test_a_python3_inside_a_venv_yields_the_interpreter_it_was_made_from(self):
+        """A venv's interpreter goes when the venv does, which would leave every hook failing to spawn."""
+        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        (base / "python3").symlink_to(this_launcher())
+        venv = self._venv(f"home = {base}\nversion = 3\n")
         self.assertEqual(
-            install.base_interpreter(str(venv / "bin" / "python3")), str(base / "python3")
+            install.base_interpreters(str(venv / "bin" / "python3")), [str(base / "python3")]
         )
         self._path_first(venv / "bin")
         launcher, rejected = install.hook_launcher()
         self.assertEqual(launcher, str(base / "python3"), rejected)
         plain = str(base / "python3")
-        self.assertEqual(install.base_interpreter(plain), plain)
+        self.assertEqual(install.base_interpreters(plain), [plain])
+
+    def test_an_older_python3_beside_the_venv_base_falls_through_to_its_executable(self):
+        """A `python3.12 -m venv` where `home`'s `python3` is 3.10 still installs, under the recorded executable."""
+        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        (base / "python3").write_text(
+            f"#!/bin/sh\necho {install.LAUNCHER_TOKEN} 3 10\n", encoding="utf-8"
+        )
+        (base / "python3").chmod(0o755)
+        real = pathlib.Path(tempfile.mkdtemp(dir=self.tmp)) / "python3.12"
+        real.symlink_to(this_launcher())
+        venv = self._venv(f"home = {base}\nexecutable = {real}\n")
+        self._path_first(venv / "bin")
+        launcher, rejected = install.hook_launcher()
+        self.assertEqual(launcher, str(real), rejected)
+        self.assertIn("below the 3.11 floor", rejected[0])
 
     def test_a_venv_whose_base_is_gone_keeps_its_own_interpreter(self):
-        """A `home` naming no interpreter leaves the candidate to the probe rather than to a path that is not there."""
-        venv = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
-        (venv / "bin").mkdir()
-        (venv / "pyvenv.cfg").write_text(f"home = {venv / 'gone'}\n", encoding="utf-8")
+        """A `pyvenv.cfg` naming no interpreter that exists leaves the candidate to the probe."""
+        venv = self._venv(f"home = {self.tmp}/gone\nexecutable = {self.tmp}/gone/python3\n")
         exe = str(venv / "bin" / "python3")
-        self.assertEqual(install.base_interpreter(exe), exe)
+        self.assertEqual(install.base_interpreters(exe), [exe])
 
     def test_exec_form_on_windows_spawns_only_a_real_exe(self):
         """A pyenv-win `.bat` shim passes the probe through cmd and fails Claude Code's exec-form spawn."""
@@ -3533,7 +3556,7 @@ class TestLauncher(StampCase):
     def test_a_broken_python3_on_path_falls_back_to_this_interpreter(self):
         self._path_first(self._stub("python3", "exit 0").parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, install.base_interpreter(os.path.abspath(sys.executable)))
+        self.assertEqual(launcher, this_launcher())
         self.assertEqual(len(rejected), 1, rejected)
         self.assertIn("python3'", rejected[0])
 
@@ -3571,9 +3594,7 @@ class TestLauncher(StampCase):
         entries = [h for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
         expected = {
             "type": "command",
-            **install.hook_command(
-                install.base_interpreter(os.path.abspath(sys.executable)), guard
-            ),
+            **install.hook_command(this_launcher(), guard),
         }
         self.assertIn(expected, entries)
 

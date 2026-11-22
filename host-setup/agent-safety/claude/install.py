@@ -669,12 +669,16 @@ def launcher_problem(launcher):
     return None
 
 
-def base_interpreter(path):
-    """The interpreter the virtual environment holding `path` was made from, or `path` where it is not in one.
+def base_interpreters(path):
+    """The interpreters the virtual environment holding `path` was made from, or `[path]` where it is not in one.
 
     A venv's interpreter goes when the venv does, and a worktree removed with its venv takes it along.
     A hook registered under it would then fail to spawn, a non-blocking error that fails the guard open.
-    So the base interpreter the venv's `pyvenv.cfg` names under `home` is used instead, where it exists.
+    So the venv's `pyvenv.cfg` is read for the base, each existing one listed in order.
+    The first is `python3` in its `home` directory, the name a minor-version upgrade keeps working.
+    The second is its `executable`, which Python 3.11 and later record.
+    That covers a `home` whose `python3` is an older interpreter or absent, as an altinstall leaves it.
+    The venv's own path stays the last resort where neither exists.
     """
     exe = pathlib.Path(path)
     for cfg in (exe.parent / "pyvenv.cfg", exe.parent.parent / "pyvenv.cfg"):
@@ -682,15 +686,20 @@ def base_interpreter(path):
             lines = cfg.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             continue
+        keys = {}
         for line in lines:
             key, sep, value = line.partition("=")
-            if sep and key.strip() == "home":
-                base = pathlib.Path(value.strip()) / (
-                    "python.exe" if os.name == "nt" else "python3"
-                )
-                return str(base) if base.is_file() else path
-        return path
-    return path
+            if sep:
+                keys[key.strip()] = value.strip()
+        named = []
+        if keys.get("home"):
+            named.append(
+                pathlib.Path(keys["home"]) / ("python.exe" if os.name == "nt" else "python3")
+            )
+        if keys.get("executable"):
+            named.append(pathlib.Path(keys["executable"]))
+        return [str(b) for b in named if b.is_file()] or [path]
+    return [path]
 
 
 def exec_spawn_problem(launcher, windows=None):
@@ -714,7 +723,7 @@ def hook_launcher():
     The path is absolute, so the hook runs the interpreter the install probed.
     Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
     The `python3` on PATH is preferred, being unambiguously Python 3.
-    A candidate inside a virtual environment is replaced by the interpreter that venv was made from.
+    A candidate inside a virtual environment is replaced by the interpreters that venv was made from.
     Its path is kept as PATH resolves it, and its links are not followed.
     So `/usr/bin/python3` stays the name a minor-version upgrade keeps pointing at a working interpreter.
     Else this interpreter's own path is used, which an upgrade or a move can break.
@@ -729,14 +738,14 @@ def hook_launcher():
     for found in (shutil.which("python3"), sys.executable):
         if not found:
             continue
-        candidate = base_interpreter(os.path.abspath(found))
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        problem = exec_spawn_problem(candidate) or launcher_problem(candidate)
-        if problem is None:
-            return candidate, rejected
-        rejected.append(problem)
+        for candidate in base_interpreters(os.path.abspath(found)):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            problem = exec_spawn_problem(candidate) or launcher_problem(candidate)
+            if problem is None:
+                return candidate, rejected
+            rejected.append(problem)
     return None, rejected
 
 
@@ -753,10 +762,9 @@ def registered_launcher(hook, path):
     """
     if exec_form(hook):
         launcher = hook.get("command")
-        args = hook["args"]
-        if not isinstance(launcher, str) or not launcher or not isinstance(args, list):
+        if not isinstance(launcher, str) or not launcher:
             return None
-        return launcher if len(args) == 1 and runs_hook(hook, path) else None
+        return launcher if runs_hook(hook, path) else None
     try:
         words = shlex.split(str(hook.get("command")))
     except ValueError:

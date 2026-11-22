@@ -144,9 +144,9 @@ host an older install registered in shell form rewrites each such entry in exec 
 The `<python3>` shown for `command` is the absolute path `PATH` resolves `python3` to. The
 installer writes it when that interpreter runs and reports Python 3.11 or newer. The path is kept as
 `PATH` resolves it, without following its links, so a minor-version upgrade behind
-`/usr/bin/python3` keeps it working. A candidate inside a virtual environment is replaced by the
+`/usr/bin/python3` keeps it working. A candidate inside a virtual environment is replaced by an
 interpreter its `pyvenv.cfg` names, since deleting the venv would leave every hook failing to
-spawn. On Windows a candidate must resolve to a `.exe`. Exec form cannot spawn a `.bat` or `.cmd`
+spawn. The `python3` in its `home` directory is tried first, then its recorded `executable`. On Windows a candidate must resolve to a `.exe`. Exec form cannot spawn a `.bat` or `.cmd`
 shim, such as pyenv-win's, and `--report` flags an exec-form launcher that is not a `.exe`. Each candidate is run with a probe that prints a token and its
 version, and the output is read. That is because presence on `PATH` and a zero exit each pass a stub
 that runs no script, such as a Windows app execution alias. A hook naming one fails open. The
