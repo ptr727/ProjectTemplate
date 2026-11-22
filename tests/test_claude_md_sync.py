@@ -71,6 +71,13 @@ def drift(pairs: list[dict[str, Any]], read: Callable[[str], str | None]) -> lis
     return out
 
 
+def unpaired(pairs: list[dict[str, Any]], units: dict[str, str]) -> tuple[list[str], list[str]]:
+    """Host sections claiming sync with no pair, then pairs whose host section is gone or claims none."""
+    claiming = {key for key, text in units.items() if SYNC_CLAIM.search(text)}
+    pinned = {pair["host"] for pair in pairs}
+    return sorted(claiming - pinned), sorted(pinned - claiming)
+
+
 class LiveTreeCase(unittest.TestCase):
     """The pin file against this checkout's own sections and host blocks."""
 
@@ -83,18 +90,17 @@ class LiveTreeCase(unittest.TestCase):
             (KIT / name).relative_to(ROOT).as_posix()
             for _, name in global_rules.load_kit().CLAUDE_MD_BLOCKS
         ]
-        claiming = {key for key, text in file_units(*blocks).items() if SYNC_CLAIM.search(text)}
-        pinned = {pair["host"] for pair in load_pairs()}
+        units = file_units(*blocks)
         self.assertTrue(
-            claiming, "no host block section says it is kept in sync, so this check reads nothing"
+            any(SYNC_CLAIM.search(text) for text in units.values()),
+            "no host block section says it is kept in sync, so this check reads nothing",
+        )
+        unpinned_claims, unclaimed_pins = unpaired(load_pairs(), units)
+        self.assertEqual(
+            unpinned_claims, [], f"host sections claiming sync with no pair in {PINS_REL}"
         )
         self.assertEqual(
-            sorted(claiming - pinned), [], f"host sections claiming sync with no pair in {PINS_REL}"
-        )
-        self.assertEqual(
-            sorted(pinned - claiming),
-            [],
-            f"pairs in {PINS_REL} whose host section is gone or claims no sync",
+            unclaimed_pins, [], f"pairs in {PINS_REL} whose host section is gone or claims no sync"
         )
 
 
@@ -124,6 +130,26 @@ class DriftCase(unittest.TestCase):
         [message] = drift([self.PAIR], lambda _key: None)
         self.assertIn("GOVERNANCE.md > Rule", message)
         self.assertIn("no longer exists", message)
+
+
+class UnpairedCase(unittest.TestCase):
+    """Each direction of the pairing check, against crafted units."""
+
+    CLAIM = "These rules are kept in sync with a governance section.\n"
+
+    def test_a_paired_claim_reports_nothing(self) -> None:
+        units = {"host.md > A": self.CLAIM, "host.md > B": "no claim\n"}
+        self.assertEqual(([], []), unpaired([{"host": "host.md > A"}], units))
+
+    def test_a_claim_with_no_pair_is_named(self) -> None:
+        self.assertEqual((["host.md > A"], []), unpaired([], {"host.md > A": self.CLAIM}))
+
+    def test_a_pair_whose_host_claims_no_sync_is_named(self) -> None:
+        units = {"host.md > A": "no claim\n"}
+        self.assertEqual(([], ["host.md > A"]), unpaired([{"host": "host.md > A"}], units))
+
+    def test_a_pair_whose_host_section_is_gone_is_named(self) -> None:
+        self.assertEqual(([], ["host.md > Gone"]), unpaired([{"host": "host.md > Gone"}], {}))
 
 
 if __name__ == "__main__":
