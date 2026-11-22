@@ -1096,11 +1096,12 @@ check_interaction() {
     pass "interaction limit = $interaction_limit, set on the repository"
     # The days left are computed by the Python this script already resolved, since jq's fromdateiso8601 fails on a native Windows jq.
     # A timedelta's days floor, so a limit with hours left reads as 0 rather than 1.
+    # It writes no newline, since a native Windows Python would end one with a carriage return that the integer test below refuses.
     expires="$(jqr '.expires_at // empty' <<<"$live")"
     if [ -z "$expires" ] || ! left="$("${py_cmd[@]}" -c 'import sys
 from datetime import datetime, timezone
 end = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
-print((end - datetime.now(timezone.utc)).days)' "$expires" 2>/dev/null)"; then
+sys.stdout.write(str((end - datetime.now(timezone.utc)).days))' "$expires" 2>/dev/null)"; then
         fail "interaction limit expiry '${expires:-none}' could not be read"
         return
     fi

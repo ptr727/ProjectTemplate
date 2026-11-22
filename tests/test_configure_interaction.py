@@ -54,7 +54,11 @@ REPO = "ptr727/Fixture"
 
 
 def expiry(days: float) -> str:
-    """An expires_at stamp this many days from now, in the shape GitHub returns."""
+    """An expires_at stamp this many days from now, in the shape GitHub returns.
+
+    A case asserting a day count passes a half day.
+    The second the stamp drops and the run's own lag then never cross a day boundary.
+    """
     stamp = datetime.now(UTC) + timedelta(days=days)
     return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -241,7 +245,7 @@ class CheckCase(Harness):
         return self.run_script(script)
 
     def live(
-        self, limit: str = "collaborators_only", origin: str = "repository", days: float = 90
+        self, limit: str = "collaborators_only", origin: str = "repository", days: float = 90.5
     ) -> str:
         return json.dumps({"limit": limit, "origin": origin, "expires_at": expiry(days)})
 
@@ -249,7 +253,7 @@ class CheckCase(Harness):
         result = self.check("false", self.live())
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("ok   interaction limit = collaborators_only", result.stdout)
-        self.assertIn("ok   interaction limit has 89 day(s) left", result.stdout)
+        self.assertIn("ok   interaction limit has 90 day(s) left", result.stdout)
         self.assertIn("FAILED=0", result.stdout)
 
     def test_a_limit_inside_the_threshold_warns_without_failing(self) -> None:
@@ -260,12 +264,12 @@ class CheckCase(Harness):
         self.assertIn("FAILED=0", result.stdout)
 
     def test_fractional_seconds_in_the_expiry_still_parse(self) -> None:
-        stamp = expiry(90).replace("Z", ".123Z")
+        stamp = expiry(90.5).replace("Z", ".123Z")
         live = json.dumps(
             {"limit": "collaborators_only", "origin": "repository", "expires_at": stamp}
         )
         result = self.check("false", live)
-        self.assertIn("ok   interaction limit has 89 day(s) left", result.stdout)
+        self.assertIn("ok   interaction limit has 90 day(s) left", result.stdout)
 
     def test_no_limit_fails_and_names_apply(self) -> None:
         result = self.check("false", "{}")
