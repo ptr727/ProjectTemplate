@@ -187,7 +187,7 @@ def names_hook(hook, name):
 
     It is the ownership test a re-run strips by, so it reads both forms.
     That is what lets a re-run rewrite a shell-form registration in exec form rather than add one beside it.
-    An exec-form entry is named when `command` or any string in `args` ends in `name`.
+    An exec-form entry is named when `command` or any string in `args` has `name` as its own file name.
     Each of those words is also read the way `shell_names_hook` reads a whole command.
     So the script string an exec-form `bash -c` carries in its arguments is named too.
     """
