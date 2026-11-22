@@ -948,7 +948,7 @@ microsoft_feed() {
     # No published config for this host fails the tool and not the run.
     # The caller collects it, and the rest of the tools still run.
     if ! fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb"; then
-        warn "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION"
+        warn "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION, or the download failed"
         return 1
     fi
     # The PowerShell install runs this with errexit off and goes on to remove a working pwsh.
@@ -1561,11 +1561,11 @@ apply_tool() {
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is whatever apt already has until the managed source is written, so quoting it here could name the wrong upstream.
-        if [[ $tool == "node" ]]; then
+        if [[ $tool == "node" || $MODE == "upgrade" ]]; then
             log "$tool: installed without the sources file this script manages, moving it to $("$(tool_function "$tool" source)")"
         else
             # An install leaves an installed package at its version, so the move waits for an upgrade.
-            log "$tool: installed without the sources file this script manages, the repository at $("$(tool_function "$tool" source)") is now configured and --upgrade moves it"
+            log "$tool: installed without the sources file this script manages, the repository at $("$(tool_function "$tool" source)") is configured by this install and --upgrade moves it"
         fi
     else
         log "$tool: ${status}${target:+, upstream carries $target}"

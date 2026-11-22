@@ -934,7 +934,9 @@ if powershell_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
 """)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["STATUS 1"])
-        self.assertIn("Microsoft publishes no feed for example 1", result.stderr)
+        self.assertIn(
+            "Microsoft publishes no feed for example 1, or the download failed", result.stderr
+        )
 
     def test_a_missing_microsoft_feed_fails_the_dotnet_tool_and_the_run_carries_on(self) -> None:
         result = self.run_bash("""
@@ -948,6 +950,16 @@ if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
 """)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), ["STATUS 1"])
+
+    def test_an_unsupported_architecture_without_a_distro_sdk_is_a_skip_not_a_failure(self) -> None:
+        result = self.run_bash("""
+ARCH=arm64
+apt_refresh() { :; }
+dotnet_sdk_latest() { :; }
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["STATUS 0"])
 
     def test_apply_tool_collects_the_failed_feed_and_returns(self) -> None:
         result = self.run_bash("""
@@ -979,8 +991,24 @@ tool_effective_status() { printf 'unmanaged'; }
 apply_tool gh
 """)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("cli.github.com is now configured and --upgrade moves it", result.stdout)
+        self.assertIn(
+            "cli.github.com is configured by this install and --upgrade moves it", result.stdout
+        )
         self.assertNotIn("moving it to", result.stdout)
+
+    def test_an_unmanaged_gh_under_upgrade_says_it_is_moving(self) -> None:
+        result = self.run_bash("""
+MODE=upgrade
+tool_function() { printf 'stub_%s' "$2"; }
+stub_version() { printf '2.0.0-1'; }
+stub_target() { printf '2.1.0'; }
+stub_source() { printf 'cli.github.com'; }
+stub_install() { :; }
+tool_effective_status() { printf 'unmanaged'; }
+apply_tool gh
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("moving it to cli.github.com", result.stdout)
 
 
 @unittest.skipUnless(
