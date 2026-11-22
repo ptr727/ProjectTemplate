@@ -2072,7 +2072,9 @@ class TestRegistration(StampCase):
         forward = str(guard).replace("\\", "/")
         self.assertTrue(install.runs_hook({"command": "py", "args": [forward]}, guard))
         direct = {"command": str(guard), "args": []}
-        self.assertTrue(install.runs_hook(direct, guard))
+        self.assertFalse(
+            install.runs_hook(direct, guard), "exec form cannot spawn a .py on Windows"
+        )
         self.assertTrue(install.names_hook(direct, install.GUARD_NAME))
         self.assertIsNone(install.registered_launcher(direct, guard))
         for label, hook in (
@@ -3469,7 +3471,7 @@ class TestLauncher(StampCase):
         self.assertIn("malformed version probe", install.launcher_problem(str(stub)))
         self._path_first(stub.parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, os.path.abspath(sys.executable))
+        self.assertEqual(launcher, install.base_interpreter(os.path.abspath(sys.executable)))
         self.assertEqual(len(rejected), 1, rejected)
 
     @unittest.skipUnless(shutil.which("bash"), "install.sh is a bash wrapper")
@@ -3491,6 +3493,39 @@ class TestLauncher(StampCase):
         self.assertIn("Passed over python3", r.stderr)
         self.assertFalse(self.home.exists())
 
+    def test_a_python3_inside_a_venv_yields_the_interpreter_it_was_made_from(self):
+        """A venv's interpreter goes when the venv does, which would leave every hook failing to spawn."""
+        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp)) / "base"
+        base.mkdir()
+        (base / "python3").symlink_to(install.base_interpreter(sys.executable))
+        venv = pathlib.Path(tempfile.mkdtemp(dir=self.tmp)) / "venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python3").symlink_to(base / "python3")
+        (venv / "pyvenv.cfg").write_text(f"home = {base}\nversion = 3\n", encoding="utf-8")
+        self.assertEqual(
+            install.base_interpreter(str(venv / "bin" / "python3")), str(base / "python3")
+        )
+        self._path_first(venv / "bin")
+        launcher, rejected = install.hook_launcher()
+        self.assertEqual(launcher, str(base / "python3"), rejected)
+        plain = str(base / "python3")
+        self.assertEqual(install.base_interpreter(plain), plain)
+
+    def test_a_venv_whose_base_is_gone_keeps_its_own_interpreter(self):
+        """A `home` naming no interpreter leaves the candidate to the probe rather than to a path that is not there."""
+        venv = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        (venv / "bin").mkdir()
+        (venv / "pyvenv.cfg").write_text(f"home = {venv / 'gone'}\n", encoding="utf-8")
+        exe = str(venv / "bin" / "python3")
+        self.assertEqual(install.base_interpreter(exe), exe)
+
+    def test_exec_form_on_windows_spawns_only_a_real_exe(self):
+        """A pyenv-win `.bat` shim passes the probe through cmd and fails Claude Code's exec-form spawn."""
+        shim = "C:\\Users\\x\\.pyenv\\pyenv-win\\shims\\python3.bat"
+        self.assertIn("not a .exe", install.exec_spawn_problem(shim, windows=True))
+        self.assertIsNone(install.exec_spawn_problem("C:\\Python313\\python.exe", windows=True))
+        self.assertIsNone(install.exec_spawn_problem(shim, windows=False))
+
     def test_a_missing_launcher_is_refused(self):
         problem = install.launcher_problem(str(pathlib.Path(self.tmp) / "no-such-python"))
         self.assertIn("could not be run", problem)
@@ -3498,7 +3533,7 @@ class TestLauncher(StampCase):
     def test_a_broken_python3_on_path_falls_back_to_this_interpreter(self):
         self._path_first(self._stub("python3", "exit 0").parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, os.path.abspath(sys.executable))
+        self.assertEqual(launcher, install.base_interpreter(os.path.abspath(sys.executable)))
         self.assertEqual(len(rejected), 1, rejected)
         self.assertIn("python3'", rejected[0])
 
@@ -3536,7 +3571,9 @@ class TestLauncher(StampCase):
         entries = [h for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
         expected = {
             "type": "command",
-            **install.hook_command(os.path.abspath(sys.executable), guard),
+            **install.hook_command(
+                install.base_interpreter(os.path.abspath(sys.executable)), guard
+            ),
         }
         self.assertIn(expected, entries)
 

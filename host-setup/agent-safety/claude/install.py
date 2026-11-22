@@ -154,6 +154,11 @@ def exec_form(hook):
     return "args" in hook
 
 
+def file_name(word):
+    """The last path segment of `word`, read with either slash as the separator."""
+    return os.path.basename(str(word).replace("\\", "/"))
+
+
 def literal_path(word, path):
     """Whether `word`, one argument passed with no shell, is `path` itself, in either slash."""
     return isinstance(word, str) and word.replace("\\", "/") == str(path).replace("\\", "/")
@@ -163,16 +168,14 @@ def runs_hook(hook, path):
     """Whether registration entry `hook` runs the hook deployed at `path`.
 
     An exec-form entry is read from its `command` and `args` directly.
-    It runs the hook when `args` holds exactly the deployed path, the shape this installer writes.
-    It also runs the hook when `command` is the deployed path and `args` is empty.
+    It runs the hook only when `args` holds exactly the deployed path, the shape this installer writes.
     No shell expands `~` or `$HOME` there, so only the literal path counts.
+    A `command` naming the hook itself is not accepted, since exec form cannot spawn a `.py` on Windows.
     A shell-form entry, one an older install or a hand edit left, is read by `shell_runs_hook`.
     """
     if not exec_form(hook):
         return shell_runs_hook(hook.get("command"), path)
     args = hook["args"]
-    if args == []:
-        return literal_path(hook.get("command"), path)
     return isinstance(args, list) and len(args) == 1 and literal_path(args[0], path)
 
 
@@ -189,8 +192,7 @@ def names_hook(hook, name):
         return shell_names_hook(hook.get("command", ""), name)
     args = hook["args"] if isinstance(hook["args"], list) else []
     return any(
-        isinstance(word, str)
-        and (word.replace("\\", "/").rsplit("/", 1)[-1] == name or shell_names_hook(word, name))
+        isinstance(word, str) and (file_name(word) == name or shell_names_hook(word, name))
         for word in [hook.get("command"), *args]
     )
 
@@ -621,7 +623,7 @@ def kit_prefix(held):
     Judged on the file name exactly, since a substring match claims someone else's wrapper whose name
     merely contains this one's.
     """
-    return os.path.basename(str(held).replace("\\", "/")) == CONTAIN_NAME
+    return file_name(held) == CONTAIN_NAME
 
 
 def foreign_prefix(data):
@@ -667,12 +669,52 @@ def launcher_problem(launcher):
     return None
 
 
+def base_interpreter(path):
+    """The interpreter the virtual environment holding `path` was made from, or `path` where it is not in one.
+
+    A venv's interpreter goes when the venv does, and a worktree removed with its venv takes it along.
+    A hook registered under it would then fail to spawn, a non-blocking error that fails the guard open.
+    So the base interpreter the venv's `pyvenv.cfg` names under `home` is used instead, where it exists.
+    """
+    exe = pathlib.Path(path)
+    for cfg in (exe.parent / "pyvenv.cfg", exe.parent.parent / "pyvenv.cfg"):
+        try:
+            lines = cfg.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            key, sep, value = line.partition("=")
+            if sep and key.strip() == "home":
+                base = pathlib.Path(value.strip()) / (
+                    "python.exe" if os.name == "nt" else "python3"
+                )
+                return str(base) if base.is_file() else path
+        return path
+    return path
+
+
+def exec_spawn_problem(launcher, windows=None):
+    """Why exec form cannot spawn `launcher`, or None where it can.
+
+    On Windows exec form needs `command` to resolve to a real `.exe`.
+    A `.bat` or `.cmd` shim, such as the ones pyenv-win puts on PATH, runs only through a shell.
+    Python's own subprocess runs such a shim through `cmd`, so the version probe alone passes it.
+    """
+    if not (os.name == "nt" if windows is None else windows):
+        return None
+    resolved = shutil.which(launcher) or launcher
+    if pathlib.PurePath(resolved).suffix.lower() != ".exe":
+        return f"{launcher!r} resolves to {resolved!r}, not a .exe, which exec form cannot spawn on Windows"
+    return None
+
+
 def hook_launcher():
     """The interpreter path the settings.json entries carry as `command`, or None, and why each other candidate failed.
 
     The path is absolute, so the hook runs the interpreter the install probed.
     Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
     The `python3` on PATH is preferred, being unambiguously Python 3.
+    A candidate inside a virtual environment is replaced by the interpreter that venv was made from.
     Its path is kept as PATH resolves it, and its links are not followed.
     So `/usr/bin/python3` stays the name a minor-version upgrade keeps pointing at a working interpreter.
     Else this interpreter's own path is used, which an upgrade or a move can break.
@@ -687,11 +729,11 @@ def hook_launcher():
     for found in (shutil.which("python3"), sys.executable):
         if not found:
             continue
-        candidate = os.path.abspath(found)
+        candidate = base_interpreter(os.path.abspath(found))
         if candidate in seen:
             continue
         seen.add(candidate)
-        problem = launcher_problem(candidate)
+        problem = exec_spawn_problem(candidate) or launcher_problem(candidate)
         if problem is None:
             return candidate, rejected
         rejected.append(problem)
@@ -1510,12 +1552,14 @@ def registration_problems(claude_home):
                     )
                     continue
                 launcher = registered_launcher(hook, path)
-                if launcher is not None and launcher not in probed:
-                    probed[launcher] = launcher_problem(launcher)
-                if launcher is not None and probed[launcher]:
+                key = (launcher, exec_form(hook))
+                if launcher is not None and key not in probed:
+                    spawn = exec_spawn_problem(launcher) if key[1] else None
+                    probed[key] = spawn or launcher_problem(launcher)
+                if launcher is not None and probed[key]:
                     out.append(
                         f"a {event} entry names a launcher that cannot run the {label} "
-                        f"({probed[launcher]}), so the {label} never runs"
+                        f"({probed[key]}), so the {label} never runs"
                     )
                     continue
                 if judge(group, hook):
