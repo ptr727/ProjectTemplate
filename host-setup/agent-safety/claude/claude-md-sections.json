@@ -1,0 +1,20 @@
+{
+    "note": "Each host CLAUDE.md block section that says it is kept in sync with a governance section, paired with that section and the digest of its text when the pair was last reviewed. A section is read and hashed as scripts/canonical_review.py reads a unit, and each key is that tool's unit key. The host text is a condensed rewording rather than a copy, so no byte check fits it. tests/test_claude_md_sync.py fails when a section's text no longer matches its digest. Re-recording the digest here is the review step. The reviewer reads the moved section, confirms the host section still states its rules without contradicting them, and edits the host section where it does not. Only the governance side is pinned, since an edit to a host block is an agent-safety change a human already approves.",
+    "pairs": [
+        {
+            "host": "host-setup/agent-safety/claude/claude-md-safety.md > Repository Boundaries and Write Safety (Any Project, Every Session)",
+            "section": "GOVERNANCE.md > Repository Boundaries and Write Safety",
+            "digest": "sha256:5107bb52c5fa710030e9fe53fc6faf432202940039c24354d9b1cace0b1169d8"
+        },
+        {
+            "host": "host-setup/agent-safety/claude/claude-md-safety.md > Data in Agent-Authored Text (Any Project, Every Session)",
+            "section": "GOVERNANCE.md > Representative Data in Agent-Authored Text",
+            "digest": "sha256:4218ba3dc5c2ca1fe0256b23b0444c43919039fcb0ad822cd8b8dd207e3d5ac3"
+        },
+        {
+            "host": "host-setup/agent-safety/claude/claude-md-fleet.md > Fleet Governance Entry Point (Any Project, Every Session)",
+            "section": "AGENTS.md > Fleet Bootstrap",
+            "digest": "sha256:355e9f4bb6213ff8536933a22c965679cc161d07b45163e29a2c31dcc484dec3"
+        }
+    ]
+}
