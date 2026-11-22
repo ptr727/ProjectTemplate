@@ -149,7 +149,9 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
      ends. The watch above can return before then, so it does not clear the grace alone. On a
      held head, `wait` holds until the grace ends. On any other head, wait in a background
      process until the named time has passed. Then run the watch above, since the review the
-     grace held for may have started. Then run `merge` once more.
+     grace held for may have started. Then run `merge` once more. A check that settled after the
+     named time can open a new grace. The rerun can then refuse again, on a line naming a later
+     end. That refusal is the bound reached, so report it as waiting on that end.
    - `next=retry` is a read that did not answer, or a merge `gh` refused on an unchanged head. Run
      `merge` once more as it is.
    - `next=maintainer` is a line no action of this seat can change, or a merge whose `cleanup`
