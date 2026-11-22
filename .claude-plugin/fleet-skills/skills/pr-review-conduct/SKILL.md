@@ -68,7 +68,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    this item. An attested local pass covers it instead, `coverage=local`, only where no Copilot
    round covering it carries a table of its own. No table above may stand in either. That pass
    runs at the `frontier` tier over the whole diff against the pull request's base,
-   `develop..main` on a promotion. It holds on the attestation's terms above. No round on record
+   `main...develop` on a promotion. It holds on the attestation's terms above. No round on record
    states partial coverage, the whole review history is in view, and no refusal on the head stands
    against it. A head round whose own table names other than exactly the changed files keeps this
    route closed, since that table says what Copilot read. So does a head no Copilot round covers

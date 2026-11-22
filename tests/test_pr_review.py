@@ -186,6 +186,20 @@ def review(
     }
 
 
+def into(pr: dict, base: str = "develop", attest: bool = False) -> dict:
+    """A pull request into `base` on a repository whose default branch is main."""
+    pr = {**pr, "baseRefName": base, "baseRepository": {"defaultBranchRef": {"name": "main"}}}
+    if attest:
+        marker = {
+            "author": {"login": "maintainer"},
+            "authorAssociation": "OWNER",
+            "createdAt": LATE,
+            "body": f"Attested.\n\n<!-- fleet-local-review: head={HEAD} base={base} findings=0 -->",
+        }
+        pr["comments"] = {"nodes": [marker], "pageInfo": {"hasPreviousPage": False}}
+    return pr
+
+
 def request_state(pending: bool = False, events: tuple[str, ...] = ()) -> dict:
     """What a review request leaves on a pull request, in the shape `REQUEST_STATE` reads it.
 
@@ -4281,18 +4295,7 @@ class TestCli(GqlCase):
             self.assertEqual(0, self.cli(["wait", "7", "--ignore-quota-signal"]))
         self.assertEqual(1, len([c for c in calls if "requestReviews" in c[0]]))
 
-    def into(self, pr: dict, base: str = "develop", attest: bool = False) -> dict:
-        """A pull request into `base` on a repository whose default branch is main."""
-        pr = {**pr, "baseRefName": base, "baseRepository": {"defaultBranchRef": {"name": "main"}}}
-        if attest:
-            marker = {
-                "author": {"login": "maintainer"},
-                "authorAssociation": "OWNER",
-                "createdAt": LATE,
-                "body": f"Attested.\n\n<!-- fleet-local-review: head={HEAD} base={base} findings=0 -->",
-            }
-            pr["comments"] = {"nodes": [marker], "pageInfo": {"hasPreviousPage": False}}
-        return pr
+    into = staticmethod(into)
 
     def test_a_newer_quota_refusal_outranks_older_coverage_of_the_head(self) -> None:
         """A re-request answered by the limit is the newest word, whatever the head already had."""
@@ -8751,29 +8754,18 @@ class TestAttestationReadings(unittest.TestCase):
                 }
                 self.assertIs(expected, pr_review_rounds.promotion(pr))
 
-    def test_the_base_branch_alone_decides_the_hold_and_the_local_cover(self) -> None:
-        """No Copilot round is needed first, so an attested head with none is covered off main."""
-        marker = f"<!-- fleet-local-review: head={HEAD} base=develop findings=0 -->"
+    def test_the_base_branch_decides_the_hold_and_the_cover_of_a_head_with_no_round(self) -> None:
+        """Off main no Copilot round is needed first, and on main the head's round is still owed."""
         for base, expected in (("develop", True), ("main", False)):
             with self.subTest(base=base):
-                pr = {
-                    **payload([]),
-                    "baseRefName": base,
-                    "baseRepository": {"defaultBranchRef": {"name": "main"}},
-                    "comments": {"nodes": [self.comment(marker.replace("develop", base))]},
-                }
+                pr = into(payload([]), base, attest=True)
                 self.assertIs(expected, pr_review_rounds.holds(pr))
                 self.assertIs(expected, pr_review_rounds.local_cover(pr))
 
     def into_main(self, rounds: list[dict], marker: bool = True, older: bool = False) -> dict:
         """A pull request into the default branch changing three files, attested against `main`."""
-        line = f"<!-- fleet-local-review: head={HEAD} base=main findings=0 -->"
-        return {
-            **payload(rounds, files=["a.py", "b.py", "c.py"], older_reviews=older),
-            "baseRefName": "main",
-            "baseRepository": {"defaultBranchRef": {"name": "main"}},
-            "comments": {"nodes": [self.comment(line)] if marker else []},
-        }
+        pr = payload(rounds, files=["a.py", "b.py", "c.py"], older_reviews=older)
+        return into(pr, "main", attest=marker)
 
     def test_an_attested_pass_covers_a_main_head_whose_rounds_carry_no_table(self) -> None:
         """An earlier head's short table does not close the route, since it is no partial statement."""
@@ -8816,6 +8808,34 @@ class TestAttestationReadings(unittest.TestCase):
             with self.subTest(case=case):
                 self.assertIs(False, pr_review_rounds.local_cover(pr))
                 self.assertNotEqual("local", pr_review_rounds.coverage(pr)[0])
+
+    def test_a_spent_cap_on_a_reviewed_main_head_keeps_every_condition(self) -> None:
+        """The cap is spent on the head itself, so the round stays owed and nothing is waived."""
+        data = json.loads(pr_review.review_policy.DEFAULT_PATH.read_text(encoding="utf-8"))
+        data["review"]["bots"]["copilot"]["maxRounds"] = 1
+        capped = pr_review.review_policy.parse(data, "a capped test policy")
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
+        odd = f"{OVERVIEW}\n<!-- fleet-review: reviewed=4 changed=3 -->"
+        refused = review(body=REFUSED, at=LATE, rid="R")
+        for case, rounds, older, expected, cover in (
+            ("tableless", [review(body=OVERVIEW)], False, "local", True),
+            ("unknown", [review(body=odd)], False, "unknown", True),
+            (
+                "partial",
+                [review(oid=OLD, body=part, rid="A"), review(body=OVERVIEW, rid="B")],
+                False,
+                "partial",
+                False,
+            ),
+            ("refused", [review(body=OVERVIEW), refused], False, "none", False),
+            ("cut", [review(body=OVERVIEW)], True, "none", False),
+        ):
+            with self.subTest(case=case):
+                pr = {**self.into_main(rounds, older=older), pr_review.POLICY_KEY: capped}
+                self.assertIs(True, pr_review_rounds.copilot_settled(pr))
+                self.assertIs(True, pr_review_rounds.promotion(pr))
+                self.assertEqual(expected, pr_review_rounds.coverage(pr)[0])
+                self.assertIs(cover, pr_review_rounds.local_cover(pr))
 
 
 class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
