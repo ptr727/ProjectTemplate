@@ -430,6 +430,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
+  On an operational-model repository the brief also requires a `Reopens on promotion:` line where
+  the group undoes a fix already in the range. Without it the promotion closes an issue whose fix
+  the range no longer holds.
   It also has the worker draft that body, and each rewrite of it, in a file named for its branch.
   Workers sharing a scratch directory and one file name each publish the other's draft.
 - **The brief names the files this group owns and the files it must not touch.** A subagent never
@@ -751,7 +754,11 @@ gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at !=
 Then read each pull request it prints for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
 ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
-line instead. A read that exits non-zero stops the assembly and is reported.
+line instead. On an operational-model repository, also read the same places for a
+`Reopens on promotion:` line, which a change undoing a fix carries there per `GOVERNANCE.md`
+"Operational Repositories". Leave out each issue such a line names, unless a later change in the
+range names it on a `Closes on promotion:` line again. A read that exits non-zero stops the
+assembly and is reported.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral
@@ -771,6 +778,10 @@ from a read of the body made immediately before the write, keeping every line th
 Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
 range calls for. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
+On an operational-model repository, a `Reopens on promotion:` line can land in the range during the
+freeze. Where it names an issue the body holds a `Fixes` line for, put that line to the maintainer
+rather than editing it. A seat cannot tell that line from one added by hand for a change that left
+its own line out.
 
 Run the mechanical closing-set check that `branching-and-release-model` states in its
 negated-keyword bullet, at each point that bullet names. A body naming a deferral issue
