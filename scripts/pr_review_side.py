@@ -33,6 +33,7 @@ from pr_review_rounds import (
     head_nodes,
     page_flag,
     qodo_comment,
+    reading,
     reviewed_heads,
     reviewer_nodes,
 )
@@ -40,6 +41,8 @@ from pr_review_rounds import (
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
 PUSHED_JQ = 'map(select(.after == "{}") | .timestamp) | max // empty'
+CLEAN_PASS = re.compile(r"^No actionable comments were generated", re.MULTILINE)
+REVIEWED_UP_TO = re.compile(r"\bbetween [0-9a-f]{40,64} and ([0-9a-f]{40,64})\b")
 
 
 def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
@@ -122,27 +125,40 @@ def unasked(pr: dict, name: str, body: str, lines: list[str]) -> bool:
     return placed and not side_answered(pr, name) and not side_asked_on_head(pr, body)
 
 
+def clean_on_head(pr: dict) -> bool:
+    """Whether CodeRabbit's summary alone records a clean pass on the head, which leaves no review.
+
+    The summary then says no actionable comments were generated, and each commit range it prints
+    ends at the head. A rate-limit notice prints the range it would read, so it never counts.
+    """
+    return not head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN)) and any(
+        CLEAN_PASS.search(text := n.get("body") or "")
+        and set(REVIEWED_UP_TO.findall(text)) == {pr["headRefOid"]}
+        and not reading(n, CODERABBIT_LOGIN).rate_limited
+        for n in reviewer_nodes(pr, "comments", CODERABBIT_LOGIN)
+    )
+
+
 def side_rounds(pr: dict, name: str, body: str) -> int:
     """Rounds asked of or run by `name` on this pull request, whichever count is larger.
 
-    CodeRabbit's formal reviews carry their commit, so its distinct reviewed heads count too. Qodo
+    CodeRabbit's distinct reviewed heads count too, and a clean pass `clean_on_head` reads. Qodo
     edits one standing comment, so its own rounds count as one once that comment exists.
     """
     asked = len(side_asks(pr, body))
     if name != "coderabbit":
         return max(asked, 1 if qodo_comment(pr) else 0)
-    return max(asked, reviewed_heads(pr, CODERABBIT_LOGIN))
+    return max(asked, reviewed_heads(pr, CODERABBIT_LOGIN) + clean_on_head(pr))
 
 
 def side_answered(pr: dict, name: str) -> bool:
     """Whether `name` has reviewed the current head, known for CodeRabbit alone.
 
-    CodeRabbit answers with a formal review on the head's commit. Qodo edits one standing comment
-    that names no head, so a request is the only per-head record of it.
+    CodeRabbit answers with a formal review on the head's commit or a clean pass `clean_on_head`
+    reads. Qodo's one standing comment names no head, so a request is its only per-head record.
     """
-    return name == "coderabbit" and bool(
-        head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN))
-    )
+    reviewed = head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN))
+    return name == "coderabbit" and (bool(reviewed) or clean_on_head(pr))
 
 
 def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:

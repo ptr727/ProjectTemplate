@@ -39,6 +39,7 @@ import test_pr_review as fixtures
 
 REPO = Path(__file__).resolve().parent.parent
 MOVED = "b" * 40
+BASE = "c" * 40
 NOW = datetime(2026, 8, 2, 12, 0, tzinfo=UTC)
 WINDOWS = (300.0, 1800.0)
 ARGS = argparse.Namespace(timeout=60.0, check_grace=WINDOWS[0], check_stall=WINDOWS[1])
@@ -327,6 +328,20 @@ EXPLICIT_RABBIT = {
 }
 
 
+def rabbit_summary(*ends: str, clean: bool = True, limited: bool = False) -> dict:
+    """CodeRabbit's summary comment, printing one reviewed commit range per entry of `ends`."""
+    parts = ["<!-- This is an auto-generated comment: summarize by coderabbit.ai -->"]
+    if limited:
+        parts.append(fixtures.RATE_LIMITED_COMMENT)
+    if clean:
+        parts.append("No actionable comments were generated in the recent review.")
+    parts += [
+        f"Reviewing files that changed from the base of the PR and between {BASE} and {end}."
+        for end in ends
+    ]
+    return fixtures.comment(login=rounds.CODERABBIT_LOGIN, body="\n\n".join(parts))
+
+
 class TestSideReaders(unittest.TestCase):
     def test_a_request_counts_for_the_head_only_once_it_postdates_the_push(self) -> None:
         pr = committed(
@@ -359,6 +374,33 @@ class TestSideReaders(unittest.TestCase):
             comments=[trusted(body, fixtures.EARLY)],
         )
         self.assertEqual(2, side.side_rounds(both, "coderabbit", body))
+
+    def test_a_clean_pass_its_summary_alone_records_answers_the_head(self) -> None:
+        """A clean pass leaves no review object, so only the summary says the head was read."""
+        body = side.side_command("coderabbit", "full review")
+        for comment, answered in (
+            (rabbit_summary(fixtures.HEAD), True),
+            (rabbit_summary(MOVED), False),
+            (rabbit_summary(MOVED, fixtures.HEAD), False),
+            (rabbit_summary(fixtures.HEAD, clean=False), False),
+            (rabbit_summary(fixtures.HEAD, limited=True), False),
+            ({**rabbit_summary(fixtures.HEAD), "author": {"login": "maintainer"}}, False),
+        ):
+            pr = fixtures.payload([], comments=[comment])
+            with self.subTest(body=comment["body"][-120:]):
+                self.assertEqual(answered, side.side_answered(pr, "coderabbit"))
+                self.assertEqual(int(answered), side.side_rounds(pr, "coderabbit", body))
+        self.assertFalse(side.side_answered(pr, "qodo"))
+
+    def test_a_clean_summary_beside_a_review_on_the_head_counts_that_head_once(self) -> None:
+        body = side.side_command("coderabbit", "full review")
+        pr = fixtures.payload(
+            [fixtures.review(login=rounds.CODERABBIT_LOGIN, oid=MOVED)],
+            comments=[rabbit_summary(fixtures.HEAD)],
+        )
+        self.assertEqual(2, side.side_rounds(pr, "coderabbit", body))
+        pr["reviews"]["nodes"].append(fixtures.review(login=rounds.CODERABBIT_LOGIN))
+        self.assertEqual(2, side.side_rounds(pr, "coderabbit", body))
 
 
 class SideCase(unittest.TestCase):
@@ -410,6 +452,13 @@ class TestRequestSideReviews(SideCase):
     def test_a_bot_already_asked_on_this_head_is_not_asked_again(self) -> None:
         pr = self.ruled([trusted("/review", fixtures.LATE)], qodo=EXPLICIT_QODO)
         self.assertEqual(0, self.run_requests(pr)[0].call_count)
+
+    def test_a_clean_pass_on_the_head_is_not_asked_again(self) -> None:
+        """That pass left no review object, so asking again spends a round on a head already read."""
+        pr = self.ruled([rabbit_summary(fixtures.HEAD)], coderabbit=EXPLICIT_RABBIT)
+        self.assertEqual(0, self.run_requests(pr)[0].call_count)
+        pr = self.ruled([rabbit_summary(MOVED)], coderabbit=EXPLICIT_RABBIT)
+        self.assertEqual(1, self.run_requests(pr)[0].call_count)
 
     def test_failing_checks_hold_a_bot_that_waits_for_green(self) -> None:
         pr = self.ruled(
