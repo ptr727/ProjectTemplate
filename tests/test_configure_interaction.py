@@ -13,10 +13,12 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 from host_capability import bash_or_skip
 
@@ -356,6 +358,36 @@ class DiscussionsCase(Harness):
 
     def test_a_private_repo_wants_discussions_off_whatever_the_policy(self) -> None:
         self.assertIn("ok   has_discussions = false", self.check("true", False, "community").stdout)
+
+
+class AuditDiscussionsCase(unittest.TestCase):
+    """spec/audit.py expects the Discussions setting configure.sh applies, so the two never disagree."""
+
+    def findings(self, private: bool, discussions: bool, entry: dict[str, str]) -> list[str]:
+        sys.path.insert(0, str(ROOT / "spec"))
+        self.addCleanup(sys.path.remove, str(ROOT / "spec"))
+        import audit  # spec/ joins the path only for this case
+
+        run = SimpleNamespace(
+            spec={"settings": {}},
+            live={"private": private, "has_discussions": discussions},
+            entry=entry,
+            main=None,
+        )
+        return [text for _, text in audit.check_settings_general(run)]
+
+    def test_a_public_collaborators_repo_expects_discussions_off(self) -> None:
+        self.assertEqual(self.findings(False, False, {"name": "Fixture"}), [])
+        self.assertTrue(self.findings(False, True, {"name": "Fixture"}))
+
+    def test_a_public_community_repo_expects_discussions_on(self) -> None:
+        entry = {"name": "Fixture", "publicInteraction": "community"}
+        self.assertEqual(self.findings(False, True, entry), [])
+        self.assertTrue(self.findings(False, False, entry))
+
+    def test_a_private_repo_expects_discussions_off(self) -> None:
+        entry = {"name": "Fixture", "publicInteraction": "community"}
+        self.assertEqual(self.findings(True, False, entry), [])
 
 
 class WiringCase(unittest.TestCase):
