@@ -42,7 +42,7 @@ class TestInstallPs1Probe(unittest.TestCase):
         """
         if WINDOWS:
             reply = (
-                f'"{sys.executable}" %*\r\nexit /b %errorlevel%'
+                f'"{sys.executable}" %*\r\nexit /b'
                 if probe == "real"
                 else "echo Python was not found; run without arguments to install from the Microsoft Store. 1>&2\r\nexit /b 9009"
                 if probe == "store"
