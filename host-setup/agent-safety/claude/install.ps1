@@ -11,7 +11,8 @@ $script = Join-Path $here "install.py"
 # A name being on PATH is not enough: the WindowsApps `python3` alias stub is found by Get-Command, prints a Store message, and installs nothing.
 # A bare `python` is the last resort, since it is Python 2 on some systems.
 # The probe's stderr stays visible so a candidate that fails says why, and a mismatch falls through to the next.
-$probe = 'import sys; print("ok" if sys.version_info >= (3, 11) else "old")'
+# No double quote may sit in the probe, since Windows PowerShell 5.1 passes a native argument without escaping one.
+$probe = "import sys; print('ok' if sys.version_info >= (3, 11) else 'old')"
 $candidates = @(
     @{ Name = "py"; Args = @("-3") }
     @{ Name = "python3"; Args = @() }

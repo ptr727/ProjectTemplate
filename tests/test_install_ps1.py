@@ -13,6 +13,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,10 +34,12 @@ class TestInstallPs1Probe(unittest.TestCase):
         (self.dir / "install.py").write_text("", encoding="utf-8")
 
     def stub(self, name: str, probe: str) -> None:
-        """Writes a candidate: the probe prints `probe` and exits 0, or `store` for the alias stub's message and exit 9009."""
+        """Writes a candidate: the probe prints `probe` and exits 0, `store` for the alias stub's message and exit 9009, or `real` to run the probe text in this interpreter."""
         if WINDOWS:
             reply = (
-                "echo Python was not found; run without arguments to install from the Microsoft Store. 1>&2\r\nexit /b 9009"
+                f'"{sys.executable}" %*\r\nexit /b %errorlevel%'
+                if probe == "real"
+                else "echo Python was not found; run without arguments to install from the Microsoft Store. 1>&2\r\nexit /b 9009"
                 if probe == "store"
                 else f"echo {probe}\r\nexit /b 0"
             )
@@ -49,7 +52,9 @@ class TestInstallPs1Probe(unittest.TestCase):
             (self.bin / f"{name}.cmd").write_bytes(body.encode())
             return
         reply = (
-            'echo "Python was not found; install from the Microsoft Store." >&2; exit 9'
+            f'exec "{sys.executable}" "$@"'
+            if probe == "real"
+            else 'echo "Python was not found; install from the Microsoft Store." >&2; exit 9'
             if probe == "store"
             else f"echo {probe}; exit 0"
         )
@@ -69,7 +74,7 @@ class TestInstallPs1Probe(unittest.TestCase):
     def test_a_store_alias_python3_is_passed_over_for_a_working_python(self) -> None:
         self.stub("py", "old")
         self.stub("python3", "store")
-        self.stub("python", "ok")
+        self.stub("python", "real")
         result = self.run_wrapper()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.split(), ["ran:python"])
