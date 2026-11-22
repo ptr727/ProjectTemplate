@@ -1208,7 +1208,9 @@ def _mapping(node):
 
 
 def _plain_list(node):
-    """The scalar values of a sequence node, `[]` for a missing, scalar, or non-sequence node."""
+    """The scalar values of a sequence node, one for a scalar node, `[]` for any other node."""
+    if isinstance(node, yaml.ScalarNode):
+        return [node.value]
     if not isinstance(node, yaml.SequenceNode):
         return []
     return [c.value for c in node.value if isinstance(c, yaml.ScalarNode)]

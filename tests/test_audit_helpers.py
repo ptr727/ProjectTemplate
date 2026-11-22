@@ -830,6 +830,14 @@ class RequireTokensCase(unittest.TestCase):
         subscribed = text.replace("[opened, closed]", "[opened, closed, auto_merge_disabled]")
         self.assertEqual(audit.check_interface("wf", contract, subscribed), [])
 
+    def test_a_single_string_types_value_is_a_subscription(self) -> None:
+        text = (
+            "on:\n  pull_request_target:\n    types: auto_merge_disabled\n"
+            "jobs:\n  merge-bot:\n    uses: acme/hub/.github/workflows/merge-bot-task.yml@x\n"
+        )
+        contract = {"requireEventTypes": ["auto_merge_disabled"]}
+        self.assertEqual(audit.check_interface("wf", contract, text), [])
+
     def test_a_branch_filter_naming_the_event_type_is_not_a_subscription(self) -> None:
         text = (
             "on:\n  pull_request_target:\n    types: [opened, closed]\n"
