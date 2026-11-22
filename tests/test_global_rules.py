@@ -39,6 +39,7 @@ class Case(unittest.TestCase):
         self.empty_bin.mkdir()
         self.env = {
             **os.environ,
+            "PYTHONIOENCODING": "utf-8",
             "CODEX_HOME": str(self.codex),
             "XDG_CONFIG_HOME": str(self.xdg),
             "AGENT_FLEET_LOCAL_INSTRUCTIONS": str(self.local),

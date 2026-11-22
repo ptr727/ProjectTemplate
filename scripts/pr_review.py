@@ -1193,6 +1193,7 @@ def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
         120,
         "local_review.py could not be run",
         cwd=checkout,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         text=True,
         encoding="utf-8",
     )

@@ -59,6 +59,7 @@ def run(home, *args, dirty=False, contain=True, timeout=None, extra_env=None):
     env = {k: v for k, v in os.environ.items() if k != install.SUBAGENT_FORCE_VAR}
     env.update(
         CLAUDE_HOME=str(home),
+        PYTHONIOENCODING="utf-8",
         AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(home)),
         AGENT_SAFETY_DIRTY_OVERRIDE="1" if dirty else "0",
         AGENT_SAFETY_CONTAINMENT_OVERRIDE="1" if contain else "0",
@@ -615,6 +616,7 @@ class TestWholeFileOwnership(StampCase):
         self.addCleanup(locked.chmod, 0o700)
         env = dict(
             os.environ,
+            PYTHONIOENCODING="utf-8",
             CLAUDE_HOME=str(self.home),
             AGENT_FLEET_LOCAL_INSTRUCTIONS=str(inner),
             AGENT_SAFETY_DIRTY_OVERRIDE="0",
@@ -713,6 +715,7 @@ class TestWholeFileOwnership(StampCase):
             self.skipTest("needs POSIX resource limits")
         env = dict(
             os.environ,
+            PYTHONIOENCODING="utf-8",
             CLAUDE_HOME=str(self.home),
             AGENT_FLEET_LOCAL_INSTRUCTIONS=str(self.local),
             AGENT_SAFETY_DIRTY_OVERRIDE="0",
@@ -851,6 +854,7 @@ class TestWholeFileOwnership(StampCase):
         )
         env = dict(
             os.environ,
+            PYTHONIOENCODING="utf-8",
             CLAUDE_HOME=str(self.home),
             AGENT_FLEET_LOCAL_INSTRUCTIONS=str(self.local),
             AGENT_SAFETY_DIRTY_OVERRIDE="0",
@@ -1234,6 +1238,7 @@ class TestWholeFileOwnership(StampCase):
         parent.write_text("", encoding="utf-8")
         env = dict(
             os.environ,
+            PYTHONIOENCODING="utf-8",
             CLAUDE_HOME=str(self.home),
             AGENT_FLEET_LOCAL_INSTRUCTIONS=str(parent / "local.md"),
             AGENT_SAFETY_DIRTY_OVERRIDE="0",
@@ -1413,6 +1418,7 @@ class TestDegradedEnvironments(StampCase):
         """A tarball install on a minimal host has no git, which is normal rather than an error."""
         env = dict(
             os.environ,
+            PYTHONIOENCODING="utf-8",
             CLAUDE_HOME=str(self.home),
             AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
             PATH="",
@@ -2026,6 +2032,7 @@ class TestRegistration(StampCase):
         )
         env = dict(
             os.environ,
+            PYTHONIOENCODING="utf-8",
             CLAUDE_HOME=str(self.home),
             AGENT_FLEET_LOCAL_INSTRUCTIONS=str(local_file(self.home)),
         )
@@ -3253,6 +3260,7 @@ class TestContainmentHookSelftests(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=60,
             check=False,
         )
