@@ -63,6 +63,16 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    table names the rest.
    A table stands in only where no Copilot round on the pull request, on any commit, states
    partial coverage. So a pull request that ever had a partial round goes to the maintainer.
+   The review policy owes a Copilot round to some heads, by default those of a pull request into
+   the default branch, a promotion among them. On such a head a file table stays the first route to
+   this item. An attested local pass covers it instead, `coverage=local`, only where no Copilot
+   round covering it carries a table of its own. No table above may stand in either. That pass
+   runs at the `frontier` tier over the whole diff against the pull request's base,
+   `develop..main` on a promotion. It holds on the attestation's terms above. No round on record
+   states partial coverage, the whole review history is in view, and no refusal on the head stands
+   against it. A head round whose own table names other than exactly the changed files keeps this
+   route closed, since that table says what Copilot read. So does a head no Copilot round covers
+   yet, since that round is still owed.
    `coverage=none` and `coverage=UNKNOWN` leave this item unsatisfied and decide no exit code,
    so read the field rather than the exit.
    The coverage this item requires is Copilot's, the attested local pass above, or that green

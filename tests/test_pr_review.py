@@ -4400,14 +4400,20 @@ class TestCli(GqlCase):
         self.assertIn("coverage=local", out)
         self.assertNotIn("coverage=none", out)
 
-    def test_the_same_head_on_a_promotion_stays_unstated(self) -> None:
-        """A promotion keeps its own Copilot round, so its attestation gives `status` no cover."""
-        pr = self.into(payload([review(body=OVERVIEW)], files=["a.md"]), base="main", attest=True)
-        self.answer(pr)
-        self.assertEqual(0, self.cli(["status", "7"]))
-        out = self.out.getvalue()
-        self.assertIn("coverage=none", out)
-        self.assertNotIn("coverage=local", out)
+    def test_the_same_head_on_a_promotion_is_covered_only_while_its_round_has_no_table(
+        self,
+    ) -> None:
+        """A promotion keeps its own Copilot round, and its table stays first where it has one."""
+        for body, want in ((OVERVIEW, "local"), (summarized(["b.md"], covers=""), "none")):
+            with self.subTest(want=want):
+                self.out.seek(0)
+                self.out.truncate()
+                pr = self.into(
+                    payload([review(body=body)], files=["a.md"]), base="main", attest=True
+                )
+                self.answer(pr)
+                self.assertEqual(0, self.cli(["status", "7"]))
+                self.assertIn(f"coverage={want} ", self.out.getvalue())
 
     def test_a_second_round_on_a_feature_pull_request_is_not_requested(self) -> None:
         """Waiting for a second round holds for the local pass rather than requesting one."""
@@ -8758,6 +8764,58 @@ class TestAttestationReadings(unittest.TestCase):
                 }
                 self.assertIs(expected, pr_review_rounds.holds(pr))
                 self.assertIs(expected, pr_review_rounds.local_cover(pr))
+
+    def into_main(self, rounds: list[dict], marker: bool = True, older: bool = False) -> dict:
+        """A pull request into the default branch changing three files, attested against `main`."""
+        line = f"<!-- fleet-local-review: head={HEAD} base=main findings=0 -->"
+        return {
+            **payload(rounds, files=["a.py", "b.py", "c.py"], older_reviews=older),
+            "baseRefName": "main",
+            "baseRepository": {"defaultBranchRef": {"name": "main"}},
+            "comments": {"nodes": [self.comment(line)] if marker else []},
+        }
+
+    def test_an_attested_pass_covers_a_main_head_whose_rounds_carry_no_table(self) -> None:
+        """An earlier head's short table does not close the route, since it is no partial statement."""
+        short = review(oid=OLD, body=summarized(["a.py", "b.py"], covers=""), rid="A")
+        for rounds in ([review(body=OVERVIEW)], [short, review(body=OVERVIEW, rid="B")]):
+            with self.subTest(rounds=len(rounds)):
+                pr = self.into_main(rounds)
+                self.assertIs(False, pr_review_rounds.holds(pr))
+                self.assertIs(True, pr_review_rounds.local_cover(pr))
+                self.assertEqual("local", pr_review_rounds.coverage(pr)[0])
+                self.assertEqual(
+                    "none", pr_review_rounds.coverage(self.into_main(rounds, False))[0]
+                )
+
+    def test_a_main_head_keeps_its_table_first_and_its_round_owed(self) -> None:
+        """No round yet, a head table of its own, or a partial round each keep the pass from standing."""
+        part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
+        for rounds, expected, cover in (
+            ([], "none", False),
+            ([review(body=summarized(["a.py"], covers=""))], "none", False),
+            ([review(body=summarized(["a.py", "b.py", "c.py"], covers=""))], "table", False),
+            (
+                [review(oid=OLD, body=part, rid="A"), review(body=OVERVIEW, rid="B")],
+                "partial",
+                False,
+            ),
+            ([review(body=f"{OVERVIEW}\n{COVERED}")], "full", True),
+        ):
+            with self.subTest(expected=expected, rounds=len(rounds)):
+                pr = self.into_main(rounds)
+                self.assertEqual(expected, pr_review_rounds.coverage(pr)[0])
+                self.assertIs(cover, pr_review_rounds.local_cover(pr))
+
+    def test_a_head_refusal_or_a_cut_history_stands_against_a_main_attestation(self) -> None:
+        refused = review(body=REFUSED, at=LATE, rid="R")
+        for case, pr in (
+            ("refused", self.into_main([review(body=OVERVIEW), refused])),
+            ("cut", self.into_main([review(body=OVERVIEW)], older=True)),
+        ):
+            with self.subTest(case=case):
+                self.assertIs(False, pr_review_rounds.local_cover(pr))
+                self.assertNotEqual("local", pr_review_rounds.coverage(pr)[0])
 
 
 class TestWriteCommandsPartitionParserChoices(unittest.TestCase):
