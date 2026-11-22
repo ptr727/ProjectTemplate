@@ -428,9 +428,11 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   it for adjudication under "Grouping and File Claims". There, losing that file parks the group
   rather than narrowing it.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
-  the issues this group fixes. On an operational-model repository it also requires a
-  `Reopens on promotion:` line where the group undoes a fix already in the range. A worker never reads this skill, and `drive-pr` does not ask for the
+  the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
+  On an operational-model repository the brief also requires a `Reopens on promotion:` line where
+  the group undoes a fix already in the range. Without it the promotion closes an issue whose fix
+  the range no longer holds.
   It also has the worker draft that body, and each rewrite of it, in a file named for its branch.
   Workers sharing a scratch directory and one file name each publish the other's draft.
 - **The brief names the files this group owns and the files it must not touch.** A subagent never
@@ -754,8 +756,8 @@ Then read each pull request it prints for its `Closes on promotion:` line. That 
 ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
 line instead. On an operational-model repository, also read the same places for a
 `Reopens on promotion:` line, which a change undoing a fix carries there per `GOVERNANCE.md`
-"Operational Repositories". Leave out each issue such a line names, unless a later commit in the
-range names it on a `Closes on promotion:` line again. A read that exits non-zero stops the
+"Operational Repositories". Leave out each issue such a line names. Where the range names one
+issue on both lines, the line of the latest change naming it decides. A read that exits non-zero stops the
 assembly and is reported.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
@@ -769,7 +771,7 @@ the opposite error destroys work.
 Deriving the set from the range rather than from what this round dispatched is what covers a group
 that deferred or parked, contributing none. It also covers an earlier round's work that no
 promotion has yet carried. A fix landing during the freeze changes the range under a body already
-written. So re-read the range when the fix lands. Amend the body where the range calls for a `Fixes`
+written, and so does a direct push. So re-read the range whenever develop moves. Amend the body where the range calls for a `Fixes`
 line the body lacks, rather than leaving an issue to be closed by hand. Amend it too where the range,
 read as above, now drops a `Fixes` line the body holds. Each amendment replaces
 the whole body, and another session may amend it between a read and a write. So build each one

@@ -104,10 +104,10 @@ body, never from its commits. The
 promotion pull request carrying the change takes a closing keyword in its body for each issue the
 line names. Its body takes no closing keyword for a change without that line. A change that undoes a
 fix not yet on `main` names that fix's issues in one `Reopens on promotion:` line, written where a
-`Closes on promotion:` line would go. A rollback committed as an ordinary change is one. The undo
-states that it reverses the fix, since a rollback often carries no revert marker for the range to show. The promotion body takes no closing
-keyword for an issue that line names. The exception is a later change in the range that names the
-issue on a `Closes on promotion:` line again. A PR still exists for a
+`Closes on promotion:` line would go. A rollback committed as an ordinary change is one. The line is
+required because a rollback often carries no revert marker for the range to show. The promotion body
+takes no closing keyword for an issue that line names. Where the range names one issue on both
+lines, the line of the latest change naming it decides. A PR still exists for a
 change worth reviewing, and the `main` promotion gate is unchanged. Release happens only by manual
 dispatch.
 
