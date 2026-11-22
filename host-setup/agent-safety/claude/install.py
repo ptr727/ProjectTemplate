@@ -679,7 +679,7 @@ def base_interpreters(path):
     That is the name a minor-version upgrade keeps working.
     The second is its `executable`, which Python 3.11 and later record.
     That covers a `home` whose `python3` is an older interpreter or absent, as an altinstall leaves it.
-    The venv's own path stays the last resort where neither exists.
+    The venv's own path stays the last resort, tried where no base exists or none passes the probe.
     """
     exe = pathlib.Path(path)
     for cfg in (exe.parent / "pyvenv.cfg", exe.parent.parent / "pyvenv.cfg"):
@@ -699,7 +699,7 @@ def base_interpreters(path):
             )
         if keys.get("executable"):
             named.append(pathlib.Path(keys["executable"]))
-        return [str(b) for b in named if b.is_file()] or [path]
+        return [str(b) for b in named if b.is_file()] + [path]
     return [path]
 
 
@@ -724,7 +724,7 @@ def hook_launcher():
     The path is absolute, so the hook runs the interpreter the install probed.
     Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
     The `python3` on PATH is preferred, being unambiguously Python 3.
-    A candidate inside a virtual environment is replaced by the interpreters that venv was made from.
+    A candidate inside a virtual environment yields first to the interpreters that venv was made from.
     Its path is kept as PATH resolves it, and its links are not followed.
     So `/usr/bin/python3` stays the name a minor-version upgrade keeps pointing at a working interpreter.
     Else this interpreter's own path is used, which an upgrade or a move can break.

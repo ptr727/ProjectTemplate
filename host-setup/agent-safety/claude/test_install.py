@@ -84,8 +84,19 @@ def local_file(home):
 
 def this_launcher():
     """The launcher `hook_launcher` falls back to for this interpreter, the first base candidate that runs."""
+    return this_launcher_and_skips()[0]
+
+
+def this_launcher_and_skips():
+    """That launcher, and how many of this interpreter's base candidates fail the probe ahead of it.
+
+    The count depends on the runner's own Python layout, so a test counting rejections adds it.
+    """
     candidates = install.base_interpreters(os.path.abspath(sys.executable))
-    return next(c for c in candidates if install.launcher_problem(c) is None)
+    for skipped, candidate in enumerate(candidates):
+        if install.launcher_problem(candidate) is None:
+            return candidate, skipped
+    raise AssertionError(f"no candidate for this interpreter runs: {candidates}")
 
 
 def entry_text(hook):
@@ -3482,8 +3493,9 @@ class TestLauncher(StampCase):
         self.assertIn("malformed version probe", install.launcher_problem(str(stub)))
         self._path_first(stub.parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, this_launcher())
-        self.assertEqual(len(rejected), 1, rejected)
+        expected, skipped = this_launcher_and_skips()
+        self.assertEqual(launcher, expected)
+        self.assertEqual(len(rejected), 1 + skipped, rejected)
 
     @unittest.skipUnless(shutil.which("bash"), "install.sh is a bash wrapper")
     def test_install_sh_passes_over_a_python_that_prints_ok_and_fails(self):
@@ -3518,7 +3530,8 @@ class TestLauncher(StampCase):
         (base / "python3").symlink_to(this_launcher())
         venv = self._venv(f"home = {base}\nversion = 3\n")
         self.assertEqual(
-            install.base_interpreters(str(venv / "bin" / "python3")), [str(base / "python3")]
+            install.base_interpreters(str(venv / "bin" / "python3")),
+            [str(base / "python3"), str(venv / "bin" / "python3")],
         )
         self._path_first(venv / "bin")
         launcher, rejected = install.hook_launcher()
@@ -3541,6 +3554,19 @@ class TestLauncher(StampCase):
         self.assertEqual(launcher, str(real), rejected)
         self.assertIn("below the 3.11 floor", rejected[0])
 
+    def test_a_venv_whose_only_base_is_below_the_floor_installs_under_its_own_interpreter(self):
+        """With no `executable` recorded and an old `home` python3, the venv's own interpreter is the one left."""
+        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        (base / "python3").write_text(
+            f"#!/bin/sh\necho {install.LAUNCHER_TOKEN} 3 10\n", encoding="utf-8"
+        )
+        (base / "python3").chmod(0o755)
+        venv = self._venv(f"home = {base}\n")
+        self._path_first(venv / "bin")
+        launcher, rejected = install.hook_launcher()
+        self.assertEqual(launcher, str(venv / "bin" / "python3"), rejected)
+        self.assertIn("below the 3.11 floor", rejected[0])
+
     def test_a_venv_whose_base_is_gone_keeps_its_own_interpreter(self):
         """A `pyvenv.cfg` naming no interpreter that exists leaves the candidate to the probe."""
         venv = self._venv(f"home = {self.tmp}/gone\nexecutable = {self.tmp}/gone/python3\n")
@@ -3561,8 +3587,9 @@ class TestLauncher(StampCase):
     def test_a_broken_python3_on_path_falls_back_to_this_interpreter(self):
         self._path_first(self._stub("python3", "exit 0").parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, this_launcher())
-        self.assertEqual(len(rejected), 1, rejected)
+        expected, skipped = this_launcher_and_skips()
+        self.assertEqual(launcher, expected)
+        self.assertEqual(len(rejected), 1 + skipped, rejected)
         self.assertIn("python3'", rejected[0])
 
     def test_no_working_candidate_yields_no_launcher(self):
