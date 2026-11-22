@@ -1,10 +1,11 @@
 """An interface unit's contract tokens, each read against the file's code view or one job's.
 
 `artifactNameToken` and `requireTokens` read the whole file, so a token a stub owes outside every
-job, such as an `on:` activity type, is checked too. `requireTokensOn` reads the `on:` mapping alone, so
-a job named for an activity type does not stand in for the subscription. `requireTokensInJob` and
-`forbidTokensInJob` read one job each. The merge-bot stub's `on:` types must name `auto_merge_disabled`, or the hub
-task's re-arm job never runs there and a disabled auto-merge stalls the pull request.
+job is checked too. A job name can satisfy such a token. `requireTokensOn` reads the `on:` mapping
+alone. A job named for an activity type then stands in for no subscription.
+`requireTokensInJob` and `forbidTokensInJob` read one job each. The merge-bot stub's `on:` types
+must name `auto_merge_disabled`, or the hub task's re-arm job never runs there and a disabled
+auto-merge stalls the pull request.
 """
 
 from collections.abc import Mapping
