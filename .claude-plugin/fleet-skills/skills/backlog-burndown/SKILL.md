@@ -771,13 +771,15 @@ the opposite error destroys work.
 Deriving the set from the range rather than from what this round dispatched is what covers a group
 that deferred or parked, contributing none. It also covers an earlier round's work that no
 promotion has yet carried. A fix landing during the freeze changes the range under a body already
-written, and so does a direct push. So re-read the range whenever develop moves. Amend the body where the range calls for a `Fixes`
-line the body lacks, rather than leaving an issue to be closed by hand. Amend it too where the range,
-read as above, now drops a `Fixes` line the body holds. Each amendment replaces
-the whole body, and another session may amend it between a read and a write. So build each one
-from a read of the body made immediately before the write. Keep every line that read holds,
-less any the range drops. Then read the body again. Repeat the amendment where it lacks a
-`Fixes` line a freshly fetched range calls for, or holds one that range drops. Checking the whole set rather than only this amendment's own lines is what
+written, and so does a direct push. So re-read the range when the fix lands, and again at each
+point the closing-set check below runs. Amend the body where the range calls for a `Fixes` line
+the body lacks, rather than leaving an issue to be closed by hand. Amend it too where a
+`Reopens on promotion:` line now in the range takes out an issue the body holds a `Fixes` line for.
+Each amendment replaces the whole body, and another session may amend it between a read and a
+write. So build each one from a read of the body made immediately before the write. Keep every
+line that read holds, less any such a `Reopens on promotion:` line takes out. Then read the body
+again. Repeat the amendment where it lacks a `Fixes` line a freshly fetched range calls for, or
+holds one such a line takes out. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
 
 Run the mechanical closing-set check that `branching-and-release-model` states in its
