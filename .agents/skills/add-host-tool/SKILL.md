@@ -25,7 +25,7 @@ description: >-
 - Prefer the distribution package when it meets the floor.
 - Use the platform's established package manager and official package identifier.
 - Keep install and upgrade idempotent.
-- Before an apt-managed install, detect an unowned downloaded copy that shadows it. Report it with the command that removes it by hand, per `GOVERNANCE.md` "Design Before Code". Skip that tool's install until the copy is gone, so a rerun stays idempotent.
+- Before an apt-managed install, detect an unowned downloaded copy that shadows it. Report it with the command that removes it by hand, per `GOVERNANCE.md` "Design Before Code". Skip that tool's install until the copy is gone, since the shadowing copy would keep answering on PATH.
 - Before a downloaded install, detect a conflicting package-managed copy. Report it and skip the install the same way.
 - Preserve report, list, explicit selection, install, upgrade, reinstall, and dry-run behavior.
 - Hand each native mutation to the operator on its own platform, never a Windows mutation on Linux or a Linux mutation on Windows.
