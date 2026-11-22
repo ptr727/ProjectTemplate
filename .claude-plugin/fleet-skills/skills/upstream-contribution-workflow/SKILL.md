@@ -75,19 +75,28 @@ iteration PR is the place where upstream drift is absorbed and its fallout fixed
 upstream PR has to absorb that drift. So merging or closing the iteration PR removes that place.
 
 When the upstream base moves, sync the mirror branch from upstream and merge the mirror branch into
-the dirty branch. In that case, also fix whatever breaks in the iteration PR. Bringing the mirror branch in is a merge rather than a rebase, since the dirty branch is append-only. A dirty branch stacked on another takes the lower branch's changes the same way. Then re-squash onto the new mirror tip whenever the clean branch needs to follow, per step 5.
+the dirty branch. In that case, also fix whatever breaks in the iteration PR. Bringing the mirror branch in is a merge rather than a rebase, since the dirty branch is append-only. A dirty branch stacked on another takes the lower branch's changes the same way. Then re-squash onto the new mirror tip whenever the clean branch needs to follow, per step 5. An append-only clean branch, per step 5, has no recorded way to follow a moved base. So stop and ask the maintainer before it follows one.
 
-**Where the upstream's own CI rejects merge commits, rebase the dirty branch instead.** Such a check fails any pull request whose commits include a merge, and stops the rest of the upstream's checks from running. So a merge there costs the iteration PR the CI coverage it exists to provide. The rebase applies only in that case, and only to the dirty branch on the maintainer's own fork. Rebase it onto the mirror branch, or onto the lower branch of a stack. First push its old head to a named backup branch on the fork, and confirm the fork holds it. That backup keeps the replaced iteration log readable. Then push the rebased branch with `--force-with-lease`, pinned to that old head, under the go-ahead step 5 requires:
+**Where the upstream's own CI rejects merge commits, rebase the dirty branch instead.** Such a check fails any pull request whose commits include a merge, and stops the rest of the upstream's checks from running. So a merge there costs the iteration PR the CI coverage it exists to provide. The rebase applies only in that case, and only to the dirty branch on the maintainer's own fork. Rebase it onto the mirror branch. On a stack, rebase the lower branch first. Then move the upper branch with `git rebase --onto <lower> <lower-old-head> <upper>`, its old head read from the lower branch's backup. Before each rebase, push the branch's old head to a named backup branch on the fork, and confirm the fork holds it. That backup keeps the replaced iteration log readable. Then push the rebased branch with `--force-with-lease`, pinned to that old head, under the go-ahead step 5 requires:
 
 ```sh
-old=$(git rev-parse work/x)
-git push origin "$old:refs/heads/backup/work-x-1"
-git ls-remote origin refs/heads/backup/work-x-1
-git rebase <mirror-branch> work/x
+old=$(git rev-parse work/x) && bak=refs/heads/backup/work-x-1
+git push origin "$old:$bak" && [ "$(git ls-remote origin "$bak" | cut -f1)" = "$old" ]
+git rebase "$mirror" work/x
 git push --force-with-lease="work/x:$old" origin work/x
 ```
 
-Number the backup branch per rebase, so a later rebase never overwrites an earlier backup.
+PowerShell equivalent:
+
+```powershell
+$old = git rev-parse work/x; $bak = 'refs/heads/backup/work-x-1'
+git push origin "${old}:$bak"
+if ((git ls-remote origin $bak).Split("`t")[0] -ne $old) { throw "backup not confirmed: $bak" }
+git rebase $mirror work/x
+git push --force-with-lease="work/x:$old" origin work/x
+```
+
+Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch.
 
 For example, the fork's mirror branch and upstream both sit at commit `A`, with the iteration PR
 from `work/x` into the mirror branch green. Upstream advances to `B`. The fork syncs its mirror
@@ -95,7 +104,7 @@ branch to `B`, merges `B` into `work/x`, and fixes the breakage in the iteration
 been merged into the mirror branch at `A`, the mirror branch could not have fast-forwarded to `B`.
 
 The contribution ends once the PR of every clean branch the dirty branch feeds is merged or
-closed, with no slice left to cut. Only then close the iteration PR, unmerged, and delete the dirty, clean, and backup branches. A merged change then reaches the
+closed, with no slice left to cut. Only then close the iteration PR, unmerged, and delete the dirty and clean branches. Leave each backup branch for the maintainer to delete. A merged change then reaches the
 mirror branch through the next sync from upstream, the same way anyone else's change does.
 
 ## Use the upstream repo's own conventions, not the fleet's
