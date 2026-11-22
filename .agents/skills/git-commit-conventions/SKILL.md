@@ -157,9 +157,11 @@ Each line names a setting, whether the target matches the probe, and the scope a
 
 ## Never force push
 
-Do not run `git push --force` or `git push --force-with-lease` under any circumstances. Force
+In a fleet repository, do not run `git push --force` or `git push --force-with-lease` under any circumstances. Force
 pushing rewrites shared history and can cause data loss. This holds regardless of how confident
 the rewrite looks, a rejected push is recoverable, a force-pushed one is not.
+
+The maintainer's fork of a third-party repository is not a fleet repository. There `upstream-contribution-workflow` names the branches that may take `--force-with-lease`, and each push still waits for his explicit, current go-ahead.
 
 ## History rewrites re-identify only what changed
 
