@@ -2044,6 +2044,12 @@ class TestRegistration(StampCase):
                     {k: v for k, v in h.items() if k != "timeout"},
                 )
 
+    def test_the_recheck_hint_quotes_the_absolute_launcher(self):
+        """The launcher is now always an absolute path, which can hold a space, so the printed line quotes it."""
+        r = self.install()
+        launcher = self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertIn(f'"{launcher}" "{install.HERE / "install.py"}" --report', r.stdout)
+
     def test_a_reinstall_rewrites_a_shell_form_registration_in_exec_form(self):
         """A host an older install registered in shell form is moved to exec form, with no duplicate left beside it."""
         self.install()

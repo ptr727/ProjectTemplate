@@ -2402,7 +2402,8 @@ def run() -> int:
     print(f"  {stamp_line(stamp)}")
     print("\nRe-check at any time, from a fresh hub checkout, without changing anything:")
     install_path = HERE / "install.py"
-    print(f'  {launcher} "{install_path}" --report')
+    call = "& " if os.name == "nt" else ""
+    print(f'  {call}"{launcher}" "{install_path}" --report')
     print("Restart Claude Code sessions on this machine so the hook and CLAUDE.md load.")
     return 0
 
