@@ -394,7 +394,8 @@ def _command_variants(
     """Each word list a command can be, a word the scan cannot read held as None.
 
     A `*` unpacking, a `+` concatenation, and a bound name are followed. A name bound more than
-    once yields one list per rebinding, so a flag one binding carries never clears another.
+    once yields one list per rebinding, so a flag one binding carries never clears another. A `+=`
+    onto the name extends every one of them.
     """
     if isinstance(expr, ast.Constant):
         return [[expr.value if isinstance(expr.value, str) else None]]
@@ -411,27 +412,33 @@ def _command_variants(
     key = _target_key(expr)
     if key is None or key in seen:
         return [[None]]
+    writes = list(_writes(key, spawn))
     found = [
         variant
-        for w in _writes(key, spawn)
+        for w in writes
         if not w.mutates
         for variant in _command_variants(w.value, spawn, seen | {key})
-    ]
-    return found or [[None]]
+    ] or [[None]]
+    for w in writes:
+        if w.mutates and isinstance(w.value, ast.List | ast.Tuple | ast.Name | ast.BinOp):
+            tails = _command_variants(w.value, spawn, seen | {key})
+            found = [v + t for v in found for t in tails]
+    return found
 
 
 def _interpreter_options(words: list[str | None]) -> set[str]:
     """The options a command gives its interpreter, read up to its script, `-c`, or `-m`.
 
-    `-X utf8` comes back as the one word `-Xutf8`, however it is spelled.
+    An option taking its value as the next word, `-X` or `-W`, comes back joined to it. So `-X utf8`
+    comes back as `-Xutf8`, however it is spelled.
     """
     options: set[str] = set()
     rest = iter(words[1:])
     for word in rest:
         if word is None or not word.startswith("-") or word in ("-c", "-m", "-"):
             break
-        if word == "-X":
-            word = f"-X{next(rest, '')}"
+        if word in ("-X", "-W"):
+            word = f"{word}{next(rest, '')}"
         options.add(word)
     return options
 
@@ -703,6 +710,19 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             '    subprocess.run([sys.executable, "s.py", "-X", "utf8"], encoding="utf-8")\n'
         )
         self.assertEqual([True, True, True], self.verdicts(source))
+
+    def test_a_flag_added_later_or_after_a_valued_option_is_read(self) -> None:
+        source = (
+            "import subprocess, sys\n"
+            "def go():\n"
+            "    cmd = [sys.executable]\n"
+            '    cmd += ["-I", "-c", "x"]\n'
+            '    subprocess.run(cmd, encoding="utf-8", env={"PYTHONIOENCODING": "utf-8"})\n'
+            "def warned():\n"
+            '    argv = [sys.executable, "-W", "error", "-I", "-c", "x"]\n'
+            '    subprocess.run(argv, encoding="utf-8", env={"PYTHONIOENCODING": "utf-8"})\n'
+        )
+        self.assertEqual([True, True], self.verdicts(source))
 
     def test_an_attribute_bound_in_a_base_class_is_followed(self) -> None:
         source = (
