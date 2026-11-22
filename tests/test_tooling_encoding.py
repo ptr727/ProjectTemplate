@@ -285,8 +285,9 @@ def _in_order(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool | None
 
     A later write overrides an earlier one, so `{"PYTHONIOENCODING": "utf-8", **os.environ}` ends
     with whatever `os.environ` holds, and so does `{"PYTHONIOENCODING": "utf-8"} | os.environ`.
-    That is why the last write decides here. An unpacked dictionary display that never names the
-    variable leaves the setting alone. A `dict(...)` keyword is final wherever it sits, since
+    That is why the last write decides here. An unpacked dictionary display with no unpacking of
+    its own that never names the variable leaves the setting alone. An unpacked name reads as
+    another codec unless it carries the entry, so the gate errs toward flagging. A `dict(...)` keyword is final wherever it sits, since
     Python refuses a keyword given twice. None means the expression is no dictionary display, `|`
     merge, or `dict(...)` call, or writes nothing to the mapping.
     """
@@ -306,7 +307,7 @@ def _in_order(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool | None
     state: bool | None = None
     for key, value in items:
         if key is None:
-            if isinstance(value, ast.Dict) and not _entries(value) and not _bases(value):
+            if isinstance(value, ast.Dict) and None not in value.keys and not _entries(value):
                 continue
             state = carries_child_encoding(value, spawn, seen)
         elif _is_constant(key, name):
@@ -319,8 +320,9 @@ def carries_child_encoding(
 ) -> bool:
     """Whether this environment expression sets `PYTHONIOENCODING` to `utf-8`.
 
-    An entry the expression writes itself decides, a dictionary entry or a `dict(...)` keyword, and
-    every one has to be the literal `utf-8`. A value the scan cannot read counts as another codec.
+    An entry the expression writes itself decides, a dictionary entry or a `dict(...)` keyword.
+    For a dictionary display, `|` merge, or `dict(...)` call the last write in order decides, as
+    `_in_order` reads it. Any other expression needs every entry to be the literal `utf-8`. A value the scan cannot read counts as another codec.
     Without such an entry, a local name or an attribute of `self` the expression reads decides, as
     `_name_carries` reads it. A function's return value is not followed, so an environment a helper
     builds is read as not carrying it.
@@ -707,6 +709,13 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             'subprocess.run([sys.executable], encoding="utf-8", env=dict(PYTHONIOENCODING="utf-8", **os.environ))\n'
         )
         self.assertEqual([False, False], self.verdicts(source))
+
+    def test_an_unpacked_copy_of_the_environment_is_not_silent(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **{**os.environ, "LC_ALL": "C"}})\n'
+        )
+        self.assertEqual([True], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (
