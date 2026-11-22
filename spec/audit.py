@@ -1207,6 +1207,15 @@ def _mapping(node):
     return {str(k.value): v for k, v in node.value if isinstance(k, yaml.ScalarNode)}
 
 
+def _plain_list(node):
+    """The scalar values of a sequence node, one for a scalar node, `[]` for any other node."""
+    if isinstance(node, yaml.ScalarNode):
+        return [node.value]
+    if not isinstance(node, yaml.SequenceNode):
+        return []
+    return [c.value for c in node.value if isinstance(c, yaml.ScalarNode)]
+
+
 def _plain(node):
     """The Python value a node constructs, as the safe loader reads it."""
     return yaml.SafeLoader("").construct_object(node, deep=True)
@@ -1331,9 +1340,13 @@ def check_interface(path, contract, text):
             )
         )
     job_views = {job: f"  {job}:\n{code_view(node, 2)}" for job, node in jobs.items()}
-    trigger_view = code_view(_mapping(root).get("on"), 1)
+    event_types = [
+        str(t)
+        for event in _mapping(_mapping(root).get("on")).values()
+        for t in _plain_list(_mapping(event).get("types"))
+    ]
     findings += audit_contract.token_findings(
-        path, contract, code_view(root), job_views, trigger_view
+        path, contract, code_view(root), job_views, event_types
     )
     return findings
 

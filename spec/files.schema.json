@@ -78,7 +78,7 @@
                             "requiredCheckName": { "type": "string" },
                             "artifactNameToken": { "type": "string" },
                             "requireTokens": { "type": "array", "items": { "type": "string" } },
-                            "requireTokensOn": { "type": "array", "items": { "type": "string" } },
+                            "requireEventTypes": { "type": "array", "items": { "type": "string" } },
                             "requireTokensInJob": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
                             "forbidTokensInJob": { "type": "object", "additionalProperties": { "type": "array", "items": { "type": "string" } } },
                             "verbatimJobs": { "type": "array", "items": { "type": "string" } }
