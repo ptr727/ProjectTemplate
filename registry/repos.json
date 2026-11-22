@@ -148,6 +148,7 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
+            "publicInteraction": "community",
             "pythonDirectories": ["RegressionTests"],
             "agentPolicy": {
                 "review": {
@@ -198,6 +199,7 @@
             "requiredSecrets": ["DOCKER_HUB_USERNAME", "DOCKER_HUB_ACCESS_TOKEN", "CODECOV_TOKEN"],
             "consumerModel": "pull",
             "releaseTrigger": "two-phase",
+            "publicInteraction": "community",
             "driftNotes": ["Docker image wrapping upstream Nx products. C# (CreateMatrix) is the codegen generator, not a shipped package (IsPackable=false, no nuget push).", "Release is the two-phase model (weekly schedule + workflow_dispatch publish, not ordinary merges) plus an extra Make/Matrix.json path-scoped push that republishes when the codegen version pin bumps.", "Docker Hub README published per-image via a Matrix.json-derived matrix.", "Branch hygiene: 3 stale Dependabot nuget branches (PRs closed/superseded) linger, safe to delete, and main+develop are otherwise clean after the 2026-07 sweep."]
         },
         {

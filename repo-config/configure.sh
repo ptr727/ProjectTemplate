@@ -13,7 +13,8 @@
 # The apply mode writes five groups, in order.
 # It adds the agent policy files when --checkout names a local checkout of the repo.
 # A last group of secrets follows.
-# First settings.json via PATCH, plus has_discussions (public repos only) and default_branch (main, only when it exists).
+# First settings.json via PATCH, plus has_discussions (public community repos only) and default_branch (main, only when it exists).
+# The same group then sets the interaction limit the registry's publicInteraction declares, on a public repo only, for six months.
 # Then the Dependabot vulnerability alerts and automated security updates.
 # Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
@@ -51,6 +52,8 @@
 # Both directions matter, since a rule added live that the payload never declared is drift this catches.
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
+# The interaction limit is asserted the same way.
+# A limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # The agent policy files are checked too, read from the repo's default branch and compared with the render.
 # The project link is checked by resolving the declared project to a node id.
@@ -251,6 +254,37 @@ esac
 settings_file="$script_dir/settings.json"
 labels_file="$script_dir/labels.json"
 project_file="$script_dir/project.json"
+
+# ----- Resolve the public interaction policy (shared by apply and check) -----
+# The registry's publicInteraction names who may interact with the repo while it is public.
+# Absent means collaborators, so a repo made public starts locked down rather than open.
+# A value outside the enum stops the run here, before any write, rather than reaching the API as a limit GitHub refuses part way through.
+# A declared null is such a value, so presence rather than jq's // decides the default.
+interaction=collaborators
+if [ -f "$registry" ]; then
+    # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
+    if ! interaction="$(jqr --arg n "$name" '([.repos[] | select(.name==$n)][0] // {}) | if has("publicInteraction") then .publicInteraction else "collaborators" end' "$registry")"; then
+        echo "Failed to read publicInteraction from $registry (invalid JSON?)." >&2
+        exit 1
+    fi
+fi
+case "$interaction" in
+collaborators | community) ;;
+*)
+    echo "Unknown publicInteraction '$interaction' for $name in $registry (expected collaborators or community)." >&2
+    exit 1
+    ;;
+esac
+# A collaborators repo is public for reference only, so it gets GitHub's collaborators_only limit and no Discussions.
+# A community repo keeps both open to its users, and existing_users blocks only accounts younger than 24 hours.
+# The limit lasts six months at most, after which GitHub removes it silently, so check warns this many days ahead.
+interaction_limit=collaborators_only
+public_discussions=false
+if [ "$interaction" = community ]; then
+    interaction_limit=existing_users
+    public_discussions=true
+fi
+interaction_warn_days=30
 
 # ----- Resolve a Python interpreter (shared by apply and check) -----
 # The ruleset composition and the description both come from plain Python scripts, so neither needs uv.
@@ -699,8 +733,42 @@ apply_secrets() { # secrets-dir
     fi
 }
 
+# ----- Interaction limit (written on a public repo only, shared by apply and check) -----
+# GitHub answers a private repo's interaction-limits read with an error, so a caller reads the visibility first and calls this on a public repo only.
+# It prints the live limit as one JSON object, which is {} when none is in force.
+# It fails on a read error or a body of any other shape.
+interaction_limits() {
+    local live
+    if ! live="$(gh api "repos/$repo/interaction-limits")"; then
+        return 1
+    fi
+    if ! jq_has -s 'length == 1 and (.[0] | type == "object")' <<<"$live"; then
+        return 1
+    fi
+    printf '%s\n' "$live"
+}
+
+# It prints the origin of the live limit, or nothing when none is in force.
+interaction_origin() {
+    local live
+    live="$(interaction_limits)" || return 1
+    jqr '.origin // empty' <<<"$live"
+}
+
+# Every apply sets the longest expiry GitHub offers, so a re-apply is also how a limit is renewed before it lapses.
+# Called with the live private flag, it writes only on a public repo, since GitHub offers no interaction limit on a private one.
+apply_interaction() { # private
+    if [ "$1" != false ]; then
+        echo "Skipped the interaction limit, since $repo is private and GitHub offers none there"
+        return
+    fi
+    jq -n --arg l "$interaction_limit" '{limit: $l, expiry: "six_months"}' |
+        gh api --method PUT "repos/$repo/interaction-limits" --input - >/dev/null
+    echo "Set the interaction limit to $interaction_limit for six months (publicInteraction=$interaction). GitHub then removes it silently, so apply again before it lapses."
+}
+
 cmd_apply() {
-    local f private disc payload project_id why
+    local f private disc payload project_id why origin
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
     for f in "$settings_file" "$labels_file" "$project_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
@@ -734,6 +802,20 @@ cmd_apply() {
     # That is because it is a read.
     # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with four groups of writes already applied.
     project_id="$(project_node_id "$(jqr '.owner' "$project_file")" "$(jqr '.number' "$project_file")" "$(jqr '.title' "$project_file")")"
+    # The visibility and any live interaction limit are read here too.
+    # GitHub refuses a repository limit while the owning account or organization has one in force.
+    # Found in apply_interaction, that refusal would follow the settings write.
+    private="$(gh api "repos/$repo" --jq '.private')"
+    if [ "$private" = false ]; then
+        if ! origin="$(interaction_origin)"; then
+            echo "Could not read the interaction limit of $repo. Aborting before any write." >&2
+            exit 1
+        fi
+        if [ -n "$origin" ] && [ "$origin" != repository ]; then
+            echo "$repo carries an interaction limit set on its $origin, which no repository limit can replace. Remove that limit first. Aborting before any write." >&2
+            exit 1
+        fi
+    fi
     # The secret plan is computed here too, since the tree and the files it reads can fail after every API write otherwise.
     # A stray exits inside plan_secrets, and a dry run exits inside dry_run_secrets, so neither reaches a write.
     if [ "$secrets_registered" = true ]; then
@@ -762,10 +844,11 @@ cmd_apply() {
     # They still fail loud, since gh errors go to stderr and a failed write aborts the script.
     # These writes run unguarded under `set -e`.
     # ----- General repository settings -----
-    # Discussions are enabled on public repos only by fleet policy, and never on a private one.
-    private="$(gh api "repos/$repo" --jq '.private')"
+    # Discussions are enabled on a public community repo only, per its publicInteraction, and never on a private one.
     disc=false
-    [ "$private" = "false" ] && disc=true
+    if [ "$private" = false ]; then
+        disc="$public_discussions"
+    fi
     # The default branch is main, but only point it there once main exists.
     # Never set the default to a missing branch, as on a repo still living on a rework branch.
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
@@ -780,6 +863,7 @@ cmd_apply() {
     fi
     echo "Applying general settings (has_discussions=$disc$([ -n "$description" ] && echo ", description from registry/repos.json"))"
     printf '%s' "$payload" | gh api --method PATCH "repos/$repo" --input - >/dev/null
+    apply_interaction "$private"
     # ----- Dependabot alerts + automated security updates -----
     gh api --method PUT "repos/$repo/vulnerability-alerts" >/dev/null
     gh api --method PUT "repos/$repo/automated-security-fixes" >/dev/null
@@ -817,6 +901,8 @@ cmd_apply() {
 FAILED=0
 note() { printf '  %s\n' "$*"; }
 pass() { printf '  ok   %s\n' "$*"; }
+# A warning names something to act on soon without failing the check.
+warn() { printf '  WARN %s\n' "$*"; }
 fail() {
     printf '  FAIL %s\n' "$*"
     FAILED=1
@@ -960,10 +1046,12 @@ check_settings() {
         got="$(jqr --arg k "$key" '.[$k]' <<<"$live")"
         assert "setting $key = $want" test "$got" = "$want"
     done <<<"$pairs"
-    # Dynamic settings apply sets: has_discussions (public repos only), default_branch (main, if it exists).
+    # Dynamic settings apply sets: has_discussions (public community repos only), default_branch (main, if it exists).
     private="$(jqr '.private' <<<"$live")"
-    wantdisc=true
-    [ "$private" = "true" ] && wantdisc=false
+    wantdisc=false
+    if [ "$private" = false ]; then
+        wantdisc="$public_discussions"
+    fi
     assert "has_discussions = $wantdisc" test "$(jqr '.has_discussions' <<<"$live")" = "$wantdisc"
     if gh api "repos/$repo/branches/main" --jq '.name' >/dev/null 2>&1; then
         assert "default_branch = main" test "$(jqr '.default_branch' <<<"$live")" = main
@@ -975,6 +1063,52 @@ check_settings() {
         note "description: no $registry to read (it resolves relative to this script, not from the repo argument). Run from a hub checkout for it to exist, and verify manually."
     else
         note "description: no matching registry entry or no declared description key for $name (falls back to the README tagline, see GOVERNANCE.md 'Repository Details'). Verify manually."
+    fi
+}
+
+# The live limit must be the one publicInteraction declares, set on the repository itself, with more than the warning threshold left.
+# An expiry inside the threshold is a warning rather than drift, since the limit still holds until GitHub removes it.
+check_interaction() {
+    local private live got origin expires left
+    if ! private="$(gh api "repos/$repo" --jq '.private')"; then
+        fail "interaction limit - could not read the repository visibility"
+        return
+    fi
+    if [ "$private" != false ]; then
+        note "interaction limit: $repo is private, so none is owed (publicInteraction=$interaction applies only while it is public)"
+        return
+    fi
+    if ! live="$(interaction_limits)"; then
+        fail "live interaction limit for '$repo' could not be read as one JSON object"
+        return
+    fi
+    got="$(jqr '.limit // "none"' <<<"$live")"
+    origin="$(jqr '.origin // "none"' <<<"$live")"
+    # The origin is tested first, since apply refuses to replace a limit the owning account set, so naming apply there would be unfollowable.
+    if [ "$got" != none ] && [ "$origin" != repository ]; then
+        fail "interaction limit $got is set on the owning $origin rather than on the repository, which apply cannot replace. Remove it there, then apply sets $interaction_limit"
+        return
+    fi
+    if [ "$got" != "$interaction_limit" ]; then
+        fail "interaction limit = $interaction_limit (publicInteraction=$interaction), live $got. Apply sets it, and GitHub removes a lapsed one silently"
+        return
+    fi
+    pass "interaction limit = $interaction_limit, set on the repository"
+    # The days left are computed by the Python this script already resolved, since jq's fromdateiso8601 fails on a native Windows jq.
+    # A timedelta's days floor, so a limit with hours left reads as 0 rather than 1.
+    # It writes no newline, since a native Windows Python would end one with a carriage return that the integer test below refuses.
+    expires="$(jqr '.expires_at // empty' <<<"$live")"
+    if [ -z "$expires" ] || ! left="$("${py_cmd[@]}" -c 'import sys
+from datetime import datetime, timezone
+end = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+sys.stdout.write(str((end - datetime.now(timezone.utc)).days))' "$expires" 2>/dev/null)"; then
+        fail "interaction limit expiry '${expires:-none}' could not be read"
+        return
+    fi
+    if [ "$left" -lt "$interaction_warn_days" ]; then
+        warn "interaction limit expires in $left day(s), inside the $interaction_warn_days-day threshold. Apply again to renew it before GitHub removes it"
+    else
+        pass "interaction limit has $left day(s) left"
     fi
 }
 
@@ -1214,6 +1348,7 @@ cmd_check() {
     check_ruleset "$develop_ruleset"
     check_ruleset "$main_ruleset"
     check_settings
+    check_interaction
     check_security
     check_labels
     check_project

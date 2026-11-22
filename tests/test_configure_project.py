@@ -56,17 +56,22 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
 
     The options are lifted rather than typed.
     That is because a harness running without them is blind to exactly the error handling the lines under test rely on.
+    The script goes to bash as a file rather than through `-c`.
+    Git Bash cuts a `-c` argument short at about 8 KiB, and cmd_apply lifted whole is longer than that.
     """
     bash = require("bash", *tools)
     options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
-    return subprocess.run(
-        [bash, "-c", f"{options}\n{script}"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "lifted.sh"
+        path.write_bytes(f"{options}\n{script}".encode())
+        return subprocess.run(
+            [bash, str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
 
 
 JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
@@ -560,12 +565,13 @@ class WiringCase(unittest.TestCase):
                 "labels_payload_ok() { return 0; }\nproject_payload_ok() { return 0; }\n"
                 'project_node_id() { printf "%s\\n" ' + PROJECT_ID + "; }\n"
                 "apply_labels() { :; }\napply_ruleset() { :; }\napply_secrets() { :; }\n"
+                "interaction_origin() { :; }\napply_interaction() { :; }\n"
                 'apply_project() { echo "the link write ran with $1"; }\n'
                 'gh() { printf "false\\n"; }\njq() { printf "{}\\n"; }\n'
                 'jqr() { printf "1\\n"; }\n'
             )
             script = (
-                f"repo=ptr727/Fixture\nmodel=release\nrepo_arg=\ndescription=\ncheckout_given=false\n"
+                f"repo=ptr727/Fixture\nmodel=release\nrepo_arg=\ndescription=\ncheckout_given=false\npublic_discussions=false\n"
                 f"secrets_registered=false\ndry_run=false\nregistry=registry.json\nsecrets_skip_reason=none\nsecret_names_skip=\n"
                 f"settings_file={files['settings']}\nlabels_file={files['labels']}\n"
                 f"develop_ruleset={files['develop']}\nmain_ruleset={files['main']}\n"
@@ -607,6 +613,7 @@ class WiringCase(unittest.TestCase):
             for name in (
                 "check_ruleset",
                 "check_settings",
+                "check_interaction",
                 "check_security",
                 "check_labels",
                 "check_environments",
