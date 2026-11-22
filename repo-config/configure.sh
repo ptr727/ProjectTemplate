@@ -259,10 +259,11 @@ project_file="$script_dir/project.json"
 # The registry's publicInteraction names who may interact with the repo while it is public.
 # Absent means collaborators, so a repo made public starts locked down rather than open.
 # A value outside the enum stops the run here, before any write, rather than reaching the API as a limit GitHub refuses part way through.
+# A declared null is such a value, so presence rather than jq's // decides the default.
 interaction=collaborators
 if [ -f "$registry" ]; then
     # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
-    if ! interaction="$(jqr --arg n "$name" '(.repos[] | select(.name==$n) | .publicInteraction) // "collaborators"' "$registry")"; then
+    if ! interaction="$(jqr --arg n "$name" '([.repos[] | select(.name==$n)][0] // {}) | if has("publicInteraction") then .publicInteraction else "collaborators" end' "$registry")"; then
         echo "Failed to read publicInteraction from $registry (invalid JSON?)." >&2
         exit 1
     fi
@@ -1068,7 +1069,7 @@ check_settings() {
 # The live limit must be the one publicInteraction declares, set on the repository itself, with more than the warning threshold left.
 # An expiry inside the threshold is a warning rather than drift, since the limit still holds until GitHub removes it.
 check_interaction() {
-    local private live got origin left
+    local private live got origin expires left
     if ! private="$(gh api "repos/$repo" --jq '.private')"; then
         fail "interaction limit - could not read the repository visibility"
         return
@@ -1093,10 +1094,14 @@ check_interaction() {
         return
     fi
     pass "interaction limit = $interaction_limit, set on the repository"
-    # The days left are computed in jq, so no date dialect is involved.
-    # Fractional seconds are dropped first, since fromdateiso8601 parses none.
-    if ! left="$(jqr '((.expires_at | sub("\\.[0-9]+"; "") | fromdateiso8601) - now) / 86400 | floor' <<<"$live" 2>/dev/null)"; then
-        fail "interaction limit expiry '$(jqr '.expires_at // "none"' <<<"$live")' could not be read"
+    # The days left are computed by the Python this script already resolved, since jq's fromdateiso8601 fails on a native Windows jq.
+    # A timedelta's days floor, so a limit with hours left reads as 0 rather than 1.
+    expires="$(jqr '.expires_at // empty' <<<"$live")"
+    if [ -z "$expires" ] || ! left="$("${py_cmd[@]}" -c 'import sys
+from datetime import datetime, timezone
+end = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+print((end - datetime.now(timezone.utc)).days)' "$expires" 2>/dev/null)"; then
+        fail "interaction limit expiry '${expires:-none}' could not be read"
         return
     fi
     if [ "$left" -lt "$interaction_warn_days" ]; then

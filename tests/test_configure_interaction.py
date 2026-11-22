@@ -99,6 +99,7 @@ class Harness(unittest.TestCase):
         return (
             f"interaction={interaction}\ninteraction_limit={limit}\n"
             f"public_discussions={discussions}\ninteraction_warn_days=30\n"
+            f"py_cmd=({shlex.quote(Path(sys.executable).as_posix())})\n"
         )
 
 
@@ -136,6 +137,16 @@ class ResolveCase(Harness):
         self.assertEqual(result.returncode, 1)
         self.assertIn("Unknown publicInteraction 'everyone'", result.stderr)
         self.assertNotIn("resolved", result.stdout)
+
+    def test_a_declared_null_stops_the_run_rather_than_defaulting(self) -> None:
+        result = self.resolve({"name": "Fixture", "publicInteraction": None})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Unknown publicInteraction 'null'", result.stderr)
+
+    def test_no_matching_entry_is_collaborators(self) -> None:
+        result = self.resolve({"name": "Other", "publicInteraction": "community"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("resolved collaborators collaborators_only false", result.stdout)
 
 
 class ApplyCase(Harness):

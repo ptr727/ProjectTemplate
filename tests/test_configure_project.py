@@ -56,17 +56,22 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
 
     The options are lifted rather than typed.
     That is because a harness running without them is blind to exactly the error handling the lines under test rely on.
+    The script goes to bash as a file rather than through `-c`.
+    Git Bash cuts a `-c` argument short at about 8 KiB, and cmd_apply lifted whole is longer than that.
     """
     bash = require("bash", *tools)
     options = lift(r"^(set -[A-Za-z]+ [a-z]+)$")
-    return subprocess.run(
-        [bash, "-c", f"{options}\n{script}"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
-        check=False,
-    )
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "lifted.sh"
+        path.write_bytes(f"{options}\n{script}".encode())
+        return subprocess.run(
+            [bash, str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+            check=False,
+        )
 
 
 JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
