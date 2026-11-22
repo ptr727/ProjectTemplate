@@ -90,7 +90,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    each one an outcome under the Merge Gate's item 3. Where the
    change writes a code or config comment line, create the PR with `gh pr create --label comments`,
    or the prose gate refuses it. A repository lacking the label can refuse that create, so
-   check `gh label list` first. Where the label is missing, `comment-and-doc-style`
+   check `gh label list --search comments` first. Where the label is missing, `comment-and-doc-style`
    says its escape is not yet available there. A label added after the create is missing from the
    opened event's payload. Where the lint log lacks "Read the pull request's labels live", that
    payload decides. A private repository's log always lacks it until the lint job holds
