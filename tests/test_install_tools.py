@@ -873,6 +873,116 @@ if ($Mode) {
 """
 
 
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxInstallRefusals(LinuxFunctionsCase):
+    """A refusal ends the run and a missing Microsoft feed fails only its tool."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        # SOURCES_DIR is readonly, so point it at an empty directory in the sourced copy, so the host's own feed files cannot take the fast path.
+        sources = self.dir / "sources.d"
+        sources.mkdir()
+        text = self.functions.read_text(encoding="utf-8")
+        old = 'readonly SOURCES_DIR="/etc/apt/sources.list.d"'
+        if old not in text:
+            raise AssertionError("install-tools.sh no longer declares SOURCES_DIR as expected")
+        self.functions.write_text(
+            text.replace(old, f'readonly SOURCES_DIR="{sources}"'), encoding="utf-8"
+        )
+
+    def test_a_non_apt_pwsh_outside_the_known_paths_stops_the_install(self) -> None:
+        result = self.run_bash("""
+unowned_command_path() { printf '/opt/example/pwsh'; }
+path_is_unowned() { return 1; }
+apt_install() { echo "APT $*"; }
+powershell_remove_non_apt
+echo "CARRIED ON"
+""")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("outside the known cleanup paths", result.stderr)
+        self.assertNotIn("CARRIED ON", result.stdout)
+
+    def test_a_failing_path_resolution_stops_the_install(self) -> None:
+        result = self.run_bash("""
+unowned_command_path() { return 1; }
+path_is_unowned() { return 1; }
+powershell_remove_non_apt
+echo "CARRIED ON"
+""")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn("CARRIED ON", result.stdout)
+
+    def test_no_non_apt_pwsh_lets_the_install_go_on(self) -> None:
+        result = self.run_bash("""
+unowned_command_path() { return 0; }
+path_is_unowned() { return 1; }
+powershell_remove_non_apt
+echo "CARRIED ON"
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["CARRIED ON"])
+
+    def test_a_missing_microsoft_feed_fails_the_powershell_tool_only(self) -> None:
+        result = self.run_bash("""
+ARCH=amd64
+DISTRO_ID=example
+DISTRO_VERSION=1
+fetch() { return 1; }
+powershell_remove_non_apt() { echo "REMOVE"; }
+apt_install() { echo "APT $*"; }
+if powershell_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["STATUS 1"])
+        self.assertIn("Microsoft publishes no feed for example 1", result.stderr)
+
+    def test_a_missing_microsoft_feed_fails_the_dotnet_tool_and_the_run_carries_on(self) -> None:
+        result = self.run_bash("""
+ARCH=amd64
+DISTRO_ID=example
+DISTRO_VERSION=1
+apt_refresh() { :; }
+dotnet_sdk_latest() { :; }
+fetch() { return 1; }
+if dotnet_install; then echo "STATUS 0"; else echo "STATUS $?"; fi
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), ["STATUS 1"])
+
+    def test_apply_tool_collects_the_failed_feed_and_returns(self) -> None:
+        result = self.run_bash("""
+ARCH=amd64
+DISTRO_ID=example
+DISTRO_VERSION=1
+MODE=install
+DRY_RUN=false
+fetch() { return 1; }
+tool_function() { printf 'powershell_%s' "$2"; }
+powershell_version() { :; }
+powershell_target() { :; }
+tool_effective_status() { printf 'missing'; }
+apply_tool powershell
+echo "FAILED ${FAILED[*]}"
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[-1], "FAILED powershell")
+
+    def test_an_unmanaged_gh_says_upgrade_moves_it(self) -> None:
+        result = self.run_bash("""
+MODE=install
+tool_function() { printf 'stub_%s' "$2"; }
+stub_version() { printf '2.0.0-1'; }
+stub_target() { printf '2.1.0'; }
+stub_source() { printf 'cli.github.com'; }
+stub_install() { echo "INSTALL RAN"; }
+tool_effective_status() { printf 'unmanaged'; }
+apply_tool gh
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("cli.github.com is now configured and --upgrade moves it", result.stdout)
+        self.assertNotIn("moving it to", result.stdout)
+
+
 @unittest.skipUnless(
     shutil.which("pwsh"), "needs pwsh to drive the Windows installer's own functions"
 )
