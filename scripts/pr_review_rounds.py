@@ -619,7 +619,7 @@ def attestation(pr: dict) -> str | None:
 
 
 def promotion(pr: dict) -> bool:
-    """Whether a Copilot round rather than a local pass is to cover this head.
+    """Whether this head is owed a Copilot round, which a local pass covers only once it has no table.
 
     Without a review policy on the payload that is a merge into the default branch, the behavior
     before `pr_review_policy` existed. With one, it is a base the policy's gated Copilot entry covers,

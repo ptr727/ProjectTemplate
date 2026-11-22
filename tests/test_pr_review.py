@@ -8783,6 +8783,7 @@ class TestAttestationReadings(unittest.TestCase):
     def test_a_main_head_keeps_its_table_first_and_its_round_owed(self) -> None:
         """No round yet, a head table of its own, or a partial round each keep the pass from standing."""
         part = f"{OVERVIEW}\n<!-- fleet-review: reviewed=1 changed=3 -->"
+        whole = summarized(["a.py", "b.py", "c.py"], covers="")
         for rounds, expected, cover in (
             ([], "none", False),
             ([review(body=summarized(["a.py"], covers=""))], "none", False),
@@ -8793,6 +8794,19 @@ class TestAttestationReadings(unittest.TestCase):
                 False,
             ),
             ([review(body=f"{OVERVIEW}\n{COVERED}")], "full", True),
+            (
+                [review(oid=OLD, body=whole, rid="A"), review(body=OVERVIEW, rid="B")],
+                "carried:table",
+                True,
+            ),
+            (
+                [
+                    review(body=OVERVIEW, rid="A"),
+                    review(body=summarized(["a.py"], covers=""), rid="B"),
+                ],
+                "none",
+                False,
+            ),
         ):
             with self.subTest(expected=expected, rounds=len(rounds)):
                 pr = self.into_main(rounds)
