@@ -756,8 +756,8 @@ Then read each pull request it prints for its `Closes on promotion:` line. That 
 ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
 line instead. On an operational-model repository, also read the same places for a
 `Reopens on promotion:` line, which a change undoing a fix carries there per `GOVERNANCE.md`
-"Operational Repositories". Leave out each issue such a line names. Where the range names one
-issue on both lines, the line of the latest change naming it decides. A read that exits non-zero stops the
+"Operational Repositories". Leave out each issue such a line names, unless a later change in the
+range names it on a `Closes on promotion:` line again. A read that exits non-zero stops the
 assembly and is reported.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
@@ -772,15 +772,14 @@ Deriving the set from the range rather than from what this round dispatched is w
 that deferred or parked, contributing none. It also covers an earlier round's work that no
 promotion has yet carried. A fix landing during the freeze changes the range under a body already
 written, and so does a direct push. So re-read the range when the fix lands, and again at each
-point the closing-set check below runs. Amend the body where the range calls for a `Fixes` line
-the body lacks, rather than leaving an issue to be closed by hand. Amend it too where a
-`Reopens on promotion:` line now in the range takes out an issue the body holds a `Fixes` line for.
-Each amendment replaces the whole body, and another session may amend it between a read and a
-write. So build each one from a read of the body made immediately before the write. Keep every
-line that read holds, less any such a `Reopens on promotion:` line takes out. Then read the body
-again. Repeat the amendment where it lacks a `Fixes` line a freshly fetched range calls for, or
-holds one such a line takes out. Checking the whole set rather than only this amendment's own lines is what
-restores a line another session's write dropped.
+point the closing-set check below runs. Derive the set from it as above. Amend the body
+wherever its `Fixes` lines differ from that set. Add each line the set calls for, rather than
+leaving an issue to be closed by hand. Drop each line it no longer calls for. Each amendment replaces
+the whole body, and another session may amend it between a read and a write. So build each one
+from a read of the body made immediately before the write, keeping every other line that read
+holds. Then read the body again, and repeat the amendment where its `Fixes` lines still differ from
+the set a freshly fetched range derives. Checking the whole set rather than only this amendment's
+own lines is what restores a line another session's write dropped.
 
 Run the mechanical closing-set check that `branching-and-release-model` states in its
 negated-keyword bullet, at each point that bullet names. A body naming a deferral issue
