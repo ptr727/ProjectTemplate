@@ -207,11 +207,9 @@ def write_agent(
     backups: list[pathlib.Path] = []
     try:
         agent.target.parent.mkdir(parents=True, exist_ok=True)
-        # Written in place rather than renamed over, so a dotfiles symlink stays a link, as the kit's CLAUDE.md write does.
         kit.write_regular_file(
             agent.target,
             encoded,
-            prior=raw,
             before=(lambda: backups.append(kit.write_backup(agent.target, raw)))
             if backup
             else None,
