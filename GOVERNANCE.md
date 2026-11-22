@@ -102,7 +102,12 @@ directly to `develop`, and CI runs on the push as advisory feedback only. The ma
 into `develop` writes it in its body. The promotion reads a merged pull request's line from its
 body, never from its commits. The
 promotion pull request carrying the change takes a closing keyword in its body for each issue the
-line names. Its body takes no closing keyword for a change without that line. A PR still exists for a
+line names. Its body takes no closing keyword for a change without that line. A change that undoes a
+fix names that fix's issues in one `Reopens on promotion:` line, written where a `Closes on promotion:`
+line would go. A rollback committed as an ordinary change is one. The undo states it because the range
+cannot show it, since a rollback often carries no revert marker. The promotion body takes no closing
+keyword for an issue that line names. The exception is a later change in the range that names the
+issue on a `Closes on promotion:` line again. A PR still exists for a
 change worth reviewing, and the `main` promotion gate is unchanged. Release happens only by manual
 dispatch.
 
@@ -237,6 +242,7 @@ A change is cheapest to shape before it is written. Hardening nothing calls for,
 - **Reuse before building.** Search this repository and the hub for a primitive that already does the job. Start from the list of consolidated primitives this repository's `OPERATIONS.md` keeps under `Configuration Layout` once it has consolidated any. Extend one that exists rather than adding a sibling that does almost the same thing. A near-duplicate splits every later fix between two copies.
 - **A defect class seen a second time gets one primitive, and every site in a file the change touches moves onto it.** A check written at each site repeats its own platform and edge-case defects at every site. A read that can block on a named pipe, for one, meets a new platform difference at each site that guards it alone. One reader that opens without blocking and judges the open descriptor closes that class everywhere. Every other site takes the outcome the class-sweep bullet of "Verification Discipline" gives it.
 - **Complexity is a cost that needs a reason.** Code that answers no requirement and no realistic threat is removed rather than maintained, since each later review and each later change reads it again.
+- **A one-off is detected and reported, never corrected by code.** A one-off is a state that occurs once on a host or a repository and that correcting it once removes. A tool installed by the wrong method is one, and so is a path the user can change by hand. The tooling detects it and tells the user how to correct it by hand. It writes no code that performs the correction. Such code runs once and then never again, yet it is reviewed, tested, and maintained for as long as it exists. The detection stays automated, because a check that runs every time is what keeps the one-off from going unnoticed.
 
 `GOVERNANCE.md` "Design Before Code" keeps the full rules. The `fleet-code-review` Skill at `.agents/skills/fleet-code-review/SKILL.md` in the hub carries it whole as a generated include and surfaces it wherever a change is reviewed. That path is not a repo-relative link, since it is hub-local and not carried into every fleet repo.
 

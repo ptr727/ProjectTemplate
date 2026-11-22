@@ -751,7 +751,10 @@ gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at !=
 Then read each pull request it prints for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
 ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
-line instead. A read that exits non-zero stops the assembly and is reported.
+line instead. Read the same places for a `Reopens on promotion:` line, which a change undoing a fix
+carries per `GOVERNANCE.md` "Operational Repositories". Leave out each issue such a line names,
+unless a later commit in the range names it on a `Closes on promotion:` line again. A read that
+exits non-zero stops the assembly and is reported.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral

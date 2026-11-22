@@ -68,7 +68,7 @@ rather than guessing from the repo's contents.
   feature PR body or a direct-push commit carries no closing keyword. It names the issues it fixes,
   where it names them, in the inert `Closes on promotion: #N, #M` line. The promotion PR's body
   carries one closing keyword per issue those lines name. In an operational repository that line
-  is required, as "Operational repositories (the complete delta)" below sets. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
+  is required, and a rollback's `Reopens on promotion:` line drops an issue from it, as "Operational repositories (the complete delta)" below sets. Closing by hand is the ordinary route wherever the keyword cannot fire. Cases include a
   promotion that already merged without it, or completed work with no promotion imminent. Closing by hand is
   not a repair for a botched promotion. Cite the squash SHA and re-read that commit before closing.
 - **A closing keyword fires inside a sentence that negates it.** GitHub matches the keyword and
@@ -165,6 +165,11 @@ stays the same:
   from its body, never from its commits. The words `on promotion:` keep GitHub from reading the line as a closing keyword. The promotion
   PR carrying the change puts a closing keyword in its own body for each issue the line names, per the
   closing-keyword bullet above. Its body takes no closing keyword for a change without the line.
+  A change that undoes a fix names that fix's issues in one `Reopens on promotion:` line, written
+  where a `Closes on promotion:` line would go. A rollback committed as an ordinary change is one.
+  The undo states it because the range cannot show it, since a rollback often carries no revert
+  marker. The promotion body takes no closing keyword for an issue that line names. The exception is a
+  later change in the range that names the issue on a `Closes on promotion:` line again.
 - **A PR into `develop` stays available, and CI runs on it, reported but not required.** Dropping
   the requirement permits the direct push. It does not withdraw the pull request, so a change worth
   reviewing takes one and both paths into `develop` are legitimate.
