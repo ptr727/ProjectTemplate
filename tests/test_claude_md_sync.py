@@ -37,17 +37,14 @@ def load_pairs() -> list[dict[str, Any]]:
     return pairs
 
 
-def file_units(rel: str) -> dict[str, str]:
-    """A tracked file's units, read exactly as `canonical_review.py` reads them."""
-    return cr.file_units(rel, cr.decode(rel, (ROOT / rel).read_bytes()))
+def file_units(*rels: str) -> dict[str, str]:
+    """Every unit of these files in this checkout, read through `canonical_review.py`'s own reader."""
+    return cr.build_units(dict.fromkeys(rels), cr.disk_reader(ROOT))[0]
 
 
 def read_unit(key: str) -> str | None:
     """One unit's text by its `<path> > <section>` key, or None where the file or section is gone."""
-    rel = key.partition(cr.SECTION_DELIM)[0]
-    if not (ROOT / rel).is_file():
-        return None
-    return file_units(rel).get(key)
+    return file_units(key.partition(cr.SECTION_DELIM)[0]).get(key)
 
 
 def drift(pairs: list[dict[str, Any]], read: Callable[[str], str | None]) -> list[str]:
@@ -86,12 +83,7 @@ class LiveTreeCase(unittest.TestCase):
             (KIT / name).relative_to(ROOT).as_posix()
             for _, name in global_rules.load_kit().CLAUDE_MD_BLOCKS
         ]
-        claiming = {
-            key
-            for rel in blocks
-            for key, text in file_units(rel).items()
-            if SYNC_CLAIM.search(text)
-        }
+        claiming = {key for key, text in file_units(*blocks).items() if SYNC_CLAIM.search(text)}
         pinned = {pair["host"] for pair in load_pairs()}
         self.assertTrue(
             claiming, "no host block section says it is kept in sync, so this check reads nothing"
