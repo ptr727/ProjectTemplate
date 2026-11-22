@@ -8,7 +8,7 @@ What verifying a change here requires, including the part CI cannot perform. The
 
 ### Run the gates locally, which is wider than CI
 
-A bare `python3 scripts/prose_lint.py [file]` runs `DEFAULT_RULES`. The two prose invocations in the block below name every rule in that set except `comment-added` between them. That block is not what CI gates with. CI's only whole-tree `prose_lint.py` run is [`.github/actions/validate`](./.github/actions/validate/action.yml)'s `--check charset-unknown --summary`. That run sets `continue-on-error: true` and so reports without gating. What gates a pull request is the `prose-gate` composite action. It passes no `--check` and therefore gates every rule in `DEFAULT_RULES`, `charset-unknown` included, scoped to the lines the pull request touches. The block below is a wider look than either, taken earlier. `comment-added` is the one left out, and the `--check` block below names it in neither invocation. That is because it reads what a change touches rather than what a file holds. It therefore stands down with no `--diff`, saying so on stderr. The scoped invocation further down does run it. That one passes a base and no `--check`, which is the local run a developer meets it in. Its overrides are `--allow-comments` on the command line and `PROSE_ALLOW_COMMENTS` in the environment, set to anything but a false spelling. The gate reads `PROSE_ALLOW_COMMENTS` directly, so that variable reaches every hook that runs the gate. In CI the flag is passed for either of two reasons. One is the `comments` label on the pull request. The other is the pull request being a promotion on the release workflow model. That means this repository's own `develop` branch into its default branch, whose whole diff was reviewed where it landed. A feature branch targeting the default branch directly is not a promotion, and it carries the rule. A promotion on the operational model carries it too. That is because any of its lines may have landed by direct commit and the promotion is then their first review. The caller names its model in the `workflow-model` input to `validate-task.yml`, and a caller passing none is read as `release`. `PROSE_ALLOW_COMMENTS` stands the rule down for as long as it is set rather than for one commit. The composite action clears it so a runner's environment cannot decide a pull request. `sentence-split` is in neither list, so nothing below runs it and a local run reaches it only by naming it. Run the local invocations:
+A bare `python3 scripts/prose_lint.py "<file>"` runs `DEFAULT_RULES`. The two prose invocations in the block below name every rule in that set except `comment-added` between them. That block is not what CI gates with. CI's only whole-tree `prose_lint.py` run is [`.github/actions/validate`](./.github/actions/validate/action.yml)'s `--check charset-unknown --summary`. That run sets `continue-on-error: true` and so reports without gating. What gates a pull request is the `prose-gate` composite action. It passes no `--check` and therefore gates every rule in `DEFAULT_RULES`, `charset-unknown` included, scoped to the lines the pull request touches. The block below is a wider look than either, taken earlier. `comment-added` is the one left out, and the `--check` block below names it in neither invocation. That is because it reads what a change touches rather than what a file holds. It therefore stands down with no `--diff`, saying so on stderr. The scoped invocation further down does run it. That one passes a base and no `--check`, which is the local run a developer meets it in. Its overrides are `--allow-comments` on the command line and `PROSE_ALLOW_COMMENTS` in the environment, set to anything but a false spelling. The gate reads `PROSE_ALLOW_COMMENTS` directly, so that variable reaches every hook that runs the gate. In CI the flag is passed for either of two reasons. One is the `comments` label on the pull request. The other is the pull request being a promotion on the release workflow model. That means this repository's own `develop` branch into its default branch, whose whole diff was reviewed where it landed. A feature branch targeting the default branch directly is not a promotion, and it carries the rule. A promotion on the operational model carries it too. That is because any of its lines may have landed by direct commit and the promotion is then their first review. The caller names its model in the `workflow-model` input to `validate-task.yml`, and a caller passing none is read as `release`. `PROSE_ALLOW_COMMENTS` stands the rule down for as long as it is set rather than for one commit. The composite action clears it so a runner's environment cannot decide a pull request. `sentence-split` is in neither list, so nothing below runs it and a local run reaches it only by naming it. Run the local invocations:
 
 ```bash
 set -Eeuo pipefail
@@ -32,7 +32,7 @@ uvx coverage@latest report
 uv run --no-project --script scripts/build_dist.py --check
 uv run --no-project --script scripts/canonical_review.py status > /dev/null
 python3 scripts/repo_gate.py
-python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path --check issue-ref --check sentence-length
+python3 scripts/prose_lint.py . --check charset --check semicolon --check dash --check dupword --check spelling --check comment-wrap --check comment-case --check home-path --check dead-path --check issue-ref --check paste-safe --check sentence-length
 python3 scripts/prose_lint.py . --check charset-unknown --summary
 for f in registry/*.json spec/*.json repo-config/*.json; do jq empty "$f"; done
 uv run --no-project --script spec/validate.py
@@ -71,8 +71,8 @@ Every run states its scope on stderr, as the files read and, for a diff-scoped r
 
 ```sh
 uv run --no-project --script spec/audit.py                 # every cataloged repo
-uv run --no-project --script spec/audit.py [RepoName]      # one repo
-uv run --no-project --script spec/audit.py --issue [RepoName]
+uv run --no-project --script spec/audit.py "<RepoName>"    # one repo
+uv run --no-project --script spec/audit.py --issue "<RepoName>"
 ```
 
 Findings are a point-in-time snapshot read live over the API. Re-run before acting on one, and quote the run stamp in any issue derived from it. The deterministic subset lives here, and the full letter-and-intent verdict is [AUDIT.md](./AUDIT.md). No project-type check in `spec/project-types.json` runs here, and the cross-cutting ones are covered only in part. So read a clean run as evidence for the subset above and not for AUDIT.md section 4.
@@ -82,8 +82,8 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 Run these commands from a hub checkout at `main`. A repo whose registry entry has merged to `develop` but not yet reached `main` runs them from a hub checkout at `develop` instead. The payloads, registry, and script are hub-hosted.
 
 ```sh
-repo-config/configure.sh check owner/repo release|operational
-repo-config/configure.sh apply owner/repo release|operational
+repo-config/configure.sh check owner/repo release  # substitute operational for an operational repo
+repo-config/configure.sh apply owner/repo release  # substitute operational for an operational repo
 ```
 
 **Always pass the command, the repository, and the model.** The command is required. A missing or unknown command, an unknown option, a repository not shaped `owner/name`, and an unknown model are each refused before any read. `--help` prints the usage. An omitted target resolves to the hub repository. Applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so under `check` a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument. `apply` refuses a repo the registry does not name, writing nothing.
@@ -103,14 +103,14 @@ The repository is the record, and GitHub holds it. Nothing here keeps state outs
 A deleted branch is recoverable from any full clone that still has the commit. That is the recovery path when a branch is deleted while another pull request is based on it:
 
 ```sh
-git push origin [sha]:refs/heads/[branch]
+git push origin "<sha>:refs/heads/<branch>"
 ```
 
 Never use `--depth 1` on a clone that will amend or force-push, because a shallow clone severs the merge base and orphans the branch.
 
 ## Logs and Debugging
 
-Workflow runs are the log. `gh run list --branch [branch]` and `gh run view [id] --log-failed` reach them.
+Workflow runs are the log. `gh run list --branch "<branch>"` and `gh run view "<id>" --log-failed` reach them.
 
 A local gate reproduces a CI failure exactly, because CI runs the same commands listed under Runbooks against the same committed configuration. Reproduce locally before reading workflow logs.
 
@@ -133,7 +133,7 @@ Two `gh` limitations were carried here as permanent behavior for months. **Both 
 - `gh pr checks --json` returned the rollup as JSON. It carried no `--json` flag on 2.46.0, so a watcher built on it printed nothing and a quiet result read as a passing one.
 - `gh pr edit --body-file` applied the change and exited 0. On 2.46.0 it failed with a Projects-classic `projectCards` deprecation error whichever field it was given, `--base`, `--title` and `--body-file` alike. That was because the failure was in the mutation the command built rather than in the field asked for. It exited non-zero **without applying the change**, so a stale pull request description survived review rounds.
 
-The `gh api --method PATCH repos/[owner/repo]/pulls/[number]` form still works and is still correct where a host is stuck on an old `gh`. However, it is no longer the required path here. **The lesson worth keeping is not either symptom.** A tool old enough to be broken answers `--version` cleanly and looks healthy. So the defect arrived as two documented workarounds rather than as an upgrade, and it was the *floor* that found it rather than either symptom. [docs/host-setup.md](./docs/host-setup.md) states where `gh` must come from, and `scripts/host_gate.py` fails a host below the floor.
+The `gh api --method PATCH "repos/<owner>/<repo>/pulls/<number>"` form still works and is still correct where a host is stuck on an old `gh`. However, it is no longer the required path here. **The lesson worth keeping is not either symptom.** A tool old enough to be broken answers `--version` cleanly and looks healthy. So the defect arrived as two documented workarounds rather than as an upgrade, and it was the *floor* that found it rather than either symptom. [docs/host-setup.md](./docs/host-setup.md) states where `gh` must come from, and `scripts/host_gate.py` fails a host below the floor.
 
 ## Configuration Layout
 

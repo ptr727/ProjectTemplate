@@ -1052,6 +1052,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
         if line.strip() and not line.strip().startswith("#")
     ]
     markup: list[Line] = []
+    commands: list[Line] = []
     spanless: dict[int, str] = {}
     spaced: dict[int, str] = {}
     parents: list[str] = []
@@ -1063,6 +1064,9 @@ def extract_markdown(lines: list[str]) -> Extracted:
         first, last = tok.map[0] + 1, tok.map[1]
         if tok.type in ("fence", "code_block"):
             code.update(range(first, last + 1))
+            dialect = COMMAND_FENCES.get(tok.info.split()[0].lower()) if tok.info.strip() else None
+            if tok.type == "fence" and dialect:
+                commands.append(Line(first + 1, tok.content, raw=dialect))
         elif tok.type == "html_block":
             found = [line for line, _ in comment_lines(tok.content, "html", HTML, first - 1)]
             markup += found
@@ -1079,6 +1083,7 @@ def extract_markdown(lines: list[str]) -> Extracted:
                 cell = parents[-1:] in (["th_open"], ["td_open"])
                 for into, blank in ((spanless, strip_inline_code), (spaced, blank_code_spans)):
                     into.update(zip(numbers, blank_inline(texts, cell, blank), strict=True))
+                commands += command_spans(texts, first, cell)
             if parents[-1:] in BLOCK_PARENTS and "blockquote_open" not in parents:
                 spans = enumerate(tok.content.split("\n"))
                 paragraphs.append(
@@ -1102,8 +1107,59 @@ def extract_markdown(lines: list[str]) -> Extracted:
         ),
         *paragraphs,
         *blocks("markup", sorted(markup, key=lambda m: m.number)),
+        *([Unit("command", tuple(sorted(commands)))] if commands else []),
     ]
     return units, skip, False
+
+
+COMMANDS = BASE["commands"]
+COMMAND_NAMES = frozenset(COMMANDS["names"])
+COMMAND_SUFFIXES = tuple(COMMANDS["script_suffixes"])
+COMMAND_FENCES: dict[str, str] = COMMANDS["fences"]
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=\S*")
+
+
+def opens_command(text: str) -> bool:
+    """Whether a code span opens with a command a reader runs, past a prompt and any assignment.
+
+    A command is a name the data file lists, a path opening `./`, or a script by its suffix. A
+    script alone in a span is a file being named rather than run, so it needs an argument.
+    """
+    words = text.split()
+    if words[:1] == ["$"]:
+        words = words[1:]
+    while words and ASSIGNMENT.fullmatch(words[0]):
+        words = words[1:]
+    if not words:
+        return False
+    head = words[0]
+    script = head.startswith("./") or head.lower().endswith(COMMAND_SUFFIXES)
+    return head in COMMAND_NAMES or (script and len(words) > 1)
+
+
+def command_spans(texts: list[str], first: int, cell: bool) -> list[Line]:
+    """Each code span in one inline token's lines that opens a command, numbered where it opens.
+
+    A table row is read a cell at a time, and a cell's escaped pipe is the pipe it renders.
+    A blockquote's markers are kept out of a span wrapped across its lines.
+    """
+    if cell:
+        pieces = [(first + i, c, True) for i, t in enumerate(texts) for c in row_cells(t)]
+    else:
+        heads = [m.group() if (m := QUOTE_PREFIX.match(t)) else "" for t in texts]
+        body = "\n".join(t[len(h) :] for t, h in zip(texts, heads, strict=True))
+        pieces = [(first, body, False)]
+    out: list[Line] = []
+    for number, text, in_cell in pieces:
+        for m in MARKDOWN_SPAN.finditer(text):
+            if not m[1]:
+                continue
+            content = m.group()[len(m[1]) : -len(m[1])]
+            content = content.replace("\\|", "|") if in_cell else content
+            at = number + text[: m.start()].count("\n")
+            if opens_command(content):
+                out.append(Line(at, content, raw="shell"))
+    return out
 
 
 def blank_inline(texts: list[str], cell: bool, blank: Callable[[str], str]) -> list[str]:
@@ -1604,6 +1660,103 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
     return out
 
 
+HEREDOC_OPEN = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_]\w*)\1")
+PASTE_SHAPES = {
+    "angle": re.compile(r"(?<!<)<[A-Za-z][^<>\s]*>"),
+    "bracket": re.compile(r"(?<![\w\[\]$}])\[([A-Za-z][\w./-]*)(?: \.\.\.)?\]"),
+    "alternation": re.compile(r"(?<![\w.|-])[\w.-]+(?:\|[\w.-]+)+(?![\w.|-])"),
+}
+
+
+def shell_literals(text: str, escape: str) -> str:
+    """The command with what the shell takes literally blanked, each line break kept.
+
+    That is a quotation, an escaped character, a `${...}` expansion, a comment, and a heredoc body.
+    A `$(...)` inside a double quotation is code again, quoted on its own terms.
+    """
+    out = list(text)
+    stack = [""]
+    heredocs: list[str] = []
+    i = 0
+    while i < len(text):
+        c, state = text[i], stack[-1]
+        if c == "\n":
+            i += 1
+            if heredocs:
+                words, heredocs = heredocs, []
+                while words and i < len(text):
+                    end = text.find("\n", i)
+                    end = len(text) if end < 0 else end
+                    if text[i:end].strip() == words[0]:
+                        words.pop(0)
+                    out[i:end] = " " * (end - i)
+                    i = end + 1
+            continue
+        end = i + 1
+        if state == "'":
+            if c == "'":
+                stack.pop()
+        elif state == '"':
+            if c == "$" and text[i + 1 : i + 2] == "(":
+                stack.append("(")
+                i += 2
+                continue
+            if c == escape:
+                end = i + 2
+            elif c == '"':
+                stack.pop()
+        elif c == escape:
+            end = i + 1 if text[i + 1 : i + 2] == "\n" else i + 2
+        elif c in "'\"":
+            stack.append(c)
+        elif c == "#" and (i == 0 or text[i - 1] in " \t\n;|&("):
+            end = text.find("\n", i)
+            end = len(text) if end < 0 else end
+        elif c == "$" and text[i + 1 : i + 2] == "{":
+            end = text.find("}", i)
+            end = len(text) if end < 0 else end + 1
+        elif (m := HEREDOC_OPEN.match(text, i)) and text[i - 1 : i] != "<" and escape == "\\":
+            heredocs.append(m.group(2))
+            end = m.end()
+        else:
+            if c == "(" and state == "(":
+                stack.append("(")
+            elif c == ")" and state == "(":
+                stack.pop()
+            i += 1
+            continue
+        out[i:end] = [ch if ch == "\n" else " " for ch in text[i:end]]
+        i = end
+    return "".join(out)
+
+
+def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
+    """A placeholder in a Markdown command that the shell reads as syntax when it is pasted.
+
+    Each command is a code span opening with a command or a shell fence's content. Each finding is
+    reported on the line holding the placeholder.
+    """
+    out: list[Finding] = []
+    for line in unit.lines:
+        dialect = COMMANDS["dialects"][line.raw]
+        bare = shell_literals(line.text, dialect["escape"])
+        taken: list[range] = []
+        for shape in dialect["shapes"]:
+            for m in PASTE_SHAPES[shape].finditer(bare):
+                if any(m.start() in r for r in taken):
+                    continue
+                taken.append(range(m.start(), m.end()))
+                at = line.number + bare[: m.start()].count("\n")
+                if shape == "bracket":
+                    out.append(
+                        finding(at, "paste-safe", "paste-safe-bracket", token=m.group(), name=m[1])
+                    )
+                else:
+                    message = "paste-safe" if shape == "angle" else "paste-safe-alternation"
+                    out.append(finding(at, "paste-safe", message, token=m.group()))
+    return out
+
+
 def is_instruction_text(path: Path, root: Path | None) -> bool:
     """Whether this Markdown file is instruction text, a skill matched by its root."""
     if path.suffix.lower() not in BASE["files"]["markdown"]:
@@ -2096,6 +2249,7 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "charset": (rule_charset, frozenset({"spanless", "code"})),
     "charset-unknown": (rule_charset, frozenset({"spanless", "code"})),
     "dead-path": (rule_dead_path, frozenset({"masked"})),
+    "paste-safe": (rule_paste_safe, frozenset({"command"})),
     "semicolon": (rule_semicolon, frozenset({"codeless"})),
     "dash": (rule_dash, frozenset({"codeless"})),
     "dupword": (rule_dupword, frozenset({"codeless", "comment"})),
@@ -2104,7 +2258,7 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
 }
 LINE_ORDERED = frozenset(list(RULE_TABLE)[list(RULE_TABLE).index("home-path") :])
 # The kinds a Markdown file yields a line at a time, which, like a file's own lines, need no lexer.
-MARKDOWN_LINES = frozenset({"prose", "spanless", "codeless", "masked"})
+MARKDOWN_LINES = frozenset({"prose", "spanless", "codeless", "masked", "command"})
 
 
 def check_file(

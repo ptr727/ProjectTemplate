@@ -217,11 +217,11 @@ the whole procedure below. Run every step without being reminded of any of them.
    already holds, so the clone never takes a path a task worktree wants:
 
    ```sh
-   git clone --branch main https://github.com/ptr727/ProjectTemplate.git <worktrees>/ProjectTemplate-hub-<unique>
+   git clone --branch main https://github.com/ptr727/ProjectTemplate.git "<worktrees>/ProjectTemplate-hub-<unique>"
    ```
 
    That clone is the hub checkout "Running the Chain" sets `$handoff` from, so every later step
-   runs the chain's script there. Bring it up to date with `git -C <clone> pull --ff-only` before
+   runs the chain's script there. Bring it up to date with `git -C "<clone>" pull --ff-only` before
    step 6 writes, since a clone is whatever it last fetched. Wherever this skill was loaded from is
    never this session's hub checkout, whatever checkout or snapshot holds it. So no step reads that
    location as the hub checkout or runs `$handoff` from it. A task worktree `repo-worktree` creates
@@ -297,7 +297,7 @@ it.
    is because the body keeps the count it was written with, and a resume reads the issue's comments.
 4. **Remove the hub clone** "The Attended Session" step 0 made, where it made one, once no step
    above still needs `$handoff`. No other step or sweep reaches that clone. From outside it, read
-   `git -C <clone> status --porcelain --ignored --untracked-files=normal`. Any line not starting
+   `git -C "<clone>" status --porcelain --ignored --untracked-files=normal`. Any line not starting
    `!!` is uncommitted work, so the clone is left in place and named in the session's closing
    message. Otherwise name each `!!` entry in that message, since the removal deletes them, and
    delete that exact directory. `--porcelain` alone never lists ignored entries. The explicit

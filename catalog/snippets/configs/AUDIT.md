@@ -10,13 +10,13 @@ This is a `<model>`-model repository. The self-audit covers the `main` and `deve
 
 ## General Settings and Rulesets
 
-Fetch the hub and check out `main`. Check out `develop` instead while this repository's registry entry has not yet reached `main`. Run `repo-config/configure.sh check <owner>/<repo> <model>` from that checkout. The command checks what `repo-config/configure.sh apply` writes, and the deployment environments the registry declares. It reports each ruleset's `bypass_actors` without asserting them, since who may bypass a ruleset is a human decision no payload declares. The token needs project access as well as admin on the repository, since the command reads the fleet project link through GraphQL.
+Fetch the hub and check out `main`. Check out `develop` instead while this repository's registry entry has not yet reached `main`. Run `repo-config/configure.sh check "<owner>/<repo>" "<model>"` from that checkout. The command checks what `repo-config/configure.sh apply` writes, and the deployment environments the registry declares. It reports each ruleset's `bypass_actors` without asserting them, since who may bypass a ruleset is a human decision no payload declares. The token needs project access as well as admin on the repository, since the command reads the fleet project link through GraphQL.
 
 The result must be exactly two rulesets named `develop` and `main`. A missing ruleset or a divergent payload is a **defect**, and a duplicate or stray ruleset is a **drift finding**.
 
 ## Secrets
 
-From the same hub checkout, run `uv run --no-project --script spec/audit.py <Repo>` and read its secret findings. It resolves the required set from the hub's `spec/secrets.json` plus this repository's registry entry. It confirms each required name exists in the stores its mechanism claims, by name only and never by value. `repo-config/configure.sh check <owner>/<repo> <model>` asserts the same names per store. `repo-config/configure.sh apply <owner>/<repo> <model>` writes each one from the host's `~/.secrets/` directory.
+From the same hub checkout, run `uv run --no-project --script spec/audit.py "<Repo>"` and read its secret findings. It resolves the required set from the hub's `spec/secrets.json` plus this repository's registry entry. It confirms each required name exists in the stores its mechanism claims, by name only and never by value. `repo-config/configure.sh check "<owner>/<repo>" "<model>"` asserts the same names per store. `repo-config/configure.sh apply "<owner>/<repo>" "<model>"` writes each one from the host's `~/.secrets/` directory.
 
 ## Verdict and Follow-Up
 
