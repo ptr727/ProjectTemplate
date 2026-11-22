@@ -591,6 +591,7 @@ class FetchedWrapperTests(unittest.TestCase):
         The real Popen is held from before the patch, since the patch replaces it module-wide.
         """
         clean = {k: v for k, v in env.items() if k != "PYTHONPATH"}
+        clean["PYTHONIOENCODING"] = "utf-8"
         child = self.real_popen(
             [sys.executable, *cmd[4:]],
             env=clean,

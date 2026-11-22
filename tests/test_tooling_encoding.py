@@ -318,13 +318,24 @@ def command_of(call: ast.Call) -> ast.expr | None:
     return next((k.value for k in call.keywords if k.arg == "args"), None)
 
 
-def _literal_words(command: ast.expr) -> list[str]:
-    """The string literals a command list display holds, in order."""
-    if not isinstance(command, ast.List | ast.Tuple):
+def _literal_words(expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()) -> list[str]:
+    """The string literals a command holds, in order, read the way `spawns_python` reads it.
+
+    A `*` unpacking, a `+` concatenation, and a bound name are followed. So a flag held in a
+    shared tuple is read as well as one written inline.
+    """
+    if isinstance(expr, ast.Constant):
+        return [expr.value] if isinstance(expr.value, str) else []
+    if isinstance(expr, ast.Starred):
+        return _literal_words(expr.value, spawn, seen)
+    if isinstance(expr, ast.List | ast.Tuple):
+        return [word for e in expr.elts for word in _literal_words(e, spawn, seen)]
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        return _literal_words(expr.left, spawn, seen) + _literal_words(expr.right, spawn, seen)
+    key = _target_key(expr)
+    if key is None or key in seen:
         return []
-    return [
-        e.value for e in command.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)
-    ]
+    return [word for w in _writes(key, spawn) for word in _literal_words(w, spawn, seen | {key})]
 
 
 def python_child_without_encoding(spawn: Spawn) -> bool | None:
@@ -337,7 +348,7 @@ def python_child_without_encoding(spawn: Spawn) -> bool | None:
     command = command_of(spawn.call)
     if command is None or not spawns_python(command, spawn):
         return None
-    words = _literal_words(command)
+    words = _literal_words(command, spawn)
     joined = list(itertools.pairwise(words))
     if ("-X", "utf8") in joined or "-Xutf8" in words:
         return False
@@ -528,6 +539,19 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             'subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", "x"], encoding="utf-8")\n'
         )
         self.assertEqual([True, False], self.verdicts(source))
+
+    def test_isolation_flags_are_read_through_a_name_and_an_unpacking(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'ISOLATED = ("-I",)\n'
+            "def go():\n"
+            '    cmd = [sys.executable, "-I", "-c", "x"]\n'
+            '    subprocess.run(cmd, encoding="utf-8", env={"PYTHONIOENCODING": "utf-8"})\n'
+            '    subprocess.run([sys.executable, *ISOLATED, "x.py"], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8"})\n'
+            '    fixed = [sys.executable, "-I", "-X", "utf8", "-c", "x"]\n'
+            '    subprocess.run(fixed, encoding="utf-8")\n'
+        )
+        self.assertEqual([True, True, False], self.verdicts(source))
 
     def test_an_attribute_bound_in_a_base_class_is_followed(self) -> None:
         source = (

@@ -1453,7 +1453,8 @@ class RegistryEntryGateCase(unittest.TestCase):
     ) -> str:
         """The gate's output for one entry, its child writing UTF-8 unless `console_encoding` names another codec.
 
-        A named codec also drops `PYTHONUTF8`, so the child's streams take that codec on every host.
+        A named codec reaches all three standard streams. `PYTHONUTF8` is dropped as well, as a host
+        with UTF-8 Mode off would run the child.
         """
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
