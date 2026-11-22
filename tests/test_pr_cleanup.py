@@ -1107,6 +1107,7 @@ class TestCleanupLoadsOneGate(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             check=True,
         )
         imported = [ln.rpartition("|")[2].strip() for ln in result.stderr.splitlines()]

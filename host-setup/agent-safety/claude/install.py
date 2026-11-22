@@ -27,7 +27,10 @@ Usage: python3 install.py            (installs to ~/.claude).
        AGENT_SAFETY_SOURCE_COMMIT=<40 hex> python3 install.py   (name the commit of a tree git cannot answer for, which the bootstrap sets).
 """
 
+from __future__ import annotations
+
 import argparse
+import contextlib
 import datetime
 import hashlib
 import importlib.util
@@ -36,12 +39,17 @@ import os
 import pathlib
 import platform
 import re
+import secrets
 import shlex
 import shutil
+import signal
 import socket
 import stat
 import subprocess
 import sys
+import types
+from collections.abc import Callable
+from typing import NoReturn
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -777,12 +785,30 @@ def local_instructions_path():
 def read_regular_file(path):
     """The bytes of `path` where it is a regular file, or None where it is anything else.
 
-    Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None
-    rather than hanging the read.
-    Judging on the open descriptor also means nothing can swap the path between the check and the read.
     Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
     """
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = _open_regular_file(path, os.O_RDONLY)
+    if fd is None:
+        return None
+    # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
+    try:
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _open_regular_file(path, access):
+    """A descriptor open on `path` with `access`, or None, closed, where it is not a regular file.
+
+    Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None.
+    It neither hangs a read nor swallows a write.
+    Judging on the open descriptor also means nothing can swap the path between the check and the use.
+    Raises OSError where the open itself fails.
+    """
+    flags = access | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
         fd = os.open(path, flags)
     # Windows refuses to open a directory at all, and a directory is still not a regular file.
@@ -792,82 +818,87 @@ def read_regular_file(path):
         if os.path.isdir(path):
             return None
         raise
-    # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        chunks = []
-        while chunk := os.read(fd, 65536):
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
+        regular = stat.S_ISREG(os.fstat(fd).st_mode)
+    except BaseException:
         os.close(fd)
+        raise
+    if not regular:
+        os.close(fd)
+        return None
+    return fd
 
 
 class NotRegularFile(OSError):
     """A write target that exists and is not a regular file, refused before anything was written."""
 
 
-class IncompleteWrite(OSError):
-    """A failed write that may leave the file holding neither its prior content nor the new."""
+def write_regular_file(
+    path: str | os.PathLike[str], data: bytes, before: Callable[[], None] | None = None
+) -> None:
+    """Replace `path`, a regular file or absent, with a file holding `data`.
 
+    The data goes to a temporary file beside the target, and `os.replace` then swaps it in whole.
+    So a failure or an interrupt leaves the target as it was found, holding its prior content or absent.
+    A path that is a link is resolved, and the file it points at is replaced, so a dotfiles symlink stays a link.
 
-def write_regular_file(path, data, prior=None, before=None):
-    """Replace the contents of `path`, a regular file or absent, with `data`.
+    The target is opened for writing first, without truncating it, and judged on that descriptor.
+    So a file this run cannot write is refused before anything is made.
+    A FIFO or a device is refused rather than hanging or swallowing the write.
+    A replaced file keeps its permission bits.
+    `before`, which backs the file up, runs once the new content is whole on disk, just before the swap.
+    So a write refused or cut short leaves no backup behind.
 
-    The open is the check: a file that cannot be opened for writing raises before anything changes.
-    So `before`, which backs the file up, runs only once the write is known to be possible.
-    Opened without blocking and judged on the descriptor, as `read_regular_file` reads.
-    So a FIFO or a device is refused rather than hanging or swallowing the write. Written in place rather than
-    replaced, so a dotfiles symlink stays a link and its target takes the content.
-
-    The open is tried exclusively first, so a file this call created is told from one it found.
-    A path that is a link always counts as found, so its target is kept. A created file is removed
-    again when the write fails, where the path still holds that same file, leaving it absent as it
-    was found.
-
-    Raises OSError where the file is unchanged or the created file was removed.
-    Raises IncompleteWrite in any of these cases:
-    - a write failed after the truncate and `prior` could not be put back.
-    - the close after the truncate failed.
-    - a created file could not be removed.
-    Any of these can leave the file holding neither version.
+    The temporary file is removed on any failure, an interrupt included, where its path still holds the file this call created.
+    Raises OSError with the target unchanged, naming any temporary file it could not remove.
     """
-    flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    target = pathlib.Path(os.path.realpath(path))
+    mode = _writable_mode(path, target)
+    temp = target.with_name(f".{target.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
+    made = None
     try:
-        fd = os.open(path, flags | os.O_EXCL, 0o666)
-    except FileExistsError:
-        fd = os.open(path, flags, 0o666)
-        created = False
-    else:
-        created = not os.path.islink(path)
-    if not created:
-        _write_open_file(path, fd, data, prior, before)
-        return
-    try:
-        made = os.fstat(fd)
-    except OSError:
-        made = None
-    try:
-        _write_open_file(path, fd, data, prior, before)
+        try:
+            made = os.fstat(fd)
+            if mode is not None and hasattr(os, "fchmod"):
+                os.fchmod(fd, mode)
+            _write_all(fd, data)
+            os.fsync(fd)
+        except BaseException:
+            try:
+                os.close(fd)
+            # The write's own error is the one raised, and the temporary file is removed below.
+            except OSError:
+                pass
+            raise
+        # A network filesystem can report a quota or I/O error at the close rather than at the write.
+        os.close(fd)
+        if before is not None:
+            before()
+        os.replace(temp, target)
     except BaseException as e:
         try:
-            _remove_if_same_file(path, made)
+            _remove_if_same_file(temp, made)
         except OSError as unlink_error:
-            if isinstance(e, IncompleteWrite):
-                raise IncompleteWrite(f"{e}, and removing it failed ({unlink_error})") from e
             if isinstance(e, Exception):
-                raise IncompleteWrite(
-                    f"{path} was created and left incomplete, and could not be removed "
-                    f"({unlink_error})"
-                ) from e
-        else:
-            if isinstance(e, IncompleteWrite):
                 raise OSError(
-                    f"its write failed, and the file this run created no longer exists "
-                    f"({e.__cause__ or e})"
+                    f"{e}, and the temporary file {temp} could not be removed ({unlink_error})"
                 ) from e
         raise
+
+
+def _writable_mode(path, target):
+    """The permission bits of `target` where it is a regular file this run can write, or None where it is absent."""
+    try:
+        fd = _open_regular_file(target, os.O_WRONLY)
+    except FileNotFoundError:
+        return None
+    if fd is None:
+        raise NotRegularFile(f"{path} is not a regular file")
+    try:
+        return stat.S_IMODE(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
 
 
 def _remove_if_same_file(path, made):
@@ -889,48 +920,8 @@ def _remove_if_same_file(path, made):
     os.unlink(path)
 
 
-def _write_open_file(path, fd, data, prior, before):
-    """The body of `write_regular_file` on its open descriptor, which this closes."""
-    truncated = False
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise NotRegularFile(f"{path} is not a regular file")
-        if before is not None:
-            before()
-        os.ftruncate(fd, 0)
-        truncated = True
-        try:
-            _replace_contents(fd, data)
-        except OSError as e:
-            if prior is None:
-                raise IncompleteWrite(f"{path} was left incomplete ({e})") from e
-            try:
-                _replace_contents(fd, prior)
-            except OSError:
-                raise IncompleteWrite(
-                    f"{path} was left incomplete ({e}), and its prior content could not be put back"
-                ) from e
-            raise
-    except BaseException as e:
-        try:
-            os.close(fd)
-        except OSError as close_error:
-            if truncated and isinstance(e, Exception) and not isinstance(e, IncompleteWrite):
-                raise IncompleteWrite(
-                    f"{path} may be incomplete, since closing it failed ({close_error})"
-                ) from e
-        raise
-    # A network filesystem can report a quota or I/O error at the close rather than at the write.
-    try:
-        os.close(fd)
-    except OSError as e:
-        raise IncompleteWrite(f"{path} may be incomplete, since closing it failed ({e})") from e
-
-
-def _replace_contents(fd, data):
-    """Truncate the open file and write all of `data`, since one write may take only part of it."""
-    os.ftruncate(fd, 0)
-    os.lseek(fd, 0, os.SEEK_SET)
+def _write_all(fd, data):
+    """Write all of `data` to the open file, since one write may take only part of it."""
     view = memoryview(data)
     while view:
         view = view[os.write(fd, view) :]
@@ -1151,47 +1142,6 @@ def subagent_model_findings(env_block, claude_home):
     if state == "foreign":
         return [], [foreign_subagent_note(held, tiers)]
     return [], []
-
-
-def record_leftover_instructions(claude_home, claude_md, written):
-    """Stamp the digest of what a cut-short CLAUDE.md write left, and return a note where that failed.
-
-    `written` holds each byte string the run wrote to the file.
-    So a leftover that is a prefix of one of them is the run's own output.
-    Replacing it loses nothing, since the prior content is a render, a backup, or absent.
-    Anything else read back is a write by something other than this run.
-    So it is not stamped, no note is returned, and the next run backs it up.
-    Without this record the next run backs the run's own leftover up as a hand edit and the report calls it one.
-    So the note says so where the stamp read back does not hold the leftover's digest.
-    A leftover that cannot be read back is not known to be the run's own, so it gets no note.
-    Only a stamp passing its shape check is updated, since one failing it vouches for nothing either way.
-    """
-    try:
-        left = read_regular_file(claude_md)
-    except OSError:
-        return ""
-    if left is None or not any(w is not None and w.startswith(left) for w in written):
-        return ""
-    digest = text_digest(left.decode("utf-8", errors="replace"))
-    stamp_path = claude_home / "agent-safety-stamp.json"
-    why = ""
-    try:
-        stamp_raw = read_regular_file(stamp_path)
-        stamp = None if stamp_raw is None else json.loads(stamp_raw.decode("utf-8"))
-        if stamp is not None and not stamp_problems(stamp):
-            stamp["instructionsDigest"] = digest
-            stamp["instructionsLeftover"] = True
-            write_regular_file(
-                stamp_path, (json.dumps(stamp, indent=2) + "\n").encode("utf-8"), prior=stamp_raw
-            )
-    except (ValueError, OSError) as e:
-        why = f" ({e})"
-    if stamped_instructions_digest(claude_home) == digest:
-        return ""
-    return (
-        f" The stamp could not record what was left{why}, so the re-run backs CLAUDE.md up as a "
-        "hand edit."
-    )
 
 
 def write_backup(claude_md, raw):
@@ -1809,11 +1759,6 @@ def report(claude_home):
                     "ownership, so a re-run backs it up before rewriting it. Move host-specific "
                     f"content into {local_path}"
                 )
-            elif stamp.get("instructionsLeftover") is True:
-                problems.append(
-                    "CLAUDE.md holds what an install left when its write of the file failed, so a "
-                    "re-run rewrites it without a backup"
-                )
             else:
                 problems.append(
                     "CLAUDE.md is this installer's own output rather than a hand edit, and "
@@ -1845,7 +1790,7 @@ def report(claude_home):
     return 0
 
 
-def main():
+def run() -> int:
     parser = argparse.ArgumentParser(
         description="Install the agent host-safety kit, or report whether this machine is current."
     )
@@ -1943,19 +1888,10 @@ def main():
             write_regular_file(
                 claude_md,
                 encoded,
-                prior=raw,
                 before=(lambda: backups.append(write_backup(claude_md, raw)))
                 if needs_backup
                 else None,
             )
-        except IncompleteWrite as e:
-            stamp_note = record_leftover_instructions(claude_home, claude_md, (encoded, raw))
-            kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
-            sys.stderr.write(
-                f"{e}.{kept}{stamp_note} Fix what the error names, then re-run. "
-                "No hook or setting was changed.\n"
-            )
-            return 1
         except OSError as e:
             kept = f" Its prior content is backed up at {backups[0]}." if backups else ""
             aside = ", or move the file aside" if os.path.lexists(claude_md) else ""
@@ -1980,68 +1916,73 @@ def main():
     # Copying onto the live path first and testing afterwards left a failed self-test's broken copy installed.
     # The existing registration still pointed at it, so an install that refused to register disabled the guard.
     # Named per process, since two installs sharing one staged path clobber each other's copy.
-    # A kill between staging and the replace still leaves one behind, which nothing here can prevent.
+    # A SIGKILL between staging and the replace still leaves one behind.
     staged = []
-    for src_name in DEPLOYED_HOOKS:
-        tmp = hooks_dir / f"{src_name}.{os.getpid()}.staged"
-        staged.append((src_name, tmp))
-        try:
-            shutil.copyfile(HERE / src_name, tmp)
-        except OSError as e:
-            for _n, f in staged:
-                f.unlink(missing_ok=True)
-            sys.stderr.write(f"staging {src_name} failed ({e}); no hook was replaced.\n")
-            return 1
-        try:
-            os.chmod(tmp, 0o755)
-        except OSError:
-            pass
-        r = subprocess.run(
-            [launcher, str(tmp), "--selftest"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-        if r.returncode != 0:
-            for _n, f in staged:
-                f.unlink(missing_ok=True)
-            sys.stderr.write(
-                f"{src_name} self-test FAILED; no hook was replaced.\n" + r.stdout + r.stderr
+    try:
+        for src_name in DEPLOYED_HOOKS:
+            tmp = hooks_dir / f"{src_name}.{os.getpid()}.staged"
+            staged.append((src_name, tmp))
+            try:
+                shutil.copyfile(HERE / src_name, tmp)
+            except OSError as e:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(f"staging {src_name} failed ({e}); no hook was replaced.\n")
+                return 1
+            try:
+                os.chmod(tmp, 0o755)
+            except OSError:
+                pass
+            r = subprocess.run(
+                [launcher, str(tmp), "--selftest"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                check=False,
             )
-            return 1
-        print(f"  {src_name} self-test: PASS")
-    # The data the hooks read goes in after every self-test passed and before any hook is replaced.
-    # A new hook then never runs beside a config it cannot find.
-    for data_name, data_src in DEPLOYED_DATA.items():
-        data_tmp = hooks_dir / f"{data_name}.{os.getpid()}.staged"
-        try:
-            shutil.copyfile(data_src, data_tmp)
-            os.replace(data_tmp, hooks_dir / data_name)
-        except OSError as e:
-            data_tmp.unlink(missing_ok=True)
-            for _n, f in staged:
+            if r.returncode != 0:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(
+                    f"{src_name} self-test FAILED; no hook was replaced.\n" + r.stdout + r.stderr
+                )
+                return 1
+            print(f"  {src_name} self-test: PASS")
+        # The data the hooks read goes in after every self-test passed and before any hook is replaced.
+        # A new hook then never runs beside a config it cannot find.
+        for data_name, data_src in DEPLOYED_DATA.items():
+            try:
+                write_regular_file(hooks_dir / data_name, data_src.read_bytes())
+            except OSError as e:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(f"copying {data_name} failed ({e}); no hook was replaced.\n")
+                return 1
+            print(f"  data -> {hooks_dir / data_name}")
+        for done_count, (src_name, tmp) in enumerate(staged):
+            dst = hooks_dir / src_name
+            # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
+            # It can still fail as a whole, most plausibly on Windows where another process holds the destination open.
+            # Each live hook is intact either way, and what needs saying is that some were replaced and some were not.
+            try:
+                os.replace(tmp, dst)
+            except OSError as e:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(
+                    f"replacing {dst} failed ({e}). {done_count} of {len(staged)} hooks were replaced, "
+                    "the rest are unchanged, nothing was registered, and the staged copies are removed. "
+                    "Re-run the installer.\n"
+                )
+                return 1
+            print(f"  hook -> {dst}")
+    except BaseException:
+        for _n, f in staged:
+            # The interrupt already unwinding is the one to report.
+            with contextlib.suppress(OSError):
                 f.unlink(missing_ok=True)
-            sys.stderr.write(f"copying {data_name} failed ({e}); no hook was replaced.\n")
-            return 1
-        print(f"  data -> {hooks_dir / data_name}")
-    for done_count, (src_name, tmp) in enumerate(staged):
-        dst = hooks_dir / src_name
-        # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
-        # It can still fail as a whole, most plausibly on Windows where another process holds the destination open.
-        # Each live hook is intact either way, and what needs saying is that some were replaced and some were not.
-        try:
-            os.replace(tmp, dst)
-        except OSError as e:
-            for _n, f in staged:
-                f.unlink(missing_ok=True)
-            sys.stderr.write(
-                f"replacing {dst} failed ({e}). {done_count} of {len(staged)} hooks were replaced, "
-                "the rest are unchanged, nothing was registered, and the staged copies are removed. "
-                "Re-run the installer.\n"
-            )
-            return 1
-        print(f"  hook -> {dst}")
+        raise
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.
     # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
@@ -2296,12 +2237,7 @@ def main():
     # Reported after the write rather than as each edit is made, since both edits share one write.
     # A line printed before it claims a change that a later failure would leave unmade.
     try:
-        write_regular_file(
-            settings, (json.dumps(data, indent=2) + "\n").encode("utf-8"), prior=settings_raw
-        )
-    except IncompleteWrite as e:
-        sys.stderr.write(f"{e}. Fix what the error names, check the file, then re-run.\n")
-        return 1
+        write_regular_file(settings, (json.dumps(data, indent=2) + "\n").encode("utf-8"))
     except OSError as e:
         sys.stderr.write(
             f"{settings} could not be written ({e}). Fix what the error names, then re-run.\n"
@@ -2338,5 +2274,52 @@ def main():
     return 0
 
 
+received: list[int] = []
+
+
+def on_signal(signum: int, _frame: types.FrameType | None) -> None:
+    """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def main() -> int | signal.Signals:
+    """Run the installer, returning its status, or the signal that interrupted it.
+
+    A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    """
+    try:
+        signal.signal(signal.SIGTERM, on_signal)
+        if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+            signal.signal(signal.SIGINT, on_signal)
+        return run()
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
+        sys.stderr.write(
+            f"Interrupted by {signum.name}, so the install stopped. Re-run it to finish.\n"
+        )
+        return signum
+
+
+def reraise(signum: int) -> NoReturn:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    status = main()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)

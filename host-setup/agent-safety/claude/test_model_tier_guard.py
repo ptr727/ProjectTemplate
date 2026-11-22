@@ -41,6 +41,7 @@ class TestModelTierGuard(unittest.TestCase):
 
     def run_hook(self, tool, tool_input, allow=None, cwd=None):
         env = {k: v for k, v in os.environ.items() if k != "FLEET_ALLOW_HIGHEST"}
+        env["PYTHONIOENCODING"] = "utf-8"
         if allow is not None:
             env["FLEET_ALLOW_HIGHEST"] = allow
         done = subprocess.run(
@@ -69,6 +70,7 @@ class TestModelTierGuard(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=60,
             check=False,
         )
@@ -227,6 +229,7 @@ class TestModelTierGuard(unittest.TestCase):
             capture_output=True,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             timeout=60,
             check=False,
         )

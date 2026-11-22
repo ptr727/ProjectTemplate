@@ -1782,7 +1782,7 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
         self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
     def run_functions(
-        self, body: str, script: Path = SCRIPT_PS
+        self, body: str, script: Path = SCRIPT_PS, extra: str = ""
     ) -> subprocess.CompletedProcess[str]:
         """Runs a script's own helper functions, lifted by AST so main is not run."""
         assert PWSH is not None
@@ -1790,8 +1790,8 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
             "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
             f"'{script}', [ref]$null, [ref]$null)\n"
             "foreach ($f in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {"
-            " if ($f.Name -in 'Resolve-FinalPath', 'Test-PathUnder', 'Test-ProtectedPath', 'Hide-Home', 'Get-CswapLauncherHolder') { . ([scriptblock]::Create($f.Extent.Text)) } }\n"
-            + body
+            f" if ($f.Name -in '{extra}', 'Resolve-FinalPath', 'Test-PathUnder', 'Test-ProtectedPath', 'Hide-Home', 'Get-CswapLauncherHolder')"
+            " { . ([scriptblock]::Create($f.Extent.Text)) } }\n" + body
         )
         return subprocess.run(
             [PWSH, "-NoProfile", "-Command", driver],
@@ -1845,6 +1845,38 @@ class TestInstallAgentsWindowsHelpers(unittest.TestCase):
         inside, sibling = result.stdout.split("\n")[:2]
         self.assertTrue(inside.startswith("inside=%USERPROFILE%"), inside)
         self.assertEqual(sibling, "sibling-kept=True")
+
+    def test_install_tools_hides_the_profile_in_a_log_line_only_at_a_path_component(self) -> None:
+        tools = ROOT / "host-setup" / "windows" / "install-tools.ps1"
+        # $HOME is read-only in PowerShell, so the lines are built from the real profile and a sibling of it.
+        body = (
+            "$h = $HOME.TrimEnd('/', '\\')\n"
+            "$script:LINES = @()\n"
+            "function warn { param([string]$Message) }\n"
+            "function info { param([string]$Message) $script:LINES += $Message }\n"
+            "function Hide-Home { param([string]$Path) return 'LOG' }\n"
+            "function Get-InstallerFailureReason { param([string]$Id, [datetime]$Since) return @{ Log = $null; Entries = @("
+            '"open $h\\AppData\\x.log", "open $h/x.log", "open $h", "open ${h}: denied", "open ${h}.000\\x", "open ${h}.-backup\\x", "open ${h}..backup\\x", "open ${h}. Done", "open ${h}a\\AppData"); WingetEntries = @(); WingetLog = $null; InUse = $false } }\n'
+            "function Get-ToolHolder { param([string]$Probe, [string]$Executable) return , @() }\n"
+            "Write-InstallFailure -ToolName 't' -Package 'P' -Code 1 -Since (Get-Date) -Probe 't'\n"
+            "$script:LINES | Where-Object { $_ -like '  open*' } | ForEach-Object { $_.Replace($h, '<H>') }\n"
+        )
+        result = self.run_functions(body, script=tools, extra="Write-InstallFailure")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "  open %USERPROFILE%\\AppData\\x.log",
+                "  open %USERPROFILE%/x.log",
+                "  open %USERPROFILE%",
+                "  open %USERPROFILE%: denied",
+                "  open <H>.000\\x",
+                "  open <H>.-backup\\x",
+                "  open <H>..backup\\x",
+                "  open %USERPROFILE%. Done",
+                "  open <H>a\\AppData",
+            ],
+        )
 
     def test_path_under_reads_the_root_and_its_children_but_not_a_sibling(self) -> None:
         root = self.dir / "Program Files"

@@ -440,10 +440,10 @@ def coverage(pr: dict) -> tuple[str, str]:
 
     A statement on a round covering the head decides it, the worst winning, but `unknown` yields to
     an earlier partial. Where none states any, a file table stands in under `table_cover`, then
-    an attested local pass under `local_cover`. That pass decides first where `copilot_settled`
-    holds, since the policy then waits on no Copilot reading.
+    an attested local pass under `local_cover`. That pass decides first on a head owed no round
+    where `copilot_settled` holds, since the policy then waits on no Copilot reading.
     """
-    if copilot_settled(pr) and local_cover(pr):
+    if copilot_settled(pr) and not promotion(pr) and local_cover(pr):
         return "local", f"an attested local pass recorded {attestation(pr)} finding(s)"
     rounds = head_reviews(pr)
     rank = ("full", "unknown", "partial")
@@ -619,7 +619,7 @@ def attestation(pr: dict) -> str | None:
 
 
 def promotion(pr: dict) -> bool:
-    """Whether a Copilot round rather than a local pass is to cover this head.
+    """Whether this head is owed a Copilot round, which a local pass covers only once it has no table.
 
     Without a review policy on the payload that is a merge into the default branch, the behavior
     before `pr_review_policy` existed. With one, it is a base the policy's gated Copilot entry covers,
@@ -675,19 +675,21 @@ def local_cover(pr: dict) -> bool:
 
     It stands in only where all of these hold:
 
-    - The review policy owes the head no Copilot round, by default off the default branch.
+    - The review policy owes the head no Copilot round, by default off the default branch. Where it
+      owes one, a round covers the head and none covering it carries a file table, which stays first.
     - The head is one its writer attests.
     - No round on record read part of a diff, and the whole review history is in view.
 
     A refusal on this head is Copilot's own word, which only a later Copilot round on the head
     spends. One saying every changed file is in Copilot's default exclusions is the exception,
     since no round will follow it. A refusal on an earlier head is spent by the head moving. Where
-    `copilot_settled` holds, no round is coming at all, so only the first two conditions apply.
+    `copilot_settled` holds on a head owed no round, none is coming, so the first two alone apply.
     """
-    if promotion(pr) or not attested(pr):
+    owed, head = promotion(pr), head_reviews(pr)
+    if not attested(pr) or (owed and not (head and all(reading(n).table is None for n in head))):
         return False
     refusal = refusing_review(pr)
-    return copilot_settled(pr) or (
+    return (copilot_settled(pr) and not owed) or (
         (refusal is None or excluded_refusal(refusal))
         and not (reviews_truncated(pr) or partial_on_record(pr))
     )

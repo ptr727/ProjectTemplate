@@ -411,6 +411,7 @@ class DockerLintCase(unittest.TestCase):
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         try:
             assert process.stdout is not None
@@ -549,6 +550,7 @@ class DockerLintCase(unittest.TestCase):
             stdout=subprocess.PIPE,
             text=True,
             encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         self.addCleanup(run.wait, 30)
         self.addCleanup(run.kill)

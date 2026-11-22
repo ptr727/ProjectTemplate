@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -179,6 +180,7 @@ class SiblingImportCase(unittest.TestCase):
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
+                        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                         check=False,
                     )
                     self.assertEqual(r.returncode, 0, r.stderr)

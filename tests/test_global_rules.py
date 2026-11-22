@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -39,6 +40,7 @@ class Case(unittest.TestCase):
         self.empty_bin.mkdir()
         self.env = {
             **os.environ,
+            "PYTHONIOENCODING": "utf-8",
             "CODEX_HOME": str(self.codex),
             "XDG_CONFIG_HOME": str(self.xdg),
             "AGENT_FLEET_LOCAL_INSTRUCTIONS": str(self.local),
@@ -438,6 +440,57 @@ class TestWriting(Case):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.codex / "AGENTS.md").is_symlink())
         self.assertIn("global_rules.py", destination.read_text(encoding="utf-8"))
+        self.assertEqual(list(self.root.glob(".*.tmp")), [])
+        self.assertEqual(list(self.codex.glob(".*.tmp")), [])
+
+
+class TestInterruptedWrite(Case):
+    """An interrupt inside the kit's write, raised in process, leaves the prior file and no temporary file."""
+
+    PRIOR = b"A constructed prior file.\n"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.install_both()
+        self.kit = global_rules.load_kit()
+        self.target = self.codex / "AGENTS.md"
+        self.agent = global_rules.Agent("codex", "codex", self.codex, self.target)
+
+    def interrupted_write(self) -> None:
+        real_write_all = self.kit._write_all
+
+        def cut(fd: int, data: bytes) -> None:
+            real_write_all(fd, data[:7])
+            raise KeyboardInterrupt
+
+        with (
+            mock.patch.object(self.kit, "_write_all", side_effect=cut),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            global_rules.write_agent(
+                self.kit, self.agent, "A constructed new file.\n", self.PRIOR, "STALE", False
+            )
+
+    def test_the_prior_file_is_intact_with_no_backup_or_temporary_file(self) -> None:
+        self.target.write_bytes(self.PRIOR)
+        self.interrupted_write()
+        self.assertEqual(self.target.read_bytes(), self.PRIOR)
+        self.assertEqual(list(self.codex.glob("*.bak")), [])
+        self.assertEqual(list(self.codex.glob(".*.tmp")), [])
+
+    def test_a_symlinked_target_keeps_its_link_and_its_destination(self) -> None:
+        destination = self.root / "dotfiles-agents.md"
+        destination.write_bytes(self.PRIOR)
+        try:
+            self.target.symlink_to(destination)
+        except OSError as error:
+            self.skipTest(f"this host refuses to create a symlink for this user ({error})")
+        self.interrupted_write()
+        self.assertTrue(self.target.is_symlink())
+        self.assertEqual(self.target.resolve(), destination.resolve())
+        self.assertEqual(destination.read_bytes(), self.PRIOR)
+        self.assertEqual(list(self.root.glob(".*.tmp")), [])
+        self.assertEqual(list(self.codex.glob(".*.tmp")), [])
 
 
 class TestDigest(Case):
@@ -597,7 +650,23 @@ class TestArguments(Case):
 
 @unittest.skipIf(sys.platform == "win32", "Windows cannot deliver SIGINT or SIGTERM to a script")
 class TestInterrupt(Case):
-    """The script holds no lock, temporary path, or child, so the check is the death by signal and the one line."""
+    """The script holds only a write's temporary path, so a signal mid-write must also leave it gone."""
+
+    PRIOR = b"A constructed prior file.\n"
+
+    SLOW_WRITE = (
+        "real_load_kit = module.load_kit\n"
+        "def slow_load_kit():\n"
+        "    kit = real_load_kit()\n"
+        "    real_write_all = kit._write_all\n"
+        "    def slow_write_all(fd, data):\n"
+        "        real_write_all(fd, data[:7])\n"
+        "        print('ready', flush=True)\n"
+        "        time.sleep(30)\n"
+        "    kit._write_all = slow_write_all\n"
+        "    return kit\n"
+        "module.load_kit = slow_load_kit\n"
+    )
 
     SLOW_RUN = (
         "def slow_run(args):\n"
@@ -610,12 +679,20 @@ class TestInterrupt(Case):
         "        print('cleaned', flush=True)\n"
     )
 
-    def interrupted(self, signum: int, *, second: bool = False) -> subprocess.CompletedProcess[str]:
+    def interrupted(
+        self, signum: int, *, second: bool = False, mid_write: bool = False
+    ) -> subprocess.CompletedProcess[str]:
         """Starts the real entry point with the run replaced by a sleep, then signals it mid-run.
 
         With `second`, the run's cleanup signals the script again with SIGTERM, then prints a line once it completes.
+        With `mid_write`, the run is real and the sleep sits inside the write of a prior Codex file.
         """
         self.install_both()
+        if mid_write:
+            (self.codex / "AGENTS.md").write_bytes(self.PRIOR)
+            stub = self.SLOW_WRITE
+        else:
+            stub = f"{self.SLOW_RUN}module.run = slow_run\nprint('ready', flush=True)\n"
         driver = (
             "import importlib.util, os, signal, sys, time\n"
             f"second = {second!r}\n"
@@ -624,10 +701,8 @@ class TestInterrupt(Case):
             "module = importlib.util.module_from_spec(spec)\n"
             "sys.modules['gr'] = module\n"
             "spec.loader.exec_module(module)\n"
-            f"{self.SLOW_RUN}"
-            "module.run = slow_run\n"
+            f"{stub}"
             "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
-            "print('ready', flush=True)\n"
             "status = module.main()\n"
             "if isinstance(status, signal.Signals):\n"
             "    module.reraise(status)\n"
@@ -641,13 +716,23 @@ class TestInterrupt(Case):
             text=True,
             encoding="utf-8",
         )
-        assert process.stdout is not None
-        self.assertEqual(process.stdout.readline().strip(), "ready")
-        time.sleep(0.2)
-        process.send_signal(signum)
+        # A child that stalls before it is ready is killed at the deadline, which ends the read below.
+        deadline = threading.Timer(30, process.kill)
+        deadline.start()
         try:
+            assert process.stdout is not None
+            if process.stdout.readline().strip() != "ready":
+                process.kill()
+                out, err = process.communicate(timeout=20)
+                self.fail(
+                    f"the writer never reported ready, status {process.returncode}\n{out}\n{err}"
+                )
+            deadline.cancel()
+            time.sleep(0.2)
+            process.send_signal(signum)
             out, err = process.communicate(timeout=20)
         finally:
+            deadline.cancel()
             if process.poll() is None:
                 process.kill()
                 process.wait()
@@ -692,6 +777,21 @@ class TestInterrupt(Case):
     def test_no_stray_file_is_left_behind(self) -> None:
         self.interrupted(signal.SIGTERM)
         self.assertFalse((self.codex / "AGENTS.md").exists())
+
+    def assert_mid_write_signal_leaves_the_prior_file(self, signum: int) -> None:
+        result = self.interrupted(signum, mid_write=True)
+        self.assertEqual(result.returncode, -signum, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(len(result.stderr.strip().splitlines()), 1)
+        self.assertEqual((self.codex / "AGENTS.md").read_bytes(), self.PRIOR)
+        self.assertEqual(list(self.codex.glob(".*.tmp")), [])
+        self.assertEqual(list(self.codex.glob("*.bak")), [])
+
+    def test_a_sigint_mid_write_leaves_the_prior_file_and_no_temporary_file(self) -> None:
+        self.assert_mid_write_signal_leaves_the_prior_file(signal.SIGINT)
+
+    def test_a_sigterm_mid_write_leaves_the_prior_file_and_no_temporary_file(self) -> None:
+        self.assert_mid_write_signal_leaves_the_prior_file(signal.SIGTERM)
 
 
 class TestKitIsReusedNotCopied(unittest.TestCase):
