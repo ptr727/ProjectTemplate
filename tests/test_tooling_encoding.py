@@ -30,7 +30,6 @@ Run as `python3 tests/test_tooling_encoding.py`, or under
 from __future__ import annotations
 
 import ast
-import itertools
 import re
 import subprocess
 import unittest
@@ -295,13 +294,38 @@ def carries_child_encoding(
     entries = _entries(expr)
     if entries:
         return all(_is_constant(v, CHILD_ENCODING[1]) for v in entries)
-    for node in ast.walk(expr):
-        if not isinstance(node, ast.Name | ast.Attribute):
-            continue
-        key = _target_key(node)
+    for base in _bases(expr):
+        key = _target_key(base)
         if key is not None and key not in seen and _name_carries(key, spawn, seen | {key}):
             return True
     return False
+
+
+def _bases(expr: ast.expr) -> list[ast.expr]:
+    """The names an environment expression is built from, rather than merely reads a value out of.
+
+    That is the expression itself, a `**` unpacking, `dict(...)`'s first argument or a `**` keyword
+    to it, a `.copy()`, and either side of a `|`. A name read for one item, or filtered through a
+    comprehension, is not a base. So it never lends the environment an entry it does not pass.
+    """
+    if _target_key(expr) is not None:
+        return [expr]
+    if isinstance(expr, ast.Dict):
+        return [
+            b for k, v in zip(expr.keys, expr.values, strict=True) if k is None for b in _bases(v)
+        ]
+    if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.BitOr):
+        return _bases(expr.left) + _bases(expr.right)
+    if isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "dict":
+        spread = [k.value for k in expr.keywords if k.arg is None]
+        return [b for v in [*expr.args[:1], *spread] for b in _bases(v)]
+    if (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Attribute)
+        and expr.func.attr == "copy"
+    ):
+        return _bases(expr.func.value)
+    return []
 
 
 def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
@@ -364,46 +388,74 @@ def command_of(call: ast.Call) -> ast.expr | None:
     return next((k.value for k in call.keywords if k.arg == "args"), None)
 
 
-def _literal_words(expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()) -> list[str]:
-    """The string literals a command holds, in order, read the way `spawns_python` reads it.
+def _command_variants(
+    expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()
+) -> list[list[str | None]]:
+    """Each word list a command can be, a word the scan cannot read held as None.
 
-    A `*` unpacking, a `+` concatenation, and a bound name are followed. So a flag held in a
-    shared tuple is read as well as one written inline.
+    A `*` unpacking, a `+` concatenation, and a bound name are followed. A name bound more than
+    once yields one list per rebinding, so a flag one binding carries never clears another.
     """
     if isinstance(expr, ast.Constant):
-        return [expr.value] if isinstance(expr.value, str) else []
+        return [[expr.value if isinstance(expr.value, str) else None]]
     if isinstance(expr, ast.Starred):
-        return _literal_words(expr.value, spawn, seen)
+        return _command_variants(expr.value, spawn, seen)
     if isinstance(expr, ast.List | ast.Tuple):
-        return [word for e in expr.elts for word in _literal_words(e, spawn, seen)]
+        variants: list[list[str | None]] = [[]]
+        for e in expr.elts:
+            variants = [v + w for v in variants for w in _command_variants(e, spawn, seen)]
+        return variants
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
-        return _literal_words(expr.left, spawn, seen) + _literal_words(expr.right, spawn, seen)
+        left = _command_variants(expr.left, spawn, seen)
+        return [v + w for v in left for w in _command_variants(expr.right, spawn, seen)]
     key = _target_key(expr)
     if key is None or key in seen:
-        return []
-    return [
-        word for w in _writes(key, spawn) for word in _literal_words(w.value, spawn, seen | {key})
+        return [[None]]
+    found = [
+        variant
+        for w in _writes(key, spawn)
+        if not w.mutates
+        for variant in _command_variants(w.value, spawn, seen | {key})
     ]
+    return found or [[None]]
+
+
+def _interpreter_options(words: list[str | None]) -> set[str]:
+    """The options a command gives its interpreter, read up to its script, `-c`, or `-m`.
+
+    `-X utf8` comes back as the one word `-Xutf8`, however it is spelled.
+    """
+    options: set[str] = set()
+    rest = iter(words[1:])
+    for word in rest:
+        if word is None or not word.startswith("-") or word in ("-c", "-m", "-"):
+            break
+        if word == "-X":
+            word = f"-X{next(rest, '')}"
+        options.add(word)
+    return options
 
 
 def python_child_without_encoding(spawn: Spawn) -> bool | None:
     """None where the child is not Python, else whether it is left to encode by the locale.
 
-    `-X utf8` on the child's own command line clears it too, since UTF-8 Mode sets the same three
-    streams. It is the one way to reach a child run with `-I` or `-E`, which ignores every `PYTHON`
-    variable. So for such a child the environment does not count.
+    `-X utf8` among the interpreter's own options clears it too, since UTF-8 Mode sets the same
+    three streams. It is the one way to reach a child run with `-I` or `-E`, which ignores every
+    `PYTHON` variable. So for such a child the environment does not count. Every word list the
+    command can be has to be cleared one of those ways.
     """
     command = command_of(spawn.call)
     if command is None or not spawns_python(command, spawn):
         return None
-    words = _literal_words(command, spawn)
-    joined = list(itertools.pairwise(words))
-    if ("-X", "utf8") in joined or "-Xutf8" in words:
-        return False
-    if "-I" in words or "-E" in words:
-        return True
     env = next((k.value for k in spawn.call.keywords if k.arg == "env"), None)
-    return env is None or not carries_child_encoding(env, spawn)
+    env_carries = env is not None and carries_child_encoding(env, spawn)
+    for words in _command_variants(command, spawn):
+        options = _interpreter_options(words)
+        if "-Xutf8" in options:
+            continue
+        if options & {"-I", "-E"} or not env_carries:
+            return True
+    return False
 
 
 def in_text_mode(call: ast.Call) -> bool:
@@ -624,6 +676,33 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             '    subprocess.run(fixed, encoding="utf-8")\n'
         )
         self.assertEqual([True, True, False], self.verdicts(source))
+
+    def test_a_name_read_for_one_item_lends_no_entry(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "class Case:\n"
+            "    def setUp(self):\n"
+            '        self.env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
+            "    def go(self):\n"
+            '        subprocess.run([sys.executable], encoding="utf-8", env={"PATH": self.env["PATH"]})\n'
+            "        kept = {k: v for k, v in self.env.items() if k != 'PYTHONIOENCODING'}\n"
+            '        subprocess.run([sys.executable], encoding="utf-8", env=kept)\n'
+            '        subprocess.run([sys.executable], encoding="utf-8", env=dict(self.env))\n'
+        )
+        self.assertEqual([True, True, False], self.verdicts(source))
+
+    def test_each_binding_of_a_command_is_judged_on_its_own(self) -> None:
+        source = (
+            "import subprocess, sys\n"
+            "def go():\n"
+            '    cmd = [sys.executable, "-I", "-X", "utf8", "-c", "a"]\n'
+            '    subprocess.run(cmd, encoding="utf-8")\n'
+            '    cmd = [sys.executable, "-I", "-c", "b"]\n'
+            '    subprocess.run(cmd, encoding="utf-8")\n'
+            "def script_argument():\n"
+            '    subprocess.run([sys.executable, "s.py", "-X", "utf8"], encoding="utf-8")\n'
+        )
+        self.assertEqual([True, True, True], self.verdicts(source))
 
     def test_an_attribute_bound_in_a_base_class_is_followed(self) -> None:
         source = (
