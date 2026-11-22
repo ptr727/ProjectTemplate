@@ -84,7 +84,7 @@ old=$(git rev-parse --verify work/x) && bak=refs/heads/backup/work-x-1 &&
   git push origin "$old:$bak" &&
   { [ "$(git ls-remote origin "$bak" | cut -f1)" = "$old" ] || { echo "backup not confirmed: $bak" >&2; false; }; } &&
   git rebase "$mirror" work/x &&
-  { [ -z "$(git rev-list --merges "$mirror..$old")" ] || { echo "the rebase dropped merge commits, read each with git show --remerge-diff" >&2; false; }; } &&
+  { merges=$(git rev-list --merges "$mirror..$old") && [ -z "$merges" ] || { echo "merge scan failed or the rebase dropped merge commits, read each with git show --remerge-diff" >&2; false; }; } &&
   git push --force-with-lease="work/x:$old" origin work/x
 ```
 
@@ -100,12 +100,14 @@ if ($LASTEXITCODE -ne 0) { throw "backup push failed: $bak" }
 if ("$(git ls-remote origin $bak)".Split("`t")[0] -ne $old) { throw "backup not confirmed: $bak" }
 git rebase $mirror work/x
 if ($LASTEXITCODE -ne 0) { throw 'rebase stopped, resolve it before pushing' }
-if (git rev-list --merges "$mirror..$old") { throw 'the rebase dropped merge commits, read each with git show --remerge-diff' }
+$merges = git rev-list --merges "$mirror..$old"
+if ($LASTEXITCODE -ne 0) { throw 'merge scan failed, so the check did not run' }
+if ($merges) { throw 'the rebase dropped merge commits, read each with git show --remerge-diff' }
 git push --force-with-lease="work/x:$old" origin work/x
 if ($LASTEXITCODE -ne 0) { throw 'lease push refused: work/x' }
 ```
 
-Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch. Where the rebase stops on a conflict, resolve it and run `git rebase --continue`. Then read the old head back from the backup branch with `git ls-remote origin <backup-ref>`. The merge check did not run in that case, so run `git rev-list --merges "$mirror..<old-head>"` with that value and read any merge it names, as above. Where the merge check stops the chain instead, reapply first. Run only the lease push, pinned to the old head.
+Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch. Where the rebase stops on a conflict, resolve it and run `git rebase --continue`. Then read the old head back from the backup branch with `git ls-remote origin <backup-ref>`. The merge check did not run in that case, so run `git rev-list --merges "$mirror..<old-head>"` with that value. A scan that exits non-zero checked nothing, so fix its cause and rerun it before anything else. Read any merge it names, as above. Where the merge check stops the chain instead, first fix a failed scan's cause and rerun it. Then read and reapply any merge it names. Run only the lease push, pinned to the old head.
 
 For example, the fork's mirror branch and upstream both sit at commit `A`, with the iteration PR
 from `work/x` into the mirror branch green. Upstream advances to `B`. The fork syncs its mirror
