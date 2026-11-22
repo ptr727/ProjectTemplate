@@ -218,7 +218,7 @@ class Write(NamedTuple):
 
     value: ast.expr
     mutates: bool
-    line: int
+    line: float
 
 
 def _writes(key: str, spawn: Spawn) -> Iterator[Write]:
@@ -277,10 +277,11 @@ def _node_writes(key: str, nodes: list[ast.AST]) -> Iterator[Write]:
         ):
             for arg in node.args:
                 yield Write(arg, mutates=True, line=line)
+            # The keywords apply after the positional mapping, so they sort just after it.
             yield Write(
                 ast.Call(func=ast.Name("dict"), args=[], keywords=node.keywords),
                 mutates=True,
-                line=line,
+                line=line + 0.5,
             )
 
 
@@ -428,7 +429,7 @@ def _name_carries(key: str, spawn: Spawn, seen: frozenset[str]) -> bool:
             w
             for w in writes
             if w not in setting
-            and w.line >= first
+            and w.line > first
             and (not w.mutates or (not _entries(w.value) and not _silent(w.value)))
         ]
         return all(carries_child_encoding(w.value, spawn, seen) for w in setting) and all(
@@ -874,6 +875,16 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             'env = {**os.environ, "PYTHONIOENCODING": "utf-8"}\n'
             "def go():\n"
             '    env.update({"LC_ALL": "C"})\n'
+            '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
+        )
+        self.assertEqual([False], self.verdicts(source))
+
+    def test_update_keywords_apply_after_the_positional_mapping(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            "def go():\n"
+            "    env = {}\n"
+            '    env.update(os.environ, PYTHONIOENCODING="utf-8")\n'
             '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
         )
         self.assertEqual([False], self.verdicts(source))
