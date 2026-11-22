@@ -75,24 +75,29 @@ iteration PR is the place where upstream drift is absorbed and its fallout fixed
 upstream PR has to absorb that drift. So merging or closing the iteration PR removes that place.
 
 When the upstream base moves, sync the mirror branch from upstream and merge the mirror branch into
-the dirty branch. In that case, also fix whatever breaks in the iteration PR. Bringing the mirror branch in is a merge rather than a rebase, since the dirty branch is append-only. A dirty branch stacked on another takes the lower branch's changes the same way. Then re-squash onto the new mirror tip whenever the clean branch needs to follow, per step 5. An append-only clean branch, per step 5, has no recorded way to follow a moved base. So stop and ask the maintainer before it follows one.
+the dirty branch. In that case, also fix whatever breaks in the iteration PR. Bringing the mirror branch in is a merge rather than a rebase, since the dirty branch is append-only. A dirty branch stacked on another takes the lower branch's changes the same way. Then re-squash onto the new mirror tip whenever the clean branch needs to follow, per step 5. An append-only clean branch, per step 5, has no recorded way to follow a moved base. So stop and ask the maintainer before it follows one. Stop too before it takes a round from a dirty branch that has merged the moved mirror, since that round carries upstream's code.
 
 **Where the upstream's own CI rejects merge commits, rebase the dirty branch instead.** Such a check fails any pull request whose commits include a merge, and stops the rest of the upstream's checks from running. So a merge there costs the iteration PR the CI coverage it exists to provide. The rebase applies only in that case, and only to the dirty branch on the maintainer's own fork. Rebase it onto the mirror branch. On a stack, rebase the lower branch first. Then move the upper branch with `git rebase --onto <lower> <lower-old-head> <upper>`, its old head read from the lower branch's backup. Before each rebase, push the branch's old head to a named backup branch on the fork, and confirm the fork holds it. That backup keeps the replaced iteration log readable. Then push the rebased branch with `--force-with-lease`, pinned to that old head, under the go-ahead step 5 requires:
 
 ```sh
-old=$(git rev-parse work/x) && bak=refs/heads/backup/work-x-1
-git push origin "$old:$bak" && [ "$(git ls-remote origin "$bak" | cut -f1)" = "$old" ]
-git rebase "$mirror" work/x
-git push --force-with-lease="work/x:$old" origin work/x
+old=$(git rev-parse --verify work/x) && bak=refs/heads/backup/work-x-1 &&
+  git push origin "$old:$bak" &&
+  { [ "$(git ls-remote origin "$bak" | cut -f1)" = "$old" ] || { echo "backup not confirmed: $bak" >&2; false; }; } &&
+  git rebase "$mirror" work/x &&
+  git push --force-with-lease="work/x:$old" origin work/x
 ```
 
 PowerShell equivalent:
 
 ```powershell
-$old = git rev-parse work/x; $bak = 'refs/heads/backup/work-x-1'
+$old = git rev-parse --verify work/x
+if ($LASTEXITCODE -ne 0) { throw 'branch not found: work/x' }
+$bak = 'refs/heads/backup/work-x-1'
 git push origin "${old}:$bak"
-if ((git ls-remote origin $bak).Split("`t")[0] -ne $old) { throw "backup not confirmed: $bak" }
+if ($LASTEXITCODE -ne 0) { throw "backup push failed: $bak" }
+if ("$(git ls-remote origin $bak)".Split("`t")[0] -ne $old) { throw "backup not confirmed: $bak" }
 git rebase $mirror work/x
+if ($LASTEXITCODE -ne 0) { throw 'rebase stopped, resolve it before pushing' }
 git push --force-with-lease="work/x:$old" origin work/x
 ```
 
