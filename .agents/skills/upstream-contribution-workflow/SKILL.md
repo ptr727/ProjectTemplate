@@ -9,9 +9,9 @@ description: >-
   pull request against a repository outside the ptr727 fleet, whenever forking a third-party project
   to contribute, whenever an upstream reviewer requests changes on a PR opened this way, whenever a
   fork-internal iteration PR looks ready to merge or close, whenever the upstream base branch moves
-  under a contribution in flight, whenever upstream CI rejects merge commits or upstream forbids
+  under a contribution, whenever an upstream's CI rejects merge commits or it forbids
   rewriting a published PR, and whenever choosing such a repository's issue or PR template.
-  Triggers whatever the target repo's type or workflow model, never assumed to match the fleet's.
+  Triggers regardless of the target repo's type or workflow model, never assumed to match the fleet's.
 ---
 
 # Upstream Contribution Workflow
@@ -100,6 +100,7 @@ if ("$(git ls-remote origin $bak)".Split("`t")[0] -ne $old) { throw "backup not 
 git rebase $mirror work/x
 if ($LASTEXITCODE -ne 0) { throw 'rebase stopped, resolve it before pushing' }
 git push --force-with-lease="work/x:$old" origin work/x
+if ($LASTEXITCODE -ne 0) { throw 'lease push refused: work/x' }
 ```
 
 Set `mirror` to the mirror branch's name first. Number the backup branch per rebase, raising the suffix each time, so a later rebase never overwrites an earlier backup. Stop where the confirmation fails, since the force-push would then leave the old head on no remote branch. Where the rebase stops on a conflict, resolve it and run `git rebase --continue`. Then read the old head back from the backup branch with `git ls-remote origin <backup-ref>`. Run only the lease push, pinned to that value.
