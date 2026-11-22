@@ -239,7 +239,7 @@ in the new tree.
 Treat hook preparation as worktree setup, not as recovery after a rejected commit. If setup
 fails, report that boundary and fix the setup this tree owns, routing a shared hook as the
 bullet above says. Never bypass the hook to make the commit succeed.
-A commit-time `core.hooksPath` override, `git -c "core.hooksPath=<dir>" commit`, is a bypass too,
+A commit-time `core.hooksPath` override, `git -c core.hooksPath="<dir>" commit`, is a bypass too,
 since git then runs whatever that directory holds, and nothing where it holds nothing.
 
 ## Listing and Cleanup

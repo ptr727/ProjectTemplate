@@ -4414,6 +4414,7 @@ class TestPasteSafeRule(BaitCase):
                 "release|operational",
             ),
             ("git push origin <sha>:refs/heads/<branch>", "<sha>"),
+            ("prose_lint.py --diff-commit -- <staged paths>", "<staged paths>"),
         ):
             with self.subTest(span=span):
                 found = self.hits(f"Run `{span}` here.\n")
@@ -4431,6 +4432,8 @@ class TestPasteSafeRule(BaitCase):
             'TASK_ORIGIN="$(git -C "<base-clone>" remote get-url origin)"',
             "echo ${list[RepoName]}",
             "test -f x && [ -n y ] && [[ -z z ]]",
+            "pip install -e .[dev]",
+            "cat <in.txt >out.txt",
         ):
             with self.subTest(span=span):
                 self.assertEqual([], self.hits(f"Run `{span}` here.\n"))

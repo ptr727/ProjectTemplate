@@ -217,7 +217,7 @@ the whole procedure below. Run every step without being reminded of any of them.
    already holds, so the clone never takes a path a task worktree wants:
 
    ```sh
-   git clone --branch main https://github.com/ptr727/ProjectTemplate.git "<worktrees>/ProjectTemplate-hub-<unique>"
+   git clone --branch main https://github.com/ptr727/ProjectTemplate.git "<worktrees>"/ProjectTemplate-hub-"<unique>"
    ```
 
    That clone is the hub checkout "Running the Chain" sets `$handoff` from, so every later step
