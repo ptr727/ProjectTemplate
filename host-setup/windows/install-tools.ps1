@@ -615,7 +615,7 @@ function Write-InstallFailure {
             info $source.Heading
             foreach ($entry in $source.Entries) {
                 # The profile is masked unless a folder-name character follows it, so a sibling folder sharing its prefix is left whole.
-                $shown = if ($HOME) { $entry -ireplace ([regex]::Escape($HOME.TrimEnd('/', '\')) + '(?![\w\-]|\.[\w\-])'), '%USERPROFILE%' } else { $entry }
+                $shown = if ($HOME) { $entry -ireplace ([regex]::Escape($HOME.TrimEnd('/', '\')) + '(?![\w\-]|\.+[\w\-])'), '%USERPROFILE%' } else { $entry }
                 info "  $shown"
             }
         }

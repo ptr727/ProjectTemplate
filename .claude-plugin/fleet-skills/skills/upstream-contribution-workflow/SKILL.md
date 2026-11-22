@@ -84,7 +84,7 @@ old=$(git rev-parse --verify work/x) && bak=refs/heads/backup/work-x-1 &&
   git push origin "$old:$bak" &&
   { [ "$(git ls-remote origin "$bak" | cut -f1)" = "$old" ] || { echo "backup not confirmed: $bak" >&2; false; }; } &&
   git rebase "$mirror" work/x &&
-  { [ -z "$(git rev-list --merges "$mirror..$old")" ] || { echo "the rebase dropped merge commits, read each with git show --remerge-diff" >&2; false; }; } &&
+  { merges=$(git rev-list --merges "$mirror..$old") && [ -z "$merges" ] || { echo "merge scan failed or the rebase dropped merge commits, read each with git show --remerge-diff" >&2; false; }; } &&
   git push --force-with-lease="work/x:$old" origin work/x
 ```
 
@@ -100,7 +100,9 @@ if ($LASTEXITCODE -ne 0) { throw "backup push failed: $bak" }
 if ("$(git ls-remote origin $bak)".Split("`t")[0] -ne $old) { throw "backup not confirmed: $bak" }
 git rebase $mirror work/x
 if ($LASTEXITCODE -ne 0) { throw 'rebase stopped, resolve it before pushing' }
-if (git rev-list --merges "$mirror..$old") { throw 'the rebase dropped merge commits, read each with git show --remerge-diff' }
+$merges = git rev-list --merges "$mirror..$old"
+if ($LASTEXITCODE -ne 0) { throw 'merge scan failed, so the check did not run' }
+if ($merges) { throw 'the rebase dropped merge commits, read each with git show --remerge-diff' }
 git push --force-with-lease="work/x:$old" origin work/x
 if ($LASTEXITCODE -ne 0) { throw 'lease push refused: work/x' }
 ```
