@@ -170,6 +170,10 @@
                 },
                 "consumerModel": { "enum": ["push", "pull"] },
                 "releaseTrigger": { "$ref": "#/$defs/releaseTrigger" },
+                "publicInteraction": {
+                    "enum": ["collaborators", "community"],
+                    "$comment": "Who may interact with the repository while it is public. Absent means collaborators, so a repository made public starts locked down rather than open. collaborators is a repository public for reference only: repo-config/configure.sh apply sets GitHub's collaborators_only interaction limit and turns Discussions off. community is a product with a user community: apply sets the existing_users limit, which blocks only accounts younger than 24 hours, and keeps Discussions on. The field has no effect on a private repository, whose visibility configure.sh reads live. A limit expires after six months at most, so configure.sh check warns before it lapses and a fresh apply renews it. spec/validate.py checks the value."
+                },
                 "driftNotes": {
                     "type": "array",
                     "items": {

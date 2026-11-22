@@ -99,14 +99,27 @@ The class labels `introduced` and `pre-existing` record which class, per the `lo
 
 ## Repo Settings
 
-The fleet-standard general settings live in [`settings.json`][settings-json] and are applied idempotently by `repo-config/configure.sh apply owner/repo release|operational` alongside the rulesets (`gh api PATCH /repos/{owner}/{repo}`). The two settings that depend on per-repo state, `has_discussions` (visibility) and `default_branch` (main-must-exist), are computed by the script, not stored in the file. `apply` also enables Dependabot vulnerability alerts and automated security updates, fleet policy applied via the API rather than a `settings.json` key. `repo-config/configure.sh check owner/repo release|operational` validates all of these and exits non-zero on drift.
+The fleet-standard general settings live in [`settings.json`][settings-json] and are applied idempotently by `repo-config/configure.sh apply owner/repo release|operational` alongside the rulesets (`gh api PATCH /repos/{owner}/{repo}`). Two settings depend on per-repo state, so the script computes them rather than storing them in the file. They are `has_discussions` (visibility and the registry's `publicInteraction`) and `default_branch` (main-must-exist). `apply` also enables Dependabot vulnerability alerts and automated security updates, fleet policy applied via the API rather than a `settings.json` key. `repo-config/configure.sh check owner/repo release|operational` validates all of these and exits non-zero on drift.
 
 - **Default branch `main`** (the script sets it only when a `main` branch exists, never pointing the default at a missing branch).
 - **Merge methods**: `Allow merge commits` and `Allow squash merging` on, **rebase off**, and each branch ruleset then picks its method (merge on `main`, squash on `develop`).
 - **Auto-merge on** (the merge-bot needs it) and **`Always suggest updating pull request branches` on**.
 - **`Automatically delete head branches` is OFF, deliberately.** With it on, a `develop -> main` promotion (whose PR head is `develop`) would delete `develop`. There is no per-branch exemption, so the repo-wide toggle stays off to protect `develop`. **The CLI has the same trap: never `gh pr merge --delete-branch` a promotion PR whose head is `develop`**. This is because the explicit flag deletes `develop` regardless of this setting (see [GOVERNANCE.md "Branching Model"][governance-branching-model]).
-- **Wikis off. Projects on**, since the fleet plans its work in the one project described under [Fleet Project][fleet-project] below. **Discussions on public repos only** (off on private). **Sponsorships off**, since the button is driven by `.github/FUNDING.yml` rather than a REST toggle, and the fleet ships none.
+- **Wikis off. Projects on**, since the fleet plans its work in the one project described under [Fleet Project][fleet-project] below. **Discussions on public `community` repos only**, off on a private repo and on a `collaborators` one, per [Public Interaction][public-interaction] below. **Sponsorships off**, since the button is driven by `.github/FUNDING.yml` rather than a REST toggle, and the fleet ships none.
 - **Actions / General**: allow GitHub Actions to create and approve pull requests (for the bots).
+
+## Public Interaction
+
+A public repository is open to comments, issues, and pull requests from any account unless something limits it. The registry's `publicInteraction` field declares which of two groups each repository is in, and `configure.sh` turns that into GitHub's repository interaction limit (`PUT /repos/{owner}/{repo}/interaction-limits`).
+
+- **`collaborators`**, the default when the field is absent, is a repository public for reference only, such as the hub. `apply` sets the `collaborators_only` limit, so only collaborators can comment, open an issue, or open a pull request. It also turns Discussions off, since a reference-only repository invites no outside conversation.
+- **`community`** is a product with a user community. `apply` sets the `existing_users` limit, which blocks only accounts younger than 24 hours, and keeps Discussions on. Anyone else can still open and comment on an issue.
+
+The default is `collaborators` so that a repository made public starts locked down rather than open. The field has no effect on a private repository. The script reads visibility live, sets no limit there, and keeps Discussions off. GitHub refuses an interaction-limit read on a private repository, so neither mode reads one there.
+
+**The limit expires.** GitHub's longest expiry is six months, after which it removes the limit silently. Every `apply` sets that longest expiry, so a re-apply is the renewal. `check` asserts the declared limit, set on the repository itself, and warns once fewer than 30 days remain. A lapsed limit reads as missing and fails the check. A limit set on the owning account instead (`PUT /user/interaction-limits`) cannot express the two groups. GitHub then refuses a repository limit, so `apply` stops in its pre-flight with nothing written and `check` fails on the limit's origin.
+
+**Two checks are owed before a limit is first applied.** It is not yet verified that a limit leaves the review bots and Dependabot able to work. That covers Copilot, CodeRabbit, and Qodo commenting and reviewing, and Dependabot opening a pull request. A limit that silenced a reviewer would read as a false green in the review gate. So confirm it on one repository first, and record the evidence on a pull request. Also check that the README of each `collaborators` repository links to no Discussions page, since `apply` turns Discussions off there.
 
 ## Agent Policy
 
@@ -140,5 +153,6 @@ A repository linked to a project of its own is left alone, like a label the payl
 [governance-representative-data]: ../GOVERNANCE.md#representative-data-in-agent-authored-text
 [governance-verification-discipline]: ../GOVERNANCE.md#verification-discipline
 [project-json]: ./project.json
+[public-interaction]: #public-interaction
 [repo-config-doc]: ../docs/repo-config.md
 [settings-json]: ./settings.json
