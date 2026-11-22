@@ -280,6 +280,30 @@ def _reads(expr: ast.expr, key: str) -> bool:
     return any(_target_key(node) == key for node in ast.walk(expr) if isinstance(node, ast.expr))
 
 
+def _in_order(expr: ast.expr, spawn: Spawn, seen: frozenset[str]) -> bool | None:
+    """The top-level mapping's effective setting, each entry and `**` unpacking applied in order.
+
+    A later write overrides an earlier one, so `{"PYTHONIOENCODING": "utf-8", **os.environ}` ends
+    with whatever `os.environ` holds. That is why the last write decides here. None means the
+    expression is no dictionary display or `dict(...)` call, or writes nothing to the mapping.
+    """
+    name, want = CHILD_ENCODING
+    if isinstance(expr, ast.Dict):
+        items = list(zip(expr.keys, expr.values, strict=True))
+    elif isinstance(expr, ast.Call) and isinstance(expr.func, ast.Name) and expr.func.id == "dict":
+        items = [(None, a) for a in expr.args[:1]]
+        items += [(ast.Constant(k.arg) if k.arg else None, k.value) for k in expr.keywords]
+    else:
+        return None
+    state: bool | None = None
+    for key, value in items:
+        if key is None:
+            state = carries_child_encoding(value, spawn, seen)
+        elif _is_constant(key, name):
+            state = _is_constant(value, want)
+    return state
+
+
 def carries_child_encoding(
     expr: ast.expr, spawn: Spawn, seen: frozenset[str] = frozenset()
 ) -> bool:
@@ -291,6 +315,9 @@ def carries_child_encoding(
     `_name_carries` reads it. A function's return value is not followed, so an environment a helper
     builds is read as not carrying it.
     """
+    ordered = _in_order(expr, spawn, seen)
+    if ordered is not None:
+        return ordered
     entries = _entries(expr)
     if entries:
         return all(_is_constant(v, CHILD_ENCODING[1]) for v in entries)
@@ -652,6 +679,15 @@ class TestThePythonChildCheckReadsEachShape(unittest.TestCase):
             '    subprocess.run([sys.executable], encoding="utf-8", env=env)\n'
         )
         self.assertEqual([True], self.verdicts(source))
+
+    def test_a_later_unpacking_overrides_an_earlier_entry(self) -> None:
+        source = (
+            "import os, subprocess, sys\n"
+            'subprocess.run([sys.executable], encoding="utf-8", env={"PYTHONIOENCODING": "utf-8", **os.environ})\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env=dict(PYTHONIOENCODING="utf-8", **os.environ))\n'
+            'subprocess.run([sys.executable], encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})\n'
+        )
+        self.assertEqual([True, True, False], self.verdicts(source))
 
     def test_an_update_keyword_clears_the_call(self) -> None:
         source = (
