@@ -9029,6 +9029,7 @@ class TestWaitInterrupt(unittest.TestCase):
             bin_dir.mkdir()
             write_executable(bin_dir / "gh", f'#!/bin/sh\n: > "{ready}"\nexec sleep 300\n')
             env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+            env["PYTHONIOENCODING"] = "utf-8"
             argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
             proc = subprocess.Popen(
                 [*argv, "--repo", "acme/widget", "--timeout", "600"],
