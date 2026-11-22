@@ -16,9 +16,11 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest import mock
@@ -80,6 +82,10 @@ def local_file(home):
 
 class StampCase(unittest.TestCase):
     def setUp(self):
+        # An in-process main() installs the installer's signal handlers, so each case puts the runner's back.
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            self.addCleanup(signal.signal, signum, signal.getsignal(signum))
+        self.addCleanup(install.received.clear)
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.home = pathlib.Path(self.tmp) / "claude"
@@ -815,11 +821,93 @@ class TestWholeFileOwnership(StampCase):
 
     def test_an_interrupted_install_leaves_a_hand_edit_and_no_backup_or_temporary_file(self):
         edited = self.hand_edited()
-        with self.cut_short(interrupt=True), self.assertRaises(KeyboardInterrupt):
-            self.run_main()
+        with self.cut_short(interrupt=True):
+            status, stderr = self.run_main()
+        self.assertEqual(status, signal.SIGINT)
+        self.assertIn("Interrupted by SIGINT", stderr)
         self.assertEqual(self.md.read_text(encoding="utf-8"), edited)
         self.assertEqual(self.backups(), [])
         self.assertEqual(self.temps(), [])
+
+    def signalled_mid_write(self, signum):
+        """Start the installer with its interpreter, signal it inside the CLAUDE.md write, and return the result."""
+        driver = (
+            "import importlib.util, os, signal, sys, time\n"
+            f"sys.argv = [{str(INSTALL)!r}]\n"
+            f"spec = importlib.util.spec_from_file_location('install', {str(INSTALL)!r})\n"
+            "module = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(module)\n"
+            "real_write_all = module._write_all\n"
+            "def slow_write_all(fd, data):\n"
+            "    real_write_all(fd, data[:7])\n"
+            "    print('ready', flush=True)\n"
+            "    time.sleep(30)\n"
+            "module._write_all = slow_write_all\n"
+            "signal.signal(signal.SIGINT, signal.default_int_handler)\n"
+            "status = module.main()\n"
+            "if isinstance(status, signal.Signals):\n"
+            "    module.reraise(status)\n"
+            "sys.exit(status)\n"
+        )
+        env = dict(
+            os.environ,
+            CLAUDE_HOME=str(self.home),
+            AGENT_FLEET_LOCAL_INSTRUCTIONS=str(self.local),
+            AGENT_SAFETY_DIRTY_OVERRIDE="0",
+            AGENT_SAFETY_CONTAINMENT_OVERRIDE="1",
+        )
+        process = subprocess.Popen(
+            [sys.executable, "-c", driver],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            assert process.stdout is not None
+            # The installer prints its own progress first, and the line ends when the process does.
+            lines = iter(process.stdout.readline, "")
+            self.assertIn("ready", (line.strip() for line in lines))
+            time.sleep(0.2)
+            process.send_signal(signum)
+            out, err = process.communicate(timeout=20)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        return subprocess.CompletedProcess(process.args, process.returncode, out, err)
+
+    def assert_signal_mid_write_leaves_the_hand_edit(self, signum):
+        if sys.platform == "win32":
+            self.skipTest("Windows cannot deliver SIGINT or SIGTERM to a script")
+        edited = self.hand_edited()
+        r = self.signalled_mid_write(signum)
+        self.assertEqual(r.returncode, -signum, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn(f"Interrupted by {signal.Signals(signum).name}", r.stderr)
+        self.assertEqual(self.md.read_text(encoding="utf-8"), edited)
+        self.assertEqual(self.backups(), [])
+        self.assertEqual(self.temps(), [])
+
+    def test_an_interrupt_during_a_hook_self_test_removes_every_staged_copy(self):
+        real_run = subprocess.run
+
+        def interrupted(command, *args, **kwargs):
+            if "--selftest" in command:
+                raise KeyboardInterrupt
+            return real_run(command, *args, **kwargs)
+
+        with mock.patch.object(install.subprocess, "run", side_effect=interrupted):
+            status, _stderr = self.run_main()
+        self.assertEqual(status, signal.SIGINT)
+        self.assertEqual(sorted((self.home / "hooks").glob("*.staged")), [])
+
+    def test_a_sigint_mid_write_leaves_the_hand_edit_and_no_temporary_file(self):
+        self.assert_signal_mid_write_leaves_the_hand_edit(signal.SIGINT)
+
+    def test_a_sigterm_mid_write_leaves_the_hand_edit_and_no_temporary_file(self):
+        self.assert_signal_mid_write_leaves_the_hand_edit(signal.SIGTERM)
 
     def test_an_interrupted_write_leaves_the_prior_file_intact_and_no_temporary_file(self):
         self.home.mkdir(parents=True)

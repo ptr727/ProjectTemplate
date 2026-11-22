@@ -28,6 +28,7 @@ Usage: python3 install.py            (installs to ~/.claude).
 """
 
 import argparse
+import contextlib
 import datetime
 import hashlib
 import importlib.util
@@ -39,6 +40,7 @@ import re
 import secrets
 import shlex
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -778,12 +780,30 @@ def local_instructions_path():
 def read_regular_file(path):
     """The bytes of `path` where it is a regular file, or None where it is anything else.
 
-    Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None
-    rather than hanging the read.
-    Judging on the open descriptor also means nothing can swap the path between the check and the read.
     Raises OSError where the open itself fails, FileNotFoundError included for a dangling link.
     """
-    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    fd = _open_regular_file(path, os.O_RDONLY)
+    if fd is None:
+        return None
+    # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
+    try:
+        chunks = []
+        while chunk := os.read(fd, 65536):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def _open_regular_file(path, access):
+    """A descriptor open on `path` with `access`, or None, closed, where it is not a regular file.
+
+    Opened without blocking and judged on the open descriptor, so a FIFO or a device returns None.
+    It neither hangs a read nor swallows a write.
+    Judging on the open descriptor also means nothing can swap the path between the check and the use.
+    Raises OSError where the open itself fails.
+    """
+    flags = access | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
         fd = os.open(path, flags)
     # Windows refuses to open a directory at all, and a directory is still not a regular file.
@@ -793,16 +813,15 @@ def read_regular_file(path):
         if os.path.isdir(path):
             return None
         raise
-    # Closed in a finally, so no return or raise after the open leaves the descriptor behind.
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            return None
-        chunks = []
-        while chunk := os.read(fd, 65536):
-            chunks.append(chunk)
-        return b"".join(chunks)
-    finally:
+        regular = stat.S_ISREG(os.fstat(fd).st_mode)
+    except BaseException:
         os.close(fd)
+        raise
+    if not regular:
+        os.close(fd)
+        return None
+    return fd
 
 
 class NotRegularFile(OSError):
@@ -818,7 +837,7 @@ def write_regular_file(path, data, before=None):
 
     The target is opened for writing first, without truncating it, and judged on that descriptor.
     So a file this run cannot write is refused before anything is made.
-    A FIFO or a device is refused rather than hanging or swallowing the write, as `read_regular_file` reads.
+    A FIFO or a device is refused rather than hanging or swallowing the write.
     A replaced file keeps its permission bits.
     `before`, which backs the file up, runs once the new content is whole on disk, just before the swap.
     So a write refused or cut short leaves no backup behind.
@@ -862,27 +881,17 @@ def write_regular_file(path, data, before=None):
 
 
 def _writable_mode(path, target):
-    """The permission bits of `target` where it is a regular file this run can write, or None where it is absent.
-
-    Opened without truncating or blocking, and judged on the open descriptor, as `read_regular_file` reads.
-    """
-    flags = os.O_WRONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    """The permission bits of `target` where it is a regular file this run can write, or None where it is absent."""
     try:
-        fd = os.open(target, flags)
+        fd = _open_regular_file(target, os.O_WRONLY)
     except FileNotFoundError:
         return None
-    # Windows refuses to open a directory at all, and a directory is still not a regular file.
-    except OSError:
-        if os.path.isdir(target):
-            raise NotRegularFile(f"{path} is not a regular file") from None
-        raise
+    if fd is None:
+        raise NotRegularFile(f"{path} is not a regular file")
     try:
-        info = os.fstat(fd)
+        return stat.S_IMODE(os.fstat(fd).st_mode)
     finally:
         os.close(fd)
-    if not stat.S_ISREG(info.st_mode):
-        raise NotRegularFile(f"{path} is not a regular file")
-    return stat.S_IMODE(info.st_mode)
 
 
 def _remove_if_same_file(path, made):
@@ -1774,7 +1783,7 @@ def report(claude_home):
     return 0
 
 
-def main():
+def run():
     parser = argparse.ArgumentParser(
         description="Install the agent host-safety kit, or report whether this machine is current."
     )
@@ -1900,68 +1909,72 @@ def main():
     # Copying onto the live path first and testing afterwards left a failed self-test's broken copy installed.
     # The existing registration still pointed at it, so an install that refused to register disabled the guard.
     # Named per process, since two installs sharing one staged path clobber each other's copy.
-    # A kill between staging and the replace still leaves one behind, which nothing here can prevent.
+    # A SIGKILL between staging and the replace still leaves one behind.
     staged = []
-    for src_name in DEPLOYED_HOOKS:
-        tmp = hooks_dir / f"{src_name}.{os.getpid()}.staged"
-        staged.append((src_name, tmp))
-        try:
-            shutil.copyfile(HERE / src_name, tmp)
-        except OSError as e:
-            for _n, f in staged:
-                f.unlink(missing_ok=True)
-            sys.stderr.write(f"staging {src_name} failed ({e}); no hook was replaced.\n")
-            return 1
-        try:
-            os.chmod(tmp, 0o755)
-        except OSError:
-            pass
-        r = subprocess.run(
-            [launcher, str(tmp), "--selftest"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-        )
-        if r.returncode != 0:
-            for _n, f in staged:
-                f.unlink(missing_ok=True)
-            sys.stderr.write(
-                f"{src_name} self-test FAILED; no hook was replaced.\n" + r.stdout + r.stderr
+    try:
+        for src_name in DEPLOYED_HOOKS:
+            tmp = hooks_dir / f"{src_name}.{os.getpid()}.staged"
+            staged.append((src_name, tmp))
+            try:
+                shutil.copyfile(HERE / src_name, tmp)
+            except OSError as e:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(f"staging {src_name} failed ({e}); no hook was replaced.\n")
+                return 1
+            try:
+                os.chmod(tmp, 0o755)
+            except OSError:
+                pass
+            r = subprocess.run(
+                [launcher, str(tmp), "--selftest"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
             )
-            return 1
-        print(f"  {src_name} self-test: PASS")
-    # The data the hooks read goes in after every self-test passed and before any hook is replaced.
-    # A new hook then never runs beside a config it cannot find.
-    for data_name, data_src in DEPLOYED_DATA.items():
-        data_tmp = hooks_dir / f"{data_name}.{os.getpid()}.staged"
-        try:
-            shutil.copyfile(data_src, data_tmp)
-            os.replace(data_tmp, hooks_dir / data_name)
-        except OSError as e:
-            data_tmp.unlink(missing_ok=True)
-            for _n, f in staged:
+            if r.returncode != 0:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(
+                    f"{src_name} self-test FAILED; no hook was replaced.\n" + r.stdout + r.stderr
+                )
+                return 1
+            print(f"  {src_name} self-test: PASS")
+        # The data the hooks read goes in after every self-test passed and before any hook is replaced.
+        # A new hook then never runs beside a config it cannot find.
+        for data_name, data_src in DEPLOYED_DATA.items():
+            try:
+                write_regular_file(hooks_dir / data_name, data_src.read_bytes())
+            except OSError as e:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(f"copying {data_name} failed ({e}); no hook was replaced.\n")
+                return 1
+            print(f"  data -> {hooks_dir / data_name}")
+        for done_count, (src_name, tmp) in enumerate(staged):
+            dst = hooks_dir / src_name
+            # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
+            # It can still fail as a whole, most plausibly on Windows where another process holds the destination open.
+            # Each live hook is intact either way, and what needs saying is that some were replaced and some were not.
+            try:
+                os.replace(tmp, dst)
+            except OSError as e:
+                for _n, f in staged:
+                    f.unlink(missing_ok=True)
+                sys.stderr.write(
+                    f"replacing {dst} failed ({e}). {done_count} of {len(staged)} hooks were replaced, "
+                    "the rest are unchanged, nothing was registered, and the staged copies are removed. "
+                    "Re-run the installer.\n"
+                )
+                return 1
+            print(f"  hook -> {dst}")
+    except BaseException:
+        for _n, f in staged:
+            # The interrupt already unwinding is the one to report.
+            with contextlib.suppress(OSError):
                 f.unlink(missing_ok=True)
-            sys.stderr.write(f"copying {data_name} failed ({e}); no hook was replaced.\n")
-            return 1
-        print(f"  data -> {hooks_dir / data_name}")
-    for done_count, (src_name, tmp) in enumerate(staged):
-        dst = hooks_dir / src_name
-        # `os.replace` is atomic on the same filesystem, so a live hook is never a partial file.
-        # It can still fail as a whole, most plausibly on Windows where another process holds the destination open.
-        # Each live hook is intact either way, and what needs saying is that some were replaced and some were not.
-        try:
-            os.replace(tmp, dst)
-        except OSError as e:
-            for _n, f in staged:
-                f.unlink(missing_ok=True)
-            sys.stderr.write(
-                f"replacing {dst} failed ({e}). {done_count} of {len(staged)} hooks were replaced, "
-                "the rest are unchanged, nothing was registered, and the staged copies are removed. "
-                "Re-run the installer.\n"
-            )
-            return 1
-        print(f"  hook -> {dst}")
+        raise
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.
     # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
@@ -2253,5 +2266,52 @@ def main():
     return 0
 
 
+received: list[int] = []
+
+
+def on_signal(signum, _frame):
+    """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def main():
+    """Run the installer, returning its status, or the signal that interrupted it.
+
+    A SIGINT inherited as ignored, as a background child's is, stays ignored.
+    """
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
+    try:
+        return run()
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
+        sys.stderr.write(
+            f"Interrupted by {signum.name}, so the install stopped. Re-run it to finish.\n"
+        )
+        return signum
+
+
+def reraise(signum):
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    status = main()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)
