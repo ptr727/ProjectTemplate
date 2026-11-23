@@ -4498,6 +4498,8 @@ class TestPasteSafeRule(BaitCase):
             'case "$1" in\n'
             "  start|stop) run ;;\n"
             "  [Yy]*) yes ;;\n"
+            "  [Nn]|[Nn][Oo]) no ;;\n"
+            "  [Mm]aybe) later ;;\n"
             "esac\n"
             "[[ $x =~ ^[A-Za-z]+$ ]] && echo ok\n"
             "```\n"

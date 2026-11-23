@@ -651,9 +651,9 @@ class Unit(NamedTuple):
     holds those lines. `masked` is `codeless` with the content spaced rather than dropped. Each of
     its lines keeps the line as written in `raw`, so a column in one is one character in both.
     `paragraph` is a Markdown sentence block. `command` is a Markdown command a reader pastes, a
-    code span opening with a command or a shell fence's content, numbered by its first line. `comment`, `doc`, and `markup` are runs of adjacent
-    comment lines, `doc` a documentation comment and `markup` a Markdown HTML one. `docstring`
-    opens at `column`.
+    code span opening with a command or a shell fence's content, numbered by its first line.
+    `comment`, `doc`, and `markup` are runs of adjacent comment lines, `doc` a documentation
+    comment and `markup` a Markdown HTML one. `docstring` opens at `column`.
     """
 
     kind: str
@@ -1678,6 +1678,9 @@ PASTE_SHAPES = {
 }
 
 
+CASE_ARM = re.compile(r"(?m)^[ \t]*\(?[^\s()<>]+\)")
+
+
 def blanked(value: str) -> str:
     return re.sub(r"[^\n]", " ", value)
 
@@ -1718,7 +1721,7 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
     for line in unit.lines:
         dialect = COMMANDS["dialects"][line.dialect]
         bare = shell_literals(line.text, dialect["lexer"])
-        taken: list[range] = []
+        taken = [range(m.start(), m.end()) for m in CASE_ARM.finditer(bare)]
         for shape in dialect["shapes"]:
             for m in PASTE_SHAPES[shape].finditer(bare):
                 if any(m.start() in r for r in taken):
@@ -2235,7 +2238,6 @@ RULE_TABLE: dict[str, tuple[Rule, frozenset[str]]] = {
     "sentence-split": (rule_sentence_split, frozenset({"codeless"})),
 }
 LINE_ORDERED = frozenset(list(RULE_TABLE)[list(RULE_TABLE).index("home-path") :])
-# The kinds a Markdown file yields a line at a time, which, like a file's own lines, need no lexer.
 MARKDOWN_LINES = frozenset({"prose", "spanless", "codeless", "masked", "command"})
 
 
