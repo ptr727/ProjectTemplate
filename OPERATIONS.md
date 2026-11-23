@@ -82,8 +82,8 @@ Findings are a point-in-time snapshot read live over the API. Re-run before acti
 Run these commands from a hub checkout at `main`. A repo whose registry entry has merged to `develop` but not yet reached `main` runs them from a hub checkout at `develop` instead. The payloads, registry, and script are hub-hosted.
 
 ```sh
-repo-config/configure.sh check owner/repo release  # substitute operational for an operational repo
-repo-config/configure.sh apply owner/repo release  # substitute operational for an operational repo
+repo-config/configure.sh check "<owner>/<repo>" release  # substitute operational for an operational repo
+repo-config/configure.sh apply "<owner>/<repo>" release  # substitute operational for an operational repo
 ```
 
 **Always pass the command, the repository, and the model.** The command is required. A missing or unknown command, an unknown option, a repository not shaped `owner/name`, and an unknown model are each refused before any read. `--help` prints the usage. An omitted target resolves to the hub repository. Applying fleet configuration there while meaning to configure a downstream repo is a well-formed write to the wrong place. The hub checkout has the registry beside the script, so under `check` a repo the registry does not name resolves through `defaults.workflowModel` to `release`. An operational repo outside the registry therefore requires the explicit model argument. `apply` refuses a repo the registry does not name, writing nothing.

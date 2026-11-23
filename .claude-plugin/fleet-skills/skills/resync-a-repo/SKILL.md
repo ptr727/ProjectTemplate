@@ -50,7 +50,7 @@ hub and for the target repo alike, create a worktree of your own off that base c
 there, per `repo-worktree`. Remove each one when the run ends, per that skill's "Listing and
 Cleanup". A merged pull request's worktree goes through
 `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`,
-`~/repos/<Repo>` being that repository's primary clone. Spell every `scripts/pr_review.py` call this skill prints as
+`~/repos/<Repo>` being that repository's primary clone. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. Spell every `scripts/pr_review.py` call this skill prints as
 `pr-review-conduct` "Expected review loop" says. A
 hub worktree that only read the hub is removed by hand once it is clean, its branch with it. On a machine carrying the hub's agent-safety install, Claude Code also
 refuses a mutating git command run directly in a primary checkout. However, its rules classify git
@@ -99,8 +99,8 @@ section 3 describes.
    The reason is that it may be an improvement the hub should adopt instead of a mistake to erase.
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.
-5. **Settings, rulesets, and secrets.** A public-interaction limit is first confirmed
-   on one repository, per `RESYNC.md` step 5. Run
+5. **Settings, rulesets, and secrets.** Apply the first public-interaction limit to one pilot repository. Verify there that Copilot, CodeRabbit, Qodo, and Dependabot still work under it, and record the evidence on a pull request. Only then roll the limit out to the other repositories.
+   This is `RESYNC.md` step 5. Run
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo), then `apply` for what it reports, never from a carried copy. Both run from
    the hub checkout this run fetched, at `main` or at `develop` for a registry entry not yet
