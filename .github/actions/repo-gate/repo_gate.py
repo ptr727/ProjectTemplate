@@ -564,9 +564,10 @@ def load_documents(path: Path, reader: str = UVX_READER) -> list[object]:
 
     PyYAML is used in process where it is importable, and otherwise under uvx, a declared host tool.
     uvx alone is not enough under UV_NO_CACHE or uv's no-cache = true, which delete the environment
-    uvx resolved before the reader launches. There `reader` decides what each document carries back.
-    The default projects the fields an action check reads. `WORKFLOW_READER` returns each document
-    whole, with a value JSON cannot hold as text. A key JSON cannot hold fails the read.
+    uvx resolved before the reader launches. In process every document comes back whole. Under uvx,
+    `reader` decides what each document carries back. The default projects the fields an action
+    check reads. `WORKFLOW_READER` returns each document whole, with a value JSON cannot hold as
+    text. A key JSON cannot hold fails the read.
     """
     try:
         import yaml  # type: ignore[import-untyped]

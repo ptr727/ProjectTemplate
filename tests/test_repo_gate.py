@@ -676,7 +676,13 @@ class TestCoverageFloors(unittest.TestCase):
     def test_this_repo_passes_both_checks_from_the_cli(self) -> None:
         """The gates run in CI from this entry point, so the entry point is what is proven."""
         tools_ready = docker_ready() and schema_ready()
-        checks = [c for c in repo_gate.CHECKS if c != "composite-actions" or tools_ready]
+        reader_ready = pyyaml_imports() or shutil.which("uvx") is not None
+        checks = [
+            c
+            for c in repo_gate.CHECKS
+            if (c != "composite-actions" or tools_ready)
+            and (c != "workflow-inputs" or reader_ready)
+        ]
         narrowed = [a for c in checks for a in ("--check", c)]
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(0, repo_gate.main(["--root", str(REPO), *narrowed]))
