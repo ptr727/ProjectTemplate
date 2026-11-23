@@ -99,11 +99,12 @@ section 3 describes.
    The reason is that it may be an improvement the hub should adopt instead of a mistake to erase.
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.
-5. **Settings, rulesets, and secrets.** Run
+5. **Settings, rulesets, and secrets.** Before the first `apply` that sets a
+   public-interaction limit, do the checks `RESYNC.md` step 5 owes. Run
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo), then `apply` for what it reports, never from a carried copy. Both run from
    the hub checkout this run fetched, at `main` or at `develop` for a registry entry not yet
-   promoted. Before the first `apply` that sets a public-interaction limit, `RESYNC.md` step 5 owes its checks. Run `uv run --no-project --script spec/audit.py "<RepoName>"` from the same checkout for secrets.
+   promoted. Run `uv run --no-project --script spec/audit.py "<RepoName>"` from the same checkout for secrets.
 6. **Intent files last, and by hand,** since nothing mechanical judges these.
 
 Reconcile the registry entry (`status`, `types`, `releaseTrigger`, `workflowModel`,
