@@ -366,7 +366,7 @@ jobs:
       # The job-wide interpreter stays at the floor the hub's own uv scripts declare, since the prose and repo gates below run under it.
       # Each Python step sets UV_PYTHON to the resolved interpreter instead, which every uv call in it reads.
       - name: Setup uv step
-        if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
+        if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != '' || hashFiles('.github/workflows/*.yml', '.github/workflows/*.yaml') != ''
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
