@@ -951,8 +951,8 @@ microsoft_feed() {
         warn "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION, or the download failed"
         return 1
     fi
-    # The PowerShell install runs this with errexit off and goes on to remove a working pwsh.
-    # So a failed install ends the run here, on the dotnet path as well.
+    # Both callers run with errexit off and stop on a failed feed before they remove anything.
+    # A failed install ends the run here instead, rather than failing only the tool as the missing feed above does.
     run_root dpkg -i "$deb" || die "Cannot install Microsoft's feed from $deb"
     APT_DIRTY=true
     apt_refresh
