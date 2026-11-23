@@ -29,7 +29,7 @@ Piping it is still detected: with no action and no terminal it reports rather th
 A Debian host installed with a root password may have no `sudo`, and its first account is left outside the `sudo` group. The first line stops on such a host. Give the account `sudo` once with one root step. Then log out and back in so the new group takes effect. Start again from the first line. The login form `su -l` is needed, since plain `su` keeps the account's `PATH` and `usermod` is then not found. Replace `<account>` with the login name of the account that will do the work:
 
 ```shell
-su -l root -c 'apt-get update && apt-get install -y sudo curl ca-certificates tar && usermod -aG sudo <account>'
+su -l root -c 'apt-get update && apt-get install -y sudo curl ca-certificates tar && usermod -aG sudo "<account>"'
 ```
 
 Run the bootstrap as that account rather than as root, since it sets up git and GitHub for whichever account runs it.
