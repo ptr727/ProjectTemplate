@@ -4515,9 +4515,14 @@ class TestPasteSafeRule(BaitCase):
     def test_a_regex_operand_is_no_placeholder_but_a_real_one_still_is(self) -> None:
         text = "```sh\n[[ $x =~ [A-Za-z] ]] && echo ok\ngit fetch origin <ref>\n```\n"
         self.assertEqual([3], self.lines(text))
+        self.assertEqual([2], self.lines("```sh\n[[ $x =~ <pattern> ]] && echo ok\n```\n"))
 
     def test_a_quoted_assignment_with_spaces_still_opens_a_command(self) -> None:
-        for span in ('LABEL="two words" git fetch origin <ref>', "A='x y' B= git fetch <ref>"):
+        for span in (
+            'LABEL="two words" git fetch origin <ref>',
+            "A='x y' B= git fetch <ref>",
+            'VERSION="$(./scripts/version.sh <ref>)"',
+        ):
             with self.subTest(span=span):
                 self.assertEqual([1], self.lines(f"Run `{span}` here.\n"))
 
