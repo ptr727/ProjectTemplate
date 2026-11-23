@@ -494,7 +494,7 @@ ISOLATED = ("-I", "-X", "utf8")
 
 
 class UvxUnavailable(Exception):
-    """uvx could not provide an interpreter with PyYAML, so no action can be read through it."""
+    """uvx could not provide an interpreter with PyYAML, so no YAML file can be read through it."""
 
 
 def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -515,7 +515,7 @@ def pyyaml_python() -> str:
         return PYYAML_PYTHON[0]
     uvx = shutil.which("uvx")
     if uvx is None:
-        raise UvxUnavailable("neither PyYAML nor uvx is available to read the action")
+        raise UvxUnavailable("neither PyYAML nor uvx is available to read YAML")
     probe = "import sys, yaml; print(sys.executable)"
     try:
         result = run_utf8([uvx, "--with", "pyyaml", "python", *ISOLATED, "-c", probe])
