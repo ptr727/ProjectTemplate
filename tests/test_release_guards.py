@@ -1064,7 +1064,7 @@ class ReleaseGuardCase(unittest.TestCase):
     def test_audit_runnable_blocks_parse_as_printed(self) -> None:
         """Every bash block AUDIT.md tells the reader to run parses with its placeholders intact.
 
-        No repository gate reads a snippet inside a Markdown file. Blocks here once shipped
+        No repository gate parses a snippet inside a Markdown file. Blocks here once shipped
         an unquoted `repo=<owner>/<repo>` and an unquoted `--repo <path-to-target-checkout>`,
         each of which bash parses as a redirection. So they died of a syntax error before any
         `set` header took effect. Checking the substituted form is what hid it, so this checks

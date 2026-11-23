@@ -7,7 +7,8 @@ description: >-
   characters to type in agent-authored text, whenever the file being edited is CRLF, whenever naming
   a tool in prose or docs, whenever authoring a new Markdown file, whenever editing a carried
   instruction file (AGENTS.md, GOVERNANCE.md, CODESTYLE.md, WORKFLOW.md,
-  .github/copilot-instructions.md), and whenever text states how many items a list or a table holds.
+  .github/copilot-instructions.md), whenever text states how many items a list or a table holds,
+  and whenever a doc gives a command for a reader to copy and run.
   Triggers even when the task looks purely mechanical, such as "just fix a typo" or "add a one-line
   comment", because an em dash slipped into a sentence, a comment that grew by one more clause, or a
   text-mode edit that silently flattens a CRLF file to LF are each easy to miss.
@@ -397,6 +398,14 @@ Drop net8.0 Multi-Targeting from Console Project
 Bump xunit.v3 from 3.2.2 to 3.3.0
 Clarify Devcontainer Setup Steps in README
 ```
+
+## Copy-and-run commands
+
+<!-- include: GOVERNANCE.md > Copy-and-Run Commands -->
+
+A command in Markdown is text a reader copies and runs, so it has to run as written once pasted. That covers a code span opening with a command and every line of a shell fence. Such a command holds no bare `<placeholder>`, since the shell reads `<` as a redirection and the paste dies before the command runs. It holds no bracketed `[Placeholder]` either, since the shell reads that as a glob. The glob expands silently to any one-character file it matches. And it holds no bare `a|b` alternation, since the shell reads that as a pipe. The left-hand side then still runs, a live write included, while its own output vanishes behind an error from the right-hand side. A real pipe is spaced, so it never reads as an alternation. A placeholder is quoted instead, as in `git branch -d "<branch>"`, so the shell reads it as one word rather than as syntax. The quotes wrap the placeholder alone where its value may need the shell to expand it, such as a path opening `~`. The reader fills the value in inside the quotes. A value that is several arguments, such as a command and its own arguments, or one the shell must expand, replaces the quotes too. A single argument holding spaces keeps them. Inside a string handed to a second shell, such as the one `sh -c` runs, the placeholder is quoted within that string. A choice between values is written as the common value, with the other named in a parenthetical after the command. So `repo-config/configure.sh check "<owner>/<repo>" release` is followed by "(substitute `operational` for an operational repo)". In a shell fence that parenthetical is a trailing comment instead. An optional flag is not written in brackets, since that is a glob too. It is left out of the command and named in the parenthetical. The rule holds for every such command, one naming a single argument in prose included. That is because whether a reader pastes a span whole is a judgment no check can make. The prose gate's `paste-safe` rule enforces it for the commands its data file names. It reads a string handed to a second shell as a plain quotation.
+
+<!-- /include -->
 
 ## Quantitative claims
 

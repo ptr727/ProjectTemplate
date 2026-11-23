@@ -274,7 +274,7 @@ for, and it binds harder than any throughput target.
   leaves its claim reading like one whose worker has yet to start.
   `gh pr list --state open --limit 1000 --json number,baseRefName,headRefName,isCrossRepository --jq '.[] | select(.headRefName != "develop" or .baseRefName != "main" or .isCrossRepository) | .number'`
   lists the open pull requests, its filter applying the promotion exclusion below.
-  `gh pr diff <number> --name-only` then reads each one's files. `git worktree list` reports the
+  `gh pr diff "<number>" --name-only` then reads each one's files. `git worktree list` reports the
   registered worktrees and the branch checked out in each. That is not the same as every branch
   that exists. So pair it with `git branch -r`, after `git fetch --prune origin`, for one that was
   pushed and whose worktree is already gone. Pair it also with `git branch` for one that was never
@@ -304,8 +304,8 @@ for, and it binds harder than any throughput target.
   worktree and a hand-driven task's branch are enumerated above and carry no claim comment. So
   reading only the comments records them as holding nothing. That is the collision this section
   exists to prevent rather than the absence of one. Read the branch itself instead:
-  `git diff --name-only origin/<base>...<branch>` for what it has committed, and, for a
-  registered worktree, `git -C <worktree> status --porcelain --untracked-files=all` for what it
+  `git diff --name-only "origin/<base>...<branch>"` for what it has committed, and, for a
+  registered worktree, `git -C "<worktree>" status --porcelain --untracked-files=all` for what it
   holds uncommitted.
   `<base>` is the `baseRefName` of the branch's pull request where it has one, and `develop`
   otherwise. That is because `repo-worktree` "The Base Branch" lets a task branch from `main`. Read against
@@ -415,7 +415,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   one of its choosing. That is because a claim naming a branch nobody used points at nothing.
   A brief dispatching an issue returned to the ranking names a new branch.
   A branch a claim comment names for the first time is one no pull request on the repository has
-  used as its head. That is checked with `gh pr list --head <name> --state all` before the
+  used as its head. That is checked with `gh pr list --head "<name>" --state all` before the
   comment is written.
 - **The brief quotes `pr-review-conduct` outcome 4 whole and adds no instruction of its own to
   file a review finding.** A worker reads its brief as the more specific instruction. So a brief saying "file a
@@ -430,6 +430,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
 - **The brief requires the `Closes on promotion:` line** in the pull request body, listing exactly
   the issues this group fixes. A worker never reads this skill, and `drive-pr` does not ask for the
   line. So a brief that omits it produces a pull request nothing can derive a closing set from.
+  On an operational-model repository the brief also requires a `Reopens on promotion:` line where
+  the group undoes a fix already in the range. Without it the promotion closes an issue whose fix
+  the range no longer holds.
   It also has the worker draft that body, and each rewrite of it, in a file named for its branch.
   Workers sharing a scratch directory and one file name each publish the other's draft.
 - **The brief names the files this group owns and the files it must not touch.** A subagent never
@@ -444,7 +447,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   installed skills need not match develop, since some installs snapshot promoted `main`. So a rule
   merged to develop during the run may not reach it. In the hub, the brief tells the worker to
   read each fleet skill from develop as it invokes it. That covers any reference file it links.
-  The read is `git fetch origin develop && git show origin/develop:.agents/skills/<name>/<path>`,
+  The read is `git fetch origin develop && git show "origin/develop:.agents/skills/<name>/<path>"`,
   in place of the installed copy. The orchestrator reads the skills it applies the same way at
   each round's start. Reading develop rather than the worker's own tree also covers a
   worker on an older branch, such as a resumed group. A downstream repository has no such gap, since its skills come from the hub.
@@ -463,9 +466,9 @@ So the whole procedure moves to the orchestrator.
 It runs the procedure against the base clone as each group's worker ends, per "The Round" step 6.
 It runs it while no worker is live in a tree it touches.
 It carries the remote half of `drive-pr`'s post-merge cleanup too.
-For a merged group both halves are one command, `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`.
+For a merged group both halves are one command, `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`.
 Spell every `scripts/pr_review.py` call this skill prints as `pr-review-conduct` "Expected review loop" says.
-The command is run from a hub checkout once for each merged group, `<base-clone>` being the repository's primary clone.
+The command is run from a hub checkout once for each merged group, `~/repos/<Repo>` being the repository's primary clone.
 It deletes the remote branch, then removes the group's worktree and local branch, per `repo-worktree` "Listing and Cleanup", which also says what its exit leaves to do.
 Taking that step from the worker without naming a new owner would leave a live remote branch behind every group.
 `cleanup` holds the delete's checks, among them the tip against the pull request's `headRefOid`.
@@ -481,7 +484,7 @@ A merged group that worked in a standalone clone is checked before anything is d
 The orchestrator confirms the clone the worker reported or recorded is clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
 It also confirms the clone's branch tip is at the pull request's `headRefOid` or behind it.
 `repo-worktree` "Listing and Cleanup" accepts both, since a GitHub "Update branch" merge leaves a tip behind it that holds nothing the merge lacks.
-After `git -C <clone> fetch origin <headRefOid>`, `git -C <clone> merge-base --is-ancestor refs/heads/<exact-branch> <headRefOid>` exits `0` in both cases.
+After `git -C "<clone>" fetch origin "<headRefOid>"`, `git -C "<clone>" merge-base --is-ancestor "refs/heads/<exact-branch>" "<headRefOid>"` exits `0` in both cases.
 Where either confirmation fails, nothing is deleted and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where both hold, `cleanup` runs as for any merged group and deletes the remote branch.
 The orchestrator then removes the clone, per `repo-worktree` "Listing and Cleanup".
@@ -506,7 +509,7 @@ abandon its branch reports its worktree path and ends without discarding anythin
 orchestrator waits until the dispatch mechanism reports that the worker has ended, per "Bounding
 the Wait on a Worker". It then reads a live `git worktree list --porcelain` for a linked worktree,
 an entry other than the first, whose `branch` line names the claimed branch. Where one exists, it
-runs `git -C <path> reset --hard` and then `git -C <path> clean -fd`, `<path>` being that entry's
+runs `git -C "<path>" reset --hard` and then `git -C "<path>" clean -fd`, `<path>` being that entry's
 `worktree` line. It discards nothing in any other tree. Where none exists and the worker reported
 or recorded no standalone clone, nothing is discarded and the group is stopped for the maintainer
 per "Raising a Blocked Question". A standalone clone follows the clone paragraph below. The
@@ -515,25 +518,25 @@ branch's commits stay for the branch check below.
 An abandoned group, and a dead worker's clean tree, have no merged pull request for
 `repo-worktree`'s verify-before-removing step to read. So that step gives way here to a check of
 what it exists to establish, that nothing unmerged is being thrown away.
-The orchestrator records the local tip with `git rev-parse refs/heads/<exact-branch>`.
-After `git fetch origin develop`, `git merge-base --is-ancestor <tip> refs/remotes/origin/develop` must exit `0`, and the worktree must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
+The orchestrator records the local tip with `git rev-parse "refs/heads/<exact-branch>"`.
+After `git fetch origin develop`, `git merge-base --is-ancestor "<tip>" refs/remotes/origin/develop` must exit `0`, and the worktree must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read.
 Where both hold, the worktree and local branch are removed by hand, since `cleanup` needs a merged pull request to read.
-The removal is `git worktree remove <exact-path>`, then `git update-ref -d refs/heads/<exact-branch> <tip>`.
+The removal is `git worktree remove "<exact-path>"`, then `git update-ref -d "refs/heads/<exact-branch>" "<tip>"`.
 That delete refuses only where the branch has moved off the tip the is-ancestor check judged, so it discards nothing that check did not clear.
 `git branch -d` would not agree with that check, since it judges a branch with no upstream against `HEAD`, and the fetch does not advance local develop.
-Where `git config --get-regexp '^branch\.<exact-branch>\.'` prints anything, `git config --remove-section branch.<exact-branch>` then removes the tracking `git branch -d` would have removed.
+Where `git config --get-regexp '^branch\.<exact-branch>\.'` prints anything, `git config --remove-section "branch.<exact-branch>"` then removes the tracking `git branch -d` would have removed.
 A refusal stops the group for the maintainer per "Raising a Blocked Question".
 Where the branch was never pushed, the orchestrator records the release once both succeed.
 It edits the group's claim comment, and the issue returns to the ranking.
 Where it was pushed, the orchestrator also deletes the remote branch, since `cleanup` needs a merged pull request to read.
 That is the one remote delete this skill types by hand.
 The delete runs only where two more checks hold.
-The remote tip, read live with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, equals the recorded tip.
+The remote tip, read live with `git ls-remote --exit-code origin "refs/heads/<exact-branch>"`, equals the recorded tip.
 And no open pull request uses the branch as its head or its base.
-`gh pr list --head <exact-branch> --state open --json number --jq length` prints `0`, and so does the same command with `--base`.
-The delete is `git push origin --delete <exact-branch>`, an outward-facing write bound by `GOVERNANCE.md` "Repository Boundaries and Write Safety".
+`gh pr list --head "<exact-branch>" --state open --json number --jq length` prints `0`, and so does the same command with `--base`.
+The delete is `git push origin --delete "<exact-branch>"`, an outward-facing write bound by `GOVERNANCE.md` "Repository Boundaries and Write Safety".
 So it names the exact branch, takes every identifier from a live read, and keeps its output unsuppressed.
-The orchestrator then reads the ref back with `git ls-remote --exit-code origin refs/heads/<exact-branch>`, and only its exit `2`, no matching ref, confirms the delete.
+The orchestrator then reads the ref back with `git ls-remote --exit-code origin "refs/heads/<exact-branch>"`, and only its exit `2`, no matching ref, confirms the delete.
 Only after that confirmation is the release recorded on the claim comment, and the issue then returns to the ranking.
 Where any check fails or the delete is not confirmed, the claim is kept and the group is stopped for the maintainer per "Raising a Blocked Question".
 Where a confirmation fails for an abandoned group, cleanup stops there and the group is stopped for the maintainer.
@@ -548,12 +551,12 @@ The orchestrator finds it under the temporary root the brief named, by the recor
 run that named another root cannot find it, so its group goes to the maintainer. The
 abandoned-worker discard above does not run there, so a dirty abandoned clone goes to the
 maintainer.
-The clone must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read, and its tip is read with `git -C <clone> rev-parse refs/heads/<exact-branch>`.
+The clone must be clean by `repo-worktree` "Listing and Cleanup"'s hand-removal read, and its tip is read with `git -C "<clone>" rev-parse "refs/heads/<exact-branch>"`.
 A clone retired alone, its branch left standing, also needs that tip to equal the remote tip, read
-live with `git -C <clone> ls-remote --exit-code origin refs/heads/<exact-branch>`. The remote then holds the
+live with `git -C "<clone>" ls-remote --exit-code origin "refs/heads/<exact-branch>"`. The remote then holds the
 only copy of the branch. A clone removed with its branch and no merged pull request instead needs
-`git -C <clone> merge-base --is-ancestor <tip> refs/remotes/origin/develop` to exit `0` after
-`git -C <clone> fetch origin develop`. Its branch, where pushed, then takes the abandoned-group
+`git -C "<clone>" merge-base --is-ancestor "<tip>" refs/remotes/origin/develop` to exit `0` after
+`git -C "<clone>" fetch origin develop`. Its branch, where pushed, then takes the abandoned-group
 remote checks, delete, and confirmation above first. Where the checks hold, the orchestrator then
 deletes the clone's exact directory, per `repo-worktree` "Listing and Cleanup". It also removes the
 recorded name from the claim comments. A clone removed with its branch and no merged pull request
@@ -598,7 +601,7 @@ Its silence looks exactly like slowness, and dying mid-drive is ordinary here.
 The bound is a state read rather than a clock. Wait until every other worker dispatched no later than
 the silent one has reported or is confirmed gone, as below. Then
 read the silent worker's branch and pull request directly, with `git log` on that branch and
-`gh pr view <branch>`. Pass the branch as that command's positional argument, since a
+`gh pr view "<branch>"`. Pass the branch as that command's positional argument, since a
 bare `gh pr view` resolves the pull request of whatever branch the caller is standing on. It never
 resolves the worker's. Let what they show decide. A pull request that is merged means the worker
 died after doing the work. The group is then finished.
@@ -745,13 +748,17 @@ two hops. First, for each commit in
 `origin/main..origin/develop`, freshly fetched, read the pull request that merged it into develop:
 
 ```sh
-gh api repos/<owner>/<repo>/commits/<sha>/pulls --jq '.[] | select(.merged_at != null and .base.ref == "develop") | .number'
+gh api "repos/<owner>/<repo>/commits/<sha>/pulls" --jq '.[] | select(.merged_at != null and .base.ref == "develop") | .number'
 ```
 
 Then read each pull request it prints for its `Closes on promotion:` line. That is the line
 "Grouping and File Claims" requires every feature pull request to carry and every worker brief to
 ask for. A commit it prints nothing for is a direct push. Read that commit's own message for its
-line instead. A read that exits non-zero stops the assembly and is reported.
+line instead. On an operational-model repository, also read the same places for a
+`Reopens on promotion:` line, which a change undoing a fix carries there per `GOVERNANCE.md`
+"Operational Repositories". Leave out each issue such a line names, unless a later change in the
+range names it on a `Closes on promotion:` line again. A read that exits non-zero stops the
+assembly and is reported.
 
 **That line exists because the set has to be stated rather than inferred**, distinct from any
 issue a body merely mentions. A body routinely references an issue it does not fix, the deferral
@@ -771,6 +778,10 @@ from a read of the body made immediately before the write, keeping every line th
 Then read the body again, and repeat the amendment where it lacks a `Fixes` line a freshly fetched
 range calls for. Checking the whole set rather than only this amendment's own lines is what
 restores a line another session's write dropped.
+On an operational-model repository, a `Reopens on promotion:` line can land in the range during the
+freeze. Where it names an issue the body holds a `Fixes` line for, put that line to the maintainer
+rather than editing it. A seat cannot tell that line from one added by hand for a change that left
+its own line out.
 
 Run the mechanical closing-set check that `branching-and-release-model` states in its
 negated-keyword bullet, at each point that bullet names. A body naming a deferral issue
@@ -899,7 +910,7 @@ subagents and holds only what they return.
    parked worktree.
 2. **Retire each parked worktree a resuming group names**, before dispatching its worker. Git
    refuses to attach a branch another worktree holds, per `repo-worktree`. Remove a tree clean by
-   `repo-worktree` "Listing and Cleanup"'s hand-removal read with `git worktree remove <exact-path>`, leaving its branch standing. That command errors on a
+   `repo-worktree` "Listing and Cleanup"'s hand-removal read with `git worktree remove "<exact-path>"`, leaving its branch standing. That command errors on a
    standalone clone, which takes the retire-alone checks of "Cleanup Is the Orchestrator's"
    instead. Leave a dirty tree, or a clone failing those checks, exactly as it stands. Keep its
    group parked, and name it in the report. Only the

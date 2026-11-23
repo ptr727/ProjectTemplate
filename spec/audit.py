@@ -2243,7 +2243,9 @@ def check_branch_drift(run):
 
 def check_settings_general(run):
     expected = dict(run.spec["settings"])
-    expected["has_discussions"] = not run.live.get("private", True)
+    expected["has_discussions"] = (
+        not run.live.get("private", True) and run.entry.get("publicInteraction") == "community"
+    )
     findings = [
         ("DEFECT", f"settings: {key} live={run.live.get(key)} expected={expected[key]}")
         for key in SETTINGS_KEYS + ["has_discussions"]

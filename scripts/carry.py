@@ -1042,7 +1042,7 @@ def run_sections(mode: str, name: str, target: pathlib.Path, hub: pathlib.Path =
     # In contrast, these files hold the repository's own sections too.
     # Exempting one would let a write land on top of an uncommitted edit to a section the tool never touches.
     # The cost is that a second apply needs the first one committed.
-    # RESYNC.md's step 1 runs these modes before anything else writes to the tree.
+    # RESYNC.md's step 1 commits any change the guard made first, so this check then sees a clean tree.
     verify_target(target, entry, [])
     plans = plan_sections(hub, target, units)
     print(f"hubCommit: {hub_commit}")

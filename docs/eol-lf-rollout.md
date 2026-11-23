@@ -81,7 +81,7 @@ per the [`branching-and-release-model`][branching-and-release-model] Skill, and 
    [`references/line-endings.md`][line-endings] "Editing discipline".
 4. **Check the branch out fresh, then run `editorconfig-checker` clean.** `--renormalize` changes
    only the index, so the working tree it ran in keeps its CRLF bytes, and `editorconfig-checker`
-   reads the working tree. A detached worktree of the branch, `git worktree add --detach <path> <branch>`, holds the
+   reads the working tree. A detached worktree of the branch, `git worktree add --detach "<path>" "<branch>"`, holds the
    converted bytes. Then open the
    pull request.
 

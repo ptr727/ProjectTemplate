@@ -3,8 +3,9 @@
 
 Deploys the PreToolUse write guard, the PreToolUse model-tier guard with its tier mapping, the
 SessionEnd stray-process sweep, and the tool-containment shell prefix. It registers the hooks in the
-user settings.json. On a host with a systemd user manager it also sets the prefix in that file's
-`env`. It sets the default subagent model there too, the model of the mapping's default tier.
+user settings.json, in exec form so no shell runs them. On a host with a systemd user manager it
+also sets the prefix in that file's `env`.
+It sets the default subagent model there too, the model of the mapping's default tier.
 It merges the permission rules this kit owns into the same file. It merges the `autoMode`
 rules this kit owns there too, each found by its tag. It sets the AGENTS.md plugin to read
 CLAUDE.md and AGENTS.md both. It sets `attribution.sessionUrl` to false where the host holds no
@@ -135,12 +136,93 @@ def payload_source(name):
 
 
 def hook_command(launcher, path):
-    """The `command` string a registered hook carries, spelled once for writer and reader alike."""
-    return f'"{launcher}" "{path}"'
+    """The exec-form `command` and `args` a registered hook carries, spelled once for writer and reader alike.
+
+    Exec form spawns `command` directly with `args` as its argument vector, and no shell is involved.
+    A shell-form string runs under `sh -c` on Linux and macOS, and on Windows under Git Bash, or
+    PowerShell where Git Bash is absent. So what such a registration ran depended on the host's shell.
+    A launcher path two shells split differently could run under one and not the other.
+    Exec form also leaves the kit's own hooks outside `CLAUDE_CODE_SHELL_PREFIX`, which Claude Code
+    applies to shell-form hooks only.
+    Claude Code added exec form in 2.1.139, below the fleet floor of 2.1.281.
+    """
+    return {"command": str(launcher), "args": [str(path)]}
 
 
-def runs_hook(command, path):
-    """Whether `command` names the hook deployed at `path`, as its own argument.
+def exec_form(hook):
+    """Whether registration entry `hook` is exec form, which Claude Code selects by the presence of `args`."""
+    return "args" in hook
+
+
+def file_name(word):
+    """The last path segment of `word`, read with either slash as the separator."""
+    return os.path.basename(str(word).replace("\\", "/"))
+
+
+def literal_path(word, path):
+    """Whether `word`, one argument passed with no shell, is `path` itself, in either slash."""
+    return isinstance(word, str) and word.replace("\\", "/") == str(path).replace("\\", "/")
+
+
+def runs_hook(hook, path):
+    """Whether registration entry `hook` runs the hook deployed at `path`.
+
+    An exec-form entry is read from its `command` and `args` directly.
+    It runs the hook only when `args` holds exactly the deployed path, the shape this installer writes.
+    It also needs a `command` to spawn, since an entry with none runs nothing.
+    No shell expands `~` or `$HOME` there, so only the literal path counts.
+    A `command` naming the hook itself is not accepted, since exec form cannot spawn a `.py` on Windows.
+    A shell-form entry, one an older install or a hand edit left, is read by `shell_runs_hook`.
+    """
+    if not exec_form(hook):
+        return shell_runs_hook(hook.get("command"), path)
+    command, args = hook.get("command"), hook["args"]
+    if not isinstance(command, str) or not command:
+        return False
+    return isinstance(args, list) and len(args) == 1 and literal_path(args[0], path)
+
+
+PYTHON_NAMES = re.compile(r"(python|pypy)[\w.\-]*|py[\d.]*")
+PATH_SEPARATOR = re.compile(r"[/\\]")
+SHELL_NAMES = re.compile(r"bash|sh|dash|zsh|ash|ksh|fish|csh|tcsh|pwsh|powershell")
+
+
+def is_program(command, names):
+    """Whether `command`, an exec-form executable, is a program whose own name (minus `.exe`) matches `names`."""
+    base = file_name(command).lower()
+    return bool(names.fullmatch(base.removesuffix(".exe")))
+
+
+def names_hook(hook, name):
+    """Whether registration entry `hook` runs a file whose own name is exactly `name`, at any path.
+
+    It is the ownership test a re-run strips by, so it reads both forms.
+    That is what lets a re-run rewrite a shell-form registration in exec form rather than add one beside it.
+    An exec-form entry runs a file as its `command`, or as its first argument where `command` is a Python interpreter.
+    So the entry is named when that file has `name` as its own file name.
+    It is also named when the word after a `-c` names it the way `shell_names_hook` reads a whole command,
+    where `command` is a shell. That is the script string an exec-form `bash -c` carries.
+    An entry whose only argument is a path to such a file is the form this installer writes, so it is named under any launcher.
+    Any other argument is plain text, and so is every argument of another command.
+    So `echo gh-write-guard.py`, or a label mentioning `name`, does not claim the host's hook.
+    """
+    if not exec_form(hook):
+        return shell_names_hook(hook.get("command", ""), name)
+    command = hook.get("command")
+    command = command if isinstance(command, str) else ""
+    args = [a for a in hook["args"] if isinstance(a, str)] if isinstance(hook["args"], list) else []
+    if file_name(command) == name:
+        return True
+    own_form = len(args) == 1 and bool(PATH_SEPARATOR.search(args[0]))
+    if args[:1] and file_name(args[0]) == name and (own_form or is_program(command, PYTHON_NAMES)):
+        return True
+    return is_program(command, SHELL_NAMES) and any(
+        args[i - 1] == "-c" and shell_names_hook(word, name) for i, word in enumerate(args) if i
+    )
+
+
+def shell_runs_hook(command, path):
+    """Whether shell-form `command` names the hook deployed at `path`, as its own argument.
 
     The path is compared and the launcher is not.
     Matching the name alone let an unrelated `echo stray-process-sweep` count as a registration.
@@ -149,7 +231,7 @@ def runs_hook(command, path):
     The path is what the installer writes and never drifts, so it is the half worth comparing.
 
     The quoting around it is not compared either.
-    This installer writes the path in double quotes.
+    This installer wrote the path in double quotes before it wrote exec form.
     A registration written by hand or through the `/hooks` UI runs the same file bare or in single quotes.
     So requiring one spelling reported those as naming a hook they do not run.
 
@@ -171,11 +253,11 @@ def runs_hook(command, path):
     )
 
 
-def names_hook(command, name):
-    """Whether `command` runs a file whose own name is exactly `name` (e.g. GUARD_NAME), at any path.
+def shell_names_hook(command, name):
+    """Whether shell-form `command` runs a file whose own name is exactly `name` (e.g. GUARD_NAME), at any path.
 
-    Matched with `runs_hook`'s own boundary characters rather than by tokenizing the command.
-    A command `runs_hook` already treats as running the deployed hook carries wrapping characters
+    Matched with `shell_runs_hook`'s own boundary characters rather than by tokenizing the command.
+    A command `shell_runs_hook` already treats as running the deployed hook carries wrapping characters
     attached to the path with no separating space.
     Such a command is, for example, one wrapped in `bash -c "..."`, in `(...)`, or followed by `; true`.
     `shlex.split` folds those characters into the token.
@@ -189,15 +271,15 @@ def names_hook(command, name):
 
     A quoted path is read to its closing quote rather than through the same boundary characters.
     That is because those are literal there: `"/c/Program Files (x86)/hooks/gh-write-guard.py"` is a path
-    `runs_hook` accepts whole.
+    `shell_runs_hook` accepts whole.
     It is also because the bare-word boundary class below cannot cross the space or the parentheses inside that path to reach the deployed name.
 
     Known gap, not chased further here:
     - an unquoted path whose own directory holds one of the bare-word boundary characters.
-    - a handful of shell compositions `runs_hook` itself only accepts because it is handed the exact
+    - a handful of shell compositions `shell_runs_hook` itself only accepts because it is handed the exact
       literal path rather than discovering one.
     The compositions are a backtick, a no-space redirect, and a quote escaped inside an outer quote.
-    Closing any of these gaps needs `runs_hook` widened too, which is a design change on its own rather than a local match.
+    Closing any of these gaps needs `shell_runs_hook` widened too, which is a design change on its own rather than a local match.
     """
     text = str(command).replace("\\", "/")
     escaped = re.escape(name)
@@ -245,7 +327,7 @@ def register_hook(groups, name, entry, selects, matcher=None):
     for g in groups:
         hooks_list = g.get("hooks")
         if isinstance(hooks_list, list):
-            hooks_list[:] = [h for h in hooks_list if not names_hook(h.get("command", ""), name)]
+            hooks_list[:] = [h for h in hooks_list if not names_hook(h, name)]
     group = next((g for g in groups if selects(g)), None)
     if group is None:
         group = {"hooks": []} if matcher is None else {"matcher": matcher, "hooks": []}
@@ -521,9 +603,10 @@ def containment_capable(prefix, env=None, system=None, uid=None, controllers=Non
 def prefix_runs_directly(prefix):
     """Why `prefix --selftest` fails when executed the way Claude Code executes it, or "" where it passes.
 
-    Claude Code runs the file itself, through its `env python3` shebang, for every hook command, the
-    write guard included. A PreToolUse hook that fails is a non-blocking error.
-    So a prefix that cannot run that way fails the guard open.
+    Claude Code runs the file itself, through its `env python3` shebang, for every Bash tool call and
+    every shell-form hook. The kit's own hooks are exec form, which Claude Code spawns without the
+    prefix. So a broken prefix does not reach the write guard. It does reach a shell-form PreToolUse
+    hook the host keeps of its own. A failure there is a non-blocking error that lets the call go ahead.
     A prefix can fail to run that way from a missing `python3`, a lost execute bit, or a `noexec` mount.
     """
     try:
@@ -564,7 +647,7 @@ def kit_prefix(held):
     Judged on the file name exactly, since a substring match claims someone else's wrapper whose name
     merely contains this one's.
     """
-    return os.path.basename(str(held).replace("\\", "/")) == CONTAIN_NAME
+    return file_name(held) == CONTAIN_NAME
 
 
 def foreign_prefix(data):
@@ -610,38 +693,106 @@ def launcher_problem(launcher):
     return None
 
 
-def hook_launcher():
-    """The python invocation the settings.json commands carry, or None, and why each other candidate failed.
+def base_interpreters(path):
+    """The interpreters the virtual environment holding `path` was made from, or `[path]` where it is not in one.
 
-    A bare `python3` is preferred, being portable and unambiguously Python 3.
-    Else this interpreter's absolute path is used, which an upgrade or a move can break.
+    A venv's interpreter goes when the venv does, and a worktree removed with its venv takes it along.
+    A hook registered under it would then fail to spawn, a non-blocking error that fails the guard open.
+    So the venv's `pyvenv.cfg` is read for the base, each existing one listed in order.
+    The first is `python3`, or `python.exe` on Windows, in its `home` directory.
+    That is the name a minor-version upgrade keeps working.
+    The second is its `executable`, which Python 3.11 and later record.
+    That covers a `home` whose `python3` is an older interpreter or absent, as an altinstall leaves it.
+    The venv's own path stays the last resort, tried where no base exists or none passes the probe.
+    """
+    exe = pathlib.Path(path)
+    for cfg in (exe.parent / "pyvenv.cfg", exe.parent.parent / "pyvenv.cfg"):
+        try:
+            lines = cfg.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        keys = {}
+        for line in lines:
+            key, sep, value = line.partition("=")
+            if sep:
+                keys[key.strip()] = value.strip()
+        named = []
+        if keys.get("home"):
+            named.append(
+                pathlib.Path(keys["home"]) / ("python.exe" if os.name == "nt" else "python3")
+            )
+        if keys.get("executable"):
+            named.append(pathlib.Path(keys["executable"]))
+        return [str(b) for b in named if b.is_file()] + [path]
+    return [path]
+
+
+def exec_spawn_problem(launcher, windows=None):
+    """Why exec form cannot spawn `launcher`, or None where it can.
+
+    On Windows exec form needs `command` to resolve to a real `.exe`.
+    A `.bat` or `.cmd` shim, such as the ones pyenv-win puts on PATH, runs only through a shell.
+    Python's own subprocess runs such a shim through `cmd`, so the version probe alone passes it.
+    """
+    if not (os.name == "nt" if windows is None else windows):
+        return None
+    resolved = shutil.which(launcher) or launcher
+    if pathlib.PurePath(resolved).suffix.lower() != ".exe":
+        return f"{launcher!r} resolves to {resolved!r}, not a .exe, which exec form cannot spawn on Windows"
+    return None
+
+
+def hook_launcher():
+    """The interpreter path the settings.json entries carry as `command`, or None, and why each other candidate failed.
+
+    The path is absolute, so the hook does not depend on the session's own PATH.
+    Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
+    A version-manager shim, such as pyenv's, still picks its interpreter when the hook runs, as a bare `python3` did before.
+    The `python3` on PATH is preferred, being unambiguously Python 3.
+    A candidate inside a virtual environment yields first to the interpreters that venv was made from.
+    Its path is kept as PATH resolves it, and its links are not followed.
+    So `/usr/bin/python3` stays the name a minor-version upgrade keeps pointing at a working interpreter.
+    Else this interpreter's own path is used, which an upgrade or a move can break.
     Never a bare `python`, which is Python 2 on some systems and would fail the hook's Python 3 syntax.
     Each candidate is run before it is chosen, since a hook naming one that never runs fails open.
+    `--report` runs the registered one again, so a launcher an upgrade broke reports STALE.
     The install picks it before writing anything and runs each hook's self-test under it, so a pass
     also proves the launcher runs the hook.
     """
     rejected = []
-    for candidate in ("python3", sys.executable):
-        if not candidate or (candidate == "python3" and not shutil.which(candidate)):
+    seen = set()
+    for found in (shutil.which("python3"), sys.executable):
+        if not found:
             continue
-        problem = launcher_problem(candidate)
-        if problem is None:
-            return candidate, rejected
-        rejected.append(problem)
+        for candidate in base_interpreters(os.path.abspath(found)):
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            problem = exec_spawn_problem(candidate) or launcher_problem(candidate)
+            if problem is None:
+                return candidate, rejected
+            rejected.append(problem)
     return None, rejected
 
 
-def registered_launcher(command, path):
-    """The interpreter a registration names in front of the hook at `path`, or None where it names none.
+def registered_launcher(hook, path):
+    """The interpreter registration entry `hook` names in front of the hook at `path`, or None where it names none.
 
-    Read only from the `<launcher> <path>` shape this installer writes and a hand edit keeps.
-    Any other shape is not run, since what it executes is not decidable from the string.
+    An exec-form entry is read from `command` and `args` directly, with no split, since no shell
+    splits them when Claude Code spawns it. Its launcher is `command` exactly as written, a UNC
+    path or one holding spaces included. `~` and `$HOME` are not expanded, since nothing expands
+    them there. It names a launcher only in the `args` = `[<path>]` shape this installer writes.
+    A shell-form entry is one an older install or a hand edit left.
+    It is read from the `<launcher> <path>` shape that install wrote, split as POSIX `sh` and Git Bash split it.
+    Any other shape is not run, since what it executes is not decidable from the entry.
     """
+    if exec_form(hook):
+        return hook["command"] if runs_hook(hook, path) else None
     try:
-        words = shlex.split(str(command))
+        words = shlex.split(str(hook.get("command")))
     except ValueError:
         return None
-    if len(words) != 2 or not runs_hook(words[1], path):
+    if len(words) != 2 or not shell_runs_hook(words[1], path):
         return None
     return os.path.expandvars(os.path.expanduser(words[0]))
 
@@ -1419,22 +1570,27 @@ def registration_problems(claude_home):
             if not isinstance(group, dict):
                 continue
             for hook in group.get("hooks") or []:
-                if not isinstance(hook, dict) or not names_hook(hook.get("command", ""), name):
+                if not isinstance(hook, dict) or not names_hook(hook, name):
                     continue
                 named += 1
-                if not runs_hook(hook.get("command"), path) or hook.get("type") != "command":
+                if not runs_hook(hook, path) or hook.get("type") != "command":
+                    spelled = repr(hook.get("command"))
+                    if exec_form(hook):
+                        spelled += f" with args {hook['args']!r}"
                     out.append(
                         f"a {event} entry names the {label} but does not run the deployed one "
-                        f"({hook.get('type')!r} running {hook.get('command')!r})"
+                        f"({hook.get('type')!r} running {spelled})"
                     )
                     continue
-                launcher = registered_launcher(hook.get("command"), path)
-                if launcher is not None and launcher not in probed:
-                    probed[launcher] = launcher_problem(launcher)
-                if launcher is not None and probed[launcher]:
+                launcher = registered_launcher(hook, path)
+                key = (launcher, exec_form(hook))
+                if launcher is not None and key not in probed:
+                    spawn = exec_spawn_problem(launcher) if key[1] else None
+                    probed[key] = spawn or launcher_problem(launcher)
+                if launcher is not None and probed[key]:
                     out.append(
                         f"a {event} entry names a launcher that cannot run the {label} "
-                        f"({probed[launcher]}), so the {label} never runs"
+                        f"({probed[key]}), so the {label} never runs"
                     )
                     continue
                 if judge(group, hook):
@@ -1985,7 +2141,6 @@ def run() -> int:
         raise
 
     # 2. Register the hook command in settings.json under exactly one PreToolUse/Bash group.
-    # Quote the launcher too: the sys.executable fallback can contain spaces (e.g. C:\Program Files\...).
     hook_cmd = hook_command(launcher, hook_dst)
     # Read into a variable rather than twice off disk, once to test for content and once to parse.
     # Two reads can also disagree, since another process may write between them.
@@ -2071,7 +2226,7 @@ def run() -> int:
     register_hook(
         pre,
         GUARD_NAME,
-        {"type": "command", "command": hook_cmd},
+        {"type": "command", **hook_cmd},
         lambda g: g.get("matcher") == "Bash",
         "Bash",
     )
@@ -2081,7 +2236,7 @@ def run() -> int:
     register_hook(
         pre,
         TIER_NAME,
-        {"type": "command", "command": hook_command(launcher, tier_dst)},
+        {"type": "command", **hook_command(launcher, tier_dst)},
         lambda g: g.get("matcher") == TIER_MATCHER,
         TIER_MATCHER,
     )
@@ -2095,7 +2250,7 @@ def run() -> int:
         SWEEP_NAME,
         {
             "type": "command",
-            "command": hook_command(launcher, sweep_dst),
+            **hook_command(launcher, sweep_dst),
             "timeout": SWEEP_TIMEOUT_SECONDS,
         },
         lambda g: matcher_covers_every_exit_reason(g.get("matcher")),
@@ -2269,7 +2424,8 @@ def run() -> int:
     print(f"  {stamp_line(stamp)}")
     print("\nRe-check at any time, from a fresh hub checkout, without changing anything:")
     install_path = HERE / "install.py"
-    print(f'  {launcher} "{install_path}" --report')
+    call = "& " if os.name == "nt" else ""
+    print(f'  {call}"{launcher}" "{install_path}" --report')
     print("Restart Claude Code sessions on this machine so the hook and CLAUDE.md load.")
     return 0
 

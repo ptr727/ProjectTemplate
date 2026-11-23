@@ -257,7 +257,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
      in it item 3's outcome: fixed with its SHA, declined with evidence, or listed as pre-existing
      in the pull request body.
    - Post the outcomes with
-     `uv run --no-project --script scripts/pr_review.py comment <number> --repo <owner>/<repo> --fingerprint <fp> --body <outcomes>`. One from an owner, member, or collaborator clears the hold,
+     `uv run --no-project --script scripts/pr_review.py comment "<number>" --repo "<owner>/<repo>" --fingerprint "<fp>" --body "<outcomes>"`. One from an owner, member, or collaborator clears the hold,
      `shapes=ACKNOWLEDGED`. New unplaced text on a new head owes a new acknowledgment.
    - The spelling is a data edit to the matching `scripts/reviewers/*.json` in the hub plus one
      fixture. Whoever acknowledged the part makes it in a pull request of its own, never an issue.
@@ -299,9 +299,12 @@ must have done.
   since an advisory reviewer blocks nothing.
 - **Silence is not evidence, and is never read as one on its own.** A reviewer that has posted
   nothing may not have started yet, or may not cover this repository at all. Or it may have
-  reviewed and had nothing to say. That case posts no comment to read, and Merge Gate item 2
-  describes it as its own ordinary shape. Read the reviews themselves rather than the comments alone, since the third
-  case appears only there.
+  reviewed and had nothing to say. That case opens no thread, and where it leaves its record
+  differs by reviewer. It can be a review with an empty body, the shape Merge Gate item 2 calls
+  ordinary. A CodeRabbit clean pass can leave no review object at all. It then shows only in
+  CodeRabbit's summary comment, as a line saying no actionable comments were generated. That line
+  counts only where the commit range the summary's review details print ends at the current head.
+  So read the reviews and the comments both, since either can hold the third case.
 - **Copilot's absence blocks where no local pass stands in, and is answered elsewhere.**
   Merge Gate item 2 requires Copilot's own coverage of the current head. Where the review policy
   hands the head to a local pass, by default off the default branch, an attested local pass stands
@@ -338,7 +341,7 @@ On Claude Code, the host-safety installer's allow rule runs a `scripts/pr_review
 the auto-mode classifier only where the call matches the rule's text. So run each such command as a
 call of its own, spelled exactly as the skill prints it. That holds for every
 `scripts/pr_review.py` call a fleet skill prints, in this skill or another. Where the hub checkout sits inside the session's working
-directories, a `cd <hub-checkout> &&` prefix keeps the match. A `cd` elsewhere may not. A leading
+directories, a `cd "<hub-checkout>" &&` prefix keeps the match. A `cd` elsewhere may not. A leading
 variable assignment leaves the rule unmatched unless Claude Code counts that variable as known-safe.
 So does a flag between `uv run` and the script, or a script named by an absolute path or a shell
 variable. The classifier then judges the call, and its default rules refuse a merge no human has
@@ -355,12 +358,12 @@ write above.
 Run `local-strict-review` against the branch's current diff before every push this loop makes. The pass is owed before the push that opens the pull request in step 1 and each one after it. It is owed whatever finding a push answers and whether or not the branch was reviewed once already. A push that delivers content no pass has read is the case the rule is about. So a re-push of a tree a recorded pass already covers needs no second pass. That is because the receipt is keyed on the branch's net content rather than on its commit series. A rebase that leaves the tree alone keeps the receipt only while the merge base holds. Rebasing onto a target that has moved retires the receipt although no file changed. That push owes a pass like any other. Follow that skill's own ordering and record each pass, which is what a capture point reads. The hub's own `pre-push` hook is one, and a repository has none until such a hook is carried to it. A push that hook refuses, where one is present, is the gate working rather than an obstacle to route around. That skill's refusal table says what each refusal means and what clears it.
 
 1. Push changes to the PR branch and open the pull request when it does not exist. Once the push
-   lands, run `uv run --no-project --script scripts/pr_review.py attest <number> --repo <owner>/<repo> --checkout <worktree>`.
+   lands, run `uv run --no-project --script scripts/pr_review.py attest "<number>" --repo "<owner>/<repo>" --checkout "<worktree>"`.
    `attest` refuses unless the checkout is the pushed head and a recorded pass covers that head.
    Attest after every push a recorded pass covers, the opening push included. The comment `attest`
    posts is the record Merge Gate item 2's promotion case reads, since the receipt goes when its
    worktree does.
-2. Run `uv run --no-project --script scripts/pr_review.py status <number> --repo <owner>/<repo>` once in the foreground and read its output.
+2. Run `uv run --no-project --script scripts/pr_review.py status "<number>" --repo "<owner>/<repo>"` once in the foreground and read its output.
 3. Send each request the repository's review policy asks for, which step 4's `wait` is what does.
    Under the hub's default that is one Copilot round, on the head of a pull request into the default
    branch. A promotion is one such pull request. Auto-trigger is unreliable, so `wait` fills a
@@ -374,7 +377,7 @@ Run `local-strict-review` against the branch's current diff before every push th
    the request set. Something in the request set is the condition the recovery below clears. An error refusal whose run log reads transient is
    the exception, owed one re-request per Merge Gate item 2. Requesting in the pull request UI is
    the maintainer's route rather than this loop's.
-4. Run a bounded `uv run --no-project --script scripts/pr_review.py wait <number> --repo <owner>/<repo>` in a background process and read its terminal output.
+4. Run a bounded `uv run --no-project --script scripts/pr_review.py wait "<number>" --repo "<owner>/<repo>"` in a background process and read its terminal output.
    A completed review raising **no findings** is a valid terminal outcome, so do not re-trigger it
    or read silence as a missing review. A review whose body says it declined to review is the one
    exception, and it is terminal the other way. Nothing follows it, and re-requesting the same
@@ -396,7 +399,7 @@ is not a stopping condition here, and neither is patience running out. Reporting
 PR was opened is an early exit unless the maintainer explicitly instructed the agent not to
 monitor or drive its review.
 
-After an authorized merge, run the `repo-worktree` post-merge cleanup procedure unless the user explicitly asks to retain the checkout or branch. For a merge into `develop` that procedure is `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`, run from a hub checkout. The pull request loop is incomplete while its finished worktree or local task branch remains. A conflicted promotion's branch merged into `main` takes the same command, run on the promotion pull request. The loop is also incomplete until the base clone returns to fetched and fast-forwarded `develop`.
+After an authorized merge, run the `repo-worktree` post-merge cleanup procedure unless the user explicitly asks to retain the checkout or branch. For a merge into `develop` that procedure is `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`, run from a hub checkout. The pull request loop is incomplete while its finished worktree or local task branch remains. A conflicted promotion's branch merged into `main` takes the same command, run on the promotion pull request. The loop is also incomplete until the base clone returns to fetched and fast-forwarded `develop`.
 
 ## Every finding ends in a listed outcome
 
@@ -582,7 +585,7 @@ item 4's lead bullet covers takes no `--ack` until the maintainer answers, per M
 collaborator. Code checks that each item carries an outcome, never that the outcome is right,
 which stays this section's.
 **Read every round, not only the head.** A suppressed finding does not retire when a later push
-supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `uv run --no-project --script scripts/pr_review.py comment <number> --repo <owner>/<repo> --ack <key>=<outcome> --body <text>`
+supersedes it, it just stops showing up in a head-scoped query while still unanswered. Post the answer with `uv run --no-project --script scripts/pr_review.py comment "<number>" --repo "<owner>/<repo>" --ack "<key>=<outcome>" --body "<text>"`
 from a hub checkout. Do not use a provider connector or reconstruct the GitHub mutation.
 
 ## Escalate to the maintainer when

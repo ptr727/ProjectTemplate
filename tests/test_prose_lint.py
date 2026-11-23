@@ -4393,6 +4393,174 @@ class TestIssueRefRule(unittest.TestCase):
         self.assertEqual(set(prose_lint.INSTRUCTION_DOCS), named)
 
 
+class TestPasteSafeRule(BaitCase):
+    """The `paste-safe` rule on a Markdown command a reader copies and runs."""
+
+    def hits(self, text: str) -> list[tuple[int, str]]:
+        path = self.tmp / "bait.md"
+        path.write_text(text, encoding="utf-8")
+        return [(n, message) for n, _, message in prose_lint.check_file(path, {"paste-safe"})]
+
+    def lines(self, text: str) -> list[int]:
+        return [n for n, _ in self.hits(text)]
+
+    def test_each_shape_in_a_command_span_is_a_finding(self) -> None:
+        for span, token in (
+            ("gh pr view <number>", "<number>"),
+            ("spec/audit.py [RepoName]", "[RepoName]"),
+            ("spec/audit.py [RepoName ...]", "[RepoName ...]"),
+            (
+                "repo-config/configure.sh check owner/repo release|operational",
+                "release|operational",
+            ),
+            ("git push origin <sha>:refs/heads/<branch>", "<sha>"),
+            ("prose_lint.py --diff-commit -- <staged paths>", "<staged paths>"),
+            ("gh repo clone <owner/repo>", "<owner/repo>"),
+            ("uvx <tool@ver>", "<tool@ver>"),
+        ):
+            with self.subTest(span=span):
+                found = self.hits(f"Run `{span}` here.\n")
+                self.assertTrue(found, span)
+                self.assertIn(repr(token), found[0][1])
+
+    def test_a_bracketed_flag_is_told_to_leave_the_command(self) -> None:
+        found = self.hits("Run `gh pr view 1 [--json]` here.\n")
+        self.assertEqual(1, len(found))
+        self.assertIn("optional flag '[--json]'", found[0][1])
+        self.assertNotIn('"<--json>"', found[0][1])
+
+    def test_the_paste_safe_forms_pass(self) -> None:
+        for span in (
+            'repo-config/configure.sh check "<owner>/<repo>" release',
+            "git branch -d '<exact-branch>'",
+            'git -C "<worktree>" status --porcelain',
+            "grep -E 'a|b' file.txt",
+            "git log --oneline | head -5",
+            "cat < in.txt > out.txt",
+            'TASK_ORIGIN="$(git -C "<base-clone>" remote get-url origin)"',
+            "echo ${list[RepoName]}",
+            "test -f x && [ -n y ] && [[ -z z ]]",
+            "pip install -e .[dev]",
+            "git push origin main  # then open <pr>",
+            "cat <in.txt >out.txt",
+            "jq . <in.json 2>/dev/null",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual([], self.hits(f"Run `{span}` here.\n"))
+
+    def test_a_span_opening_with_no_command_is_not_read(self) -> None:
+        for span in (
+            "Bash(git -C <worktree>:*)",
+            "<owner>/<repo>",
+            "~/repos/<Repo>",
+            "[RepoName]",
+            "test_<module>.py",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual([], self.hits(f"Name `{span}` here.\n"))
+
+    def test_a_script_given_an_argument_opens_a_command(self) -> None:
+        self.assertEqual(1, len(self.hits("Run `scripts/check.py <target>` here.\n")))
+
+    def test_each_literal_form_is_read_by_the_scanner(self) -> None:
+        """Each pass above has a twin that fails, so none passes by going unread."""
+        for span in (
+            'TASK_ORIGIN="$(git -C <base-clone> remote get-url origin)"',
+            "echo ${list[RepoName]} [RepoName]",
+            "test -f x && [ -n y ] && [[ -z <z> ]]",
+            "git log 'quoted' <bare>",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual(1, len(self.hits(f"Run `{span}` here.\n")))
+
+    def test_a_heredoc_body_is_literal_and_its_opening_line_is_code(self) -> None:
+        for opener in ("<<\\EOF", "<<'EOF'", "<<EOF", "<<-EOF"):
+            with self.subTest(opener=opener):
+                text = f"```sh\ncat {opener} > <out>\n<body>\nEOF\n```\n"
+                self.assertEqual([2], self.lines(text))
+
+    def test_a_prompt_and_an_assignment_still_open_a_command(self) -> None:
+        for span in ("$ git fetch origin <target>", "GH_PAGER= gh pr view <number>"):
+            with self.subTest(span=span):
+                self.assertEqual(1, len(self.hits(f"Run `{span}` here.\n")))
+
+    def test_a_shell_fence_is_read_a_line_at_a_time(self) -> None:
+        text = (
+            "Intro.\n\n```sh\n"
+            "# A comment naming <placeholder> is not run.\n"
+            "git fetch origin develop  # nor is <this>\n"
+            "cat <<'EOF' > out.txt\n"
+            "<body> stays literal\n"
+            "EOF\n"
+            'git -C "<clone>" log\n'
+            "uv run --no-project --script spec/audit.py [RepoName]\n"
+            "```\n"
+        )
+        self.assertEqual([10], self.lines(text))
+
+    def test_a_shell_pattern_in_a_fence_is_no_placeholder(self) -> None:
+        text = (
+            "```sh\n"
+            'case "$1" in\n'
+            "  start|stop) run ;;\n"
+            "  [Yy]*) yes ;;\n"
+            "  [Nn]|[Nn][Oo]) no ;;\n"
+            "  [Mm]aybe) later ;;\n"
+            "esac\n"
+            "[[ $x =~ ^[A-Za-z]+$ ]] && echo ok\n"
+            "```\n"
+        )
+        self.assertEqual([], self.lines(text))
+
+    def test_a_regex_operand_is_no_placeholder_but_a_real_one_still_is(self) -> None:
+        text = "```sh\n[[ $x =~ [A-Za-z] ]] && echo ok\ngit fetch origin <ref>\n```\n"
+        self.assertEqual([3], self.lines(text))
+        self.assertEqual([2], self.lines("```sh\n[[ $x =~ <pattern> ]] && echo ok\n```\n"))
+
+    def test_an_equals_tilde_outside_a_conditional_is_no_regex(self) -> None:
+        self.assertEqual([2], self.lines("```sh\necho x =~ [RepoName]\n```\n"))
+
+    def test_a_quoted_assignment_with_spaces_still_opens_a_command(self) -> None:
+        for span in (
+            'LABEL="two words" git fetch origin <ref>',
+            "A='x y' B= git fetch <ref>",
+            "LABEL=two\\ words git fetch origin <ref>",
+            'VERSION="$(./scripts/version.sh <ref>)"',
+        ):
+            with self.subTest(span=span):
+                self.assertEqual([1], self.lines(f"Run `{span}` here.\n"))
+
+    def test_a_fence_in_another_language_is_not_read(self) -> None:
+        for lang in ("text", "yaml", ""):
+            with self.subTest(lang=lang):
+                self.assertEqual([], self.hits(f"```{lang}\n~/repos/<Repo>\n```\n"))
+
+    def test_a_powershell_fence_keeps_its_type_literals(self) -> None:
+        text = "```powershell\n[Environment]::GetFolderPath('UserProfile')\ngit fetch origin <ref>\n```\n"
+        self.assertEqual([3], self.lines(text))
+
+    def test_a_table_cell_reads_its_escaped_pipe_as_a_pipe(self) -> None:
+        text = "| Step | Command |\n| --- | --- |\n| one | `configure.sh apply o/r release\\|operational` |\n"
+        found = self.hits(text)
+        self.assertEqual([3], [n for n, _ in found])
+        self.assertIn("'release|operational'", found[0][1])
+
+    def test_a_wrapped_span_reports_the_line_holding_the_placeholder(self) -> None:
+        self.assertEqual([2], self.lines("Run `gh pr view\n<number> --json state` now.\n"))
+
+    def test_an_alternation_inside_a_placeholder_is_one_finding(self) -> None:
+        self.assertEqual(1, len(self.hits("Run `configure.sh check o/r <release|operational>`.\n")))
+
+    def test_the_rule_gates_by_default(self) -> None:
+        """CI passes no `--check`, so only a default rule reaches a pull request."""
+        self.assertIn("paste-safe", prose_lint.DEFAULT_RULES)
+
+    def test_a_code_file_is_not_read(self) -> None:
+        path = self.tmp / "a.py"
+        path.write_text("# Run `gh pr view <number>` here.\nx = 1\n", encoding="utf-8")
+        self.assertEqual([], prose_lint.check_file(path, {"paste-safe"}))
+
+
 class TestLexerDispatch(BaitCase):
     """Which lexer a file reads through, and the language data each lexer maps to."""
 
