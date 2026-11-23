@@ -735,12 +735,16 @@ apply_secrets() { # secrets-dir
 
 # ----- Interaction limit (written on a public repo only, shared by apply and check) -----
 # GitHub answers a private repo's interaction-limits read with an error, so a caller reads the visibility first and calls this on a public repo only.
-# It prints the live limit as one JSON object, which is {} when none is in force.
+# It prints the live limit as one JSON object, which is {} when none is in force, an empty body included.
 # It fails on a read error or a body of any other shape.
 interaction_limits() {
     local live
     if ! live="$(gh api "repos/$repo/interaction-limits")"; then
         return 1
+    fi
+    # GitHub answers an unrestricted repo with an empty body, which means no limit is in force.
+    if [ -z "${live//[[:space:]]/}" ]; then
+        live='{}'
     fi
     if ! jq_has -s 'length == 1 and (.[0] | type == "object")' <<<"$live"; then
         return 1
