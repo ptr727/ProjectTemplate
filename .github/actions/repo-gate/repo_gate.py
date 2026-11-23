@@ -1052,10 +1052,10 @@ def check_workflow_inputs(root: Path, files: list[str]) -> list[str]:
     A call is a job-level `uses:` naming a workflow by its full `owner/repo` path. A call of the
     scanned repository's own workflow can take that form too. A local `./` call is left to
     actionlint, which reads that callee itself. A self-repository `$/` call is not read either. Its
-    callee is read at the calling workflow's own commit, so no pin bump moves it. Reading is scoped to the scanned repository's owner, as sha-pin's
-    resolution is and for the same reason. A callee GitHub did not answer for is counted rather
-    than failed. A floating ref is sha-pin's finding, so it is counted and not read here. A file naming no such
-    call is never parsed.
+    callee is read at the calling workflow's own commit, so no pin bump moves it. Reading is scoped
+    to the scanned repository's owner, as sha-pin's resolution is and for the same reason. A callee
+    GitHub did not answer for is counted rather than failed. A floating ref is sha-pin's finding, so
+    it is counted and not read here. A file naming no such call is never parsed.
     """
     scan = CallScan(origin_owner(root))
     bad: list[str] = []
