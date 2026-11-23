@@ -4566,6 +4566,46 @@ class TestPasteSafeRule(BaitCase):
     def test_an_alternation_inside_a_placeholder_is_one_finding(self) -> None:
         self.assertEqual(1, len(self.hits("Run `configure.sh check o/r <release|operational>`.\n")))
 
+    def test_a_placeholder_in_a_string_a_second_shell_runs_is_a_finding(self) -> None:
+        """The first shell takes the string literally, and the second reads it as a command."""
+        for span, token, shell in (
+            ("su -l root -c 'usermod -aG sudo <account>'", "<account>", "su"),
+            ("su --command='id <account>' root", "<account>", "su"),
+            ("runuser -l app -c 'ls [RepoName]'", "[RepoName]", "runuser"),
+            ("sudo sh -c 'echo on > <file>'", "<file>", "sh"),
+            ('bash -c "ls <dir>"', "<dir>", "bash"),
+            ("bash -o pipefail -ec 'deploy release|operational'", "release|operational", "bash"),
+            ("ssh -p 22 '<host>' 'rm <path>'", "<path>", "ssh"),
+            ("ssh '<host>' -t 'ls' '<dir>'", "<dir>", "ssh"),
+            ("ssh '<host>' 'sudo sh -c \"id <account>\"'", "<account>", "sh"),
+        ):
+            with self.subTest(span=span):
+                found = self.hits(f"Run `{span}` here.\n")
+                self.assertEqual(1, len(found), found)
+                self.assertIn(repr(token), found[0][1])
+                self.assertIn(f"the string {shell!r} hands a second shell", found[0][1])
+
+    def test_a_placeholder_quoted_for_the_second_shell_passes(self) -> None:
+        for span in (
+            "su -l root -c 'usermod -aG sudo \"<account>\"'",
+            'bash -c "ls \\"<dir>\\""',
+            "ssh -i '<key>' '<host>'",
+            "ssh -p 22 '<host>' 'ls' > '<out>'",
+            "bash -c 'echo \"$1\"' _ '<arg>'",
+            "bash --rcfile '<file>' -c 'ls'",
+            "su -s '<shell>' -c 'id' root",
+            "sudo chsh -s /bin/bash '<account>'",
+            "sh -c \"run $(cat '<file>')\"",
+            "timeout 600 bash -c 'for n in 1 2; do sleep \"$n\"; done'",
+            "git commit -m 'run bash -c <x>'",
+        ):
+            with self.subTest(span=span):
+                self.assertEqual([], self.hits(f"Run `{span}` here.\n"))
+
+    def test_a_second_shell_string_ends_with_its_command(self) -> None:
+        text = "```sh\nssh '<host>'\necho '<not run remotely>'\nbash -c \\\n  'cat <file>'\n```\n"
+        self.assertEqual([5], self.lines(text))
+
     def test_the_rule_gates_by_default(self) -> None:
         """CI passes no `--check`, so only a default rule reaches a pull request."""
         self.assertIn("paste-safe", prose_lint.DEFAULT_RULES)
