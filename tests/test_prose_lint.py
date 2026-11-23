@@ -4517,6 +4517,11 @@ class TestPasteSafeRule(BaitCase):
         self.assertEqual([3], self.lines(text))
         self.assertEqual([2], self.lines("```sh\n[[ $x =~ <pattern> ]] && echo ok\n```\n"))
 
+    def test_a_glob_operand_of_a_conditional_is_no_placeholder(self) -> None:
+        for op in ("==", "=", "!="):
+            text = f"```sh\n[[ $answer {op} [Yy] ]] && echo ok\ngit fetch origin <ref>\n```\n"
+            self.assertEqual([3], self.lines(text), op)
+
     def test_an_equals_tilde_outside_a_conditional_is_no_regex(self) -> None:
         self.assertEqual([2], self.lines("```sh\necho x =~ [RepoName]\n```\n"))
 
