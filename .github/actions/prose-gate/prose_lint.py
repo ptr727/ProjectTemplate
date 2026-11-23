@@ -1672,7 +1672,7 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
 
 
 PASTE_SHAPES = {
-    "angle": re.compile(r"(?<!<)<[A-Za-z][\w.|-]*(?: [\w.|-]+)*>"),
+    "angle": re.compile(r"(?<!<)<[A-Za-z][\w.|/:@-]*(?: [A-Za-z][\w.|/:@-]*)*>"),
     "bracket": re.compile(r"(?<![\w.\[\]$}^])\[([A-Za-z][\w./-]*)(?: \.\.\.)?\](?![*?+)])"),
     "alternation": re.compile(r"(?<![\w.|-])[\w.-]+(?:\|[\w.-]+)+(?![\w.|)-])"),
 }

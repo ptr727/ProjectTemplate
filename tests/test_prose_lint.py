@@ -4415,6 +4415,8 @@ class TestPasteSafeRule(BaitCase):
             ),
             ("git push origin <sha>:refs/heads/<branch>", "<sha>"),
             ("prose_lint.py --diff-commit -- <staged paths>", "<staged paths>"),
+            ("gh repo clone <owner/repo>", "<owner/repo>"),
+            ("uvx <tool@ver>", "<tool@ver>"),
         ):
             with self.subTest(span=span):
                 found = self.hits(f"Run `{span}` here.\n")
@@ -4435,6 +4437,7 @@ class TestPasteSafeRule(BaitCase):
             "pip install -e .[dev]",
             "git push origin main  # then open <pr>",
             "cat <in.txt >out.txt",
+            "jq . <in.json 2>/dev/null",
         ):
             with self.subTest(span=span):
                 self.assertEqual([], self.hits(f"Run `{span}` here.\n"))
