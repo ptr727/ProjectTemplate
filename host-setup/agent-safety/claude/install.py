@@ -606,7 +606,7 @@ def prefix_runs_directly(prefix):
     Claude Code runs the file itself, through its `env python3` shebang, for every Bash tool call and
     every shell-form hook. The kit's own hooks are exec form, which Claude Code spawns without the
     prefix. So a broken prefix does not reach the write guard. It does reach a shell-form PreToolUse
-    hook the host keeps of its own. A failure there is a non-blocking error that lets the call go ahead.
+    hook of the host's own. A failure there is a non-blocking error that lets the call go ahead.
     A prefix can fail to run that way from a missing `python3`, a lost execute bit, or a `noexec` mount.
     """
     try:

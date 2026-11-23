@@ -10,7 +10,7 @@ The last is there so a runaway at the memory ceiling is killed rather than spill
 The file then runs the string under a shell inside the scope.
 
 Everything else runs under its shell directly, with no scope.
-A shell-form PreToolUse hook the host keeps of its own runs through this file, and one that exits 1 is a non-blocking error.
+A shell-form PreToolUse hook of the host's own runs through this file, and one that exits 1 is a non-blocking error.
 A scope that failed to start would therefore let the very command such a hook denies go ahead.
 An MCP server is long-lived and started outside any session.
 A scope would therefore bound it for its whole life and outlive the session that named it.
