@@ -78,8 +78,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `coverage=none` and `coverage=UNKNOWN` leave this item unsatisfied and decide no exit code,
    so read the field rather than the exit.
    The coverage this item requires is Copilot's, the attested local pass above, or that green
-   Dependabot reading. CodeRabbit and Qodo are advisory outside the one bounded case below where
-   a refusal keeps Copilot off the head. That is because the hub's `docs/pr-reviewer-evaluation.md` "Status"
+   Dependabot reading, and CodeRabbit and Qodo are advisory. That is because the hub's `docs/pr-reviewer-evaluation.md` "Status"
    names Copilot the incumbent and says no candidate is a required reviewer. An advisory
    reviewer's absence blocks nothing, while its findings owe item 3 exactly as Copilot's do.
    A review of the head it has started and not finished is not an absence. While a CodeRabbit
@@ -123,16 +122,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    `refusal=` in the digest line instead. So reading `status`'s exit code as the absence of a
    refusal would falsely satisfy this item on the exact state it exists to catch. That is where
    the unsatisfied item goes to the maintainer. The coverage the other reviewers gave that head is
-   read rather than counted, and named to the maintainer. There a CodeRabbit or Qodo round's full
-   coverage of the head satisfies this item only where the unreviewed delta is bounded. That is the
-   delta since Copilot's last round that reviewed rather than refused. It has to be prose, or the
-   fix for a finding that covering reviewer raised. A delta holding anything else, such as new
-   code, a workflow condition, or a changed contract, owes a covering review. `pr_review.py` does
-   not tell those two shapes apart, so name the one the delta is. A reviewer skipped for quota can
-   still report its status check as `success`, with a description saying it is rate limited. That
-   check row is not a review, so read the round the reviewer posted, and `review_on_head` for
-   Copilot's, rather than the check. The maintainer's permission under item 5 is what allows the
-   merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
+   read rather than counted, and named to the maintainer. The maintainer's permission under item 5
+   is what allows the merge. Item 2 is never waived, and a merge over an unsatisfied one is theirs to authorize.
 
    One further case satisfies this item where no coverage reaches the head, and it is the only
    such case. The maintainer adopted it as a standing rule. It applies to a develop -> main
