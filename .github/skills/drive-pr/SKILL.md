@@ -184,7 +184,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    command themselves. Once the merge is
    confirmed, `--cleanup` runs repo-worktree's post-merge cleanup,
    `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`,
-   and its exit is the command's. It deletes the remote branch, then removes the task's worktree and local branch.
+   and its exit is the command's. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. It deletes the remote branch, then removes the task's worktree and local branch.
    It decides its local refusals before the remote delete. `repo-worktree` "Listing and
    Cleanup" says what a refusal after the remote delete and a `base=kept` line each leave to do.
    It takes the pull request rather than a branch name and does the verify-then-delete in

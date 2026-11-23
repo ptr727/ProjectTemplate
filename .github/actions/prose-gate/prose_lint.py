@@ -1717,8 +1717,8 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
 
     Each command is a code span opening with a command or a shell fence's content. Each finding is
     reported on the line holding the placeholder. A string handed to a second shell, as `sh -c`
-    takes one, is read as the quotation it is to the first. A `case` arm's pattern and the bracket
-    and the pattern or regex operand of a `[[ ]]` test are the shell's own syntax, not placeholders.
+    takes one, is read as the quotation it is to the first. A `case` arm's pattern is the shell's own syntax, and so is a `[[ ]]` operand.
+    A `=~` operand may hold a bracket or an alternation, and a glob operand a bracket only.
     """
     out: list[Finding] = []
     for line in unit.lines:
