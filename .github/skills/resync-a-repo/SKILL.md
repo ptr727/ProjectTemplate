@@ -103,7 +103,7 @@ section 3 describes.
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo), then `apply` for what it reports, never from a carried copy. Both run from
    the hub checkout this run fetched, at `main` or at `develop` for a registry entry not yet
-   promoted. Before the first `apply` that sets a public-interaction limit, `RESYNC.md` step 5 owes two checks. Run `uv run --no-project --script spec/audit.py "<RepoName>"` from the same checkout for secrets.
+   promoted. Before the first `apply` that sets a public-interaction limit, `RESYNC.md` step 5 owes its checks. Run `uv run --no-project --script spec/audit.py "<RepoName>"` from the same checkout for secrets.
 6. **Intent files last, and by hand,** since nothing mechanical judges these.
 
 Reconcile the registry entry (`status`, `types`, `releaseTrigger`, `workflowModel`,
