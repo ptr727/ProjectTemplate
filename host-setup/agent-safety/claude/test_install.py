@@ -2354,6 +2354,12 @@ class TestRegistration(StampCase):
             hook = {"command": command, "args": ["/old/hooks/gh-write-guard.py"]}
             with self.subTest(interpreter=command):
                 self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
+        for args in (["gh-write-guard.py"], ["/old/hooks/gh-write-guard.py", "--x"]):
+            for command in ("python3", "python3.13t.exe", "pypy3", "py"):
+                hook = {"command": command, "args": args}
+                self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
+        nameless = {"args": ["/old/hooks/gh-write-guard.py"]}
+        self.assertTrue(install.names_hook(nameless, install.GUARD_NAME), nameless)
         own = {"command": "/opt/graalpy/bin/graalpy", "args": ["/old/hooks/gh-write-guard.py"]}
         self.assertTrue(install.names_hook(own, install.GUARD_NAME), own)
         relative = {

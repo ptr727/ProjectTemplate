@@ -202,15 +202,15 @@ def names_hook(hook, name):
     So the entry is named when that file has `name` as its own file name.
     It is also named when the word after a `-c` names it the way `shell_names_hook` reads a whole command,
     where `command` is a shell. That is the script string an exec-form `bash -c` carries.
+    An entry whose only argument is a path to such a file is the form this installer writes, so it is named under any launcher.
     Any other argument is plain text, and so is every argument of another command.
-    So `echo gh-write-guard.py`, or a label or a URL mentioning `name`, does not claim the host's hook.
+    So `echo gh-write-guard.py`, or a label mentioning `name`, does not claim the host's hook.
     """
     if not exec_form(hook):
         return shell_names_hook(hook.get("command", ""), name)
     command = hook.get("command")
+    command = command if isinstance(command, str) else ""
     args = [a for a in hook["args"] if isinstance(a, str)] if isinstance(hook["args"], list) else []
-    if not isinstance(command, str):
-        return False
     if file_name(command) == name:
         return True
     own_form = len(args) == 1 and bool(PATH_SEPARATOR.search(args[0]))
