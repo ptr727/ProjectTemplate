@@ -124,8 +124,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    promotion in step 6. `wait` sends each request the repository's review policy asks for, so
    the drive never asks whether a reviewer starts on its own.
 4. Merge the feature PR into
-   develop with `uv run --no-project --script scripts/pr_review.py merge "<number>" --repo "<owner>/<repo>" --cleanup --checkout "<base-clone>"`,
-   run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
+   develop with `uv run --no-project --script scripts/pr_review.py merge "<number>" --repo "<owner>/<repo>" --cleanup --checkout ~/repos/"<Repo>"`,
+   run from a hub checkout outside the task's worktree, `~/repos/<Repo>` being the repository's
    primary clone. Spell every `scripts/pr_review.py` call this skill prints as `pr-review-conduct`
    "Expected review loop" says. `merge` reads the Merge Gate's mechanically readable items in code, through `wait`'s
    own decision and a fresh read after it. It merges nothing while one reads unmet. The items no
@@ -183,7 +183,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    inside the session's working directories or a writable uv cache. The last is running the
    command themselves. Once the merge is
    confirmed, `--cleanup` runs repo-worktree's post-merge cleanup,
-   `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout "<base-clone>"`,
+   `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`,
    and its exit is the command's. It deletes the remote branch, then removes the task's worktree and local branch.
    It decides its local refusals before the remote delete. `repo-worktree` "Listing and
    Cleanup" says what a refusal after the remote delete and a `base=kept` line each leave to do.

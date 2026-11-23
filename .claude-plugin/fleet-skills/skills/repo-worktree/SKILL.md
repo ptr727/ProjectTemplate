@@ -141,7 +141,7 @@ and again in the handoff. Do not present work there as ordinarily reviewable fro
 workspace.
 
 ```sh
-TASK_ORIGIN="$(git -C "<base-clone>" remote get-url origin)"
+TASK_ORIGIN="$(git -C ~/repos/"<Repo>" remote get-url origin)"
 git clone --no-checkout "$TASK_ORIGIN" "<temporary-root>/<Repo>-<task-slug>"
 git -C "<temporary-root>/<Repo>-<task-slug>" fetch origin develop
 git -C "<temporary-root>/<Repo>-<task-slug>" switch -c "<task-branch>" origin/develop
@@ -253,8 +253,8 @@ since git then runs whatever that directory holds, and nothing where it holds no
   helper worktree needs no pull request, but its commit must be contained in the branch whose
   completed operation created it.
 - **A pull request merged into `develop` is cleaned up by one command.** Run
-  `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout "<base-clone>"`
-  from a hub checkout outside the worktree it removes, `<base-clone>` being the repository's
+  `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`
+  from a hub checkout outside the worktree it removes, `~/repos/<Repo>` being the repository's
   primary clone. It reads the branch from the pull request and deletes the remote branch. It then
   removes every worktree holding the branch without force, deletes the local branch, and
   fast-forwards the base clone's `develop`. Its local refusals are decided before the remote delete. So a dirty worktree, an operation in progress, or a local tip the merge did not carry
@@ -283,7 +283,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   release does not leave the base clone on `main`. Stop and report a dirty base clone or a
   non-fast-forward instead of switching or reconciling it.
 - **What an interrupted or abandoned session left behind is swept.** Run
-  `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo "<owner>/<repo>" --checkout "<base-clone>"`
+  `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`
   from a hub checkout. It fetches and prunes `origin` and writes nothing else. It reports each worktree and branch that is clean, idle past `--min-age-hours` (default 24), and provably
   finished. Adding `--apply` removes what the report lists through the same checks, the remote
   branch of a merged `develop` pull request included. The report reaches other sessions' finished

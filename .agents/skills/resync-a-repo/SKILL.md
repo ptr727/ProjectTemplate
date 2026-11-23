@@ -49,7 +49,8 @@ may be using, the maintainer's own primary checkout included, even one that look
 hub and for the target repo alike, create a worktree of your own off that base clone and work
 there, per `repo-worktree`. Remove each one when the run ends, per that skill's "Listing and
 Cleanup". A merged pull request's worktree goes through
-`uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout "<base-clone>"`. Spell every `scripts/pr_review.py` call this skill prints as
+`uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`,
+`~/repos/<Repo>` being that repository's primary clone. Spell every `scripts/pr_review.py` call this skill prints as
 `pr-review-conduct` "Expected review loop" says. A
 hub worktree that only read the hub is removed by hand once it is clean, its branch with it. On a machine carrying the hub's agent-safety install, Claude Code also
 refuses a mutating git command run directly in a primary checkout. However, its rules classify git
