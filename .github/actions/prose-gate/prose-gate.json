@@ -15,7 +15,7 @@
     "home-path": { "default": true, "summary": "an absolute home path naming a real account", "file_exemption": "home_path_exempt" },
     "dead-path": { "default": true, "summary": "a mention of a path git once tracked and the tree no longer holds" },
     "issue-ref": { "default": true, "summary": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text" },
-    "paste-safe": { "default": true, "summary": "a bare <placeholder>, a [Placeholder] glob, or an a|b alternation in a Markdown command a reader copies and runs" }
+    "paste-safe": { "default": true, "summary": "a bare <placeholder>, a [Placeholder] or [--flag] glob, or an a|b alternation in a Markdown command a reader copies and runs" }
   },
   "messages": {
     "charset": "{name} (U+{code}) -> {hint}",

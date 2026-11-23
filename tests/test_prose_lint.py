@@ -4409,7 +4409,6 @@ class TestPasteSafeRule(BaitCase):
             ("gh pr view <number>", "<number>"),
             ("spec/audit.py [RepoName]", "[RepoName]"),
             ("spec/audit.py [RepoName ...]", "[RepoName ...]"),
-            ("gh pr view 1 [--json]", "[--json]"),
             (
                 "repo-config/configure.sh check owner/repo release|operational",
                 "release|operational",
@@ -4423,6 +4422,12 @@ class TestPasteSafeRule(BaitCase):
                 found = self.hits(f"Run `{span}` here.\n")
                 self.assertTrue(found, span)
                 self.assertIn(repr(token), found[0][1])
+
+    def test_a_bracketed_flag_is_told_to_leave_the_command(self) -> None:
+        found = self.hits("Run `gh pr view 1 [--json]` here.\n")
+        self.assertEqual(1, len(found))
+        self.assertIn("optional flag '[--json]'", found[0][1])
+        self.assertNotIn('"<--json>"', found[0][1])
 
     def test_the_paste_safe_forms_pass(self) -> None:
         for span in (
