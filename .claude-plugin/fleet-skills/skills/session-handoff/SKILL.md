@@ -387,7 +387,7 @@ python3 "$handoff" chain   --repo OWNER/NAME --track "<slug>" --grep "an escaped
 python3 "$handoff" new     --repo OWNER/NAME --track "<slug>" --title "<subject>" \
   --body-file "<path>" --dry-run
 python3 "$handoff" close   --repo OWNER/NAME --track "<slug>" --body-file "<path>" --dry-run
-python3 "$handoff" tracks  --repo OWNER/NAME [--json]
+python3 "$handoff" tracks  --repo OWNER/NAME  # add --json for JSON output
 ```
 
 Read `--dry-run` output before the first real `new` of a session, since the run replaces a body. It

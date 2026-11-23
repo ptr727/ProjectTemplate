@@ -1673,7 +1673,7 @@ def rule_dead_path(unit: Unit, ctx: Context) -> list[Finding]:
 
 PASTE_SHAPES = {
     "angle": re.compile(r"(?<!<)<[A-Za-z][\w.|/:@-]*(?: [A-Za-z][\w.|/:@-]*)*>"),
-    "bracket": re.compile(r"(?<![\w.\[\]$}^])\[([A-Za-z][\w./-]*)(?: \.\.\.)?\](?![*?+)])"),
+    "bracket": re.compile(r"(?<![\w.\[\]$}^])\[(-{0,2}[A-Za-z][\w./-]*)(?: \.\.\.)?\](?![*?+)])"),
     "alternation": re.compile(r"(?<![\w.|-])[\w.-]+(?:\|[\w.-]+)+(?![\w.|)-])"),
 }
 
@@ -1728,7 +1728,9 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
                     continue
                 taken.append(range(m.start(), m.end()))
                 at = line.number + bare[: m.start()].count("\n")
-                if shape == "bracket":
+                if shape == "bracket" and m[1].startswith("-"):
+                    out.append(finding(at, "paste-safe", "paste-safe-flag", token=m.group()))
+                elif shape == "bracket":
                     out.append(
                         finding(at, "paste-safe", "paste-safe-bracket", token=m.group(), name=m[1])
                     )

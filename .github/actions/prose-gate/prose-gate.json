@@ -36,6 +36,7 @@
     "issue-ref": "issue or pull request reference {ref!r} -> state the constraint it stands for, or drop the clause",
     "paste-safe": "placeholder {token!r} unquoted in a copy-and-run command, which the shell reads as a redirection -> quote it, as \"{token}\"",
     "paste-safe-bracket": "placeholder {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> quote it as \"<{name}>\"",
+    "paste-safe-flag": "optional flag {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> leave it out and name it in a parenthetical, or a trailing comment in a fence",
     "paste-safe-alternation": "alternation {token!r} unquoted in a copy-and-run command, which the shell reads as a pipe -> write the common value and name the other in a parenthetical, or space a real pipe",
     "error-empty-exclude": "--exclude was given an empty value, which matches every path and would report a whole-tree scan as clean. Drop the blank entry rather than passing it, the way the composite action skips a blank line in .github/prose-gate-excludes.",
     "error-not-a-path": "requested path(s) are not a file or a directory: {paths}. Refusing rather than falling back to the current directory, which would scan one tree and choose the rule set from another.",

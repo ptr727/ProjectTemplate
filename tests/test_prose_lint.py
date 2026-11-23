@@ -4409,6 +4409,7 @@ class TestPasteSafeRule(BaitCase):
             ("gh pr view <number>", "<number>"),
             ("spec/audit.py [RepoName]", "[RepoName]"),
             ("spec/audit.py [RepoName ...]", "[RepoName ...]"),
+            ("gh pr view 1 [--json]", "[--json]"),
             (
                 "repo-config/configure.sh check owner/repo release|operational",
                 "release|operational",
