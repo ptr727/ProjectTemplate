@@ -223,8 +223,8 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      than reading an empty answer as safe: `gh pr list --head "<branch>" --base develop --state
      merged --repo owner/repo --json number --jq 'if length == 1 then .[0].number else
      error("expected exactly one merged PR for this head, got \(length)") end'`. Then run
-     `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo owner/repo --checkout "<base-clone>"`
-     from a hub checkout outside the worktree it removes, `<base-clone>` being the repository's
+     `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo owner/repo --checkout ~/repos/"<Repo>"`
+     from a hub checkout outside the worktree it removes, `~/repos/<Repo>` being the repository's
      primary clone, per `repo-worktree` "Listing and Cleanup". It re-reads that pull request and
      repeats the merged, base, head-repository, and tip checks in code. It refuses a permanent or
      protected branch, deletes the remote branch, and confirms it by reading the ref back. It treats
@@ -241,7 +241,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      Never apply this sweep to `develop` or `main`
      themselves, only to feature branches a drive-pr loop created.
    - What no single pull request names: run
-     `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo owner/repo --checkout "<base-clone>"`
+     `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo owner/repo --checkout ~/repos/"<Repo>"`
      and report what it lists. It writes nothing but a fetch, and `--apply` runs only on the
      maintainer's go-ahead, since the report reaches other sessions' finished work too.
 
