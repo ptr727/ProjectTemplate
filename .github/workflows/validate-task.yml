@@ -11,7 +11,7 @@ on:
         default: ''
       # Threaded to the repo-gate composite action's own exclude-globs input, unvalidated.
       repo-gate-exclude-globs:
-        description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing the sha-pin, eol-coverage, composite-actions, and carried-trees scans via repo_gate.py's --exclude.
+        description: Git pathspec patterns to exclude, one per line (for example 'themes/PaperMod/**'), narrowing the sha-pin, eol-coverage, composite-actions, carried-trees, and workflow-inputs scans via repo_gate.py's --exclude.
         required: false
         type: string
         default: ''
@@ -365,11 +365,13 @@ jobs:
       # This step and the Read Python tool pins step are the one place the fleet's uvx tools are pinned or floated, decided here.
       # The job-wide interpreter stays at the floor the hub's own uv scripts declare, since the prose and repo gates below run under it.
       # Each Python step sets UV_PYTHON to the resolved interpreter instead, which every uv call in it reads.
+      # A caller with no Python or action sets uv up, so an empty cache is a normal outcome rather than an error at post-job save.
       - name: Setup uv step
-        if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != ''
+        if: steps.python.outputs.any == 'true' || hashFiles('.github/actions/**/action.yml', '.github/actions/**/action.yaml') != '' || hashFiles('.github/workflows/*.yml', '.github/workflows/*.yaml') != ''
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           python-version: "3.13"
+          ignore-nothing-to-cache: true
 
       # A declared pip directory's requirements are installed for its type check, which an undeclared root never had.
       - name: Sync Python dependencies step

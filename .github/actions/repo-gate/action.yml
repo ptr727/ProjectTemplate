@@ -1,5 +1,5 @@
 name: Repository gate
-description: Check action pins, line-ending contracts, composite action shell and schema, and carried tree currency.
+description: Check action pins, line-ending contracts, composite action shell and schema, carried tree currency, and reusable-workflow call inputs.
 
 inputs:
   exclude-globs:
