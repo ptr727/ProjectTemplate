@@ -183,6 +183,7 @@ def runs_hook(hook, path):
 
 
 PYTHON_NAMES = re.compile(r"(python|pypy)[\w.\-]*|py[\d.]*")
+ABSOLUTE_PATH = re.compile(r"/|[A-Za-z]:[\\/]|\\\\")
 SHELL_NAMES = re.compile(r"bash|sh|dash|zsh|ash|ksh|fish|csh|tcsh|pwsh|powershell")
 
 
@@ -212,7 +213,8 @@ def names_hook(hook, name):
         return False
     if file_name(command) == name:
         return True
-    if is_program(command, PYTHON_NAMES) and args[:1] and file_name(args[0]) == name:
+    own_form = len(args) == 1 and bool(ABSOLUTE_PATH.match(args[0]))
+    if args[:1] and file_name(args[0]) == name and (own_form or is_program(command, PYTHON_NAMES)):
         return True
     return is_program(command, SHELL_NAMES) and any(
         args[i - 1] == "-c" and shell_names_hook(word, name) for i, word in enumerate(args) if i
