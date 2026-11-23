@@ -2351,7 +2351,7 @@ class TestRegistration(StampCase):
             "py",
             "C:\\Python313\\python.exe",
         ):
-            hook = {"command": command, "args": ["/old/hooks/gh-write-guard.py"]}
+            hook = {"command": command, "args": ["/old/hooks/gh-write-guard.py", "--x"]}
             with self.subTest(interpreter=command):
                 self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
         for args in (["gh-write-guard.py"], ["/old/hooks/gh-write-guard.py", "--x"]):
