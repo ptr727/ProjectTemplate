@@ -2320,13 +2320,16 @@ class TestRegistration(StampCase):
                 self.assertTrue(install.names_hook(hook, install.GUARD_NAME), command)
         bash_c = {"command": "/bin/bash", "args": ["-c", f"python3 {plain} --x"]}
         self.assertTrue(install.names_hook(bash_c, install.GUARD_NAME), bash_c)
-        labelled = {
-            "command": "/usr/bin/python3",
-            "args": ["/opt/audit.py", "--label", "gh-write-guard.py audit"],
-        }
-        self.assertFalse(
-            install.names_hook(labelled, install.GUARD_NAME), "a label is not the hook"
-        )
+        for later in (
+            ["--label", "gh-write-guard.py audit"],
+            ["--label", "runs before ~/.claude/hooks/gh-write-guard.py"],
+            ["--doc=https://example.com/x/gh-write-guard.py"],
+        ):
+            labelled = {"command": "/usr/bin/python3", "args": ["/opt/audit.py", *later]}
+            self.assertFalse(
+                install.names_hook(labelled, install.GUARD_NAME),
+                f"a label is not the hook: {later}",
+            )
         for label, path in (("exec-plain", plain), ("exec-metacharacters", metachars)):
             with self.subTest(shape=label):
                 hook = {"type": "command", **install.hook_command("/usr/bin/python3", path)}

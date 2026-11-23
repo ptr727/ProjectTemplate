@@ -187,21 +187,20 @@ def names_hook(hook, name):
 
     It is the ownership test a re-run strips by, so it reads both forms.
     That is what lets a re-run rewrite a shell-form registration in exec form rather than add one beside it.
-    An exec-form entry is named when `command` or any string in `args` has `name` as its own file name.
-    Only the word after a `-c` is read the way `shell_names_hook` reads a whole command.
+    An exec-form entry runs a file as its `command` or as its first argument, the script an interpreter runs.
+    So the entry is named when either of those has `name` as its own file name.
+    It is also named when the word after a `-c` names it the way `shell_names_hook` reads a whole command.
     That is the script string an exec-form `bash -c` carries.
-    Any other argument is plain text, so a label merely mentioning `name` does not claim the host's hook.
+    Any later argument is plain text, so a label or a URL mentioning `name` does not claim the host's hook.
     """
     if not exec_form(hook):
         return shell_names_hook(hook.get("command", ""), name)
-    words = [hook.get("command"), *(hook["args"] if isinstance(hook["args"], list) else [])]
+    args = [a for a in hook["args"] if isinstance(a, str)] if isinstance(hook["args"], list) else []
+    runs = [w for w in (hook.get("command"), *args[:1]) if isinstance(w, str)]
+    if any(file_name(word) == name for word in runs):
+        return True
     return any(
-        isinstance(word, str)
-        and (
-            file_name(word) == name
-            or (i > 0 and words[i - 1] == "-c" and shell_names_hook(word, name))
-        )
-        for i, word in enumerate(words)
+        args[i - 1] == "-c" and shell_names_hook(word, name) for i, word in enumerate(args) if i
     )
 
 
