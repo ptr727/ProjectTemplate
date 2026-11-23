@@ -4522,6 +4522,12 @@ class TestPasteSafeRule(BaitCase):
             text = f"```sh\n[[ $answer {op} [Yy] ]] && echo ok\ngit fetch origin <ref>\n```\n"
             self.assertEqual([3], self.lines(text), op)
 
+    def test_a_bare_alternation_is_exempt_only_in_a_regex_operand(self) -> None:
+        self.assertEqual(
+            [2], self.lines("```sh\n[[ $x == release|operational ]] && echo ok\n```\n")
+        )
+        self.assertEqual([], self.lines("```sh\n[[ $x =~ release|operational ]] && echo ok\n```\n"))
+
     def test_a_bracket_after_a_closed_conditional_is_still_a_placeholder(self) -> None:
         text = '```sh\n[[ -n $x ]] && [ "$a" = [expected] ]\n```\n'
         self.assertEqual([2], self.lines(text))
