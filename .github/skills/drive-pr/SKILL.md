@@ -124,7 +124,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    promotion in step 6. `wait` sends each request the repository's review policy asks for, so
    the drive never asks whether a reviewer starts on its own.
 4. Merge the feature PR into
-   develop with `uv run --no-project --script scripts/pr_review.py merge <number> --repo <owner>/<repo> --cleanup --checkout <base-clone>`,
+   develop with `uv run --no-project --script scripts/pr_review.py merge "<number>" --repo "<owner>/<repo>" --cleanup --checkout "<base-clone>"`,
    run from a hub checkout outside the task's worktree, `<base-clone>` being the repository's
    primary clone. Spell every `scripts/pr_review.py` call this skill prints as `pr-review-conduct`
    "Expected review loop" says. `merge` reads the Merge Gate's mechanically readable items in code, through `wait`'s
@@ -149,13 +149,13 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
      outcome step 3 owes after a peer merge, then run the `cleanup` command below. Report a pull
      request another hand merged as a merge this run cannot vouch for. The head that merged may be
      one the gate never read.
-   - `next=readback` is a merge that may have landed. Read it back with `gh pr view <number> --repo
-     <owner>/<repo> --json state`. `MERGED` means run `cleanup`, and `OPEN` means treat it as
+   - `next=readback` is a merge that may have landed. Read it back with `gh pr view "<number>" --repo
+     "<owner>/<repo>" --json state`. `MERGED` means run `cleanup`, and `OPEN` means treat it as
      `redrive`. Only a read that still cannot answer is reported, saying the merge may have landed.
    - `next=redrive` is a refusal that merged nothing and that this seat can clear. Do what its
      `status=` lines name, per step 3 and pr-review-conduct, giving each finding they count an
      outcome per "Disposing of Every Finding". A check still running clears by waiting for it,
-     with `timeout 1800 gh pr checks <number> --repo <owner>/<repo> --watch`. A hosted
+     with `timeout 1800 gh pr checks "<number>" --repo "<owner>/<repo>" --watch`. A hosted
      reviewer's review still running on the head is such a check, refused as `CHECKS_PENDING`.
      An open registration grace is refused as `CHECKS_PENDING` too, on a line naming when it
      ends. The watch above can return before then, so it does not clear the grace alone. On a
@@ -183,7 +183,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    inside the session's working directories or a writable uv cache. The last is running the
    command themselves. Once the merge is
    confirmed, `--cleanup` runs repo-worktree's post-merge cleanup,
-   `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`,
+   `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout "<base-clone>"`,
    and its exit is the command's. It deletes the remote branch, then removes the task's worktree and local branch.
    It decides its local refusals before the remote delete. `repo-worktree` "Listing and
    Cleanup" says what a refusal after the remote delete and a `base=kept` line each leave to do.
@@ -225,7 +225,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 8. Repeat 6 and 7 until the promotion PR meets every pr-review-conduct Merge Gate item except the
    maintainer's explicit permission to merge.
 9. Report the promotion PR number, its ready state, and its full head SHA, read as `gh pr view
-   <number> --repo <owner>/<repo> --json headRefOid --jq .headRefOid`, the one `merge-and-release`
+   "<number>" --repo "<owner>/<repo>" --json headRefOid --jq .headRefOid`, the one `merge-and-release`
    compares against before merging. Do not merge it.
 
 ## Disposing of Every Finding

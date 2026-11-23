@@ -33,7 +33,7 @@ One pull request pointing a hub `uses:` at a hub-owned action. The aim is for th
   - **Checked** - `develop` at `dbd1cdc` on 2026-08-07, where the tree carries 45 pinned `uses:` refs and not one of them names a `ptr727` repository.
   - **Open** - Whether the hub gating itself through its own pinned action is desirable at all, given what follows. The action reads the rules from hub `develop` on a non-`main` target, and the hub already has the script in its own checkout.
   - **Settled** - The resolvability pass reports what it covered on every run, so the hub's zero is visible rather than silent. That is why this is a separate decision rather than a defect in that pass.
-  - **Settled** - The fleet's `ptr727` pins are live in the downstream repos that consume the action. `repo_gate.py --root <repo>` from a hub checkout reads them there, so the pass is not idle fleet-wide.
+  - **Settled** - The fleet's `ptr727` pins are live in the downstream repos that consume the action. `repo_gate.py --root "<repo>"` from a hub checkout reads them there, so the pass is not idle fleet-wide.
 
 ### Reducing the Carried Surface Further
 

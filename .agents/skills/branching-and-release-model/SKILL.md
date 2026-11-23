@@ -61,7 +61,7 @@ rather than guessing from the repo's contents.
   holding it reaches the **default branch** (`main`). A feature -> `develop` PR targets another
   branch, so it registers no closing reference itself. Its squash commit's message is still what
   the repository's squash setting composes, read live with
-  `gh api repos/<owner>/<repo> --jq .squash_merge_commit_message`. Where that reads `PR_BODY`, as
+  `gh api "repos/<owner>/<repo>" --jq .squash_merge_commit_message`. Where that reads `PR_BODY`, as
   it does in the hub, the PR body becomes the commit message. So a `Fixes #N` in that body lands
   on `develop` and closes #N when the promotion brings the commit to `main`. That holds whatever
   the promotion body says. A direct-push commit message on `develop` behaves the same way. So a
@@ -80,7 +80,7 @@ rather than guessing from the repo's contents.
   amendment. Check it again when reporting it ready and before merging it, since a merge into
   `develop` moves the range.
   Compare the set
-  `gh pr view <number> --repo <owner>/<repo> --json closingIssuesReferences --jq '[.closingIssuesReferences[].number]'`
+  `gh pr view "<number>" --repo "<owner>/<repo>" --json closingIssuesReferences --jq '[.closingIssuesReferences[].number]'`
   prints with the intended set. Then scan the range's commit messages, since a keyword there closes
   its issue at the promotion merge too:
   `git log --format=%B origin/main..origin/develop | grep -n -i -E '\b(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+[[:alnum:]_./:-]*(#|/issues/)[0-9]'`,
