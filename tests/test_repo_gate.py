@@ -960,7 +960,7 @@ class TestWorkflowInputs(InputsCase):
     def test_a_workflow_naming_no_call_is_never_parsed(self) -> None:
         self.callees({})
         files = self.caller(f"  a:\n    steps:\n      - uses: actions/checkout@{PINNED}\n")
-        with mock.patch.object(repo_gate, "load_workflow", side_effect=AssertionError):
+        with mock.patch.object(repo_gate, "load_documents", side_effect=AssertionError):
             self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, files))
 
     def test_a_quoted_call_is_read_without_its_quotes(self) -> None:
@@ -981,7 +981,7 @@ class TestWorkflowInputs(InputsCase):
     def test_no_yaml_reader_is_one_finding(self) -> None:
         self.callees({})
         with mock.patch.object(
-            repo_gate, "load_workflow", side_effect=repo_gate.UvxUnavailable("no reader")
+            repo_gate, "load_documents", side_effect=repo_gate.UvxUnavailable("no reader")
         ):
             hits = repo_gate.check_workflow_inputs(self.tmp, self.caller(self.call()))
         self.assertEqual(["no reader, so no further reusable-workflow call was compared"], hits)
@@ -1031,7 +1031,7 @@ class TestWorkflowInputsCoverage(unittest.TestCase):
         calls = [
             uses
             for rel in repo_gate.workflow_files(repo_gate.tracked(REPO))
-            for document in repo_gate.load_workflow((REPO / rel).read_text(encoding="utf-8"))
+            for document in repo_gate.load_documents(REPO / rel, repo_gate.WORKFLOW_READER)
             for _, uses, _ in repo_gate.reusable_calls(document)
             if (m := repo_gate.REUSABLE.match(uses)) and repo_gate.PIN.match(m["ref"])
         ]

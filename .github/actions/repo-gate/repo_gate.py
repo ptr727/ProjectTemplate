@@ -234,6 +234,11 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
     return {f[i]: f[i + 2] for i in range(0, len(f) - 2, 3)}
 
 
+def unquoted(ref: str) -> str:
+    """`ref` with one pair of surrounding YAML quotes stripped."""
+    return ref[1:-1] if len(ref) > 1 and ref[0] == ref[-1] and ref[0] in "\"'" else ref
+
+
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     """Every external `uses:` is a 40-hex SHA, and one under this owner resolves.
 
@@ -261,9 +266,7 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
         except OSError:
             continue
         for m in USES.finditer(text):
-            ref = m.group("ref")
-            if len(ref) > 1 and ref[0] == ref[-1] and ref[0] in "\"'":
-                ref = ref[1:-1]
+            ref = unquoted(m.group("ref"))
             if ref.startswith(("$/", "./")):
                 continue
             if ref.startswith(".github/"):
@@ -556,22 +559,29 @@ def load_through_uvx(path: Path, reader: str = UVX_READER) -> list[object]:
     return documents
 
 
-def load_action(path: Path) -> object:
-    """The one parsed document of an action file, through PyYAML on every host.
+def load_documents(path: Path, reader: str = UVX_READER) -> list[object]:
+    """Every parsed document of a YAML file, through PyYAML on every host.
 
     PyYAML is used in process where it is importable, and otherwise under uvx, a declared host tool.
     uvx alone is not enough under UV_NO_CACHE or uv's no-cache = true, which delete the environment
-    uvx resolved before the reader launches.
+    uvx resolved before the reader launches. There `reader` decides what each document carries back.
+    The default projects the fields an action check reads. `WORKFLOW_READER` returns each document
+    whole, with a value JSON cannot hold as text and a key it cannot hold dropped.
     """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:
-        return single_document(load_through_uvx(path))
+        return load_through_uvx(path, reader)
     try:
         with path.open(encoding="utf-8") as handle:
-            return single_document(list(yaml.safe_load_all(handle)))
+            return list(yaml.safe_load_all(handle))
     except yaml.YAMLError as error:
         raise ValueError(f"invalid YAML: {error}") from error
+
+
+def load_action(path: Path) -> object:
+    """The one parsed document of an action file."""
+    return single_document(load_documents(path))
 
 
 def step_dialect(shell: object) -> str | None:
@@ -948,29 +958,6 @@ REUSABLE = re.compile(r"^(?P<nwo>[^/@]+/[^/@]+)/(?P<path>\.github/workflows/[^@]
 RAW = ("-H", "Accept: application/vnd.github.raw+json")
 
 
-def unquoted(ref: str) -> str:
-    return ref[1:-1] if len(ref) > 1 and ref[0] == ref[-1] and ref[0] in "\"'" else ref
-
-
-def load_workflow(text: str) -> list[object]:
-    """Every document of a workflow, through PyYAML in process or under uvx as `load_action` reads one.
-
-    The uvx reader returns each document whole, since the check projects on this side. A value JSON
-    cannot hold prints as text, and a key it cannot hold is dropped, since no check reads either.
-    """
-    try:
-        import yaml  # type: ignore[import-untyped]
-    except ImportError:
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "workflow.yml"
-            path.write_text(text, encoding="utf-8")
-            return load_through_uvx(path, WORKFLOW_READER)
-    try:
-        return list(yaml.safe_load_all(text))
-    except yaml.YAMLError as error:
-        raise ValueError(f"invalid YAML: {error}") from error
-
-
 def workflow_triggers(document: object) -> object:
     """The workflow's `on:` value.
 
@@ -1039,7 +1026,9 @@ def callee_interface(
             None if pin_resolves(nwo, sha, pins) is None else f"no {path} exists in {nwo} at {sha}"
         )
     try:
-        documents = load_workflow(text)
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "workflow.yml").write_text(text, encoding="utf-8")
+            documents = load_documents(Path(folder) / "workflow.yml", WORKFLOW_READER)
     except ValueError as error:
         return f"its callee could not be read: {error}"
     if len(documents) != 1:
@@ -1057,9 +1046,9 @@ def check_workflow_inputs(root: Path, files: list[str]) -> list[str]:
     bump's own pull request fails instead. A `with:` key the callee does not declare is a finding,
     and so is an input it requires that the caller omits.
 
-    A call is a job-level `uses:` naming a workflow under another repository's
-    `.github/workflows/`. A local `./` or self-repository `$/` call is left to actionlint, which
-    reads those callees itself. Reading is scoped to the scanned repository's owner, as sha-pin's
+    A call is a job-level `uses:` naming a workflow by its full `owner/repo` path. A call of the
+    scanned repository's own workflow can take that form too. A local `./` or self-repository `$/` call
+    is left to actionlint, which reads those callees itself. Reading is scoped to the scanned repository's owner, as sha-pin's
     resolution is and for the same reason. A callee GitHub did not answer for is counted rather
     than failed. A floating ref is sha-pin's finding, so it is not read here. A file naming no such
     call is never parsed.
@@ -1099,7 +1088,7 @@ class CallScan:
         if not any(REUSABLE.match(unquoted(m.group("ref"))) for m in USES.finditer(text)):
             return []
         try:
-            documents = load_workflow(text)
+            documents = load_documents(root / rel, WORKFLOW_READER)
         except ValueError as error:
             return [f"{rel}: could not read the workflow: {error}"]
         bad: list[str] = []
