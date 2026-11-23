@@ -182,24 +182,39 @@ def runs_hook(hook, path):
     return isinstance(args, list) and len(args) == 1 and literal_path(args[0], path)
 
 
+PYTHON_NAMES = re.compile(r"(python|pypy)[\w.\-]*|py[\d.]*")
+SHELL_NAMES = re.compile(r"bash|sh|dash|zsh|ash|ksh|fish|csh|tcsh|pwsh|powershell")
+
+
+def is_program(command, names):
+    """Whether `command`, an exec-form executable, is a program whose own name (minus `.exe`) matches `names`."""
+    base = file_name(command).lower()
+    return bool(names.fullmatch(base.removesuffix(".exe")))
+
+
 def names_hook(hook, name):
     """Whether registration entry `hook` runs a file whose own name is exactly `name`, at any path.
 
     It is the ownership test a re-run strips by, so it reads both forms.
     That is what lets a re-run rewrite a shell-form registration in exec form rather than add one beside it.
-    An exec-form entry runs a file as its `command` or as its first argument, the script an interpreter runs.
-    So the entry is named when either of those has `name` as its own file name.
-    It is also named when the word after a `-c` names it the way `shell_names_hook` reads a whole command.
-    That is the script string an exec-form `bash -c` carries.
-    Any later argument is plain text, so a label or a URL mentioning `name` does not claim the host's hook.
+    An exec-form entry runs a file as its `command`, or as its first argument where `command` is a Python interpreter.
+    So the entry is named when that file has `name` as its own file name.
+    It is also named when the word after a `-c` names it the way `shell_names_hook` reads a whole command,
+    where `command` is a shell. That is the script string an exec-form `bash -c` carries.
+    Any other argument is plain text, and so is every argument of another command.
+    So `echo gh-write-guard.py`, or a label or a URL mentioning `name`, does not claim the host's hook.
     """
     if not exec_form(hook):
         return shell_names_hook(hook.get("command", ""), name)
+    command = hook.get("command")
     args = [a for a in hook["args"] if isinstance(a, str)] if isinstance(hook["args"], list) else []
-    runs = [w for w in (hook.get("command"), *args[:1]) if isinstance(w, str)]
-    if any(file_name(word) == name for word in runs):
+    if not isinstance(command, str):
+        return False
+    if file_name(command) == name:
         return True
-    return any(
+    if is_program(command, PYTHON_NAMES) and args[:1] and file_name(args[0]) == name:
+        return True
+    return is_program(command, SHELL_NAMES) and any(
         args[i - 1] == "-c" and shell_names_hook(word, name) for i, word in enumerate(args) if i
     )
 
