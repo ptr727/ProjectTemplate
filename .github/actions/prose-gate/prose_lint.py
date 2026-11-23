@@ -1119,7 +1119,8 @@ COMMANDS = BASE["commands"]
 COMMAND_NAMES = frozenset(COMMANDS["names"])
 COMMAND_SUFFIXES = tuple(COMMANDS["script_suffixes"])
 COMMAND_FENCES: dict[str, str] = COMMANDS["fences"]
-ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=\S*")
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|[^\s\"'])*")
+WORD = re.compile(r"(?:\"[^\"]*\"|'[^']*'|[^\s\"'])+")
 SUBSTITUTED = re.compile(r"[A-Za-z_]\w*=[\"']?\$\((\S+)")
 
 
@@ -1130,7 +1131,7 @@ def opens_command(text: str) -> bool:
     script alone in a span is a file being named rather than run, so it needs an argument. An
     assignment from a command substitution opens with the command it runs.
     """
-    words = text.split()
+    words = WORD.findall(text)
     if words[:1] == ["$"]:
         words = words[1:]
     while words and ASSIGNMENT.fullmatch(words[0]):
@@ -1679,6 +1680,7 @@ PASTE_SHAPES = {
 
 
 CASE_ARM = re.compile(r"(?m)^[ \t]*\(?[^\s()<>]+\)")
+REGEX_OPERAND = re.compile(r"=~[ \t]+(\S+)")
 
 
 def blanked(value: str) -> str:
@@ -1714,14 +1716,15 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
 
     Each command is a code span opening with a command or a shell fence's content. Each finding is
     reported on the line holding the placeholder. A string handed to a second shell, as `sh -c`
-    takes one, is read as the quotation it is to the first. A `case` arm's pattern and a regular
-    expression's bracket are the shell's own syntax, so neither is a placeholder.
+    takes one, is read as the quotation it is to the first. A `case` arm's pattern and the operand
+    of `=~` are the shell's own syntax, so neither is a placeholder.
     """
     out: list[Finding] = []
     for line in unit.lines:
         dialect = COMMANDS["dialects"][line.dialect]
         bare = shell_literals(line.text, dialect["lexer"])
         taken = [range(m.start(), m.end()) for m in CASE_ARM.finditer(bare)]
+        taken += [range(m.start(1), m.end(1)) for m in REGEX_OPERAND.finditer(bare)]
         for shape in dialect["shapes"]:
             for m in PASTE_SHAPES[shape].finditer(bare):
                 if any(m.start() in r for r in taken):
