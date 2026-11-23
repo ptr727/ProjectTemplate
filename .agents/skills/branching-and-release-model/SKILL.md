@@ -186,7 +186,8 @@ stays the same:
 - **The `main` promotion gate is unchanged.** The shared `main` ruleset still **enforces** the
   required `Check pull request workflow status job` on the `develop -> main` PR. For an operational
   repo that check is lint/validation, with unit tests only for a .NET test project or a Python suite
-  the validator runs. It is editorconfig/EOL plus a domain linter
+  the validator runs. A test in the repo's own `.github/actions/validate/action.yml` hook counts too.
+  The check is editorconfig/EOL plus a domain linter
   such as a Home Assistant or ESPHome config validation. So `develop` stays the live surface
   and a broken config can never reach `main`.
 - **Release only by manual dispatch.** Operational repos carry `releaseTrigger: dispatch-only` and

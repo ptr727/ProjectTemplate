@@ -205,6 +205,12 @@ class PreflightCase(Harness):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("reached-the-writes", result.stdout)
 
+    def test_an_empty_body_reaches_the_writes(self) -> None:
+        """GitHub answers an unrestricted repository with an empty body, which means no limit."""
+        result = self.preflight("false", "")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("reached-the-writes", result.stdout)
+
     def test_a_repository_limit_reaches_the_writes(self) -> None:
         live = {"limit": "collaborators_only", "origin": "repository", "expires_at": expiry(90)}
         result = self.preflight("false", json.dumps(live))
