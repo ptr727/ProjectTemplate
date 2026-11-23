@@ -82,6 +82,28 @@ def local_file(home):
     return home.parent / "local.md"
 
 
+def this_launcher():
+    """The launcher `hook_launcher` falls back to for this interpreter, the first base candidate that runs."""
+    return this_launcher_and_skips()[0]
+
+
+def this_launcher_and_skips():
+    """That launcher, and how many of this interpreter's base candidates fail the probe ahead of it.
+
+    The count depends on the runner's own Python layout, so a test counting rejections adds it.
+    """
+    candidates = install.base_interpreters(os.path.abspath(sys.executable))
+    for skipped, candidate in enumerate(candidates):
+        if install.launcher_problem(candidate) is None:
+            return candidate, skipped
+    raise AssertionError(f"no candidate for this interpreter runs: {candidates}")
+
+
+def entry_text(hook):
+    """A registration entry's `command` and its exec-form `args`, joined, for a test that finds an entry by a file name."""
+    return " ".join([str(hook.get("command", "")), *map(str, hook.get("args") or [])])
+
+
 class StampCase(unittest.TestCase):
     def setUp(self):
         # An in-process main() installs the installer's signal handlers, so each case puts the runner's back.
@@ -1789,10 +1811,7 @@ class TestRegistration(StampCase):
         self.assertTrue((self.home / "hooks" / install.SWEEP_NAME).is_file())
         groups = self._settings()["hooks"]["SessionEnd"]
         entries = [
-            h
-            for g in groups
-            for h in g.get("hooks", [])
-            if install.SWEEP_STEM in h.get("command", "")
+            h for g in groups for h in g.get("hooks", []) if install.SWEEP_STEM in entry_text(h)
         ]
         self.assertEqual(len(entries), 1)
         # A SessionEnd hook's own budget is 1.5s, and only a declared per-hook timeout raises it.
@@ -1805,7 +1824,7 @@ class TestRegistration(StampCase):
         owning = [
             g
             for g in groups
-            if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+            if any(install.SWEEP_STEM in entry_text(h) for h in g.get("hooks", []))
         ]
         self.assertEqual(len(owning), 1)
         self.assertNotIn("matcher", owning[0])
@@ -1815,10 +1834,7 @@ class TestRegistration(StampCase):
         self.install()
         groups = self._settings()["hooks"]["SessionEnd"]
         entries = [
-            h
-            for g in groups
-            for h in g.get("hooks", [])
-            if install.SWEEP_STEM in h.get("command", "")
+            h for g in groups for h in g.get("hooks", []) if install.SWEEP_STEM in entry_text(h)
         ]
         self.assertEqual(len(entries), 1)
 
@@ -1837,7 +1853,7 @@ class TestRegistration(StampCase):
                 owning = [
                     g
                     for g in groups
-                    if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+                    if any(install.SWEEP_STEM in entry_text(h) for h in g.get("hooks", []))
                 ]
                 self.assertEqual(len(owning), 1, groups)
                 self.assertEqual(owning[0].get("matcher"), matcher)
@@ -1942,7 +1958,7 @@ class TestRegistration(StampCase):
         groups = [
             g
             for g in data["hooks"]["PreToolUse"]
-            if any(install.TIER_NAME in h.get("command", "") for h in g.get("hooks", []))
+            if any(install.TIER_NAME in entry_text(h) for h in g.get("hooks", []))
         ]
         return data, groups
 
@@ -1963,9 +1979,7 @@ class TestRegistration(StampCase):
         self.assertEqual(groups[0]["matcher"], install.TIER_MATCHER)
         self.assertEqual(len(groups[0]["hooks"]), 1)
         bash = [g for g in data["hooks"]["PreToolUse"] if g.get("matcher") == "Bash"]
-        self.assertFalse(
-            any(install.TIER_NAME in h.get("command", "") for g in bash for h in g["hooks"])
-        )
+        self.assertFalse(any(install.TIER_NAME in entry_text(h) for g in bash for h in g["hooks"]))
         self.assertEqual(install.registration_problems(self.home), [])
 
     def test_a_tier_guard_matcher_that_misses_agent_is_a_defect(self):
@@ -2005,15 +2019,101 @@ class TestRegistration(StampCase):
         self.assertIn("the installed content differs from what this checkout would write", r.stdout)
 
     def test_a_registration_is_read_however_its_path_is_quoted(self):
-        """A hand-written or UI-written registration runs the deployed path bare or single-quoted."""
+        """A hand-written or UI-written shell-form registration runs the deployed path bare or single-quoted."""
         self.install()
         guard = self.home / "hooks" / install.DEPLOYED_HOOKS[0]
         for spelling in (f"python3 {guard}", f"python3 '{guard}'", f'python3 "{guard}"'):
             with self.subTest(command=spelling):
                 data = self._settings()
-                data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = spelling
+                data["hooks"]["PreToolUse"][0]["hooks"][0] = {
+                    "type": "command",
+                    "command": spelling,
+                }
                 self._write(data)
                 self.assertEqual(install.registration_problems(self.home), [], spelling)
+
+    def test_every_hook_is_registered_in_exec_form_under_an_absolute_launcher(self):
+        """Exec form spawns the launcher with the hook path as its one argument, so no shell decides what runs."""
+        self.install()
+        data = self._settings()
+        entries = {}
+        for event in ("PreToolUse", "SessionEnd"):
+            for g in data["hooks"][event]:
+                for h in g["hooks"]:
+                    entries[pathlib.PurePath(h["args"][0]).name] = h
+        self.assertEqual(
+            sorted(entries), sorted((install.GUARD_NAME, install.TIER_NAME, install.SWEEP_NAME))
+        )
+        for name, h in entries.items():
+            with self.subTest(hook=name):
+                self.assertEqual(h["args"], [str(self.home / "hooks" / name)])
+                self.assertTrue(os.path.isabs(h["command"]), h["command"])
+                self.assertIsNone(install.launcher_problem(h["command"]))
+                self.assertNotIn("shell", h)
+                self.assertEqual(
+                    {"type": "command", **install.hook_command(h["command"], h["args"][0])},
+                    {k: v for k, v in h.items() if k != "timeout"},
+                )
+
+    def test_the_recheck_hint_quotes_the_absolute_launcher(self):
+        """The launcher is now always an absolute path, which can hold a space, so the printed line quotes it."""
+        r = self.install()
+        launcher = self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertIn(f'"{launcher}" "{install.HERE / "install.py"}" --report', r.stdout)
+
+    def test_a_reinstall_rewrites_a_shell_form_registration_in_exec_form(self):
+        """A host an older install registered in shell form is moved to exec form, with no duplicate left beside it."""
+        self.install()
+        data = self._settings()
+        for event in ("PreToolUse", "SessionEnd"):
+            for g in data["hooks"][event]:
+                for h in g["hooks"]:
+                    path = h.pop("args")[0]
+                    h["command"] = f'"{h["command"]}" "{path}"'
+        self._write(data)
+        self.assertEqual(install.registration_problems(self.home), [])
+        self.install()
+        data = self._settings()
+        entries = [
+            h for e in ("PreToolUse", "SessionEnd") for g in data["hooks"][e] for h in g["hooks"]
+        ]
+        self.assertEqual(len(entries), 3, entries)
+        self.assertTrue(all(install.exec_form(h) for h in entries), entries)
+        self.assertEqual(install.registration_problems(self.home), [])
+
+    def test_an_exec_form_registration_is_read_from_its_command_and_args(self):
+        """No shell splits or expands exec form, so the launcher is `command` as written and the path must be literal."""
+        guard = self.home / "hooks" / install.GUARD_NAME
+        unc = "\\\\host\\share\\py\\python.exe"
+        spaced = "C:\\Program Files\\Python313\\python.exe"
+        for launcher in (unc, spaced, "python3", "~/bin/python3"):
+            with self.subTest(launcher=launcher):
+                hook = {"type": "command", **install.hook_command(launcher, guard)}
+                self.assertTrue(install.runs_hook(hook, guard))
+                self.assertTrue(install.names_hook(hook, install.GUARD_NAME))
+                self.assertEqual(install.registered_launcher(hook, guard), launcher)
+        forward = str(guard).replace("\\", "/")
+        self.assertTrue(install.runs_hook({"command": "py", "args": [forward]}, guard))
+        direct = {"command": str(guard), "args": []}
+        self.assertFalse(
+            install.runs_hook(direct, guard), "exec form cannot spawn a .py on Windows"
+        )
+        self.assertTrue(install.names_hook(direct, install.GUARD_NAME))
+        self.assertIsNone(install.registered_launcher(direct, guard))
+        for label, hook in (
+            ("extra argument", {"command": "python3", "args": [str(guard), "--x"]}),
+            (
+                "tilde not expanded",
+                {"command": "python3", "args": ["~/.claude/hooks/" + install.GUARD_NAME]},
+            ),
+            ("args not a list", {"command": "python3", "args": str(guard)}),
+            ("no command", {"args": [str(guard)]}),
+            ("empty command", {"command": "", "args": [str(guard)]}),
+            ("another file", {"command": "python3", "args": [str(guard) + ".bak"]}),
+        ):
+            with self.subTest(shape=label):
+                self.assertFalse(install.runs_hook(hook, guard), hook)
+                self.assertIsNone(install.registered_launcher(hook, guard), hook)
 
     def test_an_absent_sweep_timeout_is_reported_as_absent(self):
         """The entry carries no timeout, so a message naming a value of None describes nothing."""
@@ -2045,7 +2145,7 @@ class TestRegistration(StampCase):
         self.install()
         live = self.home / "hooks" / install.GUARD_NAME
         self.assertTrue(live.is_file(), "the deployed name is not what the installer wrote")
-        registered = self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        registered = self._settings()["hooks"]["PreToolUse"][0]["hooks"][0]
         self.assertTrue(install.names_hook(registered, install.GUARD_NAME))
 
     def test_a_longer_sweep_timeout_is_not_reported_as_a_defect(self):
@@ -2100,7 +2200,7 @@ class TestRegistration(StampCase):
         self.install()
         data = self._settings()
         for group in data["hooks"]["SessionEnd"]:
-            if any(install.SWEEP_STEM in h.get("command", "") for h in group.get("hooks", [])):
+            if any(install.SWEEP_STEM in entry_text(h) for h in group.get("hooks", [])):
                 group["matcher"] = "clear"
         self._write(data)
         r = run(self.home, "--report")
@@ -2114,7 +2214,7 @@ class TestRegistration(StampCase):
         group = next(
             g
             for g in data["hooks"]["SessionEnd"]
-            if any(install.SWEEP_STEM in h.get("command", "") for h in g.get("hooks", []))
+            if any(install.SWEEP_STEM in entry_text(h) for h in g.get("hooks", []))
         )
         data["hooks"]["SessionEnd"].append(dict(json.loads(json.dumps(group)), matcher="clear"))
         self._write(data)
@@ -2163,7 +2263,7 @@ class TestRegistration(StampCase):
         self.assertEqual([h["command"] for h in theirs["hooks"]], ["somebody-elses.sh"])
         self.assertTrue(
             any(
-                install.SWEEP_STEM in h.get("command", "")
+                install.SWEEP_STEM in entry_text(h)
                 for g in groups
                 if "matcher" not in g
                 for h in g.get("hooks", [])
@@ -2215,8 +2315,26 @@ class TestRegistration(StampCase):
             ("single-quoted-metacharacters", metachars, f"'python3' '{metachars}'"),
         ):
             with self.subTest(shape=label):
-                self.assertTrue(install.runs_hook(command, path), command)
-                self.assertTrue(install.names_hook(command, install.GUARD_NAME), command)
+                hook = {"type": "command", "command": command}
+                self.assertTrue(install.runs_hook(hook, path), command)
+                self.assertTrue(install.names_hook(hook, install.GUARD_NAME), command)
+        bash_c = {"command": "/bin/bash", "args": ["-c", f"python3 {plain} --x"]}
+        self.assertTrue(install.names_hook(bash_c, install.GUARD_NAME), bash_c)
+        for later in (
+            ["--label", "gh-write-guard.py audit"],
+            ["--label", "runs before ~/.claude/hooks/gh-write-guard.py"],
+            ["--doc=https://example.com/x/gh-write-guard.py"],
+        ):
+            labelled = {"command": "/usr/bin/python3", "args": ["/opt/audit.py", *later]}
+            self.assertFalse(
+                install.names_hook(labelled, install.GUARD_NAME),
+                f"a label is not the hook: {later}",
+            )
+        for label, path in (("exec-plain", plain), ("exec-metacharacters", metachars)):
+            with self.subTest(shape=label):
+                hook = {"type": "command", **install.hook_command("/usr/bin/python3", path)}
+                self.assertTrue(install.runs_hook(hook, path), hook)
+                self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
 
 
 class TestAutoMode(StampCase):
@@ -2530,11 +2648,10 @@ class TestContainmentPrefix(StampCase):
         r = run(self.home, "--report", contain=False)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("cannot contain", r.stdout)
-        # Every hook fails to exec there, so the note that commands run uncontained would contradict it.
         self.assertNotIn("run uncontained", r.stdout)
 
     def test_a_prefix_synced_from_another_host_reports_stale_where_it_cannot_contain(self):
-        """A path this host lacks exits 127 on every hook, which fails the guard open."""
+        """A path this host lacks exits 127 on every Bash tool call and every shell-form hook."""
         self.install(contain=False)
         data = self._settings()
         data["env"] = {install.PREFIX_VAR: "/elsewhere/.claude/hooks/" + install.CONTAIN_NAME}
@@ -3390,8 +3507,9 @@ class TestLauncher(StampCase):
         self.assertIn("malformed version probe", install.launcher_problem(str(stub)))
         self._path_first(stub.parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, sys.executable)
-        self.assertEqual(len(rejected), 1, rejected)
+        expected, skipped = this_launcher_and_skips()
+        self.assertEqual(launcher, expected)
+        self.assertEqual(len(rejected), 1 + skipped, rejected)
 
     @unittest.skipUnless(shutil.which("bash"), "install.sh is a bash wrapper")
     def test_install_sh_passes_over_a_python_that_prints_ok_and_fails(self):
@@ -3412,6 +3530,70 @@ class TestLauncher(StampCase):
         self.assertIn("Passed over python3", r.stderr)
         self.assertFalse(self.home.exists())
 
+    def _venv(self, cfg):
+        """A venv directory holding `bin/python3`, a link to this interpreter, and a `pyvenv.cfg` of `cfg`."""
+        venv = pathlib.Path(tempfile.mkdtemp(dir=self.tmp)) / "venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python3").symlink_to(this_launcher())
+        (venv / "pyvenv.cfg").write_text(cfg, encoding="utf-8")
+        return venv
+
+    def test_a_python3_inside_a_venv_yields_the_interpreter_it_was_made_from(self):
+        """A venv's interpreter goes when the venv does, which would leave every hook failing to spawn."""
+        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        (base / "python3").symlink_to(this_launcher())
+        venv = self._venv(f"home = {base}\nversion = 3\n")
+        self.assertEqual(
+            install.base_interpreters(str(venv / "bin" / "python3")),
+            [str(base / "python3"), str(venv / "bin" / "python3")],
+        )
+        self._path_first(venv / "bin")
+        launcher, rejected = install.hook_launcher()
+        self.assertEqual(launcher, str(base / "python3"), rejected)
+        plain = str(base / "python3")
+        self.assertEqual(install.base_interpreters(plain), [plain])
+
+    def test_an_older_python3_beside_the_venv_base_falls_through_to_its_executable(self):
+        """A `python3.12 -m venv` where `home`'s `python3` is 3.10 still installs, under the recorded executable."""
+        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        (base / "python3").write_text(
+            f"#!/bin/sh\necho {install.LAUNCHER_TOKEN} 3 10\n", encoding="utf-8"
+        )
+        (base / "python3").chmod(0o755)
+        real = pathlib.Path(tempfile.mkdtemp(dir=self.tmp)) / "python3.12"
+        real.symlink_to(this_launcher())
+        venv = self._venv(f"home = {base}\nexecutable = {real}\n")
+        self._path_first(venv / "bin")
+        launcher, rejected = install.hook_launcher()
+        self.assertEqual(launcher, str(real), rejected)
+        self.assertIn("below the 3.11 floor", rejected[0])
+
+    def test_a_venv_whose_only_base_is_below_the_floor_installs_under_its_own_interpreter(self):
+        """With no `executable` recorded and an old `home` python3, the venv's own interpreter is the one left."""
+        base = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        (base / "python3").write_text(
+            f"#!/bin/sh\necho {install.LAUNCHER_TOKEN} 3 10\n", encoding="utf-8"
+        )
+        (base / "python3").chmod(0o755)
+        venv = self._venv(f"home = {base}\n")
+        self._path_first(venv / "bin")
+        launcher, rejected = install.hook_launcher()
+        self.assertEqual(launcher, str(venv / "bin" / "python3"), rejected)
+        self.assertIn("below the 3.11 floor", rejected[0])
+
+    def test_a_venv_whose_base_is_gone_keeps_its_own_interpreter(self):
+        """A `pyvenv.cfg` naming no interpreter that exists leaves the candidate to the probe."""
+        venv = self._venv(f"home = {self.tmp}/gone\nexecutable = {self.tmp}/gone/python3\n")
+        exe = str(venv / "bin" / "python3")
+        self.assertEqual(install.base_interpreters(exe), [exe])
+
+    def test_exec_form_on_windows_spawns_only_a_real_exe(self):
+        """A pyenv-win `.bat` shim passes the probe through cmd and fails Claude Code's exec-form spawn."""
+        shim = "C:\\Users\\x\\.pyenv\\pyenv-win\\shims\\python3.bat"
+        self.assertIn("not a .exe", install.exec_spawn_problem(shim, windows=True))
+        self.assertIsNone(install.exec_spawn_problem("C:\\Python313\\python.exe", windows=True))
+        self.assertIsNone(install.exec_spawn_problem(shim, windows=False))
+
     def test_a_missing_launcher_is_refused(self):
         problem = install.launcher_problem(str(pathlib.Path(self.tmp) / "no-such-python"))
         self.assertIn("could not be run", problem)
@@ -3419,9 +3601,10 @@ class TestLauncher(StampCase):
     def test_a_broken_python3_on_path_falls_back_to_this_interpreter(self):
         self._path_first(self._stub("python3", "exit 0").parent)
         launcher, rejected = install.hook_launcher()
-        self.assertEqual(launcher, sys.executable)
-        self.assertEqual(len(rejected), 1, rejected)
-        self.assertIn("'python3'", rejected[0])
+        expected, skipped = this_launcher_and_skips()
+        self.assertEqual(launcher, expected)
+        self.assertEqual(len(rejected), 1 + skipped, rejected)
+        self.assertIn("python3'", rejected[0])
 
     def test_no_working_candidate_yields_no_launcher(self):
         self._path_first(self._stub("python3", "exit 0").parent)
@@ -3448,13 +3631,18 @@ class TestLauncher(StampCase):
         self.assertFalse(self.home.exists())
 
     def test_an_install_past_a_broken_python3_registers_this_interpreter(self):
-        self._path_first(self._stub("python3", "exit 0").parent)
+        stub = self._stub("python3", "exit 0")
+        self._path_first(stub.parent)
         r = self.install()
-        self.assertIn("passed over 'python3'", r.stdout)
+        self.assertIn(f"passed over {os.path.abspath(stub)!r}", r.stdout)
         settings = json.loads((self.home / "settings.json").read_text(encoding="utf-8"))
         guard = self.home / "hooks" / install.GUARD_NAME
-        commands = [h["command"] for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
-        self.assertIn(install.hook_command(sys.executable, guard), commands)
+        entries = [h for g in settings["hooks"]["PreToolUse"] for h in g["hooks"]]
+        expected = {
+            "type": "command",
+            **install.hook_command(this_launcher(), guard),
+        }
+        self.assertIn(expected, entries)
 
     def test_report_flags_a_registered_launcher_that_cannot_run(self):
         """A host installed before the probe keeps its launcher, and only the report can say so."""
@@ -3463,19 +3651,25 @@ class TestLauncher(StampCase):
         settings = self.home / "settings.json"
         data = json.loads(settings.read_text(encoding="utf-8"))
         guard = self.home / "hooks" / install.GUARD_NAME
-        data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = install.hook_command(stub, guard)
-        settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        r = run(self.home, "--report")
-        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("names a launcher that cannot run the write guard", r.stdout)
+        for label, entry in (
+            ("exec form", install.hook_command(stub, guard)),
+            ("shell form", {"command": f'"{stub}" "{guard}"'}),
+        ):
+            with self.subTest(form=label):
+                data["hooks"]["PreToolUse"][0]["hooks"][0] = {"type": "command", **entry}
+                settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+                r = run(self.home, "--report")
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+                self.assertIn("names a launcher that cannot run the write guard", r.stdout)
 
     def test_a_registration_in_another_shape_is_not_run(self):
         """What a composed command executes is not decidable from its string, so nothing in it is run."""
         guard = self.home / "hooks" / install.GUARD_NAME
         for command in (f"bash -c 'python3 {guard}'", f"{guard}", f'"python3" "{guard}" | cat'):
             with self.subTest(command=command):
-                self.assertIsNone(install.registered_launcher(command, guard))
-        self.assertEqual(install.registered_launcher(f"python3 {guard}", guard), "python3")
+                self.assertIsNone(install.registered_launcher({"command": command}, guard))
+        shell = {"command": f"python3 {guard}"}
+        self.assertEqual(install.registered_launcher(shell, guard), "python3")
 
 
 if __name__ == "__main__":

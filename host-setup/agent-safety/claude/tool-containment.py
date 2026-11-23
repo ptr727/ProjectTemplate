@@ -2,14 +2,16 @@
 """Shell prefix: run every Bash tool call inside a scope with a task and memory ceiling.
 
 Registered as `CLAUDE_CODE_SHELL_PREFIX` in the user settings.json `env`. Claude Code then runs each
-Bash tool call, each hook command, and each stdio MCP server launch as `<this file> '<command string>'`,
-one argument holding the whole string. For a tool call this file starts a transient systemd user scope carrying `TasksMax`, `MemoryMax`, and `MemorySwapMax=0`.
+Bash tool call, each shell-form hook, and each stdio MCP server launch as `<this file> '<command string>'`,
+one argument holding the whole string.
+An exec-form hook, which is how the kit registers its own, runs without the prefix.
+For a tool call this file starts a transient systemd user scope carrying `TasksMax`, `MemoryMax`, and `MemorySwapMax=0`.
 The last is there so a runaway at the memory ceiling is killed rather than spilled into the host's swap.
 The file then runs the string under a shell inside the scope.
 
 Everything else runs under its shell directly, with no scope.
-The write guard is a hook, and a PreToolUse hook that exits 1 is a non-blocking error.
-A scope that failed to start would therefore let the very command the guard denies go ahead.
+A shell-form PreToolUse hook the host keeps of its own runs through this file, and one that exits 1 is a non-blocking error.
+A scope that failed to start would therefore let the very command such a hook denies go ahead.
 An MCP server is long-lived and started outside any session.
 A scope would therefore bound it for its whole life and outlive the session that named it.
 A tool call is told apart by the Claude Code shell snapshot it sources first or by the cwd bookkeeping appended last, either one enough.
