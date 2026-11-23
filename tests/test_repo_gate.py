@@ -676,7 +676,13 @@ class TestCoverageFloors(unittest.TestCase):
     def test_this_repo_passes_both_checks_from_the_cli(self) -> None:
         """The gates run in CI from this entry point, so the entry point is what is proven."""
         tools_ready = docker_ready() and schema_ready()
-        checks = [c for c in repo_gate.CHECKS if c != "composite-actions" or tools_ready]
+        reader_ready = pyyaml_imports() or shutil.which("uvx") is not None
+        checks = [
+            c
+            for c in repo_gate.CHECKS
+            if (c != "composite-actions" or tools_ready)
+            and (c != "workflow-inputs" or reader_ready)
+        ]
         narrowed = [a for c in checks for a in ("--check", c)]
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.assertEqual(0, repo_gate.main(["--root", str(REPO), *narrowed]))
@@ -748,6 +754,308 @@ def pyyaml_imports() -> bool:
 
 
 NEEDS_PYYAML = unittest.skipUnless(pyyaml_imports(), "PyYAML does not import")
+
+
+CALLEE = """on:
+  workflow_call:
+    inputs:
+      enable_nuget:
+        type: boolean
+        default: false
+      branch:
+        type: string
+        required: true
+      label:
+        type: string
+        required: true
+        default: x
+      note:
+        type: string
+        required: false
+"""
+
+
+class InputsCase(ResolveCase):
+    """Base for the workflow-inputs check, with each callee read replaced by a table."""
+
+    CALLEE_PATH = ".github/workflows/build.yml"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.reads: list[str] = []
+
+    def call(self, with_lines: str = "", uses: str = "", job: str = "build") -> str:
+        uses = uses or f"{self.OWNER}/Fleet/{self.CALLEE_PATH}@{PINNED}"
+        given = f"    with:\n{with_lines}" if with_lines else ""
+        return f"  {job}:\n    uses: {uses}\n{given}"
+
+    def caller(self, *jobs: str, name: str = "w.yml") -> list[str]:
+        return self.workflow("on: workflow_dispatch\njobs:\n" + "".join(jobs), name=name)
+
+    def callees(
+        self,
+        mapping: dict[str, tuple[bool | None, str]],
+        pins: dict[str, bool | None] | None = None,
+    ) -> None:
+        """Answer each contents read from `mapping` and each commit or repository read from `pins`."""
+
+        def read(path: str, *flags: str) -> tuple[bool | None, str]:
+            self.reads.append(path)
+            self.assertEqual(repo_gate.RAW, flags)
+            return mapping.get(path, (None, ""))
+
+        self.enterContext(mock.patch.object(repo_gate, "gh_read", side_effect=read))
+        self.answers(pins or {})
+
+    def contents(self, path: str = "", sha: str = PINNED) -> str:
+        return f"repos/{self.OWNER}/Fleet/contents/{path or self.CALLEE_PATH}?ref={sha}"
+
+    def hits(self, *jobs: str, callee: str = CALLEE) -> list[str]:
+        self.callees({self.contents(): (True, callee)})
+        return repo_gate.check_workflow_inputs(self.tmp, self.caller(*jobs))
+
+
+@unittest.skipUnless(pyyaml_imports() or shutil.which("uvx"), "neither PyYAML nor uvx present")
+class TestWorkflowInputs(InputsCase):
+    def test_an_input_the_pinned_callee_does_not_declare_is_flagged(self) -> None:
+        """The reported break: a caller still passing an input the callee removed at the new pin."""
+        hits = self.hits(self.call("      nuget: false\n      branch: main\n"))
+        self.assertEqual(1, len(hits))
+        self.assertIn("job `build`", hits[0])
+        self.assertIn("with `nuget`, an input the callee does not declare at that pin", hits[0])
+
+    def test_a_call_passing_only_declared_inputs_is_accepted(self) -> None:
+        self.assertEqual(
+            [], self.hits(self.call("      branch: main\n      enable_nuget: ${{ true }}\n"))
+        )
+        self.assertIn("compared 1 reusable-workflow call(s)", repo_gate.NOTES[0])
+
+    def test_a_required_input_with_no_default_the_caller_omits_is_flagged(self) -> None:
+        hits = self.hits(self.call("      note: x\n"))
+        self.assertEqual(
+            [f"{self.call_label()} without `branch`, an input the callee requires at that pin"],
+            hits,
+        )
+
+    def call_label(self) -> str:
+        return (
+            f".github/workflows/w.yml: job `build` calls "
+            f"`{self.OWNER}/Fleet/{self.CALLEE_PATH}@{PINNED}`"
+        )
+
+    def test_a_call_with_no_with_block_still_owes_the_required_input(self) -> None:
+        hits = self.hits(self.call())
+        self.assertEqual(1, len(hits))
+        self.assertIn("without `branch`", hits[0])
+
+    def test_input_names_compare_case_insensitively(self) -> None:
+        """GitHub matches an input name whatever its case, so a case difference is not a finding."""
+        self.assertEqual([], self.hits(self.call("      Branch: main\n      ENABLE_NUGET: true\n")))
+
+    def test_a_callee_declaring_workflow_call_without_inputs_accepts_no_with_key(self) -> None:
+        for callee in (
+            "on: workflow_call\n",
+            "on: [push, workflow_call]\n",
+            "on:\n  workflow_call:\n",
+        ):
+            with self.subTest(callee=callee):
+                self.reads.clear()
+                repo_gate.NOTES.clear()
+                with mock.patch.object(repo_gate, "gh_read", return_value=(True, callee)):
+                    self.answers({})
+                    hits = repo_gate.check_workflow_inputs(
+                        self.tmp, self.caller(self.call("      branch: main\n"))
+                    )
+                self.assertEqual(1, len(hits))
+                self.assertIn("with `branch`, an input the callee does not declare", hits[0])
+
+    def test_a_callee_with_no_workflow_call_trigger_is_flagged(self) -> None:
+        hits = self.hits(self.call("      branch: main\n"), callee="on: push\njobs: {}\n")
+        self.assertEqual(
+            [f"{self.call_label()}, but its callee declares no workflow_call trigger"], hits
+        )
+
+    def test_an_unparseable_callee_is_flagged(self) -> None:
+        hits = self.hits(self.call(), callee="on: [unclosed\n")
+        self.assertEqual(1, len(hits))
+        self.assertIn("but its callee could not be read: invalid YAML", hits[0])
+
+    def test_a_callee_file_absent_at_a_resolving_pin_is_flagged(self) -> None:
+        self.callees(
+            {self.contents(): (False, "")},
+            {f"repos/{self.OWNER}/Fleet/commits/{PINNED}": True},
+        )
+        hits = repo_gate.check_workflow_inputs(self.tmp, self.caller(self.call()))
+        self.assertEqual(
+            [
+                f"{self.call_label()}, but no {self.CALLEE_PATH} exists in {self.OWNER}/Fleet at {PINNED}"
+            ],
+            hits,
+        )
+
+    def test_an_absent_callee_in_an_unreadable_repository_is_not_a_finding(self) -> None:
+        """A 404 is confirmed against the repository before it fails, as sha-pin confirms one."""
+        self.callees(
+            {self.contents(): (False, "")},
+            {
+                f"repos/{self.OWNER}/Fleet/commits/{PINNED}": False,
+                f"repos/{self.OWNER}/Fleet": None,
+            },
+        )
+        self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, self.caller(self.call())))
+        self.assertIn("1 whose callee GitHub did not answer for", repo_gate.NOTES[0])
+
+    def test_a_callee_github_did_not_answer_for_is_counted_rather_than_failed(self) -> None:
+        self.callees({})
+        self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, self.caller(self.call())))
+        self.assertIn("compared 0 reusable-workflow call(s)", repo_gate.NOTES[0])
+        self.assertIn("1 whose callee GitHub did not answer for", repo_gate.NOTES[0])
+
+    def test_a_callee_is_read_at_the_callers_own_pin(self) -> None:
+        self.hits(self.call("      branch: main\n"))
+        self.assertEqual([self.contents()], self.reads)
+
+    def test_one_callee_called_twice_is_read_once(self) -> None:
+        self.callees({self.contents(): (True, CALLEE)})
+        files = self.caller(
+            self.call("      branch: a\n"), self.call("      branch: b\n", job="again")
+        )
+        files += self.caller(self.call("      branch: c\n"), name="x.yml")
+        self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, files))
+        self.assertEqual(1, len(self.reads))
+        self.assertIn("compared 3 reusable-workflow call(s)", repo_gate.NOTES[0])
+
+    def test_a_call_under_another_owner_is_never_fetched(self) -> None:
+        self.callees({})
+        uses = f"someone-else/Fleet/{self.CALLEE_PATH}@{PINNED}"
+        self.assertEqual(
+            [], repo_gate.check_workflow_inputs(self.tmp, self.caller(self.call(uses=uses)))
+        )
+        self.assertEqual([], self.reads)
+        self.assertIn("1 under another owner", repo_gate.NOTES[0])
+
+    def test_an_unreadable_origin_compares_nothing_and_says_so(self) -> None:
+        self.callees({})
+        with mock.patch.object(repo_gate, "origin_owner", return_value=None):
+            self.assertEqual(
+                [], repo_gate.check_workflow_inputs(self.tmp, self.caller(self.call()))
+            )
+        self.assertEqual([], self.reads)
+        self.assertIn(
+            "0 under another owner, 1 whose owner could not be compared", repo_gate.NOTES[0]
+        )
+
+    def test_a_floating_local_or_self_repository_call_is_never_fetched(self) -> None:
+        """sha-pin owns a floating ref, actionlint reads a local callee, and a `$/` callee moves with its caller."""
+        self.callees({})
+        refs = (
+            f"{self.OWNER}/Fleet/{self.CALLEE_PATH}@main",
+            f"./{self.CALLEE_PATH}",
+            f"$/{self.CALLEE_PATH}",
+        )
+        jobs = [self.call(uses=ref, job=f"j{i}") for i, ref in enumerate(refs)]
+        self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, self.caller(*jobs)))
+        self.assertEqual([], self.reads)
+        self.assertIn("1 with a floating ref, which sha-pin reports", repo_gate.NOTES[0])
+
+    def test_a_step_using_an_action_under_this_owner_is_not_a_call(self) -> None:
+        self.callees({})
+        steps = f"  a:\n    steps:\n      - uses: {self.OWNER}/Fleet/.github/actions/x@{PINNED}\n"
+        self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, self.caller(steps)))
+        self.assertEqual([], self.reads)
+
+    def test_a_workflow_naming_no_call_is_never_parsed(self) -> None:
+        self.callees({})
+        files = self.caller(f"  a:\n    steps:\n      - uses: actions/checkout@{PINNED}\n")
+        with mock.patch.object(repo_gate, "load_documents", side_effect=AssertionError):
+            self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, files))
+
+    def test_a_quoted_call_is_read_without_its_quotes(self) -> None:
+        uses = f"'{self.OWNER}/Fleet/{self.CALLEE_PATH}@{PINNED}'"
+        self.assertEqual(
+            1, len(self.hits(self.call("      nuget: x\n      branch: a\n", uses=uses)))
+        )
+
+    def test_an_unreadable_caller_is_a_finding_for_that_file(self) -> None:
+        self.callees({})
+        files = self.workflow(
+            f"jobs:\n  a:\n    uses: {self.OWNER}/Fleet/{self.CALLEE_PATH}@{PINNED}\n  [\n"
+        )
+        hits = repo_gate.check_workflow_inputs(self.tmp, files)
+        self.assertEqual(1, len(hits))
+        self.assertIn(".github/workflows/w.yml: could not read the workflow", hits[0])
+
+    def test_no_yaml_reader_is_one_finding(self) -> None:
+        self.callees({})
+        with mock.patch.object(
+            repo_gate, "load_documents", side_effect=repo_gate.UvxUnavailable("no reader")
+        ):
+            hits = repo_gate.check_workflow_inputs(self.tmp, self.caller(self.call()))
+        self.assertEqual(["no reader, so no further reusable-workflow call was compared"], hits)
+        self.assertIn("compared 0 reusable-workflow call(s)", repo_gate.NOTES[0])
+
+    def test_the_note_carries_every_count_including_the_zeroes(self) -> None:
+        self.callees({})
+        self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, []))
+        self.assertEqual(
+            [
+                (
+                    "compared 0 reusable-workflow call(s) with their callee's inputs at the pin. "
+                    "Not compared: 0 under another owner, 0 whose owner could not be compared "
+                    "because this checkout's origin is unreadable, 0 whose callee GitHub did not "
+                    "answer for, 0 with a floating ref, which sha-pin reports."
+                )
+            ],
+            repo_gate.NOTES,
+        )
+
+
+@NEEDS_UVX
+class TestWorkflowInputsThroughUvx(InputsCase):
+    """Where PyYAML does not import, both sides are read through the uvx reader."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        repo_gate.PYYAML_PYTHON.clear()
+        self.enterContext(mock.patch.dict(sys.modules, {"yaml": None}))
+
+    def test_the_reader_reads_a_bare_on_key_and_flags_an_undeclared_input(self) -> None:
+        hits = self.hits(self.call("      nuget: false\n      branch: main\n"))
+        self.assertEqual(1, len(hits))
+        self.assertIn("with `nuget`", hits[0])
+
+    def test_the_reader_carries_a_value_json_cannot_hold(self) -> None:
+        callee = CALLEE + "      when:\n        type: string\n        default: 2026-01-01\n"
+        self.assertEqual(
+            [], self.hits(self.call("      branch: a\n      when: b\n"), callee=callee)
+        )
+
+    def test_a_key_json_cannot_hold_fails_the_read_rather_than_vanishing(self) -> None:
+        hits = self.hits(self.call("      branch: a\n      2026-01-01: b\n"))
+        self.assertEqual(1, len(hits))
+        self.assertIn(".github/workflows/w.yml: could not read the workflow: unreadable", hits[0])
+
+
+class TestWorkflowInputsCoverage(unittest.TestCase):
+    @unittest.skipUnless(pyyaml_imports() or shutil.which("uvx"), "neither PyYAML nor uvx present")
+    def test_this_repo_holds_calls_the_check_reads(self) -> None:
+        """A scan matching no call prints `compared 0`, which reads like a clean comparison."""
+
+        class AnyInputs(dict[str, bool]):
+            def __contains__(self, key: object) -> bool:
+                return True
+
+        notes = list(repo_gate.NOTES)
+        self.addCleanup(lambda: repo_gate.NOTES.__setitem__(slice(None), notes))
+        with (
+            mock.patch.object(repo_gate, "origin_owner", return_value="ptr727"),
+            mock.patch.object(repo_gate, "callee_interface", return_value=AnyInputs()),
+        ):
+            found = repo_gate.check_workflow_inputs(REPO, repo_gate.tracked(REPO))
+        self.assertEqual([], found)
+        match = re.search(r"compared (\d+) reusable-workflow call", repo_gate.NOTES[-1])
+        assert match is not None
+        self.assertGreaterEqual(int(match.group(1)), 4)
 
 
 class TestCompositeActions(TreeCase):

@@ -51,7 +51,7 @@ reach this particular repo.
      checkout with full history. Name its destination, since a single-branch clone records
      none: `git fetch origin "+refs/heads/<live.branch>:refs/remotes/origin/<live.branch>"`,
      adding `--unshallow` in a shallow clone. A `live.commit` other than `origin/<live.branch>` for which
-     `git merge-base --is-ancestor <live.commit> origin/<live.branch>` exits 0 is behind. An exit
+     `git merge-base --is-ancestor "<live.commit>" "origin/<live.branch>"` exits 0 is behind. An exit
      other than 0 or 1 means the test could not judge, which is an answer to report as well.
      Moving or fast-forwarding that checkout is the fix rather than re-installing.
    - Any other shape names no registration, or one this report could not read, and the `reason`

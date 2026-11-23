@@ -140,8 +140,10 @@ system may reap it as temporary data. State the absolute path as soon as the fal
 and again in the handoff. Do not present work there as ordinarily reviewable from the primary
 workspace.
 
+The `~/repos/"<Repo>"` path is the convention layout, and a machine not yet migrated passes its actual primary clone instead.
+
 ```sh
-TASK_ORIGIN="$(git -C "<base-clone>" remote get-url origin)"
+TASK_ORIGIN="$(git -C ~/repos/"<Repo>" remote get-url origin)"
 git clone --no-checkout "$TASK_ORIGIN" "<temporary-root>/<Repo>-<task-slug>"
 git -C "<temporary-root>/<Repo>-<task-slug>" fetch origin develop
 git -C "<temporary-root>/<Repo>-<task-slug>" switch -c "<task-branch>" origin/develop
@@ -167,7 +169,7 @@ holding it and prints the base clone first, and what to do there depends on whic
 
 The base clone holding it is the case "The Base Branch" excepts. Judge its tree by the
 hand-removal read in "Listing and Cleanup". When it is clean, return it to its own working
-branch, `git -C ~/repos/<Repo> checkout develop`, and then create the worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
+branch, `git -C ~/repos/"<Repo>" checkout develop`, and then create the worktree. Stop when it is not clean, because a dirty shared checkout is the signal that another
 task may be live there.
 
 A previous session's own worktree holding it is retired rather than switched. It normally sits at
@@ -239,7 +241,7 @@ in the new tree.
 Treat hook preparation as worktree setup, not as recovery after a rejected commit. If setup
 fails, report that boundary and fix the setup this tree owns, routing a shared hook as the
 bullet above says. Never bypass the hook to make the commit succeed.
-A commit-time `core.hooksPath` override, `git -c core.hooksPath=<dir> commit`, is a bypass too,
+A commit-time `core.hooksPath` override, `git -c core.hooksPath="<dir>" commit`, is a bypass too,
 since git then runs whatever that directory holds, and nothing where it holds nothing.
 
 ## Listing and Cleanup
@@ -253,9 +255,9 @@ since git then runs whatever that directory holds, and nothing where it holds no
   helper worktree needs no pull request, but its commit must be contained in the branch whose
   completed operation created it.
 - **A pull request merged into `develop` is cleaned up by one command.** Run
-  `uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`
-  from a hub checkout outside the worktree it removes, `<base-clone>` being the repository's
-  primary clone. It reads the branch from the pull request and deletes the remote branch. It then
+  `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`
+  from a hub checkout outside the worktree it removes, `~/repos/<Repo>` being the repository's
+  primary clone. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. It reads the branch from the pull request and deletes the remote branch. It then
   removes every worktree holding the branch without force, deletes the local branch, and
   fast-forwards the base clone's `develop`. Its local refusals are decided before the remote delete. So a dirty worktree, an operation in progress, or a local tip the merge did not carry
   leaves everything in place. A re-check after the delete can still refuse where a concurrent
@@ -268,7 +270,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   pull request into `main`.
 - **What no pull request `cleanup` takes covers is removed by hand.** That is a `develop`-headed
   promotion's worktree, a detached helper worktree, and a temporary standalone clone. Read
-  `git -C <exact-path> status --porcelain --ignored --untracked-files=normal`. Any line not starting `!!` means the tree is not clean, so stop. Each `!!` line names an ignored file the removal deletes. Then remove the exact path with `git worktree remove <exact-path>`, or delete the exact
+  `git -C "<exact-path>" status --porcelain --ignored --untracked-files=normal`. Any line not starting `!!` means the tree is not clean, so stop. Each `!!` line names an ignored file the removal deletes. Then remove the exact path with `git worktree remove "<exact-path>"`, or delete the exact
   `<temporary-root>/<Repo>-<task-slug>` directory. A named branch such a tree held is left for the
   sweep below. The sweep reads it as finished once `origin/main` or `origin/develop` contains it. `git branch -d` is no substitute, since it judges a branch with no upstream against `HEAD`. So it refuses one merged only into
   `main` while the base clone is on `develop`. Where that branch was pushed, its remote branch is
@@ -283,8 +285,8 @@ since git then runs whatever that directory holds, and nothing where it holds no
   release does not leave the base clone on `main`. Stop and report a dirty base clone or a
   non-fast-forward instead of switching or reconciling it.
 - **What an interrupted or abandoned session left behind is swept.** Run
-  `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo <owner>/<repo> --checkout <base-clone>`
-  from a hub checkout. It fetches and prunes `origin` and writes nothing else. It reports each worktree and branch that is clean, idle past `--min-age-hours` (default 24), and provably
+  `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`
+  from a hub checkout. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. It fetches and prunes `origin` and writes nothing else. It reports each worktree and branch that is clean, idle past `--min-age-hours` (default 24), and provably
   finished. Adding `--apply` removes what the report lists through the same checks, the remote
   branch of a merged `develop` pull request included. The report reaches other sessions' finished
   work as well as this task's, so `--apply` runs on the maintainer's go-ahead.

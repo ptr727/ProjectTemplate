@@ -35,6 +35,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOW_MODELS = ("release", "operational")
 RELEASE_TRIGGERS = ("two-phase", "dispatch-only")
 CONSUMER_MODELS = ("push", "pull")
+PUBLIC_INTERACTIONS = ("collaborators", "community")
 # The deployment-branch-policy forms a repo's `environments` entry may declare, kept in sync with the $defs in registry/repos.schema.json.
 # This is not a scope selector: it names no audit scope and selects nothing in spec/files.json, so it sits outside the disjointness rule above.
 # GitHub's "protected branches only" form is deliberately absent, since it counts classic branch protection and this fleet configures rulesets instead.
@@ -1778,6 +1779,12 @@ def main(argv=()):
         if "hasDevelop" in repo and not isinstance(repo["hasDevelop"], bool):
             errors.append(
                 f"{name}: hasDevelop {repo['hasDevelop']!r} must be true or false, and spec/audit.py coerces whatever is declared"
+            )
+        # Read by repo-config/configure.sh, which refuses a value outside the enum before any write.
+        # Presence is the test, so a declared null is reported rather than read as the collaborators default.
+        if "publicInteraction" in repo and repo["publicInteraction"] not in PUBLIC_INTERACTIONS:
+            errors.append(
+                f"{name}: publicInteraction {repo['publicInteraction']!r} invalid (expected {' or '.join(PUBLIC_INTERACTIONS)})"
             )
         if "pullRequestCheck" in repo and not isinstance(repo["pullRequestCheck"], bool):
             errors.append(

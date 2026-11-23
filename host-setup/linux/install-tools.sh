@@ -930,7 +930,8 @@ dotnet_feed() {
         return 1
     fi
 
-    microsoft_feed
+    # A host Microsoft publishes no feed for is a failed tool, which is status 2 so dotnet_install tells it from the architecture skip above.
+    microsoft_feed || return 2
 }
 
 # Register Microsoft's apt repository, the feed powershell always needs and dotnet falls back to when the distro carries no SDK.
@@ -944,10 +945,14 @@ microsoft_feed() {
     fi
 
     local deb="$TMP_DIR/packages-microsoft-prod.deb"
-    fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb" ||
-        die "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION"
-    # The PowerShell install runs this with errexit off and goes on to remove a working pwsh.
-    # So a failed install ends the run here, on the dotnet path as well.
+    # No published config for this host fails the tool and not the run.
+    # The caller collects it, and the rest of the tools still run.
+    if ! fetch -o "$deb" "https://packages.microsoft.com/config/$DISTRO_ID/$DISTRO_VERSION/packages-microsoft-prod.deb"; then
+        warn "Microsoft publishes no feed for $DISTRO_ID $DISTRO_VERSION, or the download failed"
+        return 1
+    fi
+    # Both callers run with errexit off and stop on a failed feed before they remove anything.
+    # A failed install ends the run here instead, rather than failing only the tool as the missing feed above does.
     run_root dpkg -i "$deb" || die "Cannot install Microsoft's feed from $deb"
     APT_DIRTY=true
     apt_refresh
@@ -958,7 +963,15 @@ microsoft_feed() {
 # The newest line is installed beside it, so a newer line stays an addition rather than a replacement.
 # The optional set is every other SDK line the feed carries, for a host that has to build against more than one.
 dotnet_install() {
-    dotnet_feed || return 0
+    local feed_status=0
+    dotnet_feed || feed_status=$?
+    # Status 1 is the named architecture skip.
+    # Any other failing status is a feed that could not be had, which fails the tool.
+    if [[ $feed_status -eq 1 ]]; then
+        return 0
+    elif [[ $feed_status -ne 0 ]]; then
+        return 1
+    fi
 
     local latest
     latest=$(dotnet_sdk_latest)
@@ -1036,7 +1049,7 @@ powershell_install() {
         return 0
     fi
 
-    microsoft_feed
+    microsoft_feed || return 1
 
     # A pwsh path that no dpkg package owns is a non-apt install.
     # The portable tar.gz build and the apt package share /opt/microsoft/powershell/7.
@@ -1083,8 +1096,12 @@ powershell_non_apt_paths() {
 
 powershell_remove_non_apt() {
     local -a paths=()
-    readarray -t paths < <(powershell_non_apt_paths)
-    [[ ${#paths[@]} -eq 0 ]] && return 0
+    # A process substitution drops its function's exit status, so the refusal inside it would print and be ignored.
+    # Reading into a variable first keeps the status, and a refusal ends the run.
+    local listing
+    listing=$(powershell_non_apt_paths) || exit 1
+    [[ -z $listing ]] && return 0
+    readarray -t paths <<<"$listing"
 
     log "  Removing ${#paths[@]} non-apt pwsh install(s): ${paths[*]}"
     confirm "  Remove these paths?" || die "Declined, PowerShell install left as it is"
@@ -1544,7 +1561,12 @@ apply_tool() {
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is whatever apt already has until the managed source is written, so quoting it here could name the wrong upstream.
-        log "$tool: installed without the sources file this script manages, moving it to $("$(tool_function "$tool" source)")"
+        if [[ $tool == "node" || $MODE == "upgrade" ]]; then
+            log "$tool: installed without the sources file this script manages, moving it to $("$(tool_function "$tool" source)")"
+        else
+            # An install leaves an installed package at its version, so the move waits for an upgrade.
+            log "$tool: installed without the sources file this script manages, the repository at $("$(tool_function "$tool" source)") is configured by this install and --upgrade moves it"
+        fi
     else
         log "$tool: ${status}${target:+, upstream carries $target}"
     fi

@@ -9,6 +9,7 @@ category's share of a 1,047-finding audit of this repo's Copilot reviews:
 - `eol-coverage`: Git attribute resolution differs from policy, count not recorded.
 - `composite-actions`: shellcheck and schema coverage of action.yml, count not recorded.
 - `carried-trees`: a manifest-owned tree differing from the hub's, count not recorded.
+- `workflow-inputs`: a reusable-workflow call its pinned callee no longer accepts, count not recorded.
 
 `eol-coverage` asks Git how representative paths resolve. This proves the global text default
 reaches Python, shell, Dockerfiles, workflow YAML, and extensionless scripts without maintaining
@@ -43,8 +44,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from types import ModuleType
+from urllib.parse import quote
 
 # GOVERNANCE.md documents exactly one floating-ref exception.
 SHA_EXCEPTIONS = {"dotnet/nbgv"}
@@ -92,28 +95,35 @@ def origin_owner(root: Path) -> str | None:
     return m.group(1).lower() if m else None
 
 
-def gh_exists(path: str) -> bool | None:
-    """True where GitHub returned the object, False where it answered absent, None where neither.
+def gh_read(path: str, *flags: str) -> tuple[bool | None, str]:
+    """GitHub's answer for `path` and the body it printed, which is empty unless the answer is True.
 
+    True is where GitHub returned the object, False where it answered absent, and None where neither.
     None covers an absent `gh`, no credentials, a rate limit, and an offline host. Those are one
     thing here: nothing was learned. The caller reports those as skipped rather than as findings. So
     the gate stays usable on a machine with no network instead of failing a correct tree.
     """
     try:
         r = subprocess.run(
-            ["gh", "api", path, "--jq", ".sha"],
+            ["gh", "api", path, *flags],
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
             timeout=GH_TIMEOUT,
             check=False,
         )
     except (OSError, subprocess.SubprocessError):
-        return None
+        return None, ""
     if r.returncode == 0:
-        return True
+        return True, r.stdout
     m = HTTP_STATUS.search(r.stderr)
-    return False if m and m.group(1) in ABSENT else None
+    return (False if m and m.group(1) in ABSENT else None), ""
+
+
+def gh_exists(path: str) -> bool | None:
+    """Whether GitHub holds the object at `path`, read as `gh_read` reads an answer."""
+    return gh_read(path, "--jq", ".sha")[0]
 
 
 def pin_resolves(nwo: str, sha: str, cache: dict[tuple[str, str], bool | None]) -> bool | None:
@@ -224,6 +234,11 @@ def resolved_eol(root: Path, paths: list[str]) -> dict[str, str] | None:
     return {f[i]: f[i + 2] for i in range(0, len(f) - 2, 3)}
 
 
+def unquoted(ref: str) -> str:
+    """`ref` with one pair of surrounding YAML quotes stripped."""
+    return ref[1:-1] if len(ref) > 1 and ref[0] == ref[-1] and ref[0] in "\"'" else ref
+
+
 def check_sha_pin(root: Path, files: list[str]) -> list[str]:
     """Every external `uses:` is a 40-hex SHA, and one under this owner resolves.
 
@@ -251,9 +266,7 @@ def check_sha_pin(root: Path, files: list[str]) -> list[str]:
         except OSError:
             continue
         for m in USES.finditer(text):
-            ref = m.group("ref")
-            if len(ref) > 1 and ref[0] == ref[-1] and ref[0] in "\"'":
-                ref = ref[1:-1]
+            ref = unquoted(m.group("ref"))
             if ref.startswith(("$/", "./")):
                 continue
             if ref.startswith(".github/"):
@@ -436,6 +449,15 @@ def single_document(documents: list[object]) -> object:
     return documents[0]
 
 
+READER_FAILURE = (
+    "except Exception as error:\n"
+    "    if isinstance(error, yaml.YAMLError):\n"
+    "        line = f'invalid YAML: {error}'\n"
+    "    else:\n"
+    "        line = f'unreadable: {type(error).__name__}: {error}'\n"
+    "    sys.exit(' '.join(line.split()))\n"
+    "sys.stdout.write(text)\n"
+)
 UVX_READER = (
     "import json, sys, yaml\n"
     "def step(item):\n"
@@ -458,20 +480,21 @@ UVX_READER = (
     "try:\n"
     "    with open(sys.argv[1], encoding='utf-8') as handle:\n"
     "        text = json.dumps([project(document) for document in yaml.safe_load_all(handle)])\n"
-    "except Exception as error:\n"
-    "    if isinstance(error, yaml.YAMLError):\n"
-    "        line = f'invalid YAML: {error}'\n"
-    "    else:\n"
-    "        line = f'unreadable: {type(error).__name__}: {error}'\n"
-    "    sys.exit(' '.join(line.split()))\n"
-    "sys.stdout.write(text)\n"
+    + READER_FAILURE
+)
+WORKFLOW_READER = (
+    "import json, sys, yaml\n"
+    "try:\n"
+    "    with open(sys.argv[1], encoding='utf-8') as handle:\n"
+    "        documents = list(yaml.safe_load_all(handle))\n"
+    "    text = json.dumps(documents, default=str)\n" + READER_FAILURE
 )
 PYYAML_PYTHON: list[str] = []
 ISOLATED = ("-I", "-X", "utf8")
 
 
 class UvxUnavailable(Exception):
-    """uvx could not provide an interpreter with PyYAML, so no action can be read through it."""
+    """uvx could not provide an interpreter with PyYAML, so no YAML file can be read through it."""
 
 
 def run_utf8(command: list[str]) -> subprocess.CompletedProcess[str]:
@@ -492,7 +515,7 @@ def pyyaml_python() -> str:
         return PYYAML_PYTHON[0]
     uvx = shutil.which("uvx")
     if uvx is None:
-        raise UvxUnavailable("neither PyYAML nor uvx is available to read the action")
+        raise UvxUnavailable("neither PyYAML nor uvx is available to read YAML")
     probe = "import sys, yaml; print(sys.executable)"
     try:
         result = run_utf8([uvx, "--with", "pyyaml", "python", *ISOLATED, "-c", probe])
@@ -508,11 +531,14 @@ def pyyaml_python() -> str:
     return PYYAML_PYTHON[0]
 
 
-def load_through_uvx(path: Path) -> list[object]:
-    """The fields the check reads from each document, parsed by PyYAML in the uvx interpreter."""
+def load_through_uvx(path: Path, reader: str = UVX_READER) -> list[object]:
+    """What `reader` projects from each document, parsed by PyYAML in the uvx interpreter.
+
+    The default reader projects the fields an action check reads.
+    """
     python = pyyaml_python()
     try:
-        result = run_utf8([python, *ISOLATED, "-c", UVX_READER, str(path)])
+        result = run_utf8([python, *ISOLATED, "-c", reader, str(path)])
     except subprocess.TimeoutExpired:
         raise ValueError(f"reading timed out after {YAML_TIMEOUT}s") from None
     except OSError as error:
@@ -533,22 +559,30 @@ def load_through_uvx(path: Path) -> list[object]:
     return documents
 
 
-def load_action(path: Path) -> object:
-    """The one parsed document of an action file, through PyYAML on every host.
+def load_documents(path: Path, reader: str = UVX_READER) -> list[object]:
+    """Every parsed document of a YAML file, through PyYAML on every host.
 
     PyYAML is used in process where it is importable, and otherwise under uvx, a declared host tool.
     uvx alone is not enough under UV_NO_CACHE or uv's no-cache = true, which delete the environment
-    uvx resolved before the reader launches.
+    uvx resolved before the reader launches. In process every document comes back whole. Under uvx,
+    `reader` decides what each document carries back. The default projects the fields an action
+    check reads. `WORKFLOW_READER` returns each document whole, with a value JSON cannot hold as
+    text. A key JSON cannot hold fails the read.
     """
     try:
         import yaml  # type: ignore[import-untyped]
     except ImportError:
-        return single_document(load_through_uvx(path))
+        return load_through_uvx(path, reader)
     try:
         with path.open(encoding="utf-8") as handle:
-            return single_document(list(yaml.safe_load_all(handle)))
+            return list(yaml.safe_load_all(handle))
     except yaml.YAMLError as error:
         raise ValueError(f"invalid YAML: {error}") from error
+
+
+def load_action(path: Path) -> object:
+    """The one parsed document of an action file."""
+    return single_document(load_documents(path))
 
 
 def step_dialect(shell: object) -> str | None:
@@ -921,12 +955,196 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
     return []
 
 
+REUSABLE = re.compile(r"^(?P<nwo>[^/@]+/[^/@]+)/(?P<path>\.github/workflows/[^@]+)@(?P<ref>[^@]+)$")
+RAW = ("-H", "Accept: application/vnd.github.raw+json")
+
+
+def workflow_triggers(document: object) -> object:
+    """The workflow's `on:` value.
+
+    PyYAML reads a bare `on` key as the boolean true, and the uvx reader's JSON spells that key `true`.
+    `spec/audit.py` reads `on:` the same way, but it imports PyYAML at load, and this gate must load
+    under a bare `python3`. So the reading is repeated here rather than imported.
+    """
+    if not isinstance(document, dict):
+        return None
+    for key in ("on", True, "true"):
+        if key in document:
+            return document[key]
+    return None
+
+
+def callee_inputs(document: object) -> dict[str, bool] | None:
+    """Each input a callee declares, lower-cased, mapped to whether a caller must pass it.
+
+    None where the document declares no `workflow_call` trigger at all. An input is owed only where
+    it is `required: true` with no `default`, which is where GitHub refuses a call omitting it.
+    Names compare case-insensitively, as GitHub matches them.
+    """
+    on = workflow_triggers(document)
+    if on == "workflow_call" or (isinstance(on, list) and "workflow_call" in on):
+        return {}
+    if not isinstance(on, dict) or "workflow_call" not in on:
+        return None
+    call = on["workflow_call"]
+    inputs = call.get("inputs") if isinstance(call, dict) else None
+    if not isinstance(inputs, dict):
+        return {}
+    return {
+        str(name).lower(): isinstance(spec, dict)
+        and spec.get("required") is True
+        and "default" not in spec
+        for name, spec in inputs.items()
+    }
+
+
+def reusable_calls(document: object) -> list[tuple[str, str, list[str]]]:
+    """Each job calling a reusable workflow, as its id, its `uses:` value, and its `with:` keys."""
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    if not isinstance(jobs, dict):
+        return []
+    calls = []
+    for job, body in jobs.items():
+        if isinstance(body, dict) and isinstance(body.get("uses"), str):
+            given = body.get("with")
+            keys = [str(key) for key in given] if isinstance(given, dict) else []
+            calls.append((str(job), body["uses"], keys))
+    return calls
+
+
+def callee_interface(
+    nwo: str, path: str, sha: str, pins: dict[tuple[str, str], bool | None]
+) -> dict[str, bool] | str | None:
+    """The inputs `path` declares in `nwo` at `sha`, why it cannot be called, or None where unread.
+
+    A 404 is confirmed as `pin_resolves` confirms one, since a missing file and a repository the
+    credentials cannot see are the same answer from here. Where the commit itself is missing,
+    sha-pin reports it too, and the call fails either way.
+    """
+    state, text = gh_read(f"repos/{nwo}/contents/{quote(path)}?ref={sha}", *RAW)
+    if state is None:
+        return None
+    if state is False:
+        return (
+            None if pin_resolves(nwo, sha, pins) is None else f"no {path} exists in {nwo} at {sha}"
+        )
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / "workflow.yml").write_text(text, encoding="utf-8")
+            documents = load_documents(Path(folder) / "workflow.yml", WORKFLOW_READER)
+    except ValueError as error:
+        return f"its callee could not be read: {error}"
+    if len(documents) != 1:
+        return f"its callee holds {len(documents)} YAML documents rather than one"
+    inputs = callee_inputs(documents[0])
+    return "its callee declares no workflow_call trigger" if inputs is None else inputs
+
+
+def check_workflow_inputs(root: Path, files: list[str]) -> list[str]:
+    """Each call of a reusable workflow under this owner fits the callee's inputs at its pin.
+
+    actionlint reads a local callee's inputs but not a remote one's. So a pin bump can move a
+    callee past an input its caller still passes. The call then fails only when it runs, which for
+    a dispatch-only caller is the next release. The callee is read at the caller's own pin, so the
+    bump's own pull request fails instead. A `with:` key the callee does not declare is a finding,
+    and so is an input it requires that the caller omits.
+
+    A call is a job-level `uses:` naming a workflow by its full `owner/repo` path. A call of the
+    scanned repository's own workflow can take that form too. A local `./` call is left to
+    actionlint, which reads that callee itself. A self-repository `$/` call is not read either. Its
+    callee is read at the calling workflow's own commit, so no pin bump moves it. Reading is scoped
+    to the scanned repository's owner, as sha-pin's resolution is and for the same reason. A callee
+    GitHub did not answer for is counted rather than failed. A floating ref is sha-pin's finding, so
+    it is counted and not read here. A file naming no such call is never parsed.
+    """
+    scan = CallScan(origin_owner(root))
+    bad: list[str] = []
+    try:
+        for rel in workflow_files(files):
+            bad.extend(scan.compare(root, rel))
+    except UvxUnavailable as error:
+        bad.append(f"{error}, so no further reusable-workflow call was compared")
+    counts = scan.counts
+    NOTES.append(
+        f"compared {counts['compared']} reusable-workflow call(s) with their callee's inputs at "
+        f"the pin. Not compared: {counts['foreign']} under another owner, {counts['unowned']} "
+        f"whose owner could not be compared because this checkout's origin is unreadable, "
+        f"{counts['unread']} whose callee GitHub did not answer for, {counts['floating']} with a "
+        f"floating ref, which sha-pin reports."
+    )
+    return bad
+
+
+class CallScan:
+    """One run's reusable-workflow comparison, reading each distinct callee and pin once."""
+
+    def __init__(self, owner: str | None) -> None:
+        self.owner = owner
+        self.interfaces: dict[tuple[str, str, str], dict[str, bool] | str | None] = {}
+        self.pins: dict[tuple[str, str], bool | None] = {}
+        self.counts = {"compared": 0, "floating": 0, "foreign": 0, "unowned": 0, "unread": 0}
+
+    def compare(self, root: Path, rel: str) -> list[str]:
+        """The findings for one workflow file's calls."""
+        try:
+            text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return []
+        if not any(REUSABLE.match(unquoted(m.group("ref"))) for m in USES.finditer(text)):
+            return []
+        try:
+            documents = load_documents(root / rel, WORKFLOW_READER)
+        except ValueError as error:
+            return [f"{rel}: could not read the workflow: {error}"]
+        bad: list[str] = []
+        for document in documents:
+            for job, uses, keys in reusable_calls(document):
+                bad.extend(self.compare_call(f"{rel}: job `{job}` calls `{uses}`", uses, keys))
+        return bad
+
+    def compare_call(self, label: str, uses: str, keys: list[str]) -> list[str]:
+        m = REUSABLE.match(uses)
+        if m is None:
+            return []
+        if not PIN.match(m["ref"]):
+            self.counts["floating"] += 1
+            return []
+        if self.owner is None:
+            self.counts["unowned"] += 1
+            return []
+        if m["nwo"].split("/")[0].lower() != self.owner:
+            self.counts["foreign"] += 1
+            return []
+        key = (m["nwo"], m["path"], m["ref"])
+        if key not in self.interfaces:
+            self.interfaces[key] = callee_interface(*key, self.pins)
+        interface = self.interfaces[key]
+        if interface is None:
+            self.counts["unread"] += 1
+            return []
+        if isinstance(interface, str):
+            return [f"{label}, but {interface}"]
+        self.counts["compared"] += 1
+        passed = {given.lower() for given in keys}
+        unknown = [
+            f"{label} with `{given}`, an input the callee does not declare at that pin"
+            for given in keys
+            if given.lower() not in interface
+        ]
+        return unknown + [
+            f"{label} without `{name}`, an input the callee requires at that pin"
+            for name, required in sorted(interface.items())
+            if required and name not in passed
+        ]
+
+
 CHECKS = {
     "sha-pin": check_sha_pin,
     "eol": check_eol,
     "eol-coverage": check_eol_coverage,
     "composite-actions": check_composite_actions,
     "carried-trees": check_carried_trees,
+    "workflow-inputs": check_workflow_inputs,
 }
 
 

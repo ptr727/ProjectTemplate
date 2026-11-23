@@ -34,7 +34,7 @@ skill's job. It is STANDUP.md sections 1A and 2 instead, since an absent carried
 baseline that never arrived rather than drift to converge. First create the hub and target
 worktrees and verify the host, as the next section says, since no hub tool runs before the host gate.
 A stale tool answers `--version`, looks healthy, and produces a wrong answer. Then run
-`uv run --no-project --script spec/audit.py <RepoName>`,
+`uv run --no-project --script spec/audit.py "<RepoName>"`,
 the target's `registry/repos.json` `name` field rather than an `owner/repo` slug or a checkout
 path. Then read whether the findings are letters (absent) or drift (present but stale). Do all of this before doing
 anything else. The finding kind names the procedure the repo is owed.
@@ -49,21 +49,22 @@ may be using, the maintainer's own primary checkout included, even one that look
 hub and for the target repo alike, create a worktree of your own off that base clone and work
 there, per `repo-worktree`. Remove each one when the run ends, per that skill's "Listing and
 Cleanup". A merged pull request's worktree goes through
-`uv run --no-project --script scripts/pr_review.py cleanup <number> --repo <owner>/<repo> --checkout <base-clone>`. Spell every `scripts/pr_review.py` call this skill prints as
+`uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`,
+`~/repos/<Repo>` being that repository's primary clone. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. Spell every `scripts/pr_review.py` call this skill prints as
 `pr-review-conduct` "Expected review loop" says. A
 hub worktree that only read the hub is removed by hand once it is clean, its branch with it. On a machine carrying the hub's agent-safety install, Claude Code also
 refuses a mutating git command run directly in a primary checkout. However, its rules classify git
 and gh commands only. So a plain file write is never denied, and the re-vendoring this skill exists
 to govern goes uncaught. A compound command is judged whole, so a copy chained to a denied git
 write does not run either. Prose is the enforcement here, and following it is not optional. Verify
-the host with `python3 scripts/host_gate.py --repo <path-to-target-worktree>`, run from your hub
+the host with `python3 scripts/host_gate.py --repo "<path-to-target-worktree>"`, run from your hub
 worktree, since `scripts/` is hub-hosted and no carrier holds it. Then run the audit end to end,
-`RESYNC.md` section 2. `uv run --no-project --script spec/audit.py <RepoName>` measures the target's ground-truth
+`RESYNC.md` section 2. `uv run --no-project --script spec/audit.py "<RepoName>"` measures the target's ground-truth
 branch, which the registry's `groundTruthBranch` names and which is `main` for every cataloged
 repo today, never `develop`. "Confirm the procedure before starting" already ran that
 invocation after this host gate, so read its findings here. A re-run is still owed before
 acting on one, as below. Convergence lands on a ref `main` does not hold yet, so a run that
-previews in-flight work names that ref: `uv run --no-project --script spec/audit.py --branch <ref> <RepoName>`. Use it
+previews in-flight work names that ref: `uv run --no-project --script spec/audit.py --branch "<ref>" "<RepoName>"`. Use it
 to check whether a fix landed, since a run against `main` still reports what the in-flight ref
 already fixed. Section 2 carries two further commands that neither of these replaces. A finding is
 a snapshot. So quote the run stamp in anything derived from it, and re-run before acting on a
@@ -98,11 +99,12 @@ section 3 describes.
    The reason is that it may be an improvement the hub should adopt instead of a mistake to erase.
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.
-5. **Settings, rulesets, and secrets.** Run
+5. **Settings, rulesets, and secrets.** Apply the first public-interaction limit to one pilot repository. Verify there that Copilot, CodeRabbit, Qodo, and Dependabot still work under it, and record the evidence on a pull request. Only then roll the limit out to the other repositories.
+   This is `RESYNC.md` step 5. Run
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo), then `apply` for what it reports, never from a carried copy. Both run from
    the hub checkout this run fetched, at `main` or at `develop` for a registry entry not yet
-   promoted. Run `uv run --no-project --script spec/audit.py <RepoName>` from the same checkout for secrets.
+   promoted. Run `uv run --no-project --script spec/audit.py "<RepoName>"` from the same checkout for secrets.
 6. **Intent files last, and by hand,** since nothing mechanical judges these.
 
 Reconcile the registry entry (`status`, `types`, `releaseTrigger`, `workflowModel`,

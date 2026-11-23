@@ -54,7 +54,7 @@ class LiveSettingsCase(unittest.TestCase):
             settings = Path(tmp) / "settings.json"
             settings.write_text(json.dumps({"delete_branch_on_merge": True}), encoding="utf-8")
             script = (
-                f"{OPTIONS}\nFAILED=0\nrepo=o/r\nname=r\ndescription=''\nregistry=/nonexistent\n"
+                f"{OPTIONS}\nFAILED=0\nrepo=o/r\nname=r\ndescription=''\nregistry=/nonexistent\npublic_discussions=false\n"
                 f"settings_file={json.dumps(str(settings))}\n"
                 f"gh() {{ printf '%s' {json.dumps(live)}; }}\n"
                 f"{NOTE}{FAIL}{PASS}{ASSERT}{JQR}{JQ_HAS}{CHECK_SETTINGS}"
