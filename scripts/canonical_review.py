@@ -43,11 +43,20 @@ The verdict vocabulary is `scripts/local_review.py`'s. So a caller reading an ex
 engine need not know which one answered. The codes are 0 for covered, 1 for a finding, and 2 for the
 check itself not having run.
 
+**A pass is recorded from the report its reviewer wrote, never from a count the caller types.** A
+typed count binds the record to nothing the reviewer produced. So a driver that misread or imagined
+a review could record one that never reported. Each unit's report sits at the path `report-path`
+names for it, which is keyed by the unit's digest. It is read by `local_review.py`'s own reader,
+so the report contract is that engine's: a first line reading `contentDigest: <digest>`, then one
+finding per non-blank line. `record` refuses a unit whose report is absent or names another digest.
+It stores the report's sha256 and derives the count from its lines.
+
 Usage, each command run as `uv run --no-project --script scripts/canonical_review.py <command>`:
     list      every unit and its digest, as JSON
     status    what is covered, stale, or never read
     sweep     the units it asks for this round
-    record    --reviewer agent-skill --target develop --findings '<count>' --unit '<key>=<digest>'
+    report-path --unit '<key>=<digest>'   where each unit's reviewer writes its report, as JSON
+    record    --reviewer agent-skill --target develop --unit '<key>=<digest>'
     report    render the burn-down to standard output
 """
 
@@ -644,12 +653,16 @@ def render_sweep(
         lines.extend(
             [
                 "",
-                "Record each pass at the digest above, which is the text that was read:",
+                (
+                    "Have each pass write its report to the path `report-path` names for its unit,"
+                    " then record the unit at the digest above, which is the text that was read:"
+                ),
                 "",
                 "```sh",
+                "uv run --no-project --script scripts/canonical_review.py report-path --unit '<key>=<digest>'",
                 (
                     "uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill"
-                    " --target develop --findings '<count>' --unit '<key>=<digest>'"
+                    " --target develop --unit '<key>=<digest>'"
                 ),
                 "```",
             ]
@@ -717,6 +730,48 @@ def parse_pairs(values: list[str]) -> dict[str, str]:
     return out
 
 
+def refused_units(wanted: dict[str, str], current: dict[str, str], window: str) -> bool:
+    """Report each named unit that is not carried or whose text moved past its digest.
+
+    `window` names the interval the content moved in, for the message. True means something was
+    refused and reported, and the caller writes nothing.
+    """
+    unknown = sorted(set(wanted) - set(current))
+    if unknown:
+        emit("no such carried canonical unit:", sys.stderr)
+        for unit in unknown:
+            emit(f"  {unit}", sys.stderr)
+        emit("Run 'canonical_review.py list' for the unit keys.", sys.stderr)
+        return True
+    moved = sorted(unit for unit, want in wanted.items() if current[unit] != want)
+    if moved:
+        emit(f"the content moved between {window}:", sys.stderr)
+        for unit in moved:
+            emit(
+                f"  {unit}\n    reviewed {wanted[unit][:19]}\n    now      {current[unit][:19]}",
+                sys.stderr,
+            )
+        emit(
+            "Read the unit's current text at the digest `list` now names, and record that read.",
+            sys.stderr,
+        )
+        return True
+    return False
+
+
+def unit_report_path(root: Path, value: str) -> Path:
+    """Where the reviewer of the unit at digest `value` writes its report.
+
+    `local_review.report_path` keyed by the digest's hex alone, since the `sha256:` prefix carries a
+    colon no Windows file name may hold. The report's own first line still names the whole digest,
+    which is what `local_review.read_report` compares.
+    The two engines share that one name space in the git directory. So recording a diff pass there
+    prunes a unit report not yet recorded, and the record then refuses it as absent. That errs
+    toward another pass rather than toward a record nobody's report backs.
+    """
+    return local_review.report_path(root, value.removeprefix("sha256:"))
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     if args.reviewer not in REVIEWERS:
         known = ", ".join(sorted(REVIEWERS))
@@ -731,31 +786,26 @@ def cmd_record(args: argparse.Namespace) -> int:
             sys.stderr,
         )
         return EXIT_CANNOT_RUN
-    if args.findings is not None and args.findings < 0:
-        emit(f"--findings cannot be negative, got {args.findings}", sys.stderr)
-        return EXIT_CANNOT_RUN
     root = local_review.repo_root()
     current, _ = units(root)
     wanted = parse_pairs(args.unit)
-    unknown = sorted(set(wanted) - set(current))
-    if unknown:
-        emit("no such carried canonical unit:", sys.stderr)
-        for unit in unknown:
-            emit(f"  {unit}", sys.stderr)
-        emit("Run 'canonical_review.py list' for the unit keys.", sys.stderr)
+    if refused_units(wanted, current, "the review and this record, so nothing was recorded"):
         return EXIT_CANNOT_RUN
-    moved = sorted(unit for unit, want in wanted.items() if current[unit] != want)
-    if moved:
+    reports: dict[str, tuple[str, int]] = {}
+    unreported: list[str] = []
+    for unit, value in wanted.items():
+        try:
+            reports[unit] = local_review.read_report(unit_report_path(root, value), value)
+        except CannotRun as exc:
+            unreported.append(f"  {unit}\n    {exc}")
+    if unreported:
+        emit("no report its reviewer wrote binds this pass, so nothing was recorded:", sys.stderr)
+        for line in unreported:
+            emit(line, sys.stderr)
         emit(
-            "the content moved between the review and this record, so nothing was recorded:",
+            "The driver never writes a report for its reviewer. A pass with no report owes a fresh one.",
             sys.stderr,
         )
-        for unit in moved:
-            emit(
-                f"  {unit}\n    reviewed {wanted[unit][:19]}\n    now      {current[unit][:19]}",
-                sys.stderr,
-            )
-        emit("Re-read the unit's current text and record that.", sys.stderr)
         return EXIT_CANNOT_RUN
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Stamped as the merge-base against the target, not HEAD, since a squash merge discards HEAD and an amend moves it.
@@ -767,11 +817,13 @@ def cmd_record(args: argparse.Namespace) -> int:
     try:
         ledger = read_ledger(root)
         for unit, value in wanted.items():
+            sha256, findings = reports[unit]
             ledger[unit] = {
                 "unit": unit,
                 "digest": value,
                 "reviewer": args.reviewer,
-                "findings": args.findings,
+                "findings": findings,
+                "reportSha256": sha256,
                 "hubCommit": base,
                 "stamp": stamp,
             }
@@ -779,7 +831,32 @@ def cmd_record(args: argparse.Namespace) -> int:
     finally:
         os.close(fd_lock)
         Path(str(lock) + ".lock").unlink(missing_ok=True)
-    emit(f"recorded {args.reviewer} over {len(wanted)} unit(s) in {LEDGER}.")
+    total = sum(findings for _, findings in reports.values())
+    emit(
+        f"recorded {args.reviewer} over {len(wanted)} unit(s) in {LEDGER},"
+        f" {total} finding(s) from their reports."
+    )
+    return EXIT_COVERED
+
+
+def cmd_report_path(args: argparse.Namespace) -> int:
+    """Name where each unit's reviewer writes its report, refusing a unit `record` would refuse.
+
+    Refused here as well as at the record. So a digest the text has already moved past is caught
+    before a reviewer reads it.
+    """
+    root = local_review.repo_root()
+    current, _ = units(root)
+    wanted = parse_pairs(args.unit)
+    if refused_units(
+        wanted, current, "the digest being read and this lookup, so no path was named"
+    ):
+        return EXIT_CANNOT_RUN
+    emit(
+        json.dumps(
+            {unit: str(unit_report_path(root, value)) for unit, value in wanted.items()}, indent=2
+        )
+    )
     return EXIT_COVERED
 
 
@@ -898,7 +975,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_sweep.set_defaults(handler=cmd_sweep)
 
-    p_record = sub.add_parser("record", help="record a full-content pass over one or more units")
+    p_report_path = sub.add_parser(
+        "report-path", help="where each named unit's reviewer writes its report, as JSON"
+    )
+    p_report_path.add_argument(
+        "--unit",
+        required=True,
+        action="append",
+        metavar="KEY=DIGEST",
+        help="a unit key and the digest the reviewer is handed, repeatable",
+    )
+    p_report_path.set_defaults(handler=cmd_report_path)
+
+    p_record = sub.add_parser(
+        "record",
+        help=(
+            "record a full-content pass over one or more units, each from the report its reviewer"
+            " wrote at the path report-path names"
+        ),
+    )
     p_record.add_argument(
         "--reviewer", required=True, help=f"one of: {', '.join(sorted(REVIEWERS))}"
     )
@@ -909,7 +1004,6 @@ def main(argv: list[str] | None = None) -> int:
         metavar="KEY=DIGEST",
         help="a unit key and the digest the reviewer read, repeatable",
     )
-    p_record.add_argument("--findings", type=int, default=None, help="how many findings it raised")
     p_record.add_argument(
         "--target",
         default=None,

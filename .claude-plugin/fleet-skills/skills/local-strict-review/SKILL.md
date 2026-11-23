@@ -115,7 +115,7 @@ A second pass under the same rule, run in the repository that authors canonical 
 
 **The unit is what a reviewer reads whole.** `spec/files.json` rather than the document decides which, down to which files carry units at all. `canonical_review.py list` names the whole set and is the authority on it. So the rules are not paraphrased here, where a paraphrase can only drift from them. In the ordinary case a unit is one level-two section of a carried Markdown canonical. `sweep` names each unit it wants exactly as `record` takes it. The pass reads that unit's whole current text rather than the diff that moved it, because reproducing the carrier's read is the entire point. It also does so because a diff with surrounding context is a different read the pass above has already done.
 
-Run it at the same model tier and in the same delegation shape as the pass above. The brief, the engine, and its flags each differ, and each is below.
+Run it at the same model tier and in the same delegation shape as the pass above, one reviewer per unit. The brief, the engine, and its flags each differ, and each is below. The report contract is the same one, so the reviewer again needs an agent type that can write a file.
 
 ```text
 Task: adversarial review of one canonical unit, read as a repository carrying it for the first
@@ -127,16 +127,23 @@ Rules that bind this task: <quote fleet-code-review's "Review the Change" sectio
   another rule is a defect wherever that claim is false, stale, or unverifiable from the unit
   itself, and an instruction it gives is a defect wherever following it literally fails.
 Return: one finding per line, the sentence quoted, and what is wrong with it. No severity theater.
-Bounds: read-only. Report a rule that looks incomplete rather than guessing at what it meant.
+  Write the same finding lines to <report-path> before returning, under a first line reading
+  `contentDigest: <digest>`. Nothing else goes in the file. A pass with no findings writes that
+  first line alone.
+Bounds: read-only apart from that one report file. Report a rule that looks incomplete rather
+  than guessing at what it meant.
 <AGENTS.md's own unresolved-rule closing line, quoted verbatim from "Context and Delegation Discipline", not restated here>
 ```
 
 ```sh
 uv run --no-project --script scripts/canonical_review.py sweep     # the units it asks for this round, with their digests
 # exit 1 where it named any, which is the sweep working rather than the command failing
-# run the pass above over each unit it named, then, per unit:
-uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill --target develop --findings '<count>' --unit '<key>=<digest>'
+# per unit it named: take the unit's <report-path>, run the pass above, wait for its completion notification, then record it
+uv run --no-project --script scripts/canonical_review.py report-path --unit '<key>=<digest>'   # JSON, the unit's report path
+uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill --target develop --unit '<key>=<digest>'
 ```
+
+`<digest>` is the one `sweep` printed beside the unit, and `<report-path>` is what `report-path` names for it. That path sits in the git directory, keyed by the unit's digest, so `record` finds each unit's report without being told where. `record` reads each report with the same reader the pass above uses. It refuses a unit whose report is absent or names another digest. While any unit it was given is refused, it records none of them. It derives each unit's count from its report's lines and stores the report's sha256. So the record-only-on-completion rule above binds here too, and a driver never writes a report for its reviewer.
 
 These run in the authoring repository itself, the only repository this pass ever runs in. So the engine path is the plain one, and no downstream side needs the `<hub-checkout>/` form the pass above shows for its own reach. Each resolves the repository from the working directory rather than from where the script sits. So the directory a command runs in is what decides which tree it measures. The unit model and the manifest reader come from the checkout the script itself lives in. Running one checkout's copy against another's tree therefore measures the second tree by the first's rules. So run them in the tree being measured. `record` additionally stamps each pass with the merge-base against `--target`, which is provenance rather than coverage. The line above names it rather than leaning on the default, since a sweep's own branch is based on `develop`. A `main`-based branch passes `--target main` instead.
 

@@ -14,6 +14,7 @@ or under `-m unittest discover -s tests` the same way.
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -243,18 +244,28 @@ class RepoCase(unittest.TestCase):
     def manifest(self) -> dict:
         return json.loads((self.tmp / "spec/files.json").read_bytes().decode("utf-8"))
 
+    def write_report(self, unit: str, findings: int = 0, digest: str | None = None) -> Path:
+        """Write the report a reviewer of `unit` leaves, at the path `record` reads it from.
+
+        `digest` is the one the report's first line names, the unit's current digest by default.
+        """
+        value = self.units()[unit]
+        path = cr.unit_report_path(self.tmp, value)
+        lines = [f"{cr.local_review.REPORT_HEADER}{digest or value}"]
+        lines.extend(f"{unit}: finding {n}" for n in range(findings))
+        path.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
+        return path
+
+    def record_argv(self, *units: str) -> list[str]:
+        argv = ["record", "--reviewer", "agent-skill"]
+        for unit in units:
+            argv.extend(["--unit", f"{unit}={self.units()[unit]}"])
+        return argv
+
     def record(self, unit: str, findings: int = 0) -> int:
-        return self.quiet(
-            [
-                "record",
-                "--reviewer",
-                "agent-skill",
-                "--findings",
-                str(findings),
-                "--unit",
-                f"{unit}={self.units()[unit]}",
-            ]
-        )
+        """Record a pass over `unit` the way a sweep does, from the report its reviewer wrote."""
+        self.write_report(unit, findings)
+        return self.quiet(self.record_argv(unit))
 
 
 class ManifestCase(RepoCase):
@@ -521,15 +532,21 @@ class SweepCase(RepoCase):
         self.record("DOC.md > Alpha")
         self.write("DOC.md", "intro\n\n## Alpha\n\na body, edited\n\n## Beta\n\nb body\n")
         _, output = self.loud(["sweep"])
-        line = (
-            "uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill --target develop"
-            " --findings '<count>' --unit '<key>=<digest>'"
+        lines = (
+            "uv run --no-project --script scripts/canonical_review.py report-path --unit '<key>=<digest>'",
+            (
+                "uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill --target develop"
+                " --unit '<key>=<digest>'"
+            ),
         )
-        self.assertIn(line, output.splitlines(), "the printed command must be one whole line")
+        for line in lines:
+            self.assertIn(line, output.splitlines(), "the printed command must be one whole line")
+        self.assertNotIn("--findings", output, "the sweep still asks for a typed count")
 
     def test_record_refuses_an_unresolvable_target(self) -> None:
         """`record` resolves a merge-base against `--target` to stamp `hubCommit`, so an
         unresolvable target refuses the record rather than falling back to `HEAD`."""
+        self.write_report("DOC.md > Alpha")
         code, output = self.loud(
             [
                 "record",
@@ -548,7 +565,8 @@ class SweepCase(RepoCase):
     def test_record_refuses_an_empty_target_value(self) -> None:
         """A caller written as `--target "$VAR"` with the variable unset must not stamp a base
         nobody named."""
-        code = self.quiet(
+        self.write_report("DOC.md > Alpha")
+        code, output = self.loud(
             [
                 "record",
                 "--reviewer",
@@ -560,6 +578,8 @@ class SweepCase(RepoCase):
             ]
         )
         self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("--target", output)
+        self.assertFalse((self.tmp / cr.LEDGER).exists(), "a refused record still wrote a ledger")
 
     def test_a_manifest_path_that_escapes_the_root_cannot_run(self) -> None:
         """Held to what a carried tree's own paths already are, rather than read straight off the manifest."""
@@ -681,6 +701,77 @@ class LedgerCase(RepoCase):
             self.quiet(["record", "--reviewer", "someone", "--unit", "DOC.md > Alpha=sha256:00"]),
             cr.EXIT_CANNOT_RUN,
         )
+
+    def test_record_refuses_a_pass_with_no_report(self) -> None:
+        """A count typed by the driver binds the record to nothing the reviewer produced. So with no
+        report on disk there is nothing to record, whatever the driver believes the pass found."""
+        unit = "DOC.md > Alpha"
+        code, output = self.loud(self.record_argv(unit))
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("no report", output)
+        self.assertIn(str(cr.unit_report_path(self.tmp, self.units()[unit])), output)
+        self.assertFalse((self.tmp / cr.LEDGER).exists(), "a pass with no report was recorded")
+
+    def test_record_takes_the_count_and_digest_of_the_report(self) -> None:
+        unit = "DOC.md > Alpha"
+        path = self.write_report(unit, findings=2)
+        code, output = self.loud(self.record_argv(unit))
+        self.assertEqual(code, cr.EXIT_COVERED, output)
+        entry = cr.read_ledger(self.tmp)[unit]
+        self.assertEqual(entry["findings"], 2)
+        self.assertEqual(entry["reportSha256"], hashlib.sha256(path.read_bytes()).hexdigest())
+        self.assertEqual(entry["digest"], self.units()[unit])
+
+    def test_a_report_with_only_its_header_records_no_findings(self) -> None:
+        """A pass with nothing to report writes the first line alone, and is recorded all the same."""
+        self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
+        self.assertEqual(cr.read_ledger(self.tmp)["DOC.md > Alpha"]["findings"], 0)
+
+    def test_record_refuses_a_report_written_for_other_text(self) -> None:
+        """A report naming another digest reviewed other text, even where it sits at this unit's path."""
+        unit = "DOC.md > Alpha"
+        self.write_report(unit, digest=self.units()["DOC.md > Beta"])
+        code, output = self.loud(self.record_argv(unit))
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("reviewed other content", output)
+        self.assertFalse((self.tmp / cr.LEDGER).exists())
+
+    def test_one_unit_lacking_its_report_records_none_of_them(self) -> None:
+        """A partial record would leave the caller unsure which of its units the ledger holds."""
+        self.write_report("DOC.md > Alpha")
+        code, output = self.loud(self.record_argv("DOC.md > Alpha", "DOC.md > Beta"))
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("DOC.md > Beta", output)
+        self.assertFalse((self.tmp / cr.LEDGER).exists())
+
+    def test_record_no_longer_takes_a_typed_count(self) -> None:
+        """The flag is gone rather than ignored, so a caller still typing a count learns it at once."""
+        unit = "DOC.md > Alpha"
+        self.write_report(unit)
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            cr.main([*self.record_argv(unit), "--findings", "0"])
+        self.assertEqual(raised.exception.code, cr.EXIT_CANNOT_RUN)
+        self.assertFalse((self.tmp / cr.LEDGER).exists())
+
+    def test_report_path_names_a_path_in_the_git_directory(self) -> None:
+        """An untracked report in the tree would be content the diff pass then has to read."""
+        unit = "DOC.md > Alpha"
+        code, output = self.loud(["report-path", "--unit", f"{unit}={self.units()[unit]}"])
+        self.assertEqual(code, cr.EXIT_COVERED, output)
+        path = Path(json.loads(output)[unit])
+        git_dir = Path(run(self.tmp, "rev-parse", "--absolute-git-dir").strip())
+        self.assertEqual(path.parent, git_dir)
+        self.assertNotIn(":", path.name, "a colon is no valid Windows file name character")
+        self.assertEqual(path, cr.unit_report_path(self.tmp, self.units()[unit]))
+
+    def test_report_path_refuses_a_digest_the_content_has_moved_past(self) -> None:
+        """Caught before a reviewer spends a pass on text the record would refuse."""
+        code, output = self.loud(["report-path", "--unit", "DOC.md > Alpha=sha256:00"])
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("moved", output)
 
     def test_two_records_in_either_order_produce_one_ledger(self) -> None:
         """The ledger is the state two branches merge. So the order two passes were recorded in
