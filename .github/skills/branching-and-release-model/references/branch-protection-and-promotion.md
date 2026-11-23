@@ -2,8 +2,8 @@
 
 Full detail for the "Branching" rules in `SKILL.md`. Load this when configuring or reconstructing
 branch protection on a fleet repo, or when executing a `develop -> main` promotion. Also load it
-when recovering a lost `develop`, resolving an EOL-only promotion conflict, or working on the
-dual-target bot wiring (Dependabot, codegen, the merge-bot). It is not for an ordinary
+when recovering a lost `develop`, cutting a conflicted promotion, the EOL-only case included, or
+recovering a squash into `main`. Load it too when working on the dual-target bot wiring (Dependabot, codegen, the merge-bot). It is not for an ordinary
 feature-branch PR, which the SKILL.md summary covers.
 
 ## Configuring branch protection: don't hand-build the rules
@@ -38,6 +38,17 @@ These traps were learned the hard way:
   confirming each is content-identical modulo EOL, or that `develop` is a strict superset**
   (`diff <(git show ":2:<file>" | tr -d '\r') <(git show ":3:<file>" | tr -d '\r')`). Then open
   that branch into `main`. Verify no genuine `main`-only content is dropped (build/test where the repo supports it).
+- **A conflicted promotion lands from a branch cut from `main` that merges `develop`.** The EOL-only case above is one instance. A bot bump that landed on `main` and `develop` separately, beside a line `develop` changed, is another. This procedure covers a `develop` that is a strict superset of `main`'s content. The steps:
+  1. Cut the branch in a worktree of its own: `git worktree add -b promote/develop-to-main "<worktree>" origin/main`, then run `git merge origin/develop` there.
+  2. Take `develop`'s side on each conflict only after the strict-superset check above shows `main` holds nothing `develop` lacks there.
+  3. Confirm the merged tree equals `develop`'s before the push: `git diff origin/develop HEAD --stat` prints nothing.
+  4. A path it prints holds content `develop` lacks, or a resolution that kept `main`'s side. Redo such a resolution. Land genuine `main`-only content on `develop` through a feature pull request first, then merge `origin/develop` again.
+  5. Open the branch as the promotion pull request in place of the one headed by `develop`. Carry the superseded pull request's whole body, its closing set included.
+  6. Carry its labels too, `comments` among them. Without that label, every comment line the feature pull requests landed reads as `comment-added` on the new head.
+  7. Close the superseded pull request with a comment naming the new one.
+  8. Land each later `develop` fix on the branch as `git merge --no-ff origin/develop` in the same worktree, re-run the tree check, then push it to the branch.
+  9. Merge it like any promotion, with `--merge`. The merge commit restores the merge base, so the next promotion runs from `develop` again.
+- **A squash into `main` is recovered with that same cut.** The `main` ruleset allows only merge commits, yet its admin bypass lets a squash through. A squashed promotion leaves `main` with `develop`'s content but not its history. The merge base stays at the previous merge commit. So the next promotion conflicts wherever a later `develop` change edits a line the squash already carried. The hub's `validate-task.yml` `Check promotion history step` fails that next promotion. It names each single-parent commit on `main`'s first-parent chain since its previous promotion merge. Recover with the conflicted-promotion cut above, taking `develop`'s side on every conflict, since `develop` holds everything the squash carried. That step passes a head that already holds `main`'s tip, and the merge then restores the merge base. Never rewrite or force-push `main` to undo the squash.
 
 ## Why both rulesets omit "Require branches to be up to date before merging"
 
