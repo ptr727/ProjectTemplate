@@ -1119,7 +1119,7 @@ COMMANDS = BASE["commands"]
 COMMAND_NAMES = frozenset(COMMANDS["names"])
 COMMAND_SUFFIXES = tuple(COMMANDS["script_suffixes"])
 COMMAND_FENCES: dict[str, str] = COMMANDS["fences"]
-ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=(?:\"[^\"]*\"|'[^']*'|[^\s\"'])*")
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*=(?:\\.|\"[^\"]*\"|'[^']*'|[^\s\"'\\])*")
 SUBSTITUTED = re.compile(r"[A-Za-z_]\w*=[\"']?\$\((\S+)")
 
 
@@ -1680,7 +1680,7 @@ PASTE_SHAPES = {
 
 
 CASE_ARM = re.compile(r"(?m)^[ \t]*\(?[^\s()<>]+\)")
-REGEX_OPERAND = re.compile(r"=~[ \t]+(\S+)")
+REGEX_OPERAND = re.compile(r"\[\[[^\n]*?=~[ \t]+(\S+)")
 
 
 def blanked(value: str) -> str:
@@ -1717,7 +1717,7 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
     Each command is a code span opening with a command or a shell fence's content. Each finding is
     reported on the line holding the placeholder. A string handed to a second shell, as `sh -c`
     takes one, is read as the quotation it is to the first. A `case` arm's pattern and the bracket
-    and alternation of a `=~` operand are the shell's own syntax, so neither is a placeholder.
+    and alternation of a `[[ =~ ]]` operand are the shell's own syntax, so neither is a placeholder.
     """
     out: list[Finding] = []
     for line in unit.lines:

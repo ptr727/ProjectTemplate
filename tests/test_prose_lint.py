@@ -4517,10 +4517,14 @@ class TestPasteSafeRule(BaitCase):
         self.assertEqual([3], self.lines(text))
         self.assertEqual([2], self.lines("```sh\n[[ $x =~ <pattern> ]] && echo ok\n```\n"))
 
+    def test_an_equals_tilde_outside_a_conditional_is_no_regex(self) -> None:
+        self.assertEqual([2], self.lines("```sh\necho x =~ [RepoName]\n```\n"))
+
     def test_a_quoted_assignment_with_spaces_still_opens_a_command(self) -> None:
         for span in (
             'LABEL="two words" git fetch origin <ref>',
             "A='x y' B= git fetch <ref>",
+            "LABEL=two\\ words git fetch origin <ref>",
             'VERSION="$(./scripts/version.sh <ref>)"',
         ):
             with self.subTest(span=span):
