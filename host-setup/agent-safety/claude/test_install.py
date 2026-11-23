@@ -2336,6 +2336,60 @@ class TestRegistration(StampCase):
                 self.assertTrue(install.runs_hook(hook, path), hook)
                 self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
 
+    def test_names_hook_ignores_a_kit_name_an_unrelated_command_merely_carries(self):
+        """A hook is named by its command being the kit file or by a lone path argument to it.
+        It is also named by an interpreter's script argument or a shell's `-c` string.
+
+        A bare kit file name or a `-c` string under `echo` is none of those, so `echo` does not claim it.
+        """
+        for args in (["gh-write-guard.py"], ["-c", "gh-write-guard.py"]):
+            hook = {"type": "command", "command": "/bin/echo", "args": args}
+            with self.subTest(args=args):
+                self.assertFalse(install.names_hook(hook, install.GUARD_NAME), hook)
+        for command in (
+            "python3",
+            "/usr/bin/python3.13",
+            "/opt/py/python3.13t",
+            "python3.13t.exe",
+            "pypy3",
+            "py",
+            "C:\\Python313\\python.exe",
+        ):
+            hook = {"command": command, "args": ["/old/hooks/gh-write-guard.py", "--x"]}
+            with self.subTest(interpreter=command):
+                self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
+        for args in (["gh-write-guard.py"], ["/old/hooks/gh-write-guard.py", "--x"]):
+            for command in ("python3", "python3.13t.exe", "pypy3", "py"):
+                hook = {"command": command, "args": args}
+                self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
+        nameless = {"args": ["/old/hooks/gh-write-guard.py"]}
+        self.assertTrue(install.names_hook(nameless, install.GUARD_NAME), nameless)
+        own = {"command": "/opt/graalpy/bin/graalpy", "args": ["/old/hooks/gh-write-guard.py"]}
+        self.assertTrue(install.names_hook(own, install.GUARD_NAME), own)
+        relative = {
+            "command": "/opt/graalpy/bin/graalpy",
+            "args": [".claude-test/hooks/gh-write-guard.py"],
+        }
+        self.assertTrue(install.names_hook(relative, install.GUARD_NAME), relative)
+        for command in ("/bin/bash", "sh", "ksh", "fish", "pwsh", "C:\\Git\\bin\\bash.exe"):
+            hook = {"command": command, "args": ["-c", "python3 /old/hooks/gh-write-guard.py"]}
+            with self.subTest(shell=command):
+                self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
+
+    def test_a_re_run_keeps_an_echo_registration_that_only_mentions_a_kit_file(self):
+        """Registering strips by `names_hook`, so a host's own `echo` entry survives and persists."""
+        for args in (["gh-write-guard.py"], ["-c", "gh-write-guard.py"]):
+            echo = {"type": "command", "command": "/bin/echo", "args": args}
+            with self.subTest(args=args):
+                self.install()
+                data = self._settings()
+                data["hooks"]["PreToolUse"][0]["hooks"].append(echo)
+                self._write(data)
+                self.install()
+                hooks = [h for g in self._settings()["hooks"]["PreToolUse"] for h in g["hooks"]]
+                self.assertIn(echo, hooks)
+                self.assertEqual(install.registration_problems(self.home), [])
+
 
 class TestAutoMode(StampCase):
     """The kit owns its tagged autoMode entries, and a machine's own entries are never touched.
