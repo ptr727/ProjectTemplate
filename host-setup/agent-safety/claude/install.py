@@ -728,8 +728,9 @@ def exec_spawn_problem(launcher, windows=None):
 def hook_launcher():
     """The interpreter path the settings.json entries carry as `command`, or None, and why each other candidate failed.
 
-    The path is absolute, so the hook runs the interpreter the install probed.
+    The path is absolute, so the hook does not depend on the session's own PATH.
     Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
+    A version-manager shim, such as pyenv's, still picks its interpreter when the hook runs, as a bare `python3` did before.
     The `python3` on PATH is preferred, being unambiguously Python 3.
     A candidate inside a virtual environment yields first to the interpreters that venv was made from.
     Its path is kept as PATH resolves it, and its links are not followed.
