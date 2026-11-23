@@ -1680,7 +1680,7 @@ PASTE_SHAPES = {
 
 
 CASE_ARM = re.compile(r"(?m)^[ \t]*\(?[^\s()<>]+\)")
-REGEX_OPERAND = re.compile(r"\[\[[^\n]*?(?:=~|==|!=|=)[ \t]+(\S+)")
+REGEX_OPERAND = re.compile(r"\[\[(?:(?!\]\])[^\n])*?(?:=~|==|!=|=)[ \t]+(\S+)")
 
 
 def blanked(value: str) -> str:

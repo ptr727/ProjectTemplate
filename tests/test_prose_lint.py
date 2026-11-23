@@ -4522,6 +4522,10 @@ class TestPasteSafeRule(BaitCase):
             text = f"```sh\n[[ $answer {op} [Yy] ]] && echo ok\ngit fetch origin <ref>\n```\n"
             self.assertEqual([3], self.lines(text), op)
 
+    def test_a_bracket_after_a_closed_conditional_is_still_a_placeholder(self) -> None:
+        text = '```sh\n[[ -n $x ]] && [ "$a" = [expected] ]\n```\n'
+        self.assertEqual([2], self.lines(text))
+
     def test_an_equals_tilde_outside_a_conditional_is_no_regex(self) -> None:
         self.assertEqual([2], self.lines("```sh\necho x =~ [RepoName]\n```\n"))
 
