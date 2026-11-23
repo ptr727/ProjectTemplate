@@ -276,8 +276,36 @@ report
                     check=False,
                     timeout=30,
                 )
-                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.returncode, 64)
                 self.assertIn("--json", result.stderr)
+                self.assertEqual(result.stdout, "")
+
+
+@unittest.skipUnless(sys.platform == "linux", "runs the Linux installer")
+class TestLinuxRefusalStatus(unittest.TestCase):
+    """Every argument refusal exits 64, the status CODESTYLE.md "Command-Line Arguments" reserves for one."""
+
+    def test_each_refusal_exits_the_reserved_status(self) -> None:
+        for arguments, message in [
+            (("--bogus-flag",), 'Unknown option "--bogus-flag"'),
+            (("--repo",), "--repo needs a path"),
+            (("--report", "--install"), "More than one action"),
+            (("--install", "--json"), "applies only to --report"),
+            (("--sudo-timestamp", "jq"), "takes no tool"),
+            (("--list", "nosuch"), 'Unknown tool "nosuch"'),
+        ]:
+            with self.subTest(arguments=arguments):
+                result = subprocess.run(
+                    [str(LINUX_INSTALLER), *arguments],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    stdin=subprocess.DEVNULL,
+                    check=False,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertIn(message, result.stderr)
                 self.assertEqual(result.stdout, "")
 
 

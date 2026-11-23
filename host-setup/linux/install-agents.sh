@@ -43,9 +43,37 @@ CHANGED=()
 # The version record_change last read, so the floor check judges the reading the change list shows.
 NOW_VERSION=""
 
+USAGE_REFUSED=false
+pids=()
+
 TMP_DIR=$(mktemp -d)
 readonly TMP_DIR
-trap 'rm -rf "$TMP_DIR"' EXIT
+
+# Exit status 64 is reserved for a refused argument, per CODESTYLE.md "Command-Line Arguments".
+# Under set -e a failed command's own status becomes the script's, so a 64 that die_usage did not exit leaves as 1.
+# shellcheck disable=SC2317,SC2329  # The EXIT trap runs it.
+on_exit() {
+    local status=$?
+    rm -rf "$TMP_DIR"
+    if [[ $status -eq 64 && $USAGE_REFUSED == false ]]; then
+        exit 1
+    fi
+}
+
+# An interrupt stops the running command and re-raises the signal, per CODESTYLE.md "Interrupts in Shell".
+# shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
+interrupted() {
+    if [[ ${#pids[@]} -ne 0 ]]; then
+        kill "${pids[@]}" 2>/dev/null || :
+        wait "${pids[@]}" || :
+    fi
+    printf 'install-agents.sh: interrupted by SIG%s.\n' "$1" >&2
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+trap on_exit EXIT
+trap 'interrupted INT; exit 130' INT
+trap 'interrupted TERM; exit 143' TERM
 
 # --- Output ---
 
@@ -55,6 +83,13 @@ warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+# A refused argument exits 64, EX_USAGE from sysexits.h, so a caller can tell it from a run that started and failed.
+die_usage() {
+    printf 'ERROR: %s\n' "$*" >&2
+    USAGE_REFUSED=true
+    exit 64
 }
 
 note() {
@@ -198,6 +233,8 @@ Examples:
   install-agents.sh --upgrade herdr        Upgrade herdr, if it is installed
   install-agents.sh --install herdr cswap  Install two tools
   install-agents.sh --install --all        Install every tool that is missing
+
+Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF
 }
 
@@ -211,7 +248,18 @@ run() {
         printf '  [dry run] %s\n' "$*"
         return 0
     fi
-    timeout "$STEP_TIMEOUT" "$@" </dev/null
+    run_child timeout "$STEP_TIMEOUT" "$@" </dev/null
+}
+
+# A command run here goes to the background and is waited for, since bash runs a trap only once a foreground command returns.
+# It keeps the script's standard input, which bash would otherwise replace with /dev/null for a background command.
+run_child() {
+    "$@" <&0 &
+    pids=("$!")
+    local status=0
+    wait "${pids[0]}" || status=$?
+    pids=()
+    return "$status"
 }
 
 confirm() {
@@ -236,7 +284,7 @@ run_installer() {
         return 1
     }
     curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 15 --max-time "$STEP_TIMEOUT" --retry-max-time "$STEP_TIMEOUT" "$url" -o "$file" || return 1
-    timeout "$STEP_TIMEOUT" "$shell" "$file" </dev/null
+    run_child timeout "$STEP_TIMEOUT" "$shell" "$file" </dev/null
 }
 
 # A nightly run reaches this through runuser or a systemd unit, whose PATH carries none of the per-user directories these installers write to.
@@ -1041,12 +1089,12 @@ resolve_selection() {
         for tool in "${TOOLS[@]}"; do
             [[ $tool == "$requested" ]] && known=true
         done
-        [[ $known == true ]] || die "Unknown tool \"$requested\", --list names the managed tools"
+        [[ $known == true ]] || die_usage "Unknown tool \"$requested\", --list names the managed tools"
     done
 
     if [[ ${#REQUESTED[@]} -eq 0 ]]; then
         if [[ $MODE == "install" && $INSTALL_ALL == false ]]; then
-            die "--install names the tools it installs, or takes --all, so nothing is installed by default"
+            die_usage "--install names the tools it installs, or takes --all, so nothing is installed by default"
         fi
         SELECTED=("${TOOLS[@]}")
         return 0
@@ -1076,7 +1124,7 @@ parse_args() {
             usage
             exit 0
             ;;
-        -*) die "Unknown option \"$1\", --help lists the options" ;;
+        -*) die_usage "Unknown option \"$1\", --help lists the options" ;;
         *) REQUESTED+=("$1") ;;
         esac
         shift
@@ -1084,18 +1132,18 @@ parse_args() {
 
     # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
     if ((${#actions[@]} > 1)); then
-        die "More than one action given (${actions[*]}), name one"
+        die_usage "More than one action given (${actions[*]}), name one"
     fi
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
 
     if [[ $JSON_OUTPUT == true && $MODE != "report" ]]; then
-        die "--json changes how a report is written, so it applies only to --report, and the $MODE action was given"
+        die_usage "--json changes how a report is written, so it applies only to --report, and the $MODE action was given"
     fi
     if [[ $INSTALL_ALL == true && $MODE != "install" ]]; then
-        die "--all names every tool for --install, and the $MODE action was given"
+        die_usage "--all names every tool for --install, and the $MODE action was given"
     fi
     if [[ $INSTALL_ALL == true && ${#REQUESTED[@]} -gt 0 ]]; then
-        die "--all and a tool name were both given, name one or the other"
+        die_usage "--all and a tool name were both given, name one or the other"
     fi
     return 0
 }

@@ -30,9 +30,37 @@ IS_WSL=false
 SUDO=()
 APT_OPTS=()
 
+USAGE_REFUSED=false
+pids=()
+
 TMP_DIR=$(mktemp -d)
 readonly TMP_DIR
-trap 'rm -rf "$TMP_DIR"' EXIT
+
+# Exit status 64 is reserved for a refused argument, per CODESTYLE.md "Command-Line Arguments".
+# Under set -e a failed command's own status becomes the script's, so a 64 that die_usage did not exit leaves as 1.
+# shellcheck disable=SC2317,SC2329  # The EXIT trap runs it.
+on_exit() {
+    local status=$?
+    rm -rf "$TMP_DIR"
+    if [[ $status -eq 64 && $USAGE_REFUSED == false ]]; then
+        exit 1
+    fi
+}
+
+# An interrupt stops the running command and re-raises the signal, per CODESTYLE.md "Interrupts in Shell".
+# shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
+interrupted() {
+    if [[ ${#pids[@]} -ne 0 ]]; then
+        kill "${pids[@]}" 2>/dev/null || :
+        wait "${pids[@]}" || :
+    fi
+    printf 'upgrade-host.sh: interrupted by SIG%s.\n' "$1" >&2
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+trap on_exit EXIT
+trap 'interrupted INT; exit 130' INT
+trap 'interrupted TERM; exit 143' TERM
 
 # --- Output ---
 
@@ -43,6 +71,13 @@ warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+# A refused argument exits 64, EX_USAGE from sysexits.h, so a caller can tell it from a run that started and failed.
+die_usage() {
+    printf 'ERROR: %s\n' "$*" >&2
+    USAGE_REFUSED=true
+    exit 64
 }
 
 usage() {
@@ -73,6 +108,8 @@ Examples:
   upgrade-host.sh --packages -y    Upgrade unattended
   upgrade-host.sh --release        Upgrade the packages, then move to the next release
   upgrade-host.sh --release -n     Show what a release upgrade would run
+
+Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF
 }
 
@@ -131,7 +168,18 @@ run() {
         printf '  [dry run] %s\n' "$*"
         return 0
     fi
-    "$@"
+    run_child "$@"
+}
+
+# A command run here goes to the background and is waited for, since bash runs a trap only once a foreground command returns.
+# It keeps the script's standard input, which bash would otherwise replace with /dev/null for a background command.
+run_child() {
+    "$@" <&0 &
+    pids=("$!")
+    local status=0
+    wait "${pids[0]}" || status=$?
+    pids=()
+    return "$status"
 }
 
 run_root() { run "${SUDO[@]}" "$@"; }
@@ -642,14 +690,14 @@ parse_args() {
             usage
             exit 0
             ;;
-        *) die "Unknown option \"$1\", --help lists the options" ;;
+        *) die_usage "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
 
     # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
     if ((${#actions[@]} > 1)); then
-        die "More than one action given (${actions[*]}), name one"
+        die_usage "More than one action given (${actions[*]}), name one"
     fi
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
     return 0

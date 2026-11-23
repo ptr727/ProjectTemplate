@@ -738,5 +738,153 @@ class DashLeadingNameCase(unittest.TestCase):
         self.assertEqual(result.stdout, "A short tagline.")
 
 
+HOST_SCRIPTS = sorted((ROOT / "host-setup" / "linux").glob("*.sh"))
+
+# Records its own process ID where its first argument says, then sleeps until signaled.
+SLEEPING_CHILD = '#!/bin/sh\necho "$$" > "$1"\nexec sleep 60\n'
+
+
+def sourced_copy(script: Path, directory: Path) -> Path:
+    """`script` without its closing `main "$@"`, so a body sourcing it runs under its own traps."""
+    lines = script.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    if lines[-1] != 'main "$@"':
+        raise AssertionError(f"{script.name} no longer ends with its main call: {lines[-1]!r}")
+    copy = directory / script.name
+    copy.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    return copy
+
+
+@unittest.skipUnless(sys.platform == "linux", "runs the host-setup/linux scripts")
+class HostSetupExitStatusCase(unittest.TestCase):
+    """Each host-setup/linux script exits 64 for a refused argument, and for no other failure.
+
+    The set is discovered from the tree, so a new script there is held to it once it is tracked.
+    """
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def run_body(self, script: Path, body: str) -> subprocess.CompletedProcess[str]:
+        copy = sourced_copy(script, self.dir)
+        return subprocess.run(
+            [bash_or_skip(), "-c", f'source "{copy}"\n{body}\n'],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            stdin=subprocess.DEVNULL,
+            check=False,
+            timeout=30,
+        )
+
+    def test_the_set_is_found(self) -> None:
+        self.assertGreaterEqual(len(HOST_SCRIPTS), 8)
+
+    def test_help_names_the_reserved_status(self) -> None:
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result = subprocess.run(
+                    [bash_or_skip(), str(script), "--help"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                    timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Exit status 64 means an argument was refused", result.stdout)
+
+    def test_an_unknown_option_exits_the_reserved_status(self) -> None:
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result, effects = run_sandboxed([bash_or_skip(), str(script), "--bogus-flag"])
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertIn('Unknown option "--bogus-flag"', result.stderr)
+                self.assertEqual(effects, "")
+
+    def test_a_refusal_through_die_usage_exits_the_reserved_status(self) -> None:
+        # The control for the case below: the sourced copy keeps a real refusal's status.
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result = self.run_body(script, 'die_usage "A constructed refusal"\necho CARRIED ON')
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertNotIn("CARRIED ON", result.stdout)
+
+    def test_another_failure_carrying_the_reserved_status_exits_1(self) -> None:
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result = self.run_body(script, "sh -c 'exit 64'\necho CARRIED ON")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn("CARRIED ON", result.stdout)
+
+    def test_another_failure_keeps_its_own_status(self) -> None:
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result = self.run_body(script, "sh -c 'exit 3'")
+                self.assertEqual(result.returncode, 3, result.stderr)
+
+
+@unittest.skipUnless(
+    sys.platform == "linux", "Windows cannot deliver SIGINT or SIGTERM to a script"
+)
+class HostSetupInterruptCase(unittest.TestCase):
+    """A host-setup/linux script holding a temporary directory dies by the signal and leaves nothing.
+
+    The signal arrives while the script's `run` waits on a child, the path a host-changing command takes.
+    """
+
+    HOLDERS = ("install-agents.sh", "install-tools.sh", "setup-github.sh", "upgrade-host.sh")
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_the_holders_are_the_scripts_with_a_temporary_directory(self) -> None:
+        holding = {
+            script.name
+            for script in HOST_SCRIPTS
+            if "TMP_DIR=$(mktemp -d)" in script.read_text(encoding="utf-8")
+        }
+        self.assertEqual(holding, set(self.HOLDERS))
+
+    def interrupt(self, name: str, signum: signal.Signals) -> tuple[int, str, Path, int]:
+        """Signal the sourced script mid-run, returning its status, stderr, TMP_DIR, and the child's pid."""
+        copy = sourced_copy(ROOT / "host-setup" / "linux" / name, self.dir)
+        child = self.dir / "child.sh"
+        child.write_text(SLEEPING_CHILD, encoding="utf-8")
+        child.chmod(0o755)
+        # One file per run, since a file left by an earlier run would read as this child having started.
+        pid_file = self.dir / f"{name}-{signum.name}.pid"
+        body = f'source "{copy}"\nDRY_RUN=false\nprintf "%s\\n" "$TMP_DIR"\nrun "{child}" "{pid_file}"\n'
+        with subprocess.Popen(
+            [bash_or_skip(), "-c", body],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            start_new_session=True,
+        ) as proc:
+            deadline = time.monotonic() + 20
+            while not (pid_file.exists() and pid_file.read_text(encoding="utf-8").strip()):
+                if proc.poll() is not None or time.monotonic() > deadline:
+                    proc.kill()
+                    _, err = proc.communicate(timeout=20)
+                    self.fail(f"{name} never started its child: {err}")
+                time.sleep(0.05)
+            proc.send_signal(signum)
+            out, err = proc.communicate(timeout=20)
+        return proc.returncode, err, Path(out.strip()), int(pid_file.read_text(encoding="utf-8"))
+
+    def test_a_signal_mid_run_stops_the_child_and_removes_the_directory(self) -> None:
+        for name in self.HOLDERS:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                with self.subTest(script=name, signal=signum.name):
+                    status, err, tmp, child = self.interrupt(name, signum)
+                    self.assertEqual(status, -signum, err)
+                    self.assertIn(f"{name}: interrupted by {signum.name}.", err)
+                    self.assertTrue(tmp.is_absolute(), tmp)
+                    self.assertFalse(tmp.exists(), tmp)
+                    self.assertFalse(Path(f"/proc/{child}").exists(), f"child {child} survived")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,7 +13,7 @@ The tooling that makes a Debian or Ubuntu based host satisfy the contract in [`d
 - [`install-global-rules.sh`][install-global-rules] writes the host-wide agent rules to the global instruction file of each installed Codex or opencode, by running [`global_rules.py`][global-rules] from this tree.
 - [`restore-secrets.sh`][restore-secrets] pulls the named secret buckets into this user's home, by running [`scripts/secrets_sync.py`][secrets-sync] from this tree. It pulls only the buckets it is given. It refuses root and needs `op`, which `install-tools.sh --install op` provides.
 
-Each runs on its own, and each takes `--help`.
+Each runs on its own, and each takes `--help`. Each exits 64 when it refuses an argument, and no other failure exits 64. A caller can therefore tell a refusal, which changed nothing, from a run that started and failed.
 
 ```shell
 host-setup/linux/install-tools.sh          # report
