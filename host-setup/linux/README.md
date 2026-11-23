@@ -136,7 +136,7 @@ Two steps cannot be automated, because they happen in a browser. The public key 
 
 ## install-agents.sh Runs as the User
 
-The agent tools install into the user's home, so this script refuses root rather than reporting root's empty home as every tool absent. A scheduled run that starts as root reaches it through `runuser -u <user> --`. It appends `~/.local/bin` and `~/.opencode/bin` to `PATH`, since such a run carries none of the per-user directories these installers write to.
+The agent tools install into the user's home, so this script refuses root rather than reporting root's empty home as every tool absent. A scheduled run that starts as root reaches it through `runuser -u "<user>" --`. It appends `~/.local/bin` and `~/.opencode/bin` to `PATH`, since such a run carries none of the per-user directories these installers write to.
 
 `--upgrade` runs each installed tool's own updater with standard input closed and a time bound. An updater that stops to ask therefore fails rather than hanging the run. `--install` takes tool names or `--all`, and with neither it refuses, so nothing is installed by default. herdr refuses to update from inside one of its own panes, so a run there skips that one step and still refreshes the integrations. [`docs/host-setup.md`][host-setup] "Agent Tool Updates" states why the set is opt-in.
 
