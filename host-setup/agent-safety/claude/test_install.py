@@ -2337,7 +2337,11 @@ class TestRegistration(StampCase):
                 self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
 
     def test_names_hook_ignores_a_kit_name_an_unrelated_command_merely_carries(self):
-        """Only a Python interpreter's script argument and a shell's `-c` string name a hook, so `echo` never does."""
+        """A hook is named by its command being the kit file or by a lone path argument to it.
+        It is also named by an interpreter's script argument or a shell's `-c` string.
+
+        A bare kit file name or a `-c` string under `echo` is none of those, so `echo` does not claim it.
+        """
         for args in (["gh-write-guard.py"], ["-c", "gh-write-guard.py"]):
             hook = {"type": "command", "command": "/bin/echo", "args": args}
             with self.subTest(args=args):
