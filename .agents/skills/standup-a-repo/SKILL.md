@@ -100,7 +100,7 @@ maintainer can supply what section 0A lists.
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo) from the hub at `main`. Use the hub at `develop` instead while the repo's
    registry entry has merged there but not yet reached `main`. A non-zero exit there means drift
-   was found, not a command failure. Review what it reports. Then run the same command's `apply` subcommand, never from a hand-built or carried copy. It
+   was found, not a command failure. Review what it reports. Where the repo is public, the first public-interaction limit follows `STANDUP.md` section 4's pilot-first rule. Then run the same command's `apply` subcommand, never from a hand-built or carried copy. It
    idempotently reconciles the repo to the full committed configuration regardless of what `check`
    reported.
 
