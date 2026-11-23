@@ -207,7 +207,7 @@
             "shortName": "homelab",
             "url": "https://github.com/ptr727/HomeAutomation-Config",
             "status": "cataloged",
-            "types": ["source-only", "python"],
+            "types": ["source-only", "python", "host-secrets"],
             "groundTruthBranch": "main",
             "workflowModel": "release",
             "lineEndings": "lf",
