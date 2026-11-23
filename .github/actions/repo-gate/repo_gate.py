@@ -487,7 +487,7 @@ WORKFLOW_READER = (
     "try:\n"
     "    with open(sys.argv[1], encoding='utf-8') as handle:\n"
     "        documents = list(yaml.safe_load_all(handle))\n"
-    "    text = json.dumps(documents, default=str, skipkeys=True)\n" + READER_FAILURE
+    "    text = json.dumps(documents, default=str)\n" + READER_FAILURE
 )
 PYYAML_PYTHON: list[str] = []
 ISOLATED = ("-I", "-X", "utf8")
@@ -566,7 +566,7 @@ def load_documents(path: Path, reader: str = UVX_READER) -> list[object]:
     uvx alone is not enough under UV_NO_CACHE or uv's no-cache = true, which delete the environment
     uvx resolved before the reader launches. There `reader` decides what each document carries back.
     The default projects the fields an action check reads. `WORKFLOW_READER` returns each document
-    whole, with a value JSON cannot hold as text and a key it cannot hold dropped.
+    whole, with a value JSON cannot hold as text. A key JSON cannot hold fails the read.
     """
     try:
         import yaml  # type: ignore[import-untyped]
@@ -962,6 +962,8 @@ def workflow_triggers(document: object) -> object:
     """The workflow's `on:` value.
 
     PyYAML reads a bare `on` key as the boolean true, and the uvx reader's JSON spells that key `true`.
+    `spec/audit.py` reads `on:` the same way, but it imports PyYAML at load, and this gate must load
+    under a bare `python3`. So the reading is repeated here rather than imported.
     """
     if not isinstance(document, dict):
         return None
@@ -1047,10 +1049,11 @@ def check_workflow_inputs(root: Path, files: list[str]) -> list[str]:
     and so is an input it requires that the caller omits.
 
     A call is a job-level `uses:` naming a workflow by its full `owner/repo` path. A call of the
-    scanned repository's own workflow can take that form too. A local `./` or self-repository `$/` call
-    is left to actionlint, which reads those callees itself. Reading is scoped to the scanned repository's owner, as sha-pin's
+    scanned repository's own workflow can take that form too. A local `./` call is left to
+    actionlint, which reads that callee itself. A self-repository `$/` call is not read either. Its
+    callee is read at the calling workflow's own commit, so no pin bump moves it. Reading is scoped to the scanned repository's owner, as sha-pin's
     resolution is and for the same reason. A callee GitHub did not answer for is counted rather
-    than failed. A floating ref is sha-pin's finding, so it is not read here. A file naming no such
+    than failed. A floating ref is sha-pin's finding, so it is counted and not read here. A file naming no such
     call is never parsed.
     """
     scan = CallScan(origin_owner(root))
@@ -1065,7 +1068,8 @@ def check_workflow_inputs(root: Path, files: list[str]) -> list[str]:
         f"compared {counts['compared']} reusable-workflow call(s) with their callee's inputs at "
         f"the pin. Not compared: {counts['foreign']} under another owner, {counts['unowned']} "
         f"whose owner could not be compared because this checkout's origin is unreadable, "
-        f"{counts['unread']} whose callee GitHub did not answer for."
+        f"{counts['unread']} whose callee GitHub did not answer for, {counts['floating']} with a "
+        f"floating ref, which sha-pin reports."
     )
     return bad
 
@@ -1077,7 +1081,7 @@ class CallScan:
         self.owner = owner
         self.interfaces: dict[tuple[str, str, str], dict[str, bool] | str | None] = {}
         self.pins: dict[tuple[str, str], bool | None] = {}
-        self.counts = {"compared": 0, "foreign": 0, "unowned": 0, "unread": 0}
+        self.counts = {"compared": 0, "floating": 0, "foreign": 0, "unowned": 0, "unread": 0}
 
     def compare(self, root: Path, rel: str) -> list[str]:
         """The findings for one workflow file's calls."""
@@ -1099,7 +1103,10 @@ class CallScan:
 
     def compare_call(self, label: str, uses: str, keys: list[str]) -> list[str]:
         m = REUSABLE.match(uses)
-        if m is None or not PIN.match(m["ref"]):
+        if m is None:
+            return []
+        if not PIN.match(m["ref"]):
+            self.counts["floating"] += 1
             return []
         if self.owner is None:
             self.counts["unowned"] += 1

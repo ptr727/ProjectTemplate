@@ -940,7 +940,7 @@ class TestWorkflowInputs(InputsCase):
         )
 
     def test_a_floating_local_or_self_repository_call_is_never_fetched(self) -> None:
-        """sha-pin owns a floating ref, and actionlint reads a local callee itself."""
+        """sha-pin owns a floating ref, actionlint reads a local callee, and a `$/` callee moves with its caller."""
         self.callees({})
         refs = (
             f"{self.OWNER}/Fleet/{self.CALLEE_PATH}@main",
@@ -950,6 +950,7 @@ class TestWorkflowInputs(InputsCase):
         jobs = [self.call(uses=ref, job=f"j{i}") for i, ref in enumerate(refs)]
         self.assertEqual([], repo_gate.check_workflow_inputs(self.tmp, self.caller(*jobs)))
         self.assertEqual([], self.reads)
+        self.assertIn("1 with a floating ref, which sha-pin reports", repo_gate.NOTES[0])
 
     def test_a_step_using_an_action_under_this_owner_is_not_a_call(self) -> None:
         self.callees({})
@@ -996,7 +997,7 @@ class TestWorkflowInputs(InputsCase):
                     "compared 0 reusable-workflow call(s) with their callee's inputs at the pin. "
                     "Not compared: 0 under another owner, 0 whose owner could not be compared "
                     "because this checkout's origin is unreadable, 0 whose callee GitHub did not "
-                    "answer for."
+                    "answer for, 0 with a floating ref, which sha-pin reports."
                 )
             ],
             repo_gate.NOTES,
@@ -1022,6 +1023,11 @@ class TestWorkflowInputsThroughUvx(InputsCase):
         self.assertEqual(
             [], self.hits(self.call("      branch: a\n      when: b\n"), callee=callee)
         )
+
+    def test_a_key_json_cannot_hold_fails_the_read_rather_than_vanishing(self) -> None:
+        hits = self.hits(self.call("      branch: a\n      2026-01-01: b\n"))
+        self.assertEqual(1, len(hits))
+        self.assertIn(".github/workflows/w.yml: could not read the workflow: unreadable", hits[0])
 
 
 class TestWorkflowInputsCoverage(unittest.TestCase):
