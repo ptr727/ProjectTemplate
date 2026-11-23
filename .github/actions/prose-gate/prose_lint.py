@@ -1680,7 +1680,8 @@ PASTE_SHAPES = {
 
 
 CASE_ARM = re.compile(r"(?m)^[ \t]*\(?[^\s()<>]+\)")
-REGEX_OPERAND = re.compile(r"\[\[[^\n]*?=~[ \t]+(\S+)")
+REGEX_OPERAND = re.compile(r"\[\[(?:(?!\]\])[^\n])*?=~[ \t]+(\S+)")
+GLOB_OPERAND = re.compile(r"\[\[(?:(?!\]\])[^\n])*?(?:==|!=|=)[ \t]+(\S+)")
 
 
 def blanked(value: str) -> str:
@@ -1716,19 +1717,21 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
 
     Each command is a code span opening with a command or a shell fence's content. Each finding is
     reported on the line holding the placeholder. A string handed to a second shell, as `sh -c`
-    takes one, is read as the quotation it is to the first. A `case` arm's pattern and the bracket
-    and alternation of a `[[ =~ ]]` operand are the shell's own syntax, so neither is a placeholder.
+    takes one, is read as the quotation it is to the first. A `case` arm's pattern is the shell's own syntax, and so is a `[[ ]]` operand.
+    A `=~` operand may hold a bracket or an alternation, and a glob operand a bracket only.
     """
     out: list[Finding] = []
     for line in unit.lines:
         dialect = COMMANDS["dialects"][line.dialect]
         bare = shell_literals(line.text, dialect["lexer"])
         taken = [range(m.start(), m.end()) for m in CASE_ARM.finditer(bare)]
-        operands = [range(m.start(1), m.end(1)) for m in REGEX_OPERAND.finditer(bare)]
+        regexes = [range(m.start(1), m.end(1)) for m in REGEX_OPERAND.finditer(bare)]
+        globs = [range(m.start(1), m.end(1)) for m in GLOB_OPERAND.finditer(bare)]
         for shape in dialect["shapes"]:
             for m in PASTE_SHAPES[shape].finditer(bare):
+                exempt = regexes if shape == "alternation" else regexes + globs
                 if any(m.start() in r for r in taken) or (
-                    shape != "angle" and any(m.start() in r for r in operands)
+                    shape != "angle" and any(m.start() in r for r in exempt)
                 ):
                     continue
                 taken.append(range(m.start(), m.end()))

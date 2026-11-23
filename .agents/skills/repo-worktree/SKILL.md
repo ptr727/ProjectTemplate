@@ -140,6 +140,8 @@ system may reap it as temporary data. State the absolute path as soon as the fal
 and again in the handoff. Do not present work there as ordinarily reviewable from the primary
 workspace.
 
+The `~/repos/"<Repo>"` path is the convention layout, and a machine not yet migrated passes its actual primary clone instead.
+
 ```sh
 TASK_ORIGIN="$(git -C ~/repos/"<Repo>" remote get-url origin)"
 git clone --no-checkout "$TASK_ORIGIN" "<temporary-root>/<Repo>-<task-slug>"
@@ -255,7 +257,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
 - **A pull request merged into `develop` is cleaned up by one command.** Run
   `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`
   from a hub checkout outside the worktree it removes, `~/repos/<Repo>` being the repository's
-  primary clone. It reads the branch from the pull request and deletes the remote branch. It then
+  primary clone. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. It reads the branch from the pull request and deletes the remote branch. It then
   removes every worktree holding the branch without force, deletes the local branch, and
   fast-forwards the base clone's `develop`. Its local refusals are decided before the remote delete. So a dirty worktree, an operation in progress, or a local tip the merge did not carry
   leaves everything in place. A re-check after the delete can still refuse where a concurrent
@@ -284,7 +286,7 @@ since git then runs whatever that directory holds, and nothing where it holds no
   non-fast-forward instead of switching or reconciling it.
 - **What an interrupted or abandoned session left behind is swept.** Run
   `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`
-  from a hub checkout. It fetches and prunes `origin` and writes nothing else. It reports each worktree and branch that is clean, idle past `--min-age-hours` (default 24), and provably
+  from a hub checkout. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. It fetches and prunes `origin` and writes nothing else. It reports each worktree and branch that is clean, idle past `--min-age-hours` (default 24), and provably
   finished. Adding `--apply` removes what the report lists through the same checks, the remote
   branch of a merged `develop` pull request included. The report reaches other sessions' finished
   work as well as this task's, so `--apply` runs on the maintainer's go-ahead.

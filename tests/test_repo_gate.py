@@ -1040,14 +1040,22 @@ class TestWorkflowInputsCoverage(unittest.TestCase):
     @unittest.skipUnless(pyyaml_imports() or shutil.which("uvx"), "neither PyYAML nor uvx present")
     def test_this_repo_holds_calls_the_check_reads(self) -> None:
         """A scan matching no call prints `compared 0`, which reads like a clean comparison."""
-        calls = [
-            uses
-            for rel in repo_gate.workflow_files(repo_gate.tracked(REPO))
-            for document in repo_gate.load_documents(REPO / rel, repo_gate.WORKFLOW_READER)
-            for _, uses, _ in repo_gate.reusable_calls(document)
-            if (m := repo_gate.REUSABLE.match(uses)) and repo_gate.PIN.match(m["ref"])
-        ]
-        self.assertGreaterEqual(len(calls), 4)
+
+        class AnyInputs(dict[str, bool]):
+            def __contains__(self, key: object) -> bool:
+                return True
+
+        notes = list(repo_gate.NOTES)
+        self.addCleanup(lambda: repo_gate.NOTES.__setitem__(slice(None), notes))
+        with (
+            mock.patch.object(repo_gate, "origin_owner", return_value="ptr727"),
+            mock.patch.object(repo_gate, "callee_interface", return_value=AnyInputs()),
+        ):
+            found = repo_gate.check_workflow_inputs(REPO, repo_gate.tracked(REPO))
+        self.assertEqual([], found)
+        match = re.search(r"compared (\d+) reusable-workflow call", repo_gate.NOTES[-1])
+        assert match is not None
+        self.assertGreaterEqual(int(match.group(1)), 4)
 
 
 class TestCompositeActions(TreeCase):

@@ -469,6 +469,7 @@ It carries the remote half of `drive-pr`'s post-merge cleanup too.
 For a merged group both halves are one command, `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo "<owner>/<repo>" --checkout ~/repos/"<Repo>"`.
 Spell every `scripts/pr_review.py` call this skill prints as `pr-review-conduct` "Expected review loop" says.
 The command is run from a hub checkout once for each merged group, `~/repos/<Repo>` being the repository's primary clone.
+That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead.
 It deletes the remote branch, then removes the group's worktree and local branch, per `repo-worktree` "Listing and Cleanup", which also says what its exit leaves to do.
 Taking that step from the worker without naming a new owner would leave a live remote branch behind every group.
 `cleanup` holds the delete's checks, among them the tip against the pull request's `headRefOid`.
