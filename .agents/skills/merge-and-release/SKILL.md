@@ -225,7 +225,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      error("expected exactly one merged PR for this head, got \(length)") end'`. Then run
      `uv run --no-project --script scripts/pr_review.py cleanup "<number>" --repo owner/repo --checkout ~/repos/"<Repo>"`
      from a hub checkout outside the worktree it removes, `~/repos/<Repo>` being the repository's
-     primary clone. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. See `repo-worktree` "Listing and Cleanup". It re-reads that pull request and
+     primary clone. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. See `repo-worktree` "Listing and Cleanup". The `cleanup` command re-reads that pull request and
      repeats the merged, base, head-repository, and tip checks in code. It refuses a permanent or
      protected branch, deletes the remote branch, and confirms it by reading the ref back. It treats
      a remote branch already gone as done, so a prior interrupted attempt finishes rather than
@@ -242,7 +242,7 @@ skill covers all of it, scoped down by what the maintainer actually asks for.
      themselves, only to feature branches a drive-pr loop created.
    - What no single pull request names: run
      `uv run --no-project --script scripts/pr_review.py cleanup --sweep --repo owner/repo --checkout ~/repos/"<Repo>"`
-     and report what it lists. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. It writes nothing but a fetch, and `--apply` runs only on the
+     and report what it lists. In that command `~/repos/<Repo>` is the convention layout, and a machine not yet migrated passes its actual primary clone instead. The sweep writes nothing but a fetch, and `--apply` runs only on the
      maintainer's go-ahead, since the report reaches other sessions' finished work too.
 
 ## Mechanics Live Elsewhere
