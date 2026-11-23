@@ -14,7 +14,8 @@
     "spelling": { "default": true, "summary": "a British spelling where the repo convention is US English" },
     "home-path": { "default": true, "summary": "an absolute home path naming a real account", "file_exemption": "home_path_exempt" },
     "dead-path": { "default": true, "summary": "a mention of a path git once tracked and the tree no longer holds" },
-    "issue-ref": { "default": true, "summary": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text" }
+    "issue-ref": { "default": true, "summary": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text" },
+    "paste-safe": { "default": true, "summary": "a bare <placeholder>, a [Placeholder] or [--flag] glob, or an a|b alternation in a Markdown command a reader copies and runs" }
   },
   "messages": {
     "charset": "{name} (U+{code}) -> {hint}",
@@ -33,6 +34,10 @@
     "home-path": "absolute home path {path!r} -> use a constructed path, not an observed one",
     "dead-path": "path {token!r} is deleted from this tree -> re-point, rewrite, or remove the stale mention",
     "issue-ref": "issue or pull request reference {ref!r} -> state the constraint it stands for, or drop the clause",
+    "paste-safe": "placeholder {token!r} unquoted in a copy-and-run command, which the shell reads as a redirection -> quote it, as \"{token}\"",
+    "paste-safe-bracket": "placeholder {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> quote it as \"<{name}>\"",
+    "paste-safe-flag": "optional flag {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> leave it out and name it in a parenthetical, or a trailing comment in a fence",
+    "paste-safe-alternation": "alternation {token!r} unquoted in a copy-and-run command, which the shell reads as a pipe -> write the common value and name the other in a parenthetical, or space a real pipe",
     "error-empty-exclude": "--exclude was given an empty value, which matches every path and would report a whole-tree scan as clean. Drop the blank entry rather than passing it, the way the composite action skips a blank line in .github/prose-gate-excludes.",
     "error-not-a-path": "requested path(s) are not a file or a directory: {paths}. Refusing rather than falling back to the current directory, which would scan one tree and choose the rule set from another.",
     "error-many-repositories": "the requested paths span more than one repository ({roots}). Each declares its own workflow model, so no single rule set is correct for all of them. Run the gate once per repository.",
@@ -145,6 +150,15 @@
       ".jsonc": "json", ".props": "xml", ".resx": "xml", ".scss": "css", ".slnx": "xml", ".targets": "xml"
     },
     "name": { ".editorconfig": "ini", ".gitattributes": "bash", ".gitignore": "bash", "dockerfile": "bash", "pre-commit": "bash" }
+  },
+  "commands": {
+    "names": ["apt", "apt-get", "awk", "bash", "brew", "cat", "cd", "chmod", "claude", "codex", "command", "cp", "curl", "diff", "docker", "dotnet", "echo", "env", "exec", "export", "find", "gh", "git", "grep", "head", "jq", "kill", "ln", "ls", "make", "mkdir", "mv", "npm", "npx", "opencode", "pgrep", "pip", "pipx", "pkill", "pre-commit", "prek", "printf", "pwsh", "pytest", "python", "python3", "rm", "rsync", "ruff", "runuser", "scp", "sed", "setsid", "sh", "shellcheck", "shfmt", "sort", "source", "ssh", "su", "sudo", "systemctl", "tail", "tar", "tee", "test", "timeout", "touch", "type", "usermod", "uv", "uvx", "wc", "wget", "which", "winget", "wsl", "xargs", "zsh"],
+    "script_suffixes": [".bash", ".ps1", ".py", ".sh"],
+    "fences": { "bash": "shell", "ps1": "powershell", "powershell": "powershell", "pwsh": "powershell", "sh": "shell", "shell": "shell", "zsh": "shell" },
+    "dialects": {
+      "shell": { "lexer": "bash", "shapes": ["angle", "bracket", "alternation"] },
+      "powershell": { "lexer": "powershell", "shapes": ["angle", "alternation"] }
+    }
   },
   "languages": {
     "python": {

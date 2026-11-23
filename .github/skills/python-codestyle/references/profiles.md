@@ -16,7 +16,7 @@ review. The axes that commonly vary:
   installs. CI's
   `uv sync --all-groups --frozen` installs that group too, since the command takes every group and
   no extra. PEP 621
-  `[project.optional-dependencies]` (installed with `uv sync --extra <group>`) suits only a tool CI
+  `[project.optional-dependencies]` (installed with `uv sync --extra "<group>"`) suits only a tool CI
   does not run. The pip form declares its dependencies in `requirements*.txt` files, installed
   together in one resolve, per `SKILL.md` "Local development loop".
 - **Versioning / publishing**: a published package or a source-only repo (see Versioning below).
@@ -40,7 +40,7 @@ Tool configuration alone marks the lint-only one:
   with `dependencies`, a `[build-system]`, and a committed `uv.lock`. Its dev tools sit in
   `[dependency-groups]`, per the dependency-declaration axis above. The `uv.lock` is pinned LF, per
   GOVERNANCE.md's "Line Endings" section. CI runs `uv sync --all-groups --frozen` +
-  `uv run <tool>`, so the lockfile pins tool versions. That sync installs every `[dependency-groups]` group and no
+  `uv run "<tool>"`, so the lockfile pins tool versions. That sync installs every `[dependency-groups]` group and no
   `[project.optional-dependencies]` extra. The pip form is a `pyproject.toml` beside a
   `requirements*.txt`, installed with pip, whether or not it carries a `[project]` table. A
   committed `uv.lock` makes a directory the uv form even where a `requirements*.txt` sits beside it.
@@ -49,7 +49,7 @@ Tool configuration alone marks the lint-only one:
   `python-directories` input runs ruff and the type checker from that environment where it
   installs them. It otherwise runs them through `uvx`, with the checker pointed at that
   environment. The undeclared default root runs ruff through `uvx` at the pinned version the
-  lint-only profile below names, and a bare `uvx <checker>@latest`, with nothing installed.
+  lint-only profile below names, and a bare `uvx "<checker>@latest"`, with nothing installed.
 - **Scripts** (the `lint-only` profile): stdlib-only utility scripts (e.g. a
   Python tooling subtree of a `csharp` app). Run the tools with `uvx` (no project install,
   no lockfile). The `pyproject.toml` carries only tool config (`[tool.ruff]`, `[tool.mypy]`, and
@@ -57,7 +57,7 @@ Tool configuration alone marks the lint-only one:
   `uv.lock` (that metadata would misrepresent it as a shippable package). mypy is the type-check
   gate (there is no first-party package for pyright strict to anchor on). A `[tool.pyright]`
   block in standard mode keeps Pylance quiet in the editor, the same mypy-gate/pyright-editor
-  split the build profile uses. There is no lockfile, and a `uvx <tool>@<ver>` literal in a `run:`
+  split the build profile uses. There is no lockfile, and a `uvx "<tool>@<ver>"` literal in a `run:`
   step is not something Dependabot tracks. The fleet rule is to pin only what Dependabot
   auto-updates (SHA-pinned actions, package deps) and otherwise run latest. A manual pin would
   silently go stale. So CI runs ruff at the version the hub validator's
@@ -77,7 +77,7 @@ Tool configuration alone marks the lint-only one:
   owes the same gates whatever its profile: lint, format, a type check, a test suite, and a
   coverage report to Codecov. The hub validator runs them in each directory the caller declares
   in its `python-directories` input, which the registry's `pythonDirectories` mirrors. From inside
-  a lint-only directory it runs `uvx ruff@<pin> check`, `uvx ruff@<pin> format --check`,
+  a lint-only directory it runs `uvx "ruff@<pin>" check`, `uvx "ruff@<pin>" format --check`,
   `uvx mypy@latest`, and `uvx coverage@latest run -m unittest discover -s tests`. It adds
   `--with-requirements tests/requirements.txt` to that last where the directory carries one. It then
   writes `coverage.xml` and uploads it best-effort per `WORKFLOW.md` D1.6, with no threshold

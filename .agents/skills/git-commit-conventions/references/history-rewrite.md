@@ -14,7 +14,7 @@ These gates keep committer and signature aligned:
    git for-each-ref --format='%(if)%(contents:signature)%(then)%(refname:short)%(end)' refs/tags
    ```
 
-2. **Re-sign every rewritten commit in a signing pass that also sets the committer.** A tool that creates each commit through `git commit-tree -S` signs it. The command below re-signs every commit on every local branch and moves each tag with it, which fits a default `git filter-repo` run. It keeps merge commits, authors, and both dates. Before running it, record each branch's `git rev-list --count <branch>` and `git log --format=%T <branch>` output. Replace the placeholders with the rewriter's own signing identity:
+2. **Re-sign every rewritten commit in a signing pass that also sets the committer.** A tool that creates each commit through `git commit-tree -S` signs it. The command below re-signs every commit on every local branch and moves each tag with it, which fits a default `git filter-repo` run. It keeps merge commits, authors, and both dates. Before running it, record each branch's `git rev-list --count "<branch>"` and `git log --format=%T "<branch>"` output. Replace the placeholders with the rewriter's own signing identity:
 
    ```sh
    git filter-branch --tag-name-filter cat --commit-filter 'GIT_COMMITTER_NAME="<name>" GIT_COMMITTER_EMAIL="<email>" git commit-tree -S "$@"' -- --branches --tags
@@ -33,7 +33,7 @@ Never leave a signature over a commit committed by another identity, and never l
 
 What is anchored to an old hash goes stale when the rewrite lands, including the following:
 
-- **Tags** move to the re-signed commits through `--tag-name-filter cat` above. A signed tag's signature no longer verifies after the rewrite, so re-create each tag gate 1 recorded as signed with `git tag -f -s <tag> '<tag>^{commit}'`.
+- **Tags** move to the re-signed commits through `--tag-name-filter cat` above. A signed tag's signature no longer verifies after the rewrite, so re-create each tag gate 1 recorded as signed with `git tag -f -s "<tag>" '<tag>^{commit}'`.
 - **Remote tags and pull request refs** keep the old commits readable on GitHub. Each moved tag is pushed again, and GitHub keeps every pull request's commits until GitHub Support purges them.
 - **Other clones** diverge from the rewritten branch, so each one is re-cloned rather than pulled.
 - **Published artifacts** that record a commit hash keep naming a hash the branch no longer holds, and no rewrite reaches them.

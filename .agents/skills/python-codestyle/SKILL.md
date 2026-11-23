@@ -122,7 +122,7 @@ where mypy is the CI checker, or both where the repo runs both (see Type checkin
 config sits in the project directory, CI passes the checker no path, so the config's own target
 settings decide what is checked. mypy left with no target that way exits with an error. A declared
 subdirectory with no config of its own uses the repository root's instead. CI then runs the checker
-from the root with the directory as its path, `uv run --project <dir> <checker> <dir>`, so run it
+from the root with the directory as its path, `uv run --project "<dir>" "<checker>" "<dir>"`, so run it
 the same way. Run the clean-compile, plus `uv run pytest`, before committing.
 
 A **build**-profile directory in its pip form builds its environment the way CI does, through uv's
@@ -174,7 +174,7 @@ a root `pyproject.toml`, per `WORKFLOW.md` D1.2. That undeclared root is gated m
 reads its type-checker configuration only from the `[tool.mypy]` or `[tool.pyright]` section of its
 `pyproject.toml`. It skips the type check where neither is there,
 whatever the form. In its pip form CI installs nothing for that check and runs a bare
-`uvx <checker>@latest`. So the local check against the environment is the stricter one. And CI runs
+`uvx "<checker>@latest"`. So the local check against the environment is the stricter one. And CI runs
 its tests only where a pytest suite in `tests/` sits beside a `uv.lock` or `requirements*.txt`.
 
 A repo that keeps no .NET tool manifest declaring Husky.Net wires its local hook from the canonical
@@ -250,7 +250,7 @@ build-profile conventions, and `references/profiles.md` for the lint-only `unitt
 <!-- include: CODESTYLE.md > Tests and Script Dependencies -->
 
 - **A test lives in a `tests/` directory, never inside the production file it tests.** A deployed script may keep a `--selftest` that runs a small smoke check in seconds, and the case matrix lives in `tests/`. A self-test shipped inside the file it tests grows the file every reviewer reads, and its cases can come to outweigh the code they test.
-- **A hub-hosted standalone script that needs a third-party library declares it in PEP 723 inline script metadata, and runs as `uv run --no-project --script <path>`.** The block opens on `# /// script`, closes on `# ///`, and carries `dependencies` and `requires-python`. The fleet already installs uv on hosts and in CI. `--no-project` keeps uv from syncing the project around a script that has no block yet, where it would write a lockfile and a virtual environment. A script with no such block runs under `python3` and uv alike. A hook an agent harness runs on every tool call stays standard-library only, since it runs before any toolchain is guaranteed.
+- **A hub-hosted standalone script that needs a third-party library declares it in PEP 723 inline script metadata, and runs as `uv run --no-project --script "<path>"`.** The block opens on `# /// script`, closes on `# ///`, and carries `dependencies` and `requires-python`. The fleet already installs uv on hosts and in CI. `--no-project` keeps uv from syncing the project around a script that has no block yet, where it would write a lockfile and a virtual environment. A script with no such block runs under `python3` and uv alike. A hook an agent harness runs on every tool call stays standard-library only, since it runs before any toolchain is guaranteed.
 
 <!-- /include -->
 
