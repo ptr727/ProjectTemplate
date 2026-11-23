@@ -2356,6 +2356,11 @@ class TestRegistration(StampCase):
                 self.assertTrue(install.names_hook(hook, install.GUARD_NAME), hook)
         own = {"command": "/opt/graalpy/bin/graalpy", "args": ["/old/hooks/gh-write-guard.py"]}
         self.assertTrue(install.names_hook(own, install.GUARD_NAME), own)
+        relative = {
+            "command": "/opt/graalpy/bin/graalpy",
+            "args": [".claude-test/hooks/gh-write-guard.py"],
+        }
+        self.assertTrue(install.names_hook(relative, install.GUARD_NAME), relative)
         for command in ("/bin/bash", "sh", "ksh", "fish", "pwsh", "C:\\Git\\bin\\bash.exe"):
             hook = {"command": command, "args": ["-c", "python3 /old/hooks/gh-write-guard.py"]}
             with self.subTest(shell=command):
