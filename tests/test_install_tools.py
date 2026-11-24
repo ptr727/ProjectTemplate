@@ -588,6 +588,50 @@ printf '%s\\n' "${{NOTES[@]}}" """
                 self.assertIn("1Password's", notes[0])
                 self.assertIn(f"{path} {expected}", notes[1])
 
+    def test_gh_and_node_notes_say_what_the_sources_directory_holds(self) -> None:
+        """A one-line vendor source is a configured repository, which the script does not manage."""
+        cases = {
+            "gh": (
+                "github-cli",
+                "the upstream repository is configured by the one-line github-cli.list",
+            ),
+            "node": (
+                "nodesource",
+                "the upstream repository is configured by the one-line nodesource.list",
+            ),
+        }
+        for tool, (stem, configured) in cases.items():
+            for files, expected in (
+                ([], "upstream repository not configured"),
+                ([f"{stem}.list"], configured),
+                ([f"{stem}.sources"], None),
+                ([f"{stem}.sources", f"{stem}.list"], None),
+            ):
+                with self.subTest(tool=tool, files=files):
+                    sources = self.dir / f"sources-{tool}-{len(files)}-{'-'.join(files)}"
+                    sources.mkdir()
+                    for name in files:
+                        (sources / name).write_text("", encoding="utf-8")
+                    text = linux_functions().replace(
+                        'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
+                        f'readonly SOURCES_DIR="{sources}"',
+                    )
+                    self.assertIn(str(sources), text)
+                    self.functions.write_text(text, encoding="utf-8")
+                    body = f"""tool_note {tool}
+printf '%s\\n' "${{NOTES[@]}}"
+tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
+                    result = self.run_bash(body)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    lines = result.stdout.splitlines()
+                    self.assertEqual(
+                        lines[-1], "CONFIGURED" if expected is None else "UNCONFIGURED"
+                    )
+                    if expected is None:
+                        self.assertNotIn("repository", result.stdout.replace("CONFIGURED", ""))
+                    else:
+                        self.assertIn(expected, lines[0])
+
     def test_the_configured_repository_is_the_one_install_writes(self) -> None:
         text = LINUX_INSTALLER.read_text(encoding="utf-8")
         self.assertRegex(text, r'(?m)^    op\) \[\[ -f "\$SOURCES_DIR/1password\.sources" \]\] ;;$')

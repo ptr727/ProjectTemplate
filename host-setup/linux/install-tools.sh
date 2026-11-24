@@ -1197,13 +1197,20 @@ tool_function() {
     printf '%s_%s' "${tool//-/_}" "$suffix"
 }
 
+tool_sources_stem() {
+    case "$1" in
+    gh) printf 'github-cli' ;;
+    node) printf 'nodesource' ;;
+    *) return 1 ;;
+    esac
+}
+
 # Whether a tool's upstream repository is in place.
 # A tool installed while its sources file is absent reads as current against whatever apt already has.
 # That is the one thing the report must not say, so it reads as unmanaged instead.
 tool_configured() {
     case "$1" in
-    gh) [[ -f "$SOURCES_DIR/github-cli.sources" ]] ;;
-    node) [[ -f "$SOURCES_DIR/nodesource.sources" ]] ;;
+    gh | node) [[ -f "$SOURCES_DIR/$(tool_sources_stem "$1").sources" ]] ;;
     # No distro carries 1password-cli, so the cases this guards are the vendor's one-line source and a .deb installed by hand.
     op) [[ -f "$SOURCES_DIR/1password.sources" ]] ;;
     *) return 0 ;;
@@ -1357,11 +1364,13 @@ tool_note() {
         fi
         ;;
     gh | node)
-        local name="github-cli"
-        if [[ $tool == "node" ]]; then
-            name="nodesource"
-        fi
-        if [[ ! -f "$SOURCES_DIR/$name.sources" ]]; then
+        local name
+        name=$(tool_sources_stem "$tool")
+        if tool_configured "$tool"; then
+            :
+        elif [[ -f "$SOURCES_DIR/$name.list" ]]; then
+            note "$tool" "the upstream repository is configured by the one-line $name.list, a file this script does not manage"
+        else
             note "$tool" "upstream repository not configured, the available version is the distro's"
         fi
         ;;
