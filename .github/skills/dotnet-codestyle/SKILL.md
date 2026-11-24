@@ -43,7 +43,8 @@ All builds must complete without warnings, enforced as follows:
 - **Analyzer configuration.** `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with
   `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (the full
   analyzer set), plus `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`. With that, any diagnostic
-  surfaced as a warning fails the build. Such a diagnostic must be fixed or deliberately suppressed at the
+  the build surfaces as a warning fails it. The IDE code-style rules do not run in the build, so
+  the `dotnet format style` step fails on their warnings instead. Such a diagnostic must be fixed or deliberately suppressed at the
   narrowest scope that fits (see Analyzer suppressions below), never left to accumulate.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
@@ -258,9 +259,10 @@ The .NET mechanics, narrowest first:
 
 ## Code patterns
 
-1. **Guard clauses**: prefer early returns for validation and error handling. An `if` that only
-   chooses between two return values, directly before the final return, is one conditional
-   `return` instead, per IDE0046.
+1. **Guard clauses**: prefer early returns for validation and error handling. IDE0046 makes one
+   shape a single conditional `return` instead, a throw expression included. That shape is an
+   `if` whose only statement returns or throws, followed directly by a `return` or by an `else`
+   that only returns. Write that shape as the conditional `return` from the start.
 2. **Async all the way**: avoid blocking calls (`.Result`, `.Wait()`), use `async`/`await`.
 3. **Cancellation tokens**: accept `CancellationToken` as the last parameter and pass it through.
 4. **ConfigureAwait**: in library code, use `ConfigureAwait(false)` unless context is required. Do
