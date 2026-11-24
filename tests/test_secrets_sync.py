@@ -107,6 +107,7 @@ class FakeOp:
         self.edit_moves_id = False
         self.duplicate_fields = False
         self.drop_content_field = False
+        self.section_labels = True
         self.archive_noop = False
         self.omit_updated = False
         self.signin_ambient = False
@@ -245,7 +246,22 @@ class FakeOp:
                     "section": {"id": "other-section", "label": "other"},
                 }
             )
-            body = {"id": argv[2], "title": got["title"], "tags": list(tags), "fields": listed}
+            if not self.section_labels:
+                for entry in listed:
+                    section = entry.get("section")
+                    if isinstance(section, dict):
+                        section.pop("label")
+            sections = [
+                {"id": "constructed-section", "label": ss.SYNC_SECTION},
+                {"id": "other-section", "label": "other"},
+            ]
+            body = {
+                "id": argv[2],
+                "title": got["title"],
+                "tags": list(tags),
+                "sections": sections,
+                "fields": listed,
+            }
             return ok(json.dumps(body).encode())
         if key == ("document", "create") and self.drop_create:
             return ok()
@@ -839,6 +855,18 @@ class TestPush(Case):
                     code, None if case.endswith("interrupted") or case == "interrupt" else 2
                 )
                 self.assertIn(recovery, err.getvalue())
+
+    def test_a_field_naming_its_section_by_id_alone_is_read_through_the_sections(self) -> None:
+        self.fake.section_labels = False
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0640", f"mtime={EARLY}"))
+        path = self.write(".secrets/alpha")
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["fields"]), ("mode=0600",))
+        code, out, err = self.run_main("status", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out, r"same\s+\.secrets/alpha")
 
     def test_an_item_carrying_only_tags_is_refused_until_its_fields_exist(self) -> None:
         """No tag is read, so an item whose metadata is still in tags refuses like one with none."""
@@ -2289,6 +2317,8 @@ class TestOutput(Case):
             ([], "not an object"),
             ({"fields": {}}, "not an array"),
             ({"fields": [1]}, "field that is not an object"),
+            ({"sections": {}}, "'sections'"),
+            ({"sections": [1]}, "'sections'"),
             ({"fields": [{"label": "mode", "value": "0600", "section": "sync"}]}, "'section'"),
             ({"fields": [{"label": "mode", "value": 600, "section": section}]}, "string label"),
         ):

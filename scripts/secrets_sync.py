@@ -540,15 +540,21 @@ def members(op: Op, vault: Vault) -> dict[str, Item]:
 def sync_fields(data: object) -> tuple[tuple[str, str], ...]:
     """The label and value of each field in the `sync` section of one item's `op item get` JSON.
 
-    A field is matched by its section's label, since `op` generates the section's id. A field
-    outside any section, such as a Document's notes, is passed over. This shape is unmeasured
-    against a live `op`, so it is read strictly and a different one fails loudly.
+    A field is matched by its section's label, since `op` generates the section's id. The label is
+    read from the field's own `section` object, or else through the item's `sections` array by
+    that object's id. A field outside any section, such as a Document's notes, is passed over.
+    This shape is unmeasured against a live `op`, so it is read strictly and a different one fails
+    loudly.
     """
     if not isinstance(data, dict):
         raise Execution("op item get returned JSON that is not an object")
     fields = data.get("fields", [])
     if not isinstance(fields, list):
         raise Execution("op item get returned a 'fields' value that is not an array")
+    sections = data.get("sections", [])
+    if not isinstance(sections, list) or not all(isinstance(s, dict) for s in sections):
+        raise Execution("op item get returned a 'sections' value that is not an array of objects")
+    named = {s.get("id"): s.get("label") for s in sections}
     found: list[tuple[str, str]] = []
     for field in fields:
         if not isinstance(field, dict):
@@ -558,7 +564,7 @@ def sync_fields(data: object) -> tuple[tuple[str, str], ...]:
             continue
         if not isinstance(section, dict):
             raise Execution("op item get returned a field whose 'section' is not an object")
-        if section.get("label") != SYNC_SECTION:
+        if section.get("label", named.get(section.get("id"))) != SYNC_SECTION:
             continue
         label, value = field.get("label"), field.get("value", "")
         if not isinstance(label, str) or not isinstance(value, str):
