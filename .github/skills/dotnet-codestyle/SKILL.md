@@ -43,11 +43,11 @@ All builds must complete without warnings, enforced as follows:
 - **Analyzer configuration.** `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with
   `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (the full
   analyzer set), plus `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`. With that, any diagnostic
-  the build surfaces as a warning fails it. The IDE code-style rules do not run in the build, so
-  the `dotnet format style` step fails on their warnings instead. Such a diagnostic must be fixed or deliberately suppressed at the
+  the build surfaces as a warning fails it. `EnforceCodeStyleInBuild` is left unset, so the IDE code-style
+  rules do not run in the build, and the `dotnet format style` step fails on their warnings instead. Such a diagnostic must be fixed or deliberately suppressed at the
   narrowest scope that fits (see Analyzer suppressions below), never left to accumulate. IDE0079 is
   the exception, since neither that step nor the build reports it. Remove a suppression the IDE
-  flags under IDE0079 only once every configuration and target framework CI builds passes without it.
+  flags under IDE0079 only once the format step and every configuration and target framework CI builds pass without it.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
   and not carried into every fleet repo. Its hook needs a .NET tool manifest declaring
