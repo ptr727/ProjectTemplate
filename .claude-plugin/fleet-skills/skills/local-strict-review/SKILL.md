@@ -173,7 +173,7 @@ Each bullet is a rule down to its `Why:` line, which is rationale rather than ru
 ## When to Run It
 
 - Before the first push toward a pull request, the push that opens it in `drive-pr` "The Drive Loop" and in `pr-review-conduct` "Expected review loop".
-- Before pushing a fix for a reviewer finding, because the same self-review blind spot applies to a fix as to the original diff. Such a fix is the fix outcome of `pr-review-conduct` "Every finding ends in a listed outcome", which `drive-pr` "Disposing of Every Finding" carries.
+- Before every push after that one, whatever finding it answers, per `pr-review-conduct` "Expected review loop", which also says when a recorded pass already covers one. A fix for a reviewer finding is the common case, because the same self-review blind spot applies to a fix as to the original diff. Such a fix is the fix outcome of `pr-review-conduct` "Every finding ends in a listed outcome", which `drive-pr` "Disposing of Every Finding" carries.
 - Whenever `agent-conduct`'s "about to claim work is done, verified, green, or fixed" trigger fires for work that will become, or already is, a pull request.
 - When the canonical sweep's issue is worked, over each unit it names, per "The Carried-Content Sweep" above. Editing such content is not itself one of these moments, and nothing refuses a push over it.
 
