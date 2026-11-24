@@ -6,7 +6,7 @@ Both read a repo's tree on its registry ground branch, the branch the audit read
 
 `names` is run by repo-config/configure.sh for one repo.
 It reads that repo's tree with read-only gh calls.
-The tree decides only whether a repo with tests owes the codecov mechanism.
+The tree, and the text of its C# projects, decide only whether a repo with tests owes the codecov mechanism.
 It prints a JSON object with the rows (name, scope, file, stores), the forbidden names, and the strays.
 A stray is the file a name would have at the wrong scope.
 With `--live` it also reads each secret store and adds the findings of secret_names.compare_stores.
@@ -36,7 +36,7 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import resolve_description
 import secret_names
@@ -59,6 +59,26 @@ class GhStatusError(ResolveError):
 
 class BranchMissing(ResolveError):
     """A ground branch that does not exist yet, which is a state to report and not a failure."""
+
+
+class ListedTree(NamedTuple):
+    """A tree's blob paths, and the reader of a C# project's text at the blob the listing named."""
+
+    paths: set[str]
+    read_project: secret_names.ProjectReader
+
+
+TreeReader = Callable[[str, str], set[str] | ListedTree]
+
+
+def split_tree(tree: set[str] | ListedTree) -> tuple[set[str], secret_names.ProjectReader | None]:
+    """The path set a tree reader answered and its project reader.
+
+    A reader may answer a bare path set, which carries no project reader, so every C# project in it reads as unread.
+    """
+    if isinstance(tree, ListedTree):
+        return tree.paths, tree.read_project
+    return tree, None
 
 
 def gh_graphql_module() -> Any:
@@ -86,7 +106,7 @@ def resolve_names(
     registry: Any,
     name: str,
     slug: str,
-    tree_reader: Callable[[str, str], set[str]],
+    tree_reader: TreeReader,
     live_reader: Callable[[str], dict[str, set[str]]] | None = None,
 ) -> dict[str, Any]:
     """The plan for NAME: its rows, forbidden names, and strays, from the tree of SLUG's ground branch.
@@ -103,12 +123,12 @@ def resolve_names(
             "Refusing to resolve secrets for a repository the entry does not name"
         )
     try:
-        tree = tree_reader(slug, ground_branch(entry, registry))
+        tree, read_project = split_tree(tree_reader(slug, ground_branch(entry, registry)))
     except BranchMissing as e:
         return {"rows": [], "forbidden": [], "strays": [], "skip": str(e)}
     try:
         live = live_reader(slug) if live_reader else None
-        return secret_names.secret_plan(secrets, entry, tree, name, live)
+        return secret_names.secret_plan(secrets, entry, tree, name, live, read_project)
     except secret_names.SecretNameError as e:
         raise ResolveError(str(e)) from e
 
@@ -124,8 +144,8 @@ def ground_branch(entry: dict[str, Any], registry: Any) -> str:
     return branch
 
 
-def read_tree(slug: str, branch: str) -> set[str]:
-    """Every blob path on BRANCH of SLUG, raising when the tree cannot be read in full.
+def read_tree(slug: str, branch: str) -> ListedTree:
+    """Every blob path on BRANCH of SLUG and their project reader, raising when the tree cannot be read in full.
 
     The branch is read first, since GitHub answers a tree read with 404 both for a missing branch and for an empty tree.
     A 404 or a 409 on the branch read is how GitHub answers for a branch that is not there, or for an empty repo.
@@ -147,7 +167,12 @@ def read_tree(slug: str, branch: str) -> set[str]:
     )
     if blobs is None:
         raise ResolveError(f"{slug}: the {branch} tree is unreadable or truncated")
-    return set(blobs)
+    return ListedTree(
+        set(blobs),
+        secret_names.blob_reader(
+            blobs, lambda s: gh_json(["gh", "api", f"repos/{slug}/git/blobs/{s}"], slug)
+        ),
+    )
 
 
 def gh_run(command: list[str], slug: str) -> str:
@@ -200,7 +225,7 @@ def read_live_names(slug: str) -> dict[str, set[str]]:
 
 
 def fleet_expectations(
-    secrets: dict[str, Any], registry: Any, tree_reader: Callable[[str, str], set[str]]
+    secrets: dict[str, Any], registry: Any, tree_reader: TreeReader
 ) -> tuple[dict[str, list[str]], set[str], set[str], list[str]]:
     """The expected files mapped to their repos, the files held for skipped repos, every wrong-scope file, and the skipped repos.
 
@@ -225,14 +250,15 @@ def fleet_expectations(
             raise ResolveError(f"registry entry {name!r} has no name or no GitHub url")
         try:
             try:
-                tree: set[str] | None = tree_reader(slug, ground_branch(entry, registry))
+                tree: set[str] | None
+                tree, read_project = split_tree(tree_reader(slug, ground_branch(entry, registry)))
                 skip = None
             except BranchMissing as e:
                 # Without a tree no test directory can be seen, and an unread tree is read as every candidate keeping its claim.
                 # That is the right reading here, since claiming a file too many only keeps it from being called unclaimed.
                 # Nothing is created from it, because only `expected` drives creation.
-                tree, skip = None, str(e)
-            plan = secret_names.secret_plan(secrets, entry, tree, name)
+                tree, read_project, skip = None, None, str(e)
+            plan = secret_names.secret_plan(secrets, entry, tree, name, None, read_project)
         except secret_names.SecretNameError as e:
             raise ResolveError(f"{name}: {e}") from e
         strays |= set(plan["strays"])
@@ -255,7 +281,7 @@ def scaffold(
     registry: Any,
     directory: Path,
     dry_run: bool,
-    tree_reader: Callable[[str, str], set[str]],
+    tree_reader: TreeReader,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     """Create each missing expected file, answering (created, present, strays, unclaimed, skipped).
 
