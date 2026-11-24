@@ -142,7 +142,7 @@
         // Each container therefore sees a read-only snapshot of the tracked and unignored files, with no network.
         // A carrier holding PowerShell adds a "Lint: PSScriptAnalyzer" task the same way, with `--linter PSScriptAnalyzer`.
         // Broad live spell-checking is the cspell extension's job.
-        // Pre-commit already runs the prose gate diff-scoped and the EOL configuration check.
+        // A pre-commit hook that carries the doc gates already runs the prose gate diff-scoped and the EOL configuration check.
         // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the hook's own EOL check on demand.
         // Every Lint task is the same check as in the .NET snippet's Lint group.
         {
