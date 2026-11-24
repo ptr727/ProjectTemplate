@@ -61,8 +61,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 
 - Naming this skill, and answering its how-far question, is the maintainer's explicit, current
   go-ahead. It covers every feature -> develop squash merge the drive performs to reach that target.
-  It also covers opening each pull request the drive needs. And it covers the verified remote
-  branch delete `cleanup` runs after each feature -> develop merge, a peer's merge included.
+  It also covers opening each pull request the drive needs. And it covers the whole post-merge
+  `cleanup` after each feature -> develop merge, a peer's merge included.
 - A dispatched drive answers no such question. So what stands in its place is the go-ahead the
   dispatching seat holds, per "How Far to Drive" above. The drive performs the same writes on it.
   Reading this bullet list is not how such a drive establishes that. That is because a worker
@@ -125,7 +125,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    So under the hub's default review policy, the hosted review runs once per change, at the
    promotion in step 6. `wait` sends each request the repository's review policy asks for, so
    the drive never asks whether a reviewer starts on its own.
-4. This step's merge and remote branch delete run only on the go-ahead "What Invoking This Skill
+4. This step's merge and post-merge `cleanup` run only on the go-ahead "What Invoking This Skill
    Authorizes" states. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge "<number>" --repo "<owner>/<repo>" --cleanup --checkout ~/repos/"<Repo>"`,
    run from a hub checkout outside the task's worktree, `~/repos/<Repo>` being the repository's
