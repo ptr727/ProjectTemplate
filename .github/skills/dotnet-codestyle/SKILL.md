@@ -261,7 +261,9 @@ The .NET mechanics, narrowest first:
 ## Code patterns
 
 1. **Guard clauses**: prefer early returns for validation and error handling. A parameter null
-   guard calls `ArgumentNullException.ThrowIfNull`, as CA1510 requires. IDE0046 makes one other
+   guard calls `ArgumentNullException.ThrowIfNull`, as CA1510 requires. A `netstandard` project
+   lacks that method, so its guard uses a throw expression instead. A local assigned and then
+   null-checked takes `?? throw` on the assignment, per IDE0270. IDE0046 makes one other
    shape a single conditional `return`, a throw expression included. That shape is an `if` and
    the `return`, `throw`, or `else` right after it, each branch only returning or throwing. Both
    branches throwing is not that shape. Write that shape as the conditional `return` from the start.
@@ -269,7 +271,8 @@ The .NET mechanics, narrowest first:
 3. **Cancellation tokens**: accept `CancellationToken` as the last parameter and pass it through.
 4. **ConfigureAwait**: in library code, use `ConfigureAwait(false)` unless context is required. Do
    not call `ConfigureAwait(false)` in xUnit tests (see xUnit1030).
-5. **Disposables**: use `await using` for async disposables, prefer `using` declarations.
+5. **Disposables**: use `await using` for async disposables. A `using` declaration is required
+   wherever IDE0063 matches.
 6. **LINQ vs loops**: use LINQ for clarity, loops for hot paths or allocations.
 7. **HTTP**: reuse `HttpClient` via factory, never per-request instantiation.
 8. **Collections**: prefer `IReadOnlyList<T>`/`IReadOnlyCollection<T>` for public APIs.
