@@ -908,10 +908,8 @@ class TestInstallAgents(unittest.TestCase):
 
     def test_refusals(self) -> None:
         for arguments, message in [
-            (("--bogus-flag",), 'Unknown option "--bogus-flag"'),
             (("--upgrade", "--json"), "applies only to --report"),
             (("--upgrade", "--all"), "--all names every tool for --install"),
-            (("--install", "--all", "claude"), "--all and a tool name were both given"),
             (("--report", "nosuch"), 'Unknown tool "nosuch"'),
             (("--report", "Herdr"), 'Unknown tool "Herdr"'),
             (("--report", "--upgrade"), "More than one action"),

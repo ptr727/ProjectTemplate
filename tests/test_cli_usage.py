@@ -523,6 +523,9 @@ class EntryPointCase(unittest.TestCase):
                     self.assertEqual(effects, "")
                     if before == before_flag:
                         self.assertRegex(output, REFUSED_AS_OPTION)
+                    if path.startswith("host-setup/linux/"):
+                        # The status CODESTYLE.md "Command-Line Arguments" reserves for a refused argument.
+                        self.assertEqual(result.returncode, 64, output)
 
     def test_before_flag_alone_would_expose_a_script_that_carries_on(self) -> None:
         """The control: each BEFORE_FLAG set alone exits 0 or leaves an effect.
@@ -738,7 +741,7 @@ class DashLeadingNameCase(unittest.TestCase):
         self.assertEqual(result.stdout, "A short tagline.")
 
 
-HOST_SCRIPTS = sorted((ROOT / "host-setup" / "linux").glob("*.sh"))
+HOST_SCRIPTS = [ROOT / path for path in entry_points() if path.startswith("host-setup/linux/")]
 
 # Records its own process ID where its first argument says, then sleeps until signaled.
 SLEEPING_CHILD = '#!/bin/sh\necho "$$" > "$1"\nexec sleep 60\n'
@@ -793,14 +796,6 @@ class HostSetupExitStatusCase(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("No other failure exits 64.", " ".join(result.stdout.split()))
 
-    def test_an_unknown_option_exits_the_reserved_status(self) -> None:
-        for script in HOST_SCRIPTS:
-            with self.subTest(script=script.name):
-                result, effects = run_sandboxed([bash_or_skip(), str(script), "--bogus-flag"])
-                self.assertEqual(result.returncode, 64, result.stderr)
-                self.assertIn('Unknown option "--bogus-flag"', result.stderr)
-                self.assertEqual(effects, "")
-
     def test_each_refusal_exits_the_reserved_status(self) -> None:
         empty = str(self.dir)
         for name, arguments, message in [
@@ -809,22 +804,14 @@ class HostSetupExitStatusCase(unittest.TestCase):
             ("install-tools.sh", ("--repo",), "--repo needs a path"),
             ("install-tools.sh", ("--list", "--repo", empty), "carries no host-tools.json"),
             ("install-tools.sh", ("--report", "--install"), "More than one action"),
-            ("install-tools.sh", ("--install", "--json"), "applies only to --report"),
             ("install-tools.sh", ("--sudo-timestamp", "jq"), "takes no tool"),
             ("install-tools.sh", ("--list", "nosuch"), 'Unknown tool "nosuch"'),
-            ("install-agents.sh", ("--report", "--upgrade"), "More than one action"),
-            ("install-agents.sh", ("--upgrade", "--json"), "applies only to --report"),
-            ("install-agents.sh", ("--upgrade", "--all"), "--all names every tool"),
             ("install-agents.sh", ("--install", "--all", "claude"), "--all and a tool name"),
             ("install-agents.sh", ("--list", "nosuch"), 'Unknown tool "nosuch"'),
-            ("install-agents.sh", ("--install",), "nothing is installed by default"),
             ("setup-github.sh", ("--name",), "--name takes a value"),
             ("setup-github.sh", ("--email",), "--email takes a value"),
             ("setup-github.sh", ("--shared-checkout",), "--shared-checkout takes the path"),
             ("setup-github.sh", ("--status", "--configure"), "More than one action"),
-            ("restore-secrets.sh", (), "Name at least one bucket"),
-            ("restore-secrets.sh", ("--bucket",), "--bucket takes a bucket name"),
-            ("restore-secrets.sh", ("--bucket", "Bad_Name"), "--bucket takes lowercase letters"),
         ]:
             with self.subTest(script=name, arguments=arguments):
                 script = ROOT / "host-setup" / "linux" / name

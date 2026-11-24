@@ -62,7 +62,8 @@ on_exit() {
 }
 
 # An interrupt names the signal and re-raises it, per CODESTYLE.md "Interrupts in Shell".
-# Every command runs in the foreground, since apt-get, dpkg, and the installers do not stop cleanly on SIGTERM.
+# Every command runs in the foreground, per that section's launcher case.
+# The tools apt-get, dpkg, and the installers start do not stop cleanly on SIGTERM.
 # So Ctrl-C reaches the command itself, and the trap runs once the command returns.
 # shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
 interrupted() {
