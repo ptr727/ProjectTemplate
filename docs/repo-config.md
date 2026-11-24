@@ -12,7 +12,7 @@ The hub holds all fleet-wide repository configuration:
 - `operational/develop.json` declares the operational-model `develop` ruleset.
 - `labels.json` declares the fleet label set.
 - `project.json` declares the fleet project every repository is linked to, by owner, number, and title.
-- `workflow-permissions.json` declares the Actions workflow token defaults, a read-only `GITHUB_TOKEN` that may neither create nor approve a pull request.
+- `workflow-permissions.json` declares the Actions workflow token defaults. `GITHUB_TOKEN` is read-only unless a workflow's `permissions:` block grants more, and may neither create nor approve a pull request.
 - `configure.sh` applies or checks those payloads through the GitHub API.
 - `central/` holds the READMEs `scripts/central_config.py` writes into the central bot-settings repositories, per "Central Bot Settings" below.
 
