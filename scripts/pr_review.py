@@ -271,7 +271,7 @@ from pr_review_checks import (
     held_checks_open,
 )
 from pr_review_copilot import has_prose
-from pr_review_digest import digest_refusal, render
+from pr_review_digest import digest_refusal, render, run_log_reading
 from pr_review_hold import grace_note, grace_open, pending_line
 from pr_review_payload import POLICY_KEY, page_files, page_reviews
 from pr_review_rounds import (
@@ -763,19 +763,6 @@ def transient_state(owner: str, repo: str, num: int, pr: dict, node: dict) -> tu
     if made <= (node.get("submittedAt") or ""):
         return "owed", line
     return ("pending" if reviewer_requested(pr) else "sent"), line
-
-
-def run_log_reading(state: str, line: str) -> str:
-    """The digest line naming the reading `transient_state` gave, empty where it gave none."""
-    readings = {
-        "owed": "transient. The run log names a fetch failure, not a rate limit, so one "
-        "re-request is owed",
-        "pending": "transient. The one re-request it is owed is pending",
-        "sent": "possible quota. The one re-request it was owed was sent and nothing answered it",
-        "spent": "possible quota. The run log names a fetch failure, but the round before was "
-        "an error refusal too",
-    }
-    return f"  RUN LOG READING: {readings[state]}: {line}" if state else ""
 
 
 def full_read(owner: str, repo: str, num: int, pr: dict | None = None) -> dict:
@@ -2175,17 +2162,29 @@ def main(argv: list[str] | None = None) -> int:
     return run_wait(owner, repo, a)
 
 
-def on_sigterm(signum: int, _frame: object) -> None:
-    """Raise SIGTERM as a `KeyboardInterrupt` carrying its number, so both signals unwind one path."""
-    raise KeyboardInterrupt(signum)
+received: list[int] = []
+
+
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal in `received` and raise `KeyboardInterrupt`, so both unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short. One is the copy `uv run`
+    forwards of a SIGTERM an outer `timeout` already sent this whole process group.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":
-    signal.signal(signal.SIGTERM, on_sigterm)
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
     try:
         sys.exit(main())
-    except KeyboardInterrupt as stop:
-        signum = signal.Signals(stop.args[0] if stop.args else signal.SIGINT)
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
         print(f"pr_review.py: interrupted by {signum.name}.", file=sys.stderr)
     with contextlib.suppress(OSError):
         sys.stdout.flush()

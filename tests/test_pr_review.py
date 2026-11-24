@@ -9090,32 +9090,36 @@ class TestWaitInterrupt(unittest.TestCase):
     `gh` on PATH holds the first read open, so the signal lands mid-wait with a child to stop.
     """
 
+    def start_wait(self, root: Path, stderr: int) -> tuple[subprocess.Popen[str], Path]:
+        """Start `wait` from a scripts copy under `root`, returning it and the stand-in's marker."""
+        scripts = root / "checkout" / "scripts"
+        shutil.copytree(REPO / "scripts", scripts, ignore=shutil.ignore_patterns("__pycache__"))
+        env = without_git_location()
+        git = ["git", "-C", str(scripts.parent)]
+        subprocess.run(["git", "init", "--quiet", str(scripts.parent)], check=True, env=env)
+        origin = "https://github.com/acme/widget.git"
+        subprocess.run([*git, "remote", "add", "origin", origin], check=True, env=env)
+        bin_dir, ready = root / "bin", root / "gh.started"
+        bin_dir.mkdir()
+        write_executable(bin_dir / "gh", f'#!/bin/sh\n: > "{ready}"\nexec sleep 300\n')
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        env["PYTHONIOENCODING"] = "utf-8"
+        argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
+        proc = subprocess.Popen(
+            [*argv, "--repo", "acme/widget", "--timeout", "600"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            text=True,
+            encoding="utf-8",
+            start_new_session=True,
+        )
+        return proc, ready
+
     def test_sigterm_mid_wait_prints_one_line_and_ends_by_that_signal(self) -> None:
         """The signal goes half a second after the stand-in starts, once the read is under way."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            scripts = root / "checkout" / "scripts"
-            shutil.copytree(REPO / "scripts", scripts, ignore=shutil.ignore_patterns("__pycache__"))
-            env = without_git_location()
-            git = ["git", "-C", str(scripts.parent)]
-            subprocess.run(["git", "init", "--quiet", str(scripts.parent)], check=True, env=env)
-            origin = "https://github.com/acme/widget.git"
-            subprocess.run([*git, "remote", "add", "origin", origin], check=True, env=env)
-            bin_dir, ready = root / "bin", root / "gh.started"
-            bin_dir.mkdir()
-            write_executable(bin_dir / "gh", f'#!/bin/sh\n: > "{ready}"\nexec sleep 300\n')
-            env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-            env["PYTHONIOENCODING"] = "utf-8"
-            argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
-            proc = subprocess.Popen(
-                [*argv, "--repo", "acme/widget", "--timeout", "600"],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                start_new_session=True,
-            )
+            proc, ready = self.start_wait(Path(tmp), subprocess.PIPE)
             try:
                 wait_until_started(proc, ready)
                 time.sleep(0.5)
@@ -9123,6 +9127,39 @@ class TestWaitInterrupt(unittest.TestCase):
                 _, err = proc.communicate(timeout=60)
             finally:
                 end_group(proc)
+            self.assertEqual(-signal.SIGTERM, proc.returncode, err)
+            self.assertEqual("pr_review.py: interrupted by SIGTERM.\n", err)
+            assert_group_ended(proc.pid)
+
+    def test_a_second_sigterm_during_the_interrupted_line_is_passed_over(self) -> None:
+        """An outer `timeout` over `uv run` sends SIGTERM twice, and the second once broke the print.
+
+        Standard error is a pipe this case fills before the start, so the script's one line blocks
+        until the case drains it. The second signal therefore lands inside that print.
+        """
+        read_end, write_end = os.pipe()
+        os.set_blocking(write_end, False)
+        filled = 0
+        with contextlib.suppress(BlockingIOError):
+            while True:
+                filled += os.write(write_end, b"x" * 512)
+        os.set_blocking(write_end, True)
+        with tempfile.TemporaryDirectory() as tmp, os.fdopen(read_end, "rb") as stream:
+            try:
+                proc, ready = self.start_wait(Path(tmp), write_end)
+            finally:
+                os.close(write_end)
+            try:
+                wait_until_started(proc, ready)
+                time.sleep(0.5)
+                proc.send_signal(signal.SIGTERM)
+                time.sleep(0.5)
+                proc.send_signal(signal.SIGTERM)
+                self.assertEqual(filled, len(stream.read(filled)))
+                proc.communicate(timeout=60)
+            finally:
+                end_group(proc)
+            err = stream.read().decode("utf-8")
             self.assertEqual(-signal.SIGTERM, proc.returncode, err)
             self.assertEqual("pr_review.py: interrupted by SIGTERM.\n", err)
             assert_group_ended(proc.pid)
