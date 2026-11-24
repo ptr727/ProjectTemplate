@@ -35,7 +35,6 @@ Usage: python3 scripts/skills_install.py            (installs)
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import os
 import shutil
@@ -46,10 +45,10 @@ import sys
 from pathlib import Path
 
 import build_dist
+from run_deadline import run_with_deadline
 
 # A stalled child would hang a read-only report indefinitely, so every git and claude child the report runs gets a deadline.
 SUBPROCESS_TIMEOUT = 60
-KILL_GRACE_SECONDS = 5
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SKILLS_SRC = ROOT / ".agents" / "skills"
@@ -70,38 +69,14 @@ def agents_home():
     return Path(override).expanduser() if override else Path.home() / ".agents"
 
 
-def kill_process_tree(process):
-    """Kill `process` and, on Windows, what it started, since a launcher's child outlives it alone."""
-    if os.name == "nt":
-        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
-            subprocess.run(
-                ["taskkill", "/T", "/F", "/PID", str(process.pid)],
-                capture_output=True,
-                check=False,
-                timeout=KILL_GRACE_SECONDS,
-            )
-    process.kill()
+def report_run(argv):
+    """Run a report child under SUBPROCESS_TIMEOUT, its stdout decoded and its stderr discarded.
 
-
-def run_with_deadline(argv):
-    """Run a report child, raising `TimeoutExpired` close to SUBPROCESS_TIMEOUT.
-
-    `subprocess.run` on Windows kills only the direct child at the deadline, then waits with no
-    bound for the pipes to close. A child of a launcher or a `.cmd` shim holds them open, so that
-    wait lasts as long as the stall. Here the tree is killed and the final collection is bounded.
-
-    Stdout decodes here because text mode decodes on a reader thread on Windows, where a failure
-    prints a traceback and never reaches the caller. No caller reads stderr, so none is captured.
+    No caller reads stderr, so a stalled child's descendant holds no stderr pipe either.
     """
-    process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    try:
-        stdout, _ = process.communicate(timeout=SUBPROCESS_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        kill_process_tree(process)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            process.communicate(timeout=KILL_GRACE_SECONDS)
-        raise
-    return subprocess.CompletedProcess(argv, process.returncode, stdout.decode("utf-8"))
+    return run_with_deadline(
+        argv, timeout=SUBPROCESS_TIMEOUT, encoding="utf-8", stderr=subprocess.DEVNULL
+    )
 
 
 def git_in(root, *args):
@@ -110,7 +85,7 @@ def git_in(root, *args):
     Output that does not decode raises instead, since None could read as a clean tree.
     """
     try:
-        r = run_with_deadline(["git", "-C", str(root), *args])
+        r = report_run(["git", "-C", str(root), *args])
     except UnicodeDecodeError:
         raise
     except (OSError, ValueError, subprocess.TimeoutExpired):
@@ -253,7 +228,7 @@ def claude_argv(*args):
 def claude_json(*args):
     """The JSON list `claude <args>` prints, or None where it cannot be run or read as one."""
     try:
-        listing = run_with_deadline(claude_argv(*args))
+        listing = report_run(claude_argv(*args))
         entries = json.loads(listing.stdout) if listing.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired, ValueError):
         return None
