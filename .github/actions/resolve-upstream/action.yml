@@ -1,6 +1,4 @@
 # A moved key names a pin a human decides on.
-# - python pins the winget id in host-setup/windows/install-tools.ps1, pyproject.toml's version settings, and CI's python-version.
-# - dotnet pins $DOTNET_MAJOR in host-setup/windows/install-tools.ps1 and global.json.
 name: Hub resolve-upstream hook
 description: Resolve the newest released upstream line of each host tool the hub pins to one line.
 

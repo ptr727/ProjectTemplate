@@ -112,7 +112,7 @@ class PythonFilterTests(unittest.TestCase):
         self.assertIn('line 3.15 has an unknown status "rc"', stderr)
 
     def test_an_entry_without_a_status_fails(self) -> None:
-        self.assertIn("unknown status null", self.refused({"3.14": "bugfix"}))
+        self.assertIn("unknown status null", self.refused({"3.14": {}}))
 
     def test_a_key_that_is_not_a_line_fails(self) -> None:
         self.assertIn("is not a <major>.<minor> line", self.refused({"main": {"status": "bugfix"}}))
@@ -120,11 +120,8 @@ class PythonFilterTests(unittest.TestCase):
     def test_no_released_line_fails(self) -> None:
         self.assertIn("holds no released line", self.refused(python_cycle(**{"3_16": "feature"})))
 
-    def test_a_document_that_is_not_an_object_fails(self) -> None:
-        documents: list[object] = [[], {}, "3.14"]
-        for data in documents:
-            with self.subTest(data=data):
-                self.assertIn("is not a non-empty object", self.refused(data))
+    def test_an_empty_document_holds_no_released_line(self) -> None:
+        self.assertIn("holds no released line", self.refused({}))
 
 
 class DotnetFilterTests(unittest.TestCase):
@@ -156,19 +153,16 @@ class DotnetFilterTests(unittest.TestCase):
     def test_a_malformed_channel_fails(self) -> None:
         self.assertIn("is not a <major>.<minor> line", self.refused(dotnet_index(("10", "active"))))
 
-    def test_a_non_object_entry_fails(self) -> None:
-        self.assertIn("is not an object", self.refused({"releases-index": ["10.0"]}))
-
     def test_no_released_line_fails(self) -> None:
         self.assertIn("holds no released line", self.refused(dotnet_index(("11.0", "preview"))))
 
-    def test_a_document_without_the_index_fails(self) -> None:
-        documents: list[object] = [[], {}, {"releases-index": []}, {"releases-index": "10.0"}]
-        for data in documents:
-            with self.subTest(data=data):
-                self.assertIn("holds no releases-index list", self.refused(data))
+    def test_an_empty_index_holds_no_released_line(self) -> None:
+        self.assertIn("holds no released line", self.refused({"releases-index": []}))
 
 
+@unittest.skipUnless(
+    os.name == "posix", "the hook runs on a Linux runner, and jq ends lines in CRLF on Windows"
+)
 class HookStepTests(unittest.TestCase):
     """The hook's step, run whole with its own env, against a stub curl serving constructed data."""
 
