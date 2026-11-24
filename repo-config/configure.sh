@@ -54,7 +54,7 @@
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The interaction limit is asserted the same way.
-# A limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
+# Once a verification is recorded, a limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # The agent policy files are checked too, read from the repo's default branch and compared with the render.
 # The project link is checked by resolving the declared project to a node id.
