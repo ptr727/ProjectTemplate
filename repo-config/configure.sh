@@ -15,6 +15,7 @@
 # A last group of secrets follows.
 # First settings.json via PATCH, plus has_discussions (public community repos only) and default_branch (main, only when it exists).
 # The same group then sets the interaction limit the registry's publicInteraction declares, on a public repo only, for six months.
+# It sets none until interaction-verification.json records a pilot's bot verification, and check owes none before then.
 # Then the Dependabot vulnerability alerts and automated security updates.
 # Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
@@ -53,7 +54,7 @@
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The interaction limit is asserted the same way.
-# A limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
+# Once a verification is recorded, a limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
 # The agent policy files are checked too, read from the repo's default branch and compared with the render.
 # The project link is checked by resolving the declared project to a node id.
@@ -203,6 +204,33 @@ name="${repo##*/}"
 # That is because sed's own escape is a GNU extension a BSD sed would not honor.
 jqr() { jq -r "$@" | sed $'s/\r$//'; }
 
+# Call as `payload_problem FILE STEP...`, each step a jq filter over the slurped file, then @@, then the reason it prints on a failure.
+# Each step runs its own jq, so a payload that parses but fails a step is told apart from a jq that failed.
+payload_problem() {
+    local file="$1" err status step
+    shift
+    status=0
+    err="$(jq empty "$file" 2>&1)" || status=$?
+    if [ "$status" -ne 0 ] && [[ "$err" == *"parse error"* ]]; then
+        echo "did not parse (${err//$'\n'/ })"
+        return 1
+    elif [ "$status" -ne 0 ]; then
+        echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
+        return 1
+    fi
+    for step in "$@"; do
+        status=0
+        err="$(jq -s -e "${step%%@@*}" "$file" 2>&1 >/dev/null)" || status=$?
+        if [ "$status" -eq 1 ]; then
+            echo "${step#*@@}"
+            return 1
+        elif [ "$status" -ne 0 ]; then
+            echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
+            return 1
+        fi
+    done
+}
+
 archived_status=""
 # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
 if [ -f "$registry" ]; then
@@ -304,6 +332,24 @@ elif python3 -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>
 else
     echo "No Python 3.10 or newer found (python3 or py -3), the oldest that runs this repo's Python scripts. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
     exit 1
+fi
+
+# ----- Resolve the bot verification record that gates the interaction limit (shared by apply and check) -----
+# A limit that silenced a review bot would read as a false green, so none is set until a pilot verifies the bots.
+# A committed record rather than a flag carries that evidence, so an operator who skips the README still cannot set an unverified limit.
+interaction_record="$script_dir/interaction-verification.json"
+interaction_verified=false
+if [ -e "$interaction_record" ]; then
+    if ! record_problem="$(payload_problem "$interaction_record" \
+        'length == 1@@does not hold exactly one JSON document' \
+        '.[0] | type == "object"@@is not a JSON object' \
+        '.[0] | keys == ["bots", "date", "pilot"]@@does not hold exactly the keys pilot, date, and bots' \
+        '.[0] | (.pilot | type == "string" and length > 0) and (.date | type == "string" and length > 0)@@does not name the pilot repository and the date as non-empty strings' \
+        '.[0] | (.bots | type == "array") and (.bots | sort) == ["CodeRabbit", "Copilot", "Dependabot", "Qodo"]@@does not name exactly the four bots Copilot, CodeRabbit, Qodo, and Dependabot')"; then
+        echo "The interaction verification record $interaction_record $record_problem, per repo-config/README.md \"Public Interaction\". Fix or remove it. Stopping before any write." >&2
+        exit 1
+    fi
+    interaction_verified=true
 fi
 
 # ----- Compose the ruleset payloads from the agent policy and the registry (shared by apply and check) -----
@@ -623,37 +669,13 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
 #   - a six-digit lowercase hex color, which is how GitHub stores it
 #   - a description of at most 100 characters
 # Each is a string holding no tab or line break.
-# Each step runs its own jq and prints its own reason on a failure.
-# A payload that is malformed, empty, out of contract, or repeats a name is therefore told apart from a jq that failed.
 labels_payload_ok() {
-    local err status step
-    local -a steps=(
-        'length == 1@@does not hold exactly one JSON document'
-        '.[0] | type=="array"@@is not an array'
-        '.[0] | length > 0@@is empty'
-        '.[0] | all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)'
+    payload_problem "$labels_file" \
+        'length == 1@@does not hold exactly one JSON document' \
+        '.[0] | type=="array"@@is not an array' \
+        '.[0] | length > 0@@is empty' \
+        '.[0] | all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)' \
         '.[0] | (map(.name | ascii_downcase) | unique | length) == length@@names a label more than once, ignoring case'
-    )
-    status=0
-    err="$(jq empty "$labels_file" 2>&1)" || status=$?
-    if [ "$status" -ne 0 ] && [[ "$err" == *"parse error"* ]]; then
-        echo "did not parse (${err//$'\n'/ })"
-        return 1
-    elif [ "$status" -ne 0 ]; then
-        echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
-        return 1
-    fi
-    for step in "${steps[@]}"; do
-        status=0
-        err="$(jq -s -e "${step%%@@*}" "$labels_file" 2>&1 >/dev/null)" || status=$?
-        if [ "$status" -eq 1 ]; then
-            echo "${step#*@@}"
-            return 1
-        elif [ "$status" -ne 0 ]; then
-            echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
-            return 1
-        fi
-    done
 }
 
 apply_labels() { # create-or-update every label labels.json declares, by name
@@ -753,8 +775,12 @@ interaction_limits() {
 }
 
 # It prints the origin of the live limit, or nothing when none is in force.
+# Without a verification record apply writes no limit, so no origin can block one and nothing is read.
 interaction_origin() {
     local live
+    if [ "$interaction_verified" != true ]; then
+        return 0
+    fi
     live="$(interaction_limits)" || return 1
     jqr '.origin // empty' <<<"$live"
 }
@@ -764,6 +790,10 @@ interaction_origin() {
 apply_interaction() { # private
     if [ "$1" != false ]; then
         echo "Skipped the interaction limit, since $repo is private and GitHub offers none there"
+        return
+    fi
+    if [ "$interaction_verified" != true ]; then
+        echo "Skipped the interaction limit, since no pilot's bot verification is recorded at $interaction_record. See repo-config/README.md \"Public Interaction\""
         return
     fi
     jq -n --arg l "$interaction_limit" '{limit: $l, expiry: "six_months"}' |
@@ -1088,6 +1118,15 @@ check_interaction() {
     fi
     got="$(jqr '.limit // "none"' <<<"$live")"
     origin="$(jqr '.origin // "none"' <<<"$live")"
+    # A limit in force before any record, such as the pilot's, is named with its expiry, since nothing renews it.
+    if [ "$interaction_verified" != true ]; then
+        if [ "$got" = none ]; then
+            note "interaction limit: none is owed until a pilot's bot verification is recorded at $interaction_record, and apply sets none before then"
+        else
+            note "interaction limit: $got is in force on the $origin until $(jqr '.expires_at // "an unread expiry"' <<<"$live"), and apply neither renews nor replaces it until a pilot's bot verification is recorded at $interaction_record"
+        fi
+        return
+    fi
     # The origin is tested first, since apply refuses to replace a limit the owning account set, so naming apply there would be unfollowable.
     if [ "$got" != none ] && [ "$origin" != repository ]; then
         fail "interaction limit $got is set on the owning $origin rather than on the repository, which apply cannot replace. Remove it there, then apply sets $interaction_limit"

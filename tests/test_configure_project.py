@@ -75,7 +75,9 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
 
 
 JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
-LABELS_OK = lift(r"^(labels_payload_ok\(\) \{\n.*?\n\}\n)")
+LABELS_OK = lift(r"^(payload_problem\(\) \{\n.*?\n\}\n)") + lift(
+    r"^(labels_payload_ok\(\) \{\n.*?\n\}\n)"
+)
 LABELS = ROOT / "repo-config" / "labels.json"
 PAYLOAD_OK = lift(r"^(project_payload_ok\(\) \{\n.*?\n\}\n)")
 NODE_ID = lift(r"^(project_node_id\(\) \{ # owner number title\n.*?\n\}\n)")
