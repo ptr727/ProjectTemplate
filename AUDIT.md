@@ -232,19 +232,21 @@ flowchart LR
 
 ## 10. Converge: Apply the Fixes
 
-Sections 0-9 (the audit and its report) are **read-only** and never touch the target. **Converging** is the separate follow-on phase: the drift the report found is **resolved by applying fixes to the target repo**, not left as a report. The convergence loop:
+Sections 0-9 (the audit and its report) never edit the target's content. **Converging** is the separate follow-on phase: the drift the report found is **resolved by applying fixes to the target repo**, not left as a report. The fixes apply in the order [`RESYNC.md`][resync] section 3 sets. That order lands the rules before the files they govern, and a deletion before the re-vendor that would refresh it. The convergence loop:
 
-- **Apply via a pull request on the target repo.** Branch from the target's `develop` (or `main` for a `main`-only repo), make the fix, and open a PR. Never push a fix directly to a protected branch, and never hand-edit a target outside a PR.
-- **Drive the PR's review to green** - the same loop the hub runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette]). The [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md` covers that one reviewer's mechanics. Request review at the defined moments. Address and resolve every thread from every reviewer the repo has configured, and confirm the review covers the head SHA.
+- **Apply a file fix via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`.
+- **Drive the PR's review to green** - the same loop the hub runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette]). The [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md` covers that one reviewer's mechanics.
 - **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
-- **One focused PR per drift class**, apart from the grouping [`RESYNC.md`][resync] section 6 states, cross-referencing the audit finding. A sprawling all-drifts PR draws many review rounds and never feels done.
-- **A `hub-only:` finding converges by deleting the file, not by updating it.** That prefix is how `spec/audit.py` reports the **carried-scope** dimension section 4 names. It is the one class where the fix removes content. So it is easy to convert into a re-vendor by reflex and end up refreshing a copy that should not exist. Delete the repo's copy. Where the hub still hosts the file, reach the hub's per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. The finding says which of the two it is. Confirm the disposition is `retire` before deleting anything. A file the fleet retired outright is deleted only where the finding says the copy matches a past hub version. Any other copy is reported to the maintainer, per [`RESYNC.md`][resync] section 3 step 2. An untriaged hit may be the repo's own content at a shared path, and deleting that destroys work the hub never owned.
+- **Re-audit once the fix reaches `main`.** Section 1 reads `main` as ground truth, so a convergence is done once a re-run of the audit measures it there. Section 8's `--branch` run checks it on `develop` first. The hub commits the report under its own `reports/`, per section 8.
+- **One focused PR per drift class of file fixes**, apart from the grouping [`RESYNC.md`][resync] section 6 states, cross-referencing the audit finding. A sprawling all-drifts PR draws many review rounds and never feels done.
+- **A `hub-only:` finding converges by deleting the file, not by updating it.** That prefix is how `spec/audit.py` reports the **carried-scope** dimension section 4 names. Such a finding is easy to convert into a re-vendor by reflex and end up refreshing a copy that should not exist. Delete the repo's copy. Where the hub still hosts the file, reach the hub's per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. The finding says which of the two it is. Confirm the path's [`spec/divergences.json`][divergences] `gaps` disposition is `retire` before deleting anything. A file the fleet retired outright is deleted only where the finding says the copy matches a past hub version. Any other copy is reported to the maintainer, per [`RESYNC.md`][resync] section 3 step 2. An untriaged hit may be the repo's own content at a shared path, and deleting that destroys work the hub never owned.
 - **Any deletion sweeps the inbound references to the path, and the sweep is part of the deletion rather than follow-up.** This governs every removal and not only a `hub-only:` one. Grep the path tree-wide and read every hit. Then read the files whose job is to say what the repo holds because a path search cannot find a description that names no path. Point a link at the hub's copy when that is the equivalent. Rewrite a runnable command to the invocation that works. Remove a mention with no equivalent and remove its reference definition in the same edit, per [GOVERNANCE.md "Documentation Style Conventions"][governance-documentation-style].
-- **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) here and let a re-audit re-flag it. This is instead of hand-patching each repo for the shared cause.
+- **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) in the hub and let a re-audit re-flag it. This is instead of hand-patching each repo for the shared cause.
 
-The convergence model: the hub audits and the agent **applies** the fixes via target PRs, and the maintainer gates every merge. It supersedes any "the hub only reports; downstream operators apply by hand" framing.
+The convergence model: the hub audits and the agent **applies** the fixes, and the maintainer gates every merge.
 
 <!-- Workflow -->
+[workflows]: https://github.com/ptr727/ProjectTemplate/tree/main/catalog/snippets/workflows
 
 <!-- Repo -->
 [audit-runner]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/audit.py
@@ -275,4 +277,3 @@ The convergence model: the hub audits and the agent **applies** the fixes via ta
 [template]: https://github.com/ptr727/ProjectTemplate/blob/main/reports/_template.md
 [validate]: https://github.com/ptr727/ProjectTemplate/blob/main/spec/validate.py
 [workflow]: ./WORKFLOW.md
-[workflows]: https://github.com/ptr727/ProjectTemplate/tree/main/catalog/snippets/workflows
