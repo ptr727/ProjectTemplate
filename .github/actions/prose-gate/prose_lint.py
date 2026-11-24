@@ -1691,6 +1691,17 @@ def blanked(value: str) -> str:
     return re.sub(r"[^\n]", " ", value)
 
 
+def heredoc_rest(value: str) -> tuple[int, int] | None:
+    """Where a heredoc token's opening line resumes past its label and where that line ends.
+
+    None where `value` opens no heredoc. The text between the two is ordinary shell code.
+    """
+    if not (m := re.match(HEREDOC, value)):
+        return None
+    eol = value.find("\n")
+    return m.end(4) + len(m[2]), len(value) if eol < 0 else eol
+
+
 def shell_literals(text: str, lexer: str) -> str:
     """The command with what its shell takes literally blanked, each line break kept.
 
@@ -1704,9 +1715,8 @@ def shell_literals(text: str, lexer: str) -> str:
     for kind, value in lexer_for(lexer).get_tokens(text + "\n"):
         opens = kind in String.Interpol and value == "${"
         depth += opens - (depth > 0 and kind in String.Interpol and value == "}")
-        if kind in String.Heredoc and (m := re.match(HEREDOC, value)):
-            cut, eol = m.end(4) + len(m[2]), value.find("\n")
-            eol = len(value) if eol < 0 else eol
+        if kind in String.Heredoc and (split := heredoc_rest(value)):
+            cut, eol = split
             rest = shell_literals(value[cut:eol], lexer)
             out.append(blanked(value[:cut]) + rest + blanked(value[eol:]))
         elif opens or depth or kind in Comment or (kind in String and kind not in String.Backtick):
@@ -1773,9 +1783,8 @@ def shell_char_kinds(text: str, lexer: str) -> str:
             out.append("#" * len(value))
         elif kind in String.Escape and value == "\\\n":
             out.append("ww")
-        elif kind in String.Heredoc and (m := re.match(HEREDOC, value)):
-            cut, eol = m.end(4) + len(m[2]), value.find("\n")
-            eol = len(value) if eol < 0 else eol
+        elif kind in String.Heredoc and (split := heredoc_rest(value)):
+            cut, eol = split
             rest = shell_char_kinds(value[cut:eol], lexer)
             out.append("h" * cut + rest + "H" * (len(value) - eol))
         elif kind in String.Heredoc:
