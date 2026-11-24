@@ -19,7 +19,7 @@ project.
    - top-level statements in place of a `Program.Main` (IDE0210),
    - pattern matching over traditional checks (IDE0019, IDE0020, IDE0038, IDE0078, IDE0083,
      IDE0260),
-   - a collection expression when types loosely match (IDE0300 to IDE0306),
+   - a collection expression when types loosely match (IDE0028, IDE0300 to IDE0306),
    - implicit object creation when the type is apparent (IDE0090),
    - range and index operators (IDE0056, IDE0057).
 
