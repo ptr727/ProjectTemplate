@@ -60,7 +60,7 @@ maintainer can supply what section 0A lists.
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
    `spec/validate.py`. The entry and its `SHORT_NAME_PINS` pin are hub edits, so they land
-   through a hub pull request into `develop`. Merge it before step 6, since `scripts/carry.py`
+   through a hub pull request into `develop`. Step 6 waits for it to merge, since `scripts/carry.py`
    refuses a repository the fetched hub's registry does not hold.
 
 4. **The instruction set, before authoring anything.** STANDUP.md section 1A. An existing
