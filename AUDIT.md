@@ -234,7 +234,7 @@ flowchart LR
 
 Sections 0-9 (the audit and its report) never edit the target's content. **Converging** is the separate follow-on phase: the drift the report found is **resolved by applying fixes to the target repo**, not left as a report. The fixes apply in the order [`RESYNC.md`][resync] section 3 sets. That order lands the rules before the files they govern, and a deletion before the re-vendor that would refresh it. The convergence loop:
 
-- **Apply via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`.
+- **Apply via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`. A settings, ruleset, or secret fix writes no file and applies through `repo-config/configure.sh` instead, per [`RESYNC.md`][resync] section 3 step 5.
 - **Drive the PR's review to green** - the same loop the hub runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette]). The [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md` covers that one reviewer's mechanics.
 - **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
 - **Re-audit once the fix reaches `main`.** Section 1 reads `main` as ground truth, so a convergence is done once a re-run of the audit measures it there. Section 8's `--branch` run checks it on `develop` before the promotion. The hub commits the report under its own `reports/`, per section 8.
