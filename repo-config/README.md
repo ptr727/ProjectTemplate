@@ -110,16 +110,33 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 
 ## Public Interaction
 
-A public repository is open to comments, issues, and pull requests from any account unless something limits it. The registry's `publicInteraction` field declares which of two groups each repository is in, and `configure.sh` turns that into GitHub's repository interaction limit (`PUT /repos/{owner}/{repo}/interaction-limits`).
+A public repository is open to comments, issues, and pull requests from any account unless something limits it. The registry's `publicInteraction` field declares which of two groups each repository is in, and `configure.sh` turns that into GitHub's repository interaction limit (`PUT /repos/{owner}/{repo}/interaction-limits`). It sets that limit only once a pilot repository has verified one, per the pilot rule below.
 
 - **`collaborators`**, the default when the field is absent, is a repository public for reference only, such as the hub. `apply` sets the `collaborators_only` limit, so only collaborators can comment, open an issue, or open a pull request. It also turns Discussions off, since a reference-only repository invites no outside conversation.
 - **`community`** is a product with a user community. `apply` sets the `existing_users` limit, which blocks only accounts younger than 24 hours, and keeps Discussions on. Anyone else can still open and comment on an issue.
 
 The default is `collaborators` so that a repository made public starts locked down rather than open. The field has no effect on a private repository. The script reads visibility live, sets no limit there, and keeps Discussions off. GitHub refuses an interaction-limit read on a private repository, so neither mode reads one there.
 
-**The limit expires.** GitHub's longest expiry is six months, after which it removes the limit silently. Every `apply` sets that longest expiry, so a re-apply is the renewal. `check` asserts the declared limit, set on the repository itself, and warns once fewer than 30 days remain. A lapsed limit reads as missing and fails the check. A limit set on the owning account instead (`PUT /user/interaction-limits`) cannot express the two groups. GitHub then refuses a repository limit, so `apply` stops in its pre-flight with nothing written and `check` fails on the limit's origin.
+**The limit expires.** GitHub's longest expiry is six months, after which it removes the limit silently. Every `apply` that sets a limit sets that longest expiry, so a re-apply is the renewal. Once a limit is owed, `check` asserts the declared limit, set on the repository itself, and warns once fewer than 30 days remain. A lapsed limit reads as missing and fails the check. A limit set on the owning account instead (`PUT /user/interaction-limits`) cannot express the two groups. GitHub then refuses a repository limit, so `apply` stops in its pre-flight with nothing written and `check` fails on the limit's origin.
 
-**The first limit goes to one pilot repository.** It is not yet verified that a limit leaves the review bots and Dependabot able to work. A limit that silenced a reviewer would read as a false green in the review gate. Apply the first public-interaction limit to one pilot repository. Verify there that Copilot, CodeRabbit, Qodo, and Dependabot still work under it, and record the evidence on a pull request. Only then roll the limit out to the other repositories. Also check that the README of each `collaborators` repository links to no Discussions page, since `apply` turns Discussions off there.
+**No limit is set until a pilot verifies one.** It is not yet verified that a limit leaves the review bots and Dependabot able to work. A limit that silenced a reviewer would read as a false green in the review gate. So `apply` sets no interaction limit until a committed record, `repo-config/interaction-verification.json`, shows that a pilot repository verified one. Without the record, `apply` skips the limit with a note and applies every other group. `check` then notes that no limit is owed. The record is absent until the pilot is done, so the pilot's first limit is set by hand:
+
+1. Pick one public repository as the pilot.
+2. In its settings, under **Moderation options**, open **Interaction limits**. Set the limit its `publicInteraction` declares, for six months.
+3. Verify there that Copilot, CodeRabbit, Qodo, and Dependabot still work under the limit.
+4. Commit the record through a hub pull request whose body carries that evidence.
+
+The record names the pilot repository, the date of the verification, and the four bots, in any order. It holds nothing else:
+
+```json
+{
+  "pilot": "<owner>/<repo>",
+  "date": "<YYYY-MM-DD>",
+  "bots": ["Copilot", "CodeRabbit", "Qodo", "Dependabot"]
+}
+```
+
+A record of any other shape, or one dated on a day no calendar holds, stops `apply` and `check` before any write. Each command reads the record from the hub checkout it runs from, so a checkout at `main` honors it once it is promoted. From then on `apply` sets the limit on every public repository, which renews the pilot's hand-set one. Also check that the README of each `collaborators` repository links to no Discussions page, since `apply` turns Discussions off there.
 
 ## Agent Policy
 

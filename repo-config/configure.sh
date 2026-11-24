@@ -15,6 +15,7 @@
 # A last group of secrets follows.
 # First settings.json via PATCH, plus has_discussions (public community repos only) and default_branch (main, only when it exists).
 # The same group then sets the interaction limit the registry's publicInteraction declares, on a public repo only, for six months.
+# It sets none until interaction-verification.json records a pilot's bot verification, and check owes none before then.
 # Then the Dependabot vulnerability alerts and automated security updates.
 # Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
@@ -304,6 +305,37 @@ elif python3 -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>
 else
     echo "No Python 3.10 or newer found (python3 or py -3), the oldest that runs this repo's Python scripts. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
     exit 1
+fi
+
+# ----- Resolve the bot verification record that gates the interaction limit (shared by apply and check) -----
+# A limit that silenced a review bot would read as a false green, so none is set until a pilot verifies the bots.
+# A committed record rather than a flag carries that evidence, so an operator who skips the README still cannot set an unverified limit.
+interaction_record="$script_dir/interaction-verification.json"
+interaction_verified=false
+if [ -e "$interaction_record" ]; then
+    if ! record_problem="$(jqr -s 'if length != 1 or (.[0] | type) != "object" then "does not hold one JSON object"
+        else .[0] |
+            if keys != ["bots", "date", "pilot"] then "does not hold exactly the keys pilot, date, and bots"
+            elif (.pilot | type) != "string" or (.pilot | test("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$") | not) or (.pilot | test("/\\.+$")) then "does not name the pilot repository as owner/name"
+            elif (.date | type) != "string" or (.date | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") | not) then "does not date the verification as YYYY-MM-DD"
+            elif (.bots | type) != "array" or (.bots | sort) != ["CodeRabbit", "Copilot", "Dependabot", "Qodo"] then "does not name exactly the four bots Copilot, CodeRabbit, Qodo, and Dependabot"
+            else empty end
+        end' "$interaction_record")"; then
+        record_problem="does not parse as JSON"
+    fi
+    if [ -z "$record_problem" ] && ! "${py_cmd[@]}" -c 'import sys
+from datetime import date
+try:
+    date.fromisoformat(sys.argv[1])
+except ValueError:
+    sys.exit(1)' "$(jqr -s '.[0].date' "$interaction_record")"; then
+        record_problem="dates the verification on a day the calendar does not hold"
+    fi
+    if [ -n "$record_problem" ]; then
+        echo "The interaction verification record $interaction_record $record_problem, per repo-config/README.md \"Public Interaction\". Fix or remove it. Stopping before any write." >&2
+        exit 1
+    fi
+    interaction_verified=true
 fi
 
 # ----- Compose the ruleset payloads from the agent policy and the registry (shared by apply and check) -----
@@ -753,8 +785,12 @@ interaction_limits() {
 }
 
 # It prints the origin of the live limit, or nothing when none is in force.
+# Without a verification record apply writes no limit, so no origin can block one and nothing is read.
 interaction_origin() {
     local live
+    if [ "$interaction_verified" != true ]; then
+        return 0
+    fi
     live="$(interaction_limits)" || return 1
     jqr '.origin // empty' <<<"$live"
 }
@@ -764,6 +800,10 @@ interaction_origin() {
 apply_interaction() { # private
     if [ "$1" != false ]; then
         echo "Skipped the interaction limit, since $repo is private and GitHub offers none there"
+        return
+    fi
+    if [ "$interaction_verified" != true ]; then
+        echo "Skipped the interaction limit, since no pilot's bot verification is recorded at $interaction_record. See repo-config/README.md \"Public Interaction\""
         return
     fi
     jq -n --arg l "$interaction_limit" '{limit: $l, expiry: "six_months"}' |
@@ -1080,6 +1120,10 @@ check_interaction() {
     fi
     if [ "$private" != false ]; then
         note "interaction limit: $repo is private, so none is owed (publicInteraction=$interaction applies only while it is public)"
+        return
+    fi
+    if [ "$interaction_verified" != true ]; then
+        note "interaction limit: none is owed until a pilot's bot verification is recorded at $interaction_record, and apply sets none before then"
         return
     fi
     if ! live="$(interaction_limits)"; then
