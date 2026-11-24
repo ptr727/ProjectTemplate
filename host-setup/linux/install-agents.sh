@@ -62,7 +62,7 @@ on_exit() {
 # An interrupt names the signal and re-raises it, per CODESTYLE.md "Interrupts in Shell".
 # Every command runs in the foreground, per that section's launcher case.
 # The tools apt-get, dpkg, and the installers start do not stop cleanly on SIGTERM.
-# So Ctrl-C reaches the command itself, and the trap runs once the command returns.
+# A Ctrl-C that reaches this shell as well runs the trap once the running command returns.
 # shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
 interrupted() {
     printf 'install-agents.sh: interrupted by SIG%s.\n' "$1" >&2

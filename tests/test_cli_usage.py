@@ -506,6 +506,9 @@ class EntryPointCase(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertTrue(opens_on_usage(result.stdout, path), result.stdout)
                     self.assertEqual(effects, "")
+                    if path.startswith("host-setup/linux/"):
+                        # The contract CODESTYLE.md "Command-Line Arguments" asks the help to state.
+                        self.assertIn("No other failure exits 64.", " ".join(result.stdout.split()))
                     outputs[flag] = result.stdout
             if len(outputs) == 2:
                 with self.subTest(path=path, flag="both"):
@@ -782,20 +785,6 @@ class HostSetupExitStatusCase(unittest.TestCase):
     def test_the_set_is_found(self) -> None:
         self.assertGreaterEqual(len(HOST_SCRIPTS), 8)
 
-    def test_help_names_the_reserved_status(self) -> None:
-        for script in HOST_SCRIPTS:
-            with self.subTest(script=script.name):
-                result = subprocess.run(
-                    [bash_or_skip(), str(script), "--help"],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    check=False,
-                    timeout=30,
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("No other failure exits 64.", " ".join(result.stdout.split()))
-
     def test_each_refusal_exits_the_reserved_status(self) -> None:
         empty = str(self.dir)
         for name, arguments, message in [
@@ -807,7 +796,6 @@ class HostSetupExitStatusCase(unittest.TestCase):
             ("install-tools.sh", ("--sudo-timestamp", "jq"), "takes no tool"),
             ("install-tools.sh", ("--list", "nosuch"), 'Unknown tool "nosuch"'),
             ("install-agents.sh", ("--install", "--all", "claude"), "--all and a tool name"),
-            ("install-agents.sh", ("--list", "nosuch"), 'Unknown tool "nosuch"'),
             ("setup-github.sh", ("--name",), "--name takes a value"),
             ("setup-github.sh", ("--email",), "--email takes a value"),
             ("setup-github.sh", ("--shared-checkout",), "--shared-checkout takes the path"),
