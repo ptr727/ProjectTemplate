@@ -57,6 +57,7 @@ from test_pre_commit_hook import (
     wait_until_started,
     write_executable,
 )
+from test_skills_install import reap_grandchild, stalled_tree
 
 DEFAULT_POLICY = pr_review.review_policy.load_default()
 _POLICY_PATCH = mock.patch.object(
@@ -7307,38 +7308,19 @@ class TestClaimsIsReadOnly(unittest.TestCase):
             self.assertEqual(1, pr_review.gh_rest("repos/o/r").returncode)
 
 
+@unittest.skipUnless(os.name == "nt", "only Windows waits out a grandchild holding the pipes")
 class TestRunDeadline(unittest.TestCase):
-    """`_run` holds its deadline with a grandchild holding the pipes, which a mock cannot show.
-
-    `subprocess.run` waits that grandchild out on Windows. The child launches it with
-    `close_fds=False`, since a default Windows launch inherits no handle."""
+    """`_run` holds its deadline with a grandchild holding the pipes, which a mock cannot show."""
 
     def test_a_stalled_tree_reads_as_unrun_within_the_deadline(self) -> None:
         pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
-        self.addCleanup(self.reap, pid_file)
-        grandchild = (
-            "import os, pathlib, sys, time; "
-            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
-        )
-        child = (
-            "import subprocess, sys, time; "
-            f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], close_fds=False); "
-            "time.sleep(30)"
-        )
-        argv = [sys.executable, "-c", child, str(pid_file)]
+        self.addCleanup(reap_grandchild, pid_file)
         started = time.monotonic()
-        proc = pr_review._run(argv, 5, "could not be run", encoding="utf-8")
+        proc = pr_review._run(stalled_tree(pid_file), 5, "could not be run", encoding="utf-8")
         elapsed = time.monotonic() - started
         self.assertTrue(pid_file.exists(), "the grandchild did not start before the deadline")
         self.assertEqual((1, "could not be run"), (proc.returncode, proc.stderr))
         self.assertLess(elapsed, 25)
-
-    @staticmethod
-    def reap(pid_file: Path) -> None:
-        """A POSIX grandchild outlives the kill by design, so this test ends it."""
-        if os.name != "nt" and pid_file.exists():
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(int(pid_file.read_text()), signal.SIGKILL)
 
 
 class TestContract(unittest.TestCase):

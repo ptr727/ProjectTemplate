@@ -454,6 +454,30 @@ class GitInCase(unittest.TestCase):
             skills_install.git_in(Path("."), "status", "--porcelain")
 
 
+def stalled_tree(pid_file: Path) -> list[str]:
+    """A child that starts a pipe-holding grandchild, which writes its pid to `pid_file`.
+
+    The child launches it with `close_fds=False`, since a default Windows launch inherits no handle.
+    """
+    grandchild = (
+        "import os, pathlib, sys, time; "
+        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+    )
+    child = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], close_fds=False); "
+        "time.sleep(30)"
+    )
+    return [sys.executable, "-c", child, str(pid_file)]
+
+
+def reap_grandchild(pid_file: Path) -> None:
+    """A POSIX grandchild outlives the kill by design, so a test ends it."""
+    if os.name != "nt" and pid_file.exists():
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(pid_file.read_text()), signal.SIGKILL)
+
+
 class RunWithDeadlineCase(unittest.TestCase):
     """The deadline holds with a grandchild holding the pipes, which `subprocess.run` waits out on
     Windows. A real process tree is the only way to show that, since a mock holds no pipe.
@@ -464,33 +488,15 @@ class RunWithDeadlineCase(unittest.TestCase):
 
     def setUp(self) -> None:
         self.pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
-        self.addCleanup(self.reap)
-
-    def stalled_tree(self) -> list[str]:
-        grandchild = (
-            "import os, pathlib, sys, time; "
-            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
-        )
-        child = (
-            "import subprocess, sys, time; "
-            f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], close_fds=False); "
-            "time.sleep(30)"
-        )
-        return [sys.executable, "-c", child, str(self.pid_file)]
+        self.addCleanup(reap_grandchild, self.pid_file)
 
     def time_stalled(self, run: Callable[[list[str]], object]) -> float:
         started = time.monotonic()
         with self.assertRaises(subprocess.TimeoutExpired):
-            run(self.stalled_tree())
+            run(stalled_tree(self.pid_file))
         elapsed = time.monotonic() - started
         self.assertTrue(self.pid_file.exists(), "the grandchild did not start before the deadline")
         return elapsed
-
-    def reap(self) -> None:
-        """A POSIX grandchild outlives the kill by design, so this test ends it."""
-        if os.name != "nt" and self.pid_file.exists():
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(int(self.pid_file.read_text()), signal.SIGKILL)
 
     def test_a_grandchild_holding_both_pipes_does_not_outlast_the_deadline(self) -> None:
         elapsed = self.time_stalled(
@@ -539,6 +545,17 @@ class RunWithDeadlineCase(unittest.TestCase):
         )
         self.assertEqual(result.stdout, "\ufffd")
 
+    def test_an_interrupt_kills_the_tree_and_propagates(self) -> None:
+        process = mock.Mock(pid=1)
+        process.communicate.side_effect = KeyboardInterrupt
+        with (
+            mock.patch("run_deadline.subprocess.Popen", return_value=process),
+            mock.patch("run_deadline.kill_process_tree") as kill,
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            run_deadline.run_with_deadline(["child"], 60)
+        kill.assert_called_once_with(process)
+
     def test_every_timed_captured_run_in_scripts_goes_through_the_helper(self) -> None:
         """A new site written the old way would outlast its deadline on Windows again.
 
@@ -559,7 +576,8 @@ class RunWithDeadlineCase(unittest.TestCase):
                 ):
                     continue
                 names = {k.arg for k in node.keywords}
-                if "timeout" in names and names & {"capture_output", "stdout", "stderr"}:
+                captured = names & {"capture_output", "stdout", "stderr"}
+                if "timeout" in names and (captured or node.func.attr == "check_output"):
                     found.append(f"{path.name}:{node.lineno}")
         self.assertTrue(any(f.startswith("run_deadline.py:") for f in found), found)
         self.assertEqual([], [f for f in found if f.split(":")[0] not in exempt])
