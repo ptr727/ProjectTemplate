@@ -29,7 +29,8 @@
         // A lint-only Scripts-profile subtree, with no [project], no [build-system], no `uv.lock`, and no `requirements*.txt`, runs every tool via `uvx <tool>` rather than `uv run <tool>`.
         // The type-checker swap composes with it: `uvx mypy@latest` for a mypy repo, `uvx pyright@latest` otherwise.
         // It omits "uv Sync" and "uv Upgrade", and "Python Test" runs the unittest command the repository's OPERATIONS.md gives rather than pytest, per the python-codestyle Skill "Two profiles".
-        // A `python-directories` input naming several trees takes these tasks per tree with `options.cwd`, sequenced under "Python Format" and "Python Test".
+        // A `python-directories` input naming several trees takes these tasks per tree, sequenced under "Python Format" and "Python Test".
+        // Each tree's ruff and test tasks set `options.cwd`, and its "Python Types" keeps the command above.
         {
             "label": "ruff format",
             "type": "process",
@@ -143,7 +144,7 @@
         // A carrier holding PowerShell adds a "Lint: PSScriptAnalyzer" task the same way, with `--linter PSScriptAnalyzer`.
         // Broad live spell-checking is the cspell extension's job.
         // A pre-commit hook that carries the doc gates already runs the prose gate diff-scoped and the EOL configuration check.
-        // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the hook's own EOL check on demand.
+        // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the EOL configuration check on demand.
         // Every Lint task is the same check as in the .NET snippet's Lint group.
         {
             "label": "Lint: EditorConfig",
