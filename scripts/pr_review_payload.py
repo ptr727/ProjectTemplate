@@ -28,6 +28,13 @@ def bot_entry(pr: dict | None, name: str) -> Any:
     return policy.bot(name) if policy is not None else None
 
 
+def covering_bot(pr: dict, name: str) -> Any:
+    """The policy's settings for bot `name` where they cover this pull request's base, else None."""
+    bot = bot_entry(pr, name)
+    covers = bot is not None and bot.covers(pr.get("baseRefName") or "", default_branch(pr))
+    return bot if covers else None
+
+
 def page_files(pr: dict, pages: Callable[[str], Iterable[dict]]) -> None:
     """Read the rest of `pr`'s changed-file list into it, past the full read's first page.
 

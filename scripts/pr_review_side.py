@@ -26,24 +26,21 @@ from pr_review_checks import (
     utc_instant,
 )
 from pr_review_hold import PUSHED_KEY, head_arrived, hosted_check, side_asks, side_command
-from pr_review_payload import bot_entry, default_branch
+from pr_review_payload import bot_entry, covering_bot
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     QODO_LOGIN,
     commit_oid,
-    head_nodes,
     page_flag,
     qodo_comment,
-    reading,
     reviewed_heads,
     reviewer_nodes,
 )
+from pr_review_summary import clean_pass, rabbit_on_head
 
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
 PUSHED_JQ = 'map(select(.after == "{}") | .timestamp) | max // empty'
-CLEAN_PASS = re.compile(r"^No actionable comments were generated", re.MULTILINE)
-REVIEWED_UP_TO = re.compile(r"\bbetween [0-9a-f]{40,64} and ([0-9a-f]{40,64})\b")
 
 
 def checks_hold(pr: dict, now: datetime, grace: float, stall: float) -> str:
@@ -126,20 +123,6 @@ def unasked(pr: dict, name: str, body: str, lines: list[str]) -> bool:
     return placed and not side_answered(pr, name) and not side_asked_on_head(pr, body)
 
 
-def clean_pass(pr: dict) -> str:
-    """The commit CodeRabbit's summary records a clean pass on, empty where it records none.
-
-    That pass leaves no review, only its summary saying no actionable comments were generated, each
-    range it prints ending at the commit read. A rate-limit notice prints one too and never counts.
-    """
-    for n in reversed(reviewer_nodes(pr, "comments", CODERABBIT_LOGIN)):
-        ends = set(REVIEWED_UP_TO.findall(text := n.get("body") or ""))
-        limited = reading(n, CODERABBIT_LOGIN).rate_limited
-        if CLEAN_PASS.search(text) and len(ends) == 1 and not limited:
-            return ends.pop()
-    return ""
-
-
 def side_rounds(pr: dict, name: str, body: str) -> int:
     """Rounds asked of or run by `name` on this pull request, whichever count is larger.
 
@@ -159,8 +142,7 @@ def side_answered(pr: dict, name: str) -> bool:
     CodeRabbit answers with a formal review on the head's commit or a clean pass `clean_pass` reads
     on it. Qodo's one standing comment names no head, so a request is its only per-head record.
     """
-    reviewed = head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN))
-    return name == "coderabbit" and (bool(reviewed) or clean_pass(pr) == pr["headRefOid"])
+    return name == "coderabbit" and rabbit_on_head(pr)
 
 
 def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:
@@ -168,11 +150,10 @@ def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:
 
     Empty where no policy rides the payload, since a reviewer the gate never named stays unnamed.
     """
-    default, base = default_branch(pr), pr.get("baseRefName") or ""
     found = []
     for name in SIDE_LOGINS:
-        bot = bot_entry(pr, name)
-        if bot is not None and bot.covers(base, default):
+        bot = covering_bot(pr, name)
+        if bot is not None:
             found.append((name, bot, side_command(name, bot.command)))
     return found
 

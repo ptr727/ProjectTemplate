@@ -15,6 +15,7 @@ import pr_review_answers as answers
 import pr_review_copilot as adapter
 from pr_review_check_lines import check_lines
 from pr_review_checks import checks_stuck, checks_tally
+from pr_review_payload import covering_bot
 from pr_review_promotion import coverage
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -49,6 +50,7 @@ from pr_review_rounds import (
     uncounted_verdict,
     window_blind,
 )
+from pr_review_summary import rabbit_on_head, summary_blind
 
 NO_THREAD, NOTED = answers.NO_THREAD, answers.NOTED
 BEHIND_THE_WINDOW = (
@@ -152,8 +154,16 @@ def render(
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
     other_on_head = [
-        login for login in OTHER_REVIEWERS if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
+        login
+        for login in OTHER_REVIEWERS
+        if (
+            rabbit_on_head(pr)
+            if login == CODERABBIT_LOGIN
+            else head_nodes(pr, reviewer_nodes(pr, "reviews", login))
+        )
     ]
+    covered = covering_bot(pr, "coderabbit") is not None
+    unread = covered and summary_blind(pr) and CODERABBIT_LOGIN not in other_on_head
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
     }
@@ -172,6 +182,7 @@ def render(
         ("rounds", len(revs)),
         ("review_on_head", "yes" if on_head else "local" if cover == "local" else "NO"),
         ("other_reviewed", ",".join(other_on_head) or None),
+        ("other_unknown", CODERABBIT_LOGIN if unread else None),
         (
             "other_rate_limited",
             ",".join(f"{login}:{name}" if name else login for login, name in other_limited.items())

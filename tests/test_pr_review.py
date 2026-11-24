@@ -46,6 +46,8 @@ import pr_review_check_lines
 import pr_review_checks
 import pr_review_copilot
 import pr_review_hold
+import pr_review_payload
+import pr_review_policy
 import pr_review_rounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
@@ -90,6 +92,7 @@ GATE_SOURCES = (
     "pr_review_payload.py",
     "pr_review_promotion.py",
     "pr_review_hold.py",
+    "pr_review_summary.py",
 )
 WRITE_SCANNED = (*GATE_SOURCES, "pr_review_side.py", "pr_review_policy.py")
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
@@ -109,6 +112,7 @@ READER_IMPORTS = frozenset(
         "pr_review_payload",
         "pr_review_promotion",
         "pr_review_rounds",
+        "pr_review_summary",
     }
 )
 # One import each reader module is known to make, the floor under the allowlist above.
@@ -121,6 +125,7 @@ READER_FLOORS = {
     "pr_review_payload": "typing",
     "pr_review_promotion": "pr_review_rounds",
     "pr_review_hold": "pr_review_checks",
+    "pr_review_summary": "pr_review_rounds",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
@@ -876,8 +881,8 @@ class TestDigest(GqlCase):
 CROWDED_DIGEST = "\n".join(
     (
         (
-            "repo=o/r pr=7 head=aaaaaaaa rounds=2 review_on_head=yes effort=unknown "
-            "effort_source=unknown coverage=full shapes=ok refusal=no threads=2+ unresolved=2+ "
+            "repo=o/r pr=7 head=aaaaaaaa rounds=2 review_on_head=yes other_unknown=coderabbitai "
+            "effort=unknown effort_source=unknown coverage=full shapes=ok refusal=no threads=2+ unresolved=2+ "
             f"({pr_review_rounds.REVIEWER}=1 other=1) suppressed=0 (on_head=0 earlier=0) "
             "overview=?/0 qodo_open=unknown answered_outside_review=unknown requested=no "
             "merge=BLOCKED checks=0/1 stuck=FAILED new=2"
@@ -1007,6 +1012,9 @@ class TestReviewPaging(unittest.TestCase):
         self.assertEqual({"headRefOid": HEAD}, self.read(pr_review.Q_CLAIMS, answer)[0])
 
 
+RUNNING = "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n\nProcessing."
+
+
 class TestOtherReviewers(GqlCase):
     """Thread resolution, head-presence, and the rate-limit marker's own structural pattern,
     generalized past Copilot to the other review bots this repository has trialed. Free-text
@@ -1107,6 +1115,58 @@ class TestOtherReviewers(GqlCase):
         self.answer(payload([review()]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertNotIn("other_reviewed", out)
+
+    def rabbit_summary(self, end: str, clean: bool = True) -> dict:
+        """CodeRabbit's summary comment, recording one reviewed range ending at `end`."""
+        verdict = "No actionable comments were generated in the recent review.\n\n" if clean else ""
+        body = f"{verdict}Reviewing files that changed between {'c' * 40} and {end}."
+        return comment(login="coderabbitai", at=EARLY, body=body)
+
+    def test_other_reviewed_names_coderabbit_for_a_clean_pass_on_the_head_alone(self) -> None:
+        """That pass leaves no review object, so only its summary tells it from no pass at all.
+
+        A clean pass on an earlier head, or a summary with findings, covers nothing here.
+        """
+        for summary, named in (
+            (self.rabbit_summary(HEAD), True),
+            (self.rabbit_summary(OLD), False),
+            (self.rabbit_summary(HEAD, clean=False), False),
+        ):
+            self.answer(payload([review()], comments=[summary]))
+            with self.subTest(body=summary["body"]):
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertEqual(named, "other_reviewed=coderabbitai" in out)
+                self.assertNotIn("other_unknown", out)
+
+    def rabbit_policy(self, pr: dict, bases: str = "^develop$") -> dict:
+        """`pr` carrying the default policy with CodeRabbit asked explicitly on `bases`."""
+        data = json.loads((REPO / "spec" / "agent-policy.default.json").read_text(encoding="utf-8"))
+        rabbit = {"trigger": "explicit", "bases": [bases], "command": "full review"}
+        data["review"]["bots"]["coderabbit"] = rabbit
+        pr[pr_review_payload.POLICY_KEY] = pr_review_policy.parse(data, "test")
+        return pr
+
+    def test_a_blind_comments_window_leaves_coderabbit_unknown_rather_than_unreviewed(self) -> None:
+        """The summary is an early comment, so older comments past the window can hold it unseen.
+
+        A review on the head or any summary in view decides, since CodeRabbit edits that one
+        summary in place. A base the policy does not cover CodeRabbit on expects no summary at all.
+        """
+        for reviews, comments, bases, field in (
+            ([review()], [], "^develop$", "other_unknown=coderabbitai"),
+            ([review()], [self.rabbit_summary(HEAD, clean=False)], "^develop$", ""),
+            ([review()], [comment("coderabbitai", EARLY, RUNNING)], "^develop$", ""),
+            ([review()], [self.rabbit_summary(OLD)], "^develop$", ""),
+            ([review()], [], "^main$", ""),
+            ([review()], [self.rabbit_summary(HEAD)], "^develop$", "other_reviewed=coderabbitai"),
+            ([review(), self.other_review("coderabbitai")], [], "^develop$", "other_reviewed"),
+        ):
+            self.answer(self.rabbit_policy(payload(reviews, comments=comments, older=True), bases))
+            with self.subTest(field=field, bases=bases, comments=len(comments)):
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn(field, out)
+                for absent in {"other_reviewed", "other_unknown"} - {field.split("=")[0]}:
+                    self.assertNotIn(absent, out)
 
     def test_reviewer_nodes_defaults_to_copilot_but_reads_any_login_explicitly(self) -> None:
         pr = payload([review(), self.other_review("coderabbitai")])
