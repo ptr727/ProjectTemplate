@@ -6298,6 +6298,24 @@ class StalePullRequestCheckCase(unittest.TestCase):
         unnamed = audit.check_interface("p.yml", PR_CONTRACT, called)
         self.assertTrue(any("neither as a literal job name" in f[1] for f in unnamed), unnamed)
 
+    def test_the_rulesets_check_reports_it_from_each_branch_head(self) -> None:
+        entry = {"name": "Fixture", "pullRequestCheck": False}
+        heads = {"main": {"commit": {"sha": "m1"}}, "develop": {"commit": {"sha": "d1"}}}
+        spec = {"registry": {"repos": [entry], "defaults": {}}}
+        run = audit.Run(entry, spec, "o/r", "main", {}, heads["main"], heads["develop"])
+        posting = base64.b64encode(self.POSTING.encode()).decode()
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            if "/rulesets" in path:
+                return []
+            self.assertRegex(path, r"\?ref=(m1|d1)$")
+            return {"encoding": "base64", "content": posting}
+
+        with mock.patch.object(audit, "gh", fake_gh):
+            got = audit.check_rulesets_payload(run)
+        stale = [f for f in got if f[1].startswith("registry: pullRequestCheck is false,")]
+        self.assertEqual([f[0] for f in stale], ["DRIFT"], got)
+
     def test_each_branch_is_read_at_its_own_head(self) -> None:
         heads = {"main": {"commit": {"sha": "m1"}}, "develop": {"commit": {"sha": "d1"}}}
         run = audit.Run({}, {}, "o/r", "main", {}, heads["main"], heads["develop"])
