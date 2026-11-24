@@ -120,7 +120,9 @@ Run it at the same model tier and in the same delegation shape as the pass above
 ```text
 Task: adversarial review of one canonical unit, read as a repository carrying it for the first
   time reads it, whole, knowing nothing about what this branch changed in it.
-Paths: <the unit key, substituted here>, read in full out of the file that key names.
+Worktree: <worktree>, the checkout holding the sweep's branch and the <report-path> below.
+  Start every command with `cd <worktree> &&`, since a harness can reset the working directory between calls.
+Paths: <the unit key, substituted here>, read in full out of the file that key names, at its path under `<worktree>`.
   Read the whole unit, never a diff of it.
 Rules that bind this task: <quote fleet-code-review's "Review the Change" section>, and judge the text
   as a reader who has only this unit: a claim it makes about a tool, a path, a command, or
@@ -143,7 +145,7 @@ uv run --no-project --script scripts/canonical_review.py report-path --unit '<ke
 uv run --no-project --script scripts/canonical_review.py record --reviewer agent-skill --target develop --unit '<key>=<digest>'
 ```
 
-`<digest>` is the one `sweep` printed beside the unit, and `<report-path>` is what `report-path` names for it. That path sits in the git directory, keyed by the unit and its digest, so `record` finds each unit's report without being told where. `record` reads each report with the same reader the pass above uses. It refuses a unit whose report is absent or names another digest. While any unit it was given is refused, it records none of them. It derives each unit's count from its report's lines and stores the report's sha256. So the record-only-on-completion rule above binds here too, and a driver never writes a report for its reviewer.
+`<worktree>` is the checkout these commands run in. `<digest>` is the one `sweep` printed beside the unit, and `<report-path>` is what `report-path` names for it. That path sits in the git directory, keyed by the unit and its digest, so `record` finds each unit's report without being told where. `record` reads each report with the same reader the pass above uses. It refuses a unit whose report is absent or names another digest. While any unit it was given is refused, it records none of them. It derives each unit's count from its report's lines and stores the report's sha256. So the record-only-on-completion rule above binds here too, and a driver never writes a report for its reviewer.
 
 These run in the authoring repository itself, the only repository this pass ever runs in. So the engine path is the plain one, and no downstream side needs the `<hub-checkout>/` form the pass above shows for its own reach. Each resolves the repository from the working directory rather than from where the script sits. So the directory a command runs in is what decides which tree it measures. The unit model and the manifest reader come from the checkout the script itself lives in. Running one checkout's copy against another's tree therefore measures the second tree by the first's rules. So run them in the tree being measured. `record` additionally stamps each pass with the merge-base against `--target`, which is provenance rather than coverage. The line above names it rather than leaning on the default, since a sweep's own branch is based on `develop`. A `main`-based branch passes `--target main` instead.
 
