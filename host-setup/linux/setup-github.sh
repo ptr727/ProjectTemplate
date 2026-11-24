@@ -769,17 +769,17 @@ parse_args() {
         -n | --dry-run) DRY_RUN=true ;;
         -y | --yes) ASSUME_YES=true ;;
         --name)
-            [[ $# -ge 2 ]] || die_usage "--name takes a value"
+            [[ $# -ge 2 && -n $2 ]] || die_usage "--name takes a value"
             NAME="$2"
             shift
             ;;
         --email)
-            [[ $# -ge 2 ]] || die_usage "--email takes a value"
+            [[ $# -ge 2 && -n $2 ]] || die_usage "--email takes a value"
             EMAIL="$2"
             shift
             ;;
         --shared-checkout)
-            [[ $# -ge 2 ]] || die_usage "--shared-checkout takes the path of the shared checkout"
+            [[ $# -ge 2 && -n $2 ]] || die_usage "--shared-checkout takes the path of the shared checkout"
             SHARED_CHECKOUT="$2"
             shift
             ;;

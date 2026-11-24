@@ -801,6 +801,9 @@ class HostSetupExitStatusCase(unittest.TestCase):
             ("setup-github.sh", ("--name",), "--name takes a value"),
             ("setup-github.sh", ("--email",), "--email takes a value"),
             ("setup-github.sh", ("--shared-checkout",), "--shared-checkout takes the path"),
+            ("setup-github.sh", ("--name", ""), "--name takes a value"),
+            ("setup-github.sh", ("--email", ""), "--email takes a value"),
+            ("setup-github.sh", ("--shared-checkout", ""), "--shared-checkout takes the path"),
             ("setup-github.sh", ("--status", "--configure"), "More than one action"),
         ]:
             with self.subTest(script=name, arguments=arguments):
@@ -874,7 +877,12 @@ class HostSetupInterruptCase(unittest.TestCase):
             start_new_session=True,
         ) as proc:
             try:
-                wait_until_started(proc, ready)
+                try:
+                    wait_until_started(proc, ready)
+                except AssertionError:
+                    end_group(proc)
+                    _, err = proc.communicate(timeout=20)
+                    self.fail(f"{name} never started its child before {signum.name}: {err}")
                 os.killpg(proc.pid, signum)
                 out, err = proc.communicate(timeout=20)
             finally:
