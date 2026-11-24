@@ -6295,6 +6295,28 @@ class StalePullRequestCheckCase(unittest.TestCase):
         called = self.POSTING.replace("    runs-on: ubuntu-latest\n", "    uses: ./x.yml\n")
         self.assertIn("uses: ./x.yml", called)
         self.assertEqual(self.findings({"main": called, "develop": called}), [])
+        unnamed = audit.check_interface("p.yml", PR_CONTRACT, called)
+        self.assertTrue(any("neither as a literal job name" in f[1] for f in unnamed), unnamed)
+
+    def test_each_branch_is_read_at_its_own_head(self) -> None:
+        heads = {"main": {"commit": {"sha": "m1"}}, "develop": {"commit": {"sha": "d1"}}}
+        run = audit.Run({}, {}, "o/r", "main", {}, heads["main"], heads["develop"])
+        reads: list[tuple[str, bool]] = []
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            reads.append((path, ok404))
+            if path.endswith("?ref=d1"):
+                return None
+            return {"encoding": "base64", "content": base64.b64encode(b"main text").decode()}
+
+        with mock.patch.object(audit, "gh", fake_gh):
+            self.assertEqual(run.branch_workflow("main"), "main text")
+            self.assertIsNone(run.branch_workflow("develop"))
+            self.assertIsNone(
+                audit.Run({}, {}, "o/r", "main", {}, None, None).branch_workflow("main")
+            )
+        path = "repos/o/r/contents/.github/workflows/test-pull-request.yml?ref="
+        self.assertEqual(reads, [(path + "m1", True), (path + "d1", True)])
 
 
 if __name__ == "__main__":

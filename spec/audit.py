@@ -1260,10 +1260,11 @@ def workflow_events(doc):
 
 
 def job_names(jobs):
-    """`(names, matches)`, each job's scalar `name:` and the PR_ONLY_NAME match of each one taking that form."""
+    """`(names, matches)` over the jobs posting their own `name:`, which a `uses:` call does not, and their PR_ONLY_NAME matches."""
     names = {
         key: node.value
         for key, job in jobs.items()
+        if "uses" not in _mapping(job)
         if isinstance(node := _mapping(job).get("name"), yaml.ScalarNode)
     }
     matches = {
@@ -1275,7 +1276,7 @@ def job_names(jobs):
 
 
 def posts_check(text, name, branch):
-    """Whether every pull request into `branch` runs `text` with a job of its own steps posting the check `name`."""
+    """Whether every pull request into `branch` runs the workflow `text` with a job posting the check `name`."""
     root = _compose(text)
     if "pull_request" not in workflow_events(_plain(root) if root is not None else None):
         return False
@@ -1288,8 +1289,7 @@ def posts_check(text, name, branch):
         return False
     if trigger.keys() & {"paths", "paths-ignore"} or not PULL_REQUEST_TYPES <= kinds:
         return False
-    jobs = _mapping(_mapping(root).get("jobs"))
-    names, matches = job_names({k: v for k, v in jobs.items() if "uses" not in _mapping(v)})
+    names, matches = job_names(_mapping(_mapping(root).get("jobs")))
     return name in {matches[key][1] if key in matches else v for key, v in names.items()}
 
 
