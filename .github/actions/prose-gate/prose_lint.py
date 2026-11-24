@@ -1833,6 +1833,13 @@ def takes_value(option: str, values: set[str]) -> bool:
     return False
 
 
+def cluster(option: str, values: set[str]) -> str:
+    """A short option cluster's own letters, up to and including the first that takes a value."""
+    letters = option[1:]
+    taken = next((at for at, letter in enumerate(letters) if letter in values), len(letters))
+    return letters[: taken + 1]
+
+
 def is_redirect(word: ShellWord) -> bool:
     return word.lead in "ch" and bool(REDIRECT.match(word.raw))
 
@@ -1854,7 +1861,7 @@ def launcher_span(words: list[ShellWord], spec: dict[str, Any]) -> int | None:
         elif options and v == "--":
             options = False
         elif options and len(v) > 1 and v[0] == "-":
-            if v.partition("=")[0] in no_run or (v[1] != "-" and no_run & set(v[1:])):
+            if v.partition("=")[0] in no_run or (v[1] != "-" and no_run & set(cluster(v, values))):
                 return None
             pending = takes_value(v, values)
         elif ASSIGNMENT.match(word.raw):
@@ -1971,6 +1978,9 @@ def handed_words(words: list[ShellWord]) -> list[tuple[list[ShellWord], str, str
 def joined_command(text: str, words: list[ShellWord], found: list[range]) -> str | None:
     """The one command `ssh` builds from `words`, joined by spaces, or None where a quote is open.
 
+    A line break between two words becomes a line continuation. So the command stays one line to
+    the shell reading it, and each placeholder keeps its line.
+
     Each placeholder the first shell already reported is blanked from its word first. The word's
     quoting is then removed, so the second reading does not report it again.
     """
@@ -1982,7 +1992,7 @@ def joined_command(text: str, words: list[ShellWord], found: list[range]) -> str
         if piece is None:
             return None
         gap = text[end : word.start].count("\n")
-        parts += ["\n" * gap if gap else " " if parts else "", piece]
+        parts += [" " + "\\\n" * gap if parts else "\n" * gap, piece]
         end = spans.stop
     return "".join(parts)
 

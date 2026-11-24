@@ -4589,6 +4589,7 @@ class TestPasteSafeRule(BaitCase):
             ("timeout 600 bash -c 'ls <dir>'", "<dir>", "bash"),
             ("env -u LANG bash -c 'ls <dir>'", "<dir>", "bash"),
             ("xargs -n 1 sh -c 'ls <dir>'", "<dir>", "sh"),
+            ("sudo -upostgres bash -c 'ls <dir>'", "<dir>", "bash"),
             ("ssh '<host>' sudo sh -c \"'ls <dir>'\"", "<dir>", "sh"),
             ("bash -oc pipefail 'ls <dir>'", "<dir>", "bash"),
             ("su -- root -c 'id <dir>'", "<dir>", "su"),
@@ -4637,6 +4638,7 @@ class TestPasteSafeRule(BaitCase):
         """A bracket or a pipe there may be a pattern rather than a placeholder."""
         for span, advice in (
             ("bash -c 'deploy release|operational'", "or write the common value there"),
+            ("bash -c 'ls|wc -l'", "or space a real pipe"),
             ("bash -c 'ls [--all]'", "or leave it out where it is an optional flag"),
             ("bash -c 'ls [RepoName]'", 'or write "<RepoName>" there'),
             ("ssh '<host>' grep '[Ee]rror' log", "quote it inside that string, as a pattern is"),
@@ -4659,9 +4661,15 @@ class TestPasteSafeRule(BaitCase):
         for text in (
             "Run `sudo sh -c\n'echo on > <file>'` here.\n",
             "Run `ssh '<host>'\n'ls <file>'` here.\n",
+            "Run `ssh '<host>' sudo sh -c\n\"'ls <file>'\"` here.\n",
         ):
             with self.subTest(text=text):
                 self.assertEqual([2], self.lines(text))
+
+    def test_the_command_ssh_joins_stays_one_line(self) -> None:
+        fence = "```sh\nssh '<host>' sudo sh -c \\\n  \"'ls <dir>'\"\n```\n"
+        self.assertEqual([3], self.lines(fence))
+        self.assertEqual([], self.lines("Run `ssh '<host>' echo\nsh -c \"'ls <dir>'\"` here.\n"))
 
     def test_each_second_shell_and_launcher_opens_a_command_span(self) -> None:
         tables = prose_lint.COMMANDS["second_shells"]
