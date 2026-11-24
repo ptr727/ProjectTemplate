@@ -642,16 +642,19 @@ tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
     def test_the_note_clause_matches_what_install_does_to_the_one_line_source(self) -> None:
         stubs = """ensure_prerequisites() { :; }
 install_keyring() { return 1; }
-write_sources() { return 1; }
+write_sources() { printf 'REACHED\\n'; return 1; }
 remove_stale() { printf 'REMOVE %s\\n' "$@"; }
 apt_install() { :; }
 apt_install_displacing() { :; }
 node_lts_major() { printf '22'; }
 """
-        removed = {
-            tool: self.run_bash(stubs + f"{tool}_install").stdout.splitlines()
-            for tool in self.STEMS
-        }
+        removed: dict[str, list[str]] = {}
+        for tool in self.STEMS:
+            result = self.run_bash(stubs + f"{tool}_install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.splitlines()
+            self.assertEqual(lines[0], "REACHED", lines)
+            removed[tool] = lines[1:]
         self.assertEqual(len(removed["gh"]), 2, removed["gh"])
         self.assertTrue(removed["gh"][0].endswith("/github-cli.list"), removed["gh"])
         self.assertIn("replaces it", self.ONE_LINE["gh"])
