@@ -12,7 +12,7 @@ The verbatim engine verifies a unit's *content* against the canonical (declared 
 verifies the *classifications themselves* (declared -> checked), the same declared-to-verified leap one
 level up. It answers two questions the audit cannot:
 
-  1. Which `intent` units are actually content-identical (after EOL normalization) across the whole fleet? Those are candidates to
+  1. Which `intent` units are actually content-identical (after EOL, action-pin, and job-`needs:` normalization) across the whole fleet? Those are candidates to
      promote to `verbatim` - they would gain free drift-detection (a stale-but-present copy is invisible
      under intent, caught under verbatim). This is the class that hid the configure.sh drift.
      A unit declaring `repoOwnedKeys` is never a candidate, since verbatim would overwrite the repo's own values.
