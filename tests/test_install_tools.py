@@ -24,7 +24,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from sdk_baseline import baseline_line
 
@@ -592,6 +592,80 @@ printf '%s\\n' "${{NOTES[@]}}" """
         text = LINUX_INSTALLER.read_text(encoding="utf-8")
         self.assertRegex(text, r'(?m)^    op\) \[\[ -f "\$SOURCES_DIR/1password\.sources" \]\] ;;$')
         self.assertRegex(text, r'register_apt_source "1password" ')
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxSourceNotes(LinuxFunctionsCase):
+    """The gh and node note and `tool_configured` read one test of the sources directory."""
+
+    NOT_CONFIGURED = "upstream repository not configured, the available version is the distro's"
+    ONE_LINE: ClassVar[dict[str, str]] = {
+        "gh": "the upstream repository is configured by the one-line github-cli.list, a file this script does not manage, and an install or upgrade replaces it",
+        "node": "the upstream repository is configured by the one-line nodesource.list, a file this script does not manage, and an install or upgrade writes nodesource.sources beside it and leaves it",
+    }
+    STEMS: ClassVar[dict[str, str]] = {"gh": "github-cli", "node": "nodesource"}
+
+    def probe(self, tool: str, files: list[str]) -> tuple[list[str], str]:
+        sources = self.dir / f"sources-{tool}-{'-'.join(files) or 'empty'}"
+        sources.mkdir()
+        for name in files:
+            (sources / name).write_text("", encoding="utf-8")
+        text = linux_functions().replace(
+            'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
+            f'readonly SOURCES_DIR="{sources}"',
+        )
+        self.assertIn(str(sources), text)
+        self.functions.write_text(text, encoding="utf-8")
+        body = f"""tool_note {tool}
+for n in "${{NOTES[@]}}"; do printf 'NOTE %s\\n' "$n"; done
+tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        notes = [line.removeprefix("NOTE ") for line in lines if line.startswith("NOTE ")]
+        return notes, lines[-1]
+
+    def test_each_sources_directory_state_gets_the_note_that_is_true_of_it(self) -> None:
+        for tool, stem in self.STEMS.items():
+            cases: tuple[tuple[list[str], list[str], str], ...] = (
+                ([], [self.NOT_CONFIGURED], "UNCONFIGURED"),
+                ([f"{stem}.list"], [self.ONE_LINE[tool]], "UNCONFIGURED"),
+                ([f"{stem}.sources"], [], "CONFIGURED"),
+                ([f"{stem}.sources", f"{stem}.list"], [], "CONFIGURED"),
+            )
+            for files, notes, configured in cases:
+                with self.subTest(tool=tool, files=files):
+                    self.assertEqual(
+                        self.probe(tool, files), ([f"{tool}: {n}" for n in notes], configured)
+                    )
+
+    def test_the_note_clause_matches_what_install_does_to_the_one_line_source(self) -> None:
+        stubs = """ensure_prerequisites() { :; }
+install_keyring() { return 1; }
+write_sources() { printf 'REACHED\\n'; return 1; }
+remove_stale() { printf 'REMOVE %s\\n' "$@"; }
+apt_install() { :; }
+apt_install_displacing() { :; }
+node_lts_major() { printf '22'; }
+"""
+        removed: dict[str, list[str]] = {}
+        for tool in self.STEMS:
+            result = self.run_bash(stubs + f"{tool}_install")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.splitlines()
+            self.assertEqual(lines[0], "REACHED", lines)
+            removed[tool] = lines[1:]
+        self.assertEqual(len(removed["gh"]), 2, removed["gh"])
+        self.assertTrue(removed["gh"][0].endswith("/github-cli.list"), removed["gh"])
+        self.assertIn("replaces it", self.ONE_LINE["gh"])
+        self.assertEqual(removed["node"], [])
+        self.assertIn("leaves it", self.ONE_LINE["node"])
+
+    def test_the_stem_is_the_name_install_registers(self) -> None:
+        text = LINUX_INSTALLER.read_text(encoding="utf-8")
+        for tool, stem in self.STEMS.items():
+            self.assertRegex(text, rf"(?m)^    {tool}\) printf '{stem}' ;;$")
+            self.assertRegex(text, rf'register_apt_source "{stem}" ')
 
 
 class TestInstallersNameTheBaselineLine(unittest.TestCase):
