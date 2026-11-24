@@ -40,7 +40,8 @@ from typing import NamedTuple
 REPO = Path(__file__).resolve().parent.parent
 
 # The spawning callables whose text mode this rule governs.
-SPAWNERS = frozenset({"run", "check_output", "check_call", "Popen"})
+SPAWNERS = frozenset({"run", "check_output", "check_call", "Popen", "run_with_deadline"})
+SPAWNER_MODULES = frozenset({"subprocess", "run_deadline"})
 
 # The keywords that put a call into text mode alongside `errors`, checked in `in_text_mode`.
 TEXT_KEYWORDS = ("text", "universal_newlines")
@@ -110,7 +111,7 @@ def scanned_python_files() -> list[Path]:
 
 
 def _subprocess_bindings(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
-    """This file's own local names for the `subprocess` module and for a spawner imported by name.
+    """This file's own local names for a spawner module and for a spawner imported by name.
 
     `import subprocess as sp` and `from subprocess import run as spawn` are both lint-clean. So a
     scan matching only the literal `subprocess.run` spelling silently drops such a file from
@@ -121,9 +122,9 @@ def _subprocess_bindings(tree: ast.AST) -> tuple[frozenset[str], frozenset[str]]
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == "subprocess":
+                if alias.name in SPAWNER_MODULES:
                     modules.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
+        elif isinstance(node, ast.ImportFrom) and node.module in SPAWNER_MODULES:
             for alias in node.names:
                 if alias.name in SPAWNERS:
                     spawners.add(alias.asname or alias.name)
@@ -679,6 +680,21 @@ class TestEveryTextModeSpawnNamesUtf8(unittest.TestCase):
                 self.exemptions_hit.get((rel, name), 0),
                 f"the exemption for {rel}:{name} covers exactly one call, and did not",
             )
+
+
+class TestTheScanReachesTheDeadlineHelper(unittest.TestCase):
+    """A site moved onto `run_with_deadline` keeps the encoding rule it held under `subprocess`."""
+
+    def test_both_spellings_of_the_helper_are_spawning_calls(self) -> None:
+        source = (
+            "import run_deadline\n"
+            "from run_deadline import run_with_deadline\n"
+            'run_deadline.run_with_deadline(["git"], 5, errors="replace")\n'
+            'run_with_deadline(["git"], 5, errors="replace")\n'
+        )
+        calls = [spawn.call for spawn in spawning_calls(ast.parse(source))]
+        self.assertEqual(2, len(calls))
+        self.assertEqual([False, False], [names_utf8(call) for call in calls])
 
 
 class TestThePythonChildCheckReadsEachShape(unittest.TestCase):

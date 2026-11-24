@@ -455,6 +455,9 @@ class GitInCase(unittest.TestCase):
             skills_install.git_in(Path("."), "status", "--porcelain")
 
 
+CHILD_ENV = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+
+
 def stalled_tree(pid_file: Path) -> list[str]:
     """A child that starts a pipe-holding grandchild, which writes its pid to `pid_file`.
 
@@ -525,7 +528,9 @@ class RunWithDeadlineCase(unittest.TestCase):
             r"import sys; sys.stdout.buffer.write(b'out\r\n'); "
             r"sys.stderr.buffer.write(b'err'); sys.exit(3)"
         )
-        result = run_deadline.run_with_deadline([sys.executable, "-c", child], 60, encoding="utf-8")
+        result = run_deadline.run_with_deadline(
+            [sys.executable, "-c", child], 60, encoding="utf-8", env=CHILD_ENV
+        )
         self.assertEqual((result.returncode, result.stdout, result.stderr), (3, "out\n", "err"))
 
     def test_output_stays_bytes_where_no_decoding_is_asked_for(self) -> None:
@@ -542,7 +547,7 @@ class RunWithDeadlineCase(unittest.TestCase):
     def test_a_named_error_handler_decodes_what_strict_would_refuse(self) -> None:
         child = r"import sys; sys.stdout.buffer.write(b'\xff')"
         result = run_deadline.run_with_deadline(
-            [sys.executable, "-c", child], 60, encoding="utf-8", errors="replace"
+            [sys.executable, "-c", child], 60, encoding="utf-8", errors="replace", env=CHILD_ENV
         )
         self.assertEqual(result.stdout, "\ufffd")
 
@@ -572,6 +577,8 @@ class RunWithDeadlineCase(unittest.TestCase):
                 names = {k.arg for k in call.keywords}
                 spawner = getattr(call.func, "attr", getattr(call.func, "id", ""))
                 captured = names & {"capture_output", "stdout", "stderr"}
+                if spawner == "run_with_deadline":
+                    continue
                 if "timeout" in names and (captured or spawner == "check_output"):
                     found.append(f"{path.name}:{call.lineno}")
         self.assertTrue(any(f.startswith("run_deadline.py:") for f in found), found)
