@@ -57,7 +57,8 @@ against every repository carrying it.
 carries out against the hub.** It is a different kind of reference. A rule naming a gate, a
 script, or a reference snippet the reader executes or copies states an instruction rather than a
 provenance. So does a procedure the reader performs against the hub, such as auditing a
-repository against the hub and converging what the audit finds. An instruction
+repository against the hub and converging what the audit finds. Reporting a discrepancy upstream
+stays a behavior under item 1, since its destination is the maintainer's to supply. An instruction
 with no destination is unfollowable, which is precisely how a pointer in carried text comes to read
 as decorative. The test is whether the reference is something the reader *does* or something
 that *happened to this file*. Where the content came from stays out, what the reader runs or
