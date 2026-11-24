@@ -17,11 +17,31 @@ readonly ROOT
 
 MODE="install"
 DRY_RUN=false
+USAGE_REFUSED=false
+
+# Exit status 64 is reserved for a refused argument, per CODESTYLE.md "Command-Line Arguments".
+# Under set -e a failed command's own status becomes the script's, so a 64 that die_usage did not exit leaves as 1.
+# The program this script ends by exec-ing replaces the trap along with the script, and that program never exits 64.
+# shellcheck disable=SC2317,SC2329  # The EXIT trap runs it.
+on_exit() {
+    local status=$?
+    if [[ $status -eq 64 && $USAGE_REFUSED == false ]]; then
+        exit 1
+    fi
+}
+trap on_exit EXIT
 
 info() { printf '  %s\n' "$*"; }
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+# A refused argument exits 64, EX_USAGE from sysexits.h, so a caller can tell it from a run that started and failed.
+die_usage() {
+    printf 'ERROR: %s\n' "$*" >&2
+    USAGE_REFUSED=true
+    exit 64
 }
 
 usage() {
@@ -42,6 +62,8 @@ Actions, name one, default install:
 Options:
   -n, --dry-run     Print the command instead of running it
   -y, --yes         Accepted for symmetry with the sibling scripts, since the installer never prompts
+
+Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF2
 }
 
@@ -55,7 +77,7 @@ parse_args() {
             usage
             exit 0
             ;;
-        *) die "Unknown option \"$1\", --help lists the options" ;;
+        *) die_usage "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done

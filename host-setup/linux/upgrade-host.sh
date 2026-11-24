@@ -30,9 +30,35 @@ IS_WSL=false
 SUDO=()
 APT_OPTS=()
 
+USAGE_REFUSED=false
+
 TMP_DIR=$(mktemp -d)
 readonly TMP_DIR
-trap 'rm -rf "$TMP_DIR"' EXIT
+
+# Exit status 64 is reserved for a refused argument, per CODESTYLE.md "Command-Line Arguments".
+# Under set -e a failed command's own status becomes the script's, so a 64 that die_usage did not exit leaves as 1.
+# shellcheck disable=SC2317,SC2329  # The EXIT trap runs it.
+on_exit() {
+    local status=$?
+    rm -rf "$TMP_DIR"
+    if [[ $status -eq 64 && $USAGE_REFUSED == false ]]; then
+        exit 1
+    fi
+}
+
+# An interrupt names the signal and re-raises it, per CODESTYLE.md "Interrupts in Shell".
+# Every command runs in the foreground, per that section's launcher case.
+# The tools apt-get, dpkg, and the installers start do not stop cleanly on SIGTERM.
+# A Ctrl-C that reaches this shell as well runs the trap once the running command returns.
+# shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
+interrupted() {
+    printf 'upgrade-host.sh: interrupted by SIG%s.\n' "$1" >&2
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+trap on_exit EXIT
+trap 'interrupted INT; exit 130' INT
+trap 'interrupted TERM; exit 143' TERM
 
 # --- Output ---
 
@@ -43,6 +69,13 @@ warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+# A refused argument exits 64, EX_USAGE from sysexits.h, so a caller can tell it from a run that started and failed.
+die_usage() {
+    printf 'ERROR: %s\n' "$*" >&2
+    USAGE_REFUSED=true
+    exit 64
 }
 
 usage() {
@@ -73,6 +106,8 @@ Examples:
   upgrade-host.sh --packages -y    Upgrade unattended
   upgrade-host.sh --release        Upgrade the packages, then move to the next release
   upgrade-host.sh --release -n     Show what a release upgrade would run
+
+Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF
 }
 
@@ -642,14 +677,14 @@ parse_args() {
             usage
             exit 0
             ;;
-        *) die "Unknown option \"$1\", --help lists the options" ;;
+        *) die_usage "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
 
     # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
     if ((${#actions[@]} > 1)); then
-        die "More than one action given (${actions[*]}), name one"
+        die_usage "More than one action given (${actions[*]}), name one"
     fi
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
     return 0
