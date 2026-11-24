@@ -108,7 +108,7 @@ maintainer can supply what section 0A lists.
 
 9. **Verify with the audit.** STANDUP.md section 5: run `AUDIT.md` end to end. The repo is stood
    up only when it passes for its type, or a hub-committed `reports/<repo>/audit.md`
-   plus an issue tracks its residual deltas. `<repo>` there is the repository name in lowercase.
+   plus an issue tracks its residual deltas. `AUDIT.md` section 8 defines `<repo>` there.
    The report lands through a hub pull request of its own into `develop`.
 
 ## Onboarding a new repo type
