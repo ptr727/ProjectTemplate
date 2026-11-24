@@ -41,9 +41,9 @@ Exit codes
      line saying the review figures were unavailable and names the error on stderr, then exits 1.
      Four reads fail more softly: the default branch, whether `develop` exists, the policy file,
      and its history. A failed one still writes the report, names that read on stderr, and
-     exits 1. Where the policy itself went unread, the report shows `error` in its place. So does a
-     failed read of the attention lists, which `--format json` makes. Each repository's
-     `attention` is then `null`, one note says so, and the exit status is 1.
+     exits 1. Where the policy itself went unread, the report shows `error` in its place. A failed
+     read of the attention lists, which `--format json` makes, writes the report too. Each
+     repository's `attention` is then `null`, one note says so, and the exit status is 1.
   2  the command line was wrong.
 """
 
@@ -64,7 +64,7 @@ from typing import Any
 import pr_review_rounds as rounds
 import pr_review_side as side
 from gh_graphql import GraphQLError, request, run_subprocess, said_absent, walk
-from pr_review_checks import utc_instant
+from pr_review_checks import check_nodes, checks_truncated, utc_instant
 from pr_review_copilot import VOCABULARIES
 from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 
@@ -94,6 +94,8 @@ HISTORY_CAP = 10
 FAILED_STATES = frozenset({"FAILURE", "ERROR"})
 FAILING_CHECKS = frozenset({"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"})
 FAILING_RUNS = frozenset({"failure", "timed_out", "startup_failure"})
+UNDECIDED_RUNS = frozenset({"cancelled", "skipped", "neutral"})
+PR_EVENTS = frozenset({"pull_request", "pull_request_target"})
 ATTENTION_RUN_LIMIT = 200
 CHECK_CAP = 100
 LABELS = ("pre-existing", "prose", "documentation", "bug", "script", "enhancement", "decision")
@@ -855,7 +857,7 @@ for _token, _cap in (
 def graphql(query: str, variables: dict[str, object]) -> dict[str, Any]:
     """Run one GraphQL document through the shared reader, so a null node or error raises.
 
-    The one caller reads through `walked`, which names a `GraphQLError` as a `GhError`.
+    Each caller reads through `walked`, which names a `GraphQLError` as a `GhError`.
     """
     return dict(request(query, variables).data)
 
@@ -993,11 +995,12 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
     return result
 
 
-ATTENTION_QUERY = """
+ATTENTION_QUERY = (
+    """
 query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
-    develop: ref(qualifiedName: "refs/heads/develop") { name }
+    develop: ref(qualifiedName: "refs/heads/@INTEGRATION@") { name }
     pullRequests(states: OPEN, first: @PAGE@, after: $after,
                  orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
@@ -1008,34 +1011,39 @@ query($owner: String!, $name: String!, $after: String) {
         isDraft
         updatedAt
         baseRefName
+        headRefOid
         author { login }
-        commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: @CHECK@) {
+        commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: @CHECK@) {
           pageInfo { hasNextPage }
           nodes {
             __typename
-            ... on CheckRun { name conclusion }
-            ... on StatusContext { context state }
+            ... on CheckRun { name status conclusion startedAt completedAt
+              checkSuite { databaseId status app { slug databaseId }
+                workflowRun { databaseId workflow { databaseId } } } }
+            ... on StatusContext { context state createdAt creator { login } }
           }
         } } } } }
       }
     }
   }
 }
-""".replace("@PAGE@", str(PAGE_SIZE)).replace("@CHECK@", str(CHECK_CAP))
+""".replace("@PAGE@", str(PAGE_SIZE))
+    .replace("@CHECK@", str(CHECK_CAP))
+    .replace("@INTEGRATION@", INTEGRATION_BRANCH)
+)
 
 
-def failing_checks(pr: Mapping[str, Any]) -> tuple[list[str], bool]:
-    """The names of a pull request's failing checks, and whether its check list was cut."""
-    commits = nodes_of(pr.get("commits"))
-    rollup = (commits[0].get("commit") or {}).get("statusCheckRollup") if commits else None
-    contexts = (rollup or {}).get("contexts") or {}
-    names = []
-    for node in nodes_of(contexts):
-        if node.get("__typename") == "CheckRun" and node.get("conclusion") in FAILING_CHECKS:
-            names.append(str(node.get("name") or ""))
-        elif node.get("__typename") == "StatusContext" and node.get("state") in FAILED_STATES:
-            names.append(str(node.get("context") or ""))
-    return names, bool((contexts.get("pageInfo") or {}).get("hasNextPage"))
+def failing_checks(pr: Mapping[str, Any]) -> list[str]:
+    """The names of a pull request's failing checks, read as the review gate reads them.
+
+    `check_nodes` keeps the newest suite per workflow, so a workflow re-run on the same commit
+    counts by its latest run. A finished check a newer run is replacing is left out as well.
+    """
+    return [
+        str(node["name"])
+        for node in check_nodes(dict(pr))
+        if node["conclusion"] in FAILING_CHECKS | FAILED_STATES and not node.get("superseded")
+    ]
 
 
 def pr_attention(pr: Mapping[str, Any]) -> dict[str, Any]:
@@ -1050,14 +1058,18 @@ def pr_attention(pr: Mapping[str, Any]) -> dict[str, Any]:
 def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[list, list]:
     """The workflows whose latest completed run on `branch` failed, and those that recovered.
 
-    `runs` is newest first, as `gh run list` prints it. A workflow recovered where a run failed in
+    `runs` is newest first, as `gh run list` prints it. A cancelled or skipped run decided nothing,
+    so it is never a workflow's latest. A pull request's run is left out, since a fork's branch
+    can share the name. A workflow recovered where a run failed in
     the window and its latest completed run did not.
     """
     latest: dict[str, Mapping[str, Any]] = {}
     failed: dict[str, list[Mapping[str, Any]]] = {}
     for run in runs:
         workflow = str(run.get("workflowName") or run.get("name") or "")
-        if not run.get("conclusion"):
+        if not run.get("conclusion") or run["conclusion"] in UNDECIDED_RUNS:
+            continue
+        if run.get("event") in PR_EVENTS:
             continue
         latest.setdefault(workflow, run)
         if run["conclusion"] in FAILING_RUNS and str(run.get("createdAt") or "")[:10] >= str(since):
@@ -1088,12 +1100,12 @@ def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[li
 
 
 def collect_attention(
-    owner: str, name: str, since: datetime.date, today: datetime.date, stale_days: int
+    owner: str, name: str, since: datetime.date, now: datetime.datetime, stale_days: int
 ) -> dict[str, Any]:
     """What needs the maintainer now in one repository: failing and stale pull requests, branches.
 
-    Open non-draft pull requests are read, up to `PR_CAP`. A stale one has had no update for
-    `stale_days` and has no failing check. The default branch and `develop`, where it exists, are
+    Open pull requests are read, up to `PR_CAP`, drafts counting toward it and in no list. A stale
+    one has had no update for `stale_days`, to the instant, and has no failing check. The default branch and `develop`, where it exists, are
     read for two kinds of workflow. One kind's latest completed run failed. The other kind failed
     in the window and recovered.
     """
@@ -1111,7 +1123,7 @@ def collect_attention(
         "recovered_branches": [],
         "truncated": [],
     }
-    stale_before = window_start(today, stale_days).isoformat()
+    stale_before = now - datetime.timedelta(days=stale_days)
     branches: list[str] = []
     seen = 0
     for page in walked(fetch, ("repository", "pullRequests")):
@@ -1125,14 +1137,16 @@ def collect_attention(
             seen += 1
             if pr.get("isDraft"):
                 continue
-            names, cut = failing_checks(pr)
-            if cut:
+            names = failing_checks(pr)
+            if checks_truncated(dict(pr)):
                 result["truncated"].append(f"checks of #{pr.get('number')} cut at {CHECK_CAP}")
             if names:
                 result["failing_pull_requests"].append(
                     {**pr_attention(pr), "failing_checks": names}
                 )
-            elif str(pr.get("updatedAt") or "")[:10] <= stale_before:
+            elif (
+                updated := utc_instant(str(pr.get("updatedAt") or ""))
+            ) and updated <= stale_before:
                 result["stale_pull_requests"].append(
                     {**pr_attention(pr), "updated_at": str(pr.get("updatedAt") or "")}
                 )
@@ -1144,7 +1158,7 @@ def collect_attention(
         runs = run_gh(
             ["run", "list", "--repo", f"{owner}/{name}", "--branch", branch]
             + ["--limit", str(ATTENTION_RUN_LIMIT)]
-            + ["--json", "databaseId,workflowName,url,conclusion,createdAt"]
+            + ["--json", "databaseId,workflowName,url,conclusion,createdAt,event"]
         )
         still, recovered = branch_attention(branch, runs, since)
         result["failing_branches"] += still
@@ -1208,7 +1222,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     default_owner, default_names = registry_defaults()
     owner = args.owner or default_owner
     names = args.repo or default_names
-    end = datetime.datetime.now(datetime.UTC).date()
+    now = datetime.datetime.now(datetime.UTC)
+    end = now.date()
     start = window_start(end, args.days)
     try:
         metrics = [collect(owner, name, start) for name in names]
@@ -1225,7 +1240,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     attention_error = ""
     if args.format == "json":
         try:
-            attention = {n: collect_attention(owner, n, start, end, args.stale_days) for n in names}
+            attention = {n: collect_attention(owner, n, start, now, args.stale_days) for n in names}
             metrics = [dataclasses.replace(m, attention=attention[m.name]) for m in metrics]
         except GhError as error:
             attention_error = str(error)

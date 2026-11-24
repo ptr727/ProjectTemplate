@@ -1228,16 +1228,32 @@ def open_pr(number: int, *contexts: dict[str, object], **fields: object) -> dict
         "updatedAt": "2026-11-23T00:00:00Z",
         "baseRefName": "develop",
         "author": {"login": "dependabot"},
-        "commits": {"nodes": [{"commit": {"statusCheckRollup": rollup}}]},
+        "headRefOid": "h",
+        "commits": {"nodes": [{"commit": {"oid": "h", "statusCheckRollup": rollup}}]},
     } | fields
 
 
-def check(name: str, conclusion: str) -> dict[str, object]:
-    return {"__typename": "CheckRun", "name": name, "conclusion": conclusion}
+def check(name: str, conclusion: str, suite: int | None = None) -> dict[str, object]:
+    node: dict[str, object] = {
+        "__typename": "CheckRun",
+        "name": name,
+        "status": "COMPLETED",
+        "conclusion": conclusion,
+    }
+    if suite is not None:
+        node["checkSuite"] = {
+            "databaseId": suite,
+            "status": "COMPLETED",
+            "workflowRun": {"databaseId": suite, "workflow": {"databaseId": 1}},
+        }
+    return node
 
 
-def run_record(workflow: str, conclusion: str, day: str, url: str) -> dict[str, object]:
+def run_record(
+    workflow: str, conclusion: str, day: str, url: str, event: str = "push"
+) -> dict[str, object]:
     return {
+        "event": event,
         "workflowName": workflow,
         "conclusion": conclusion,
         "createdAt": f"{day}T00:00:00Z",
@@ -1247,7 +1263,7 @@ def run_record(workflow: str, conclusion: str, day: str, url: str) -> dict[str, 
 
 class AttentionTests(unittest.TestCase):
     START = datetime.date(2026, 11, 17)
-    TODAY = datetime.date(2026, 11, 24)
+    NOW = datetime.datetime(2026, 11, 24, 8, 0, tzinfo=datetime.UTC)
 
     def attention(
         self,
@@ -1268,14 +1284,19 @@ class AttentionTests(unittest.TestCase):
             ),
             unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
         ):
-            return bm.collect_attention("o", "alpha", self.START, self.TODAY, 7)
+            return bm.collect_attention("o", "alpha", self.START, self.NOW, 7)
 
     def test_a_failing_check_or_status_names_the_pull_request(self) -> None:
         failing = open_pr(
             1,
             check("compile", "FAILURE"),
             check("lint", "SUCCESS"),
-            {"__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR"},
+            {
+                "__typename": "StatusContext",
+                "context": "ci/legacy",
+                "state": "ERROR",
+                "createdAt": "2026-11-23T00:00:00Z",
+            },
         )
         result = self.attention([failing])
         self.assertEqual(
@@ -1306,14 +1327,66 @@ class AttentionTests(unittest.TestCase):
         self.assertEqual((result["failing_pull_requests"], result["stale_pull_requests"]), ([], []))
 
     def test_a_stale_pull_request_has_no_failing_check_and_a_failing_one_is_not_stale(self) -> None:
-        old = "2026-11-17T09:00:00Z"
+        old = "2026-11-17T08:00:00Z"
         stale = open_pr(1, check("x", "SUCCESS"), updatedAt=old)
         failing = open_pr(2, check("x", "FAILURE"), updatedAt=old)
-        fresh = open_pr(3, updatedAt="2026-11-18T00:00:00Z")
+        fresh = open_pr(3, updatedAt="2026-11-17T08:00:01Z")
         result = self.attention([stale, failing, fresh])
         self.assertEqual([p["number"] for p in result["stale_pull_requests"]], [1])  # type: ignore[attr-defined]
         self.assertEqual(result["stale_pull_requests"][0]["updated_at"], old)  # type: ignore[index]
         self.assertEqual([p["number"] for p in result["failing_pull_requests"]], [2])  # type: ignore[attr-defined]
+
+    def test_a_rerun_workflow_counts_by_its_newest_run(self) -> None:
+        rerun = open_pr(
+            1, check("compile", "FAILURE", suite=10), check("compile", "SUCCESS", suite=11)
+        )
+        self.assertEqual(self.attention([rerun])["failing_pull_requests"], [])
+        failed_again = open_pr(
+            2, check("compile", "SUCCESS", suite=10), check("compile", "FAILURE", suite=11)
+        )
+        self.assertEqual(len(self.attention([failed_again])["failing_pull_requests"]), 1)  # type: ignore[arg-type]
+
+    def test_a_cancelled_run_after_a_failure_is_neither_recovery_nor_latest(self) -> None:
+        runs = {
+            "main": [
+                run_record("Build", "cancelled", "2026-11-23", "b2"),
+                run_record("Build", "failure", "2026-11-22", "b1"),
+                run_record("Fork", "failure", "2026-11-23", "f1", event="pull_request"),
+            ]
+        }
+        result = self.attention([], runs)
+        self.assertEqual([e["html_url"] for e in result["failing_branches"]], ["b1"])  # type: ignore[attr-defined]
+        self.assertEqual(result["recovered_branches"], [])
+
+    def test_the_caps_are_named_where_reached(self) -> None:
+        prs = [open_pr(n) for n in range(1, bm.PR_CAP + 2)]
+        runs = {
+            "main": [run_record("Build", "success", "2026-11-23", "r")] * bm.ATTENTION_RUN_LIMIT
+        }
+        result = self.attention(prs, runs, more=True)
+        self.assertEqual(
+            result["truncated"],
+            [
+                f"open pull requests cut at {bm.PR_CAP}",
+                f"runs of main cut at {bm.ATTENTION_RUN_LIMIT}",
+            ],
+        )
+
+    def test_stale_days_reaches_the_read(self) -> None:
+        seen: list[int] = []
+
+        def read(owner: str, name: str, since: object, now: object, stale_days: int) -> dict:
+            seen.append(stale_days)
+            return {}
+
+        with (
+            unittest.mock.patch.object(bm, "collect_attention", side_effect=read),
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=quiet_rest),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            bm.main(["--owner", "o", "--repo", "alpha", "--format", "json", "--stale-days", "3"])
+        self.assertEqual(seen, [3])
 
     def test_a_cut_check_list_is_named(self) -> None:
         pr = open_pr(5, check("x", "SUCCESS"))
@@ -1382,7 +1455,7 @@ class AttentionTests(unittest.TestCase):
             ),
             unittest.mock.patch.object(bm, "run_gh", return_value=[]) as run,
         ):
-            bm.collect_attention("o", "alpha", self.START, self.TODAY, 7)
+            bm.collect_attention("o", "alpha", self.START, self.NOW, 7)
         self.assertEqual(
             [c.args[0][c.args[0].index("--branch") + 1] for c in run.call_args_list], ["main"]
         )
@@ -1394,7 +1467,7 @@ class AttentionTests(unittest.TestCase):
             unittest.mock.patch.object(bm, "graphql", side_effect=pages),
             unittest.mock.patch.object(bm, "run_gh", return_value=[]),
         ):
-            result = bm.collect_attention("o", "alpha", self.START, self.TODAY, 7)
+            result = bm.collect_attention("o", "alpha", self.START, self.NOW, 7)
         self.assertEqual([p["number"] for p in result["failing_pull_requests"]], [1, 2])
 
     def test_a_failed_read_leaves_attention_null_and_exits_one(self) -> None:
