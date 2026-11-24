@@ -9101,7 +9101,8 @@ class TestWaitInterrupt(unittest.TestCase):
         subprocess.run([*git, "remote", "add", "origin", origin], check=True, env=env)
         bin_dir, ready = root / "bin", root / "gh.started"
         bin_dir.mkdir()
-        write_executable(bin_dir / "gh", f'#!/bin/sh\n: > "{ready}"\nexec sleep 300\n')
+        stand_in = f'#!/bin/sh\necho $$ > "{root}/gh.pid"\n: > "{ready}"\nexec sleep 300\n'
+        write_executable(bin_dir / "gh", stand_in)
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
         env["PYTHONIOENCODING"] = "utf-8"
         argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
@@ -9135,7 +9136,9 @@ class TestWaitInterrupt(unittest.TestCase):
         """An outer `timeout` over `uv run` sends SIGTERM twice, and the second once broke the print.
 
         Standard error is a pipe this case fills before the start, so the script's one line blocks
-        until the case drains it. The second signal therefore lands inside that print.
+        until the case drains it. The second signal goes once the script has killed the stand-in,
+        which follows `subprocess`'s own interrupt grace, so it lands inside the blocked print.
+        Popen leaves a child it killed on an interrupt unreaped, so the kill reads as a zombie.
         """
         read_end, write_end = os.pipe()
         os.set_blocking(write_end, False)
@@ -9145,14 +9148,25 @@ class TestWaitInterrupt(unittest.TestCase):
                 filled += os.write(write_end, b"x" * 512)
         os.set_blocking(write_end, True)
         with tempfile.TemporaryDirectory() as tmp, os.fdopen(read_end, "rb") as stream:
+            root = Path(tmp)
             try:
-                proc, ready = self.start_wait(Path(tmp), write_end)
+                proc, ready = self.start_wait(root, write_end)
             finally:
                 os.close(write_end)
             try:
                 wait_until_started(proc, ready)
                 time.sleep(0.5)
                 proc.send_signal(signal.SIGTERM)
+                stand_in = int((root / "gh.pid").read_text(encoding="utf-8"))
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    ps = ["ps", "-o", "stat=", "-p", str(stand_in)]
+                    state = subprocess.run(ps, capture_output=True, text=True, check=False).stdout
+                    if state.strip()[:1] in ("Z", ""):
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("the script never killed the stand-in")
                 time.sleep(0.5)
                 proc.send_signal(signal.SIGTERM)
                 self.assertEqual(filled, len(stream.read(filled)))
