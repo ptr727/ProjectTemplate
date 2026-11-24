@@ -77,7 +77,6 @@ doc's authorship. Archived repos are not tracked.
 - [ ] **ESPHome-Config** (`source-only`, `python`, `cpp`): `pre-commit` framework + doc gates for
       the Python half. `cpp` has no fleet linter declared today, out of scope here.
 - [ ] **HomeAssistant-Config** (`source-only`): doc-gate half only, no declared language.
-- [ ] **DevKitCIoT** (`eda`): doc-gate half only, no fleet-covered language.
 - [ ] **PhotoCleaner** (`csharp`, `dotnet-publish`, `docker`): Husky.Net + doc gates.
 - [ ] **MediaTools** (`csharp`, `nuget`): Husky.Net + doc gates.
 - [ ] **AudioCleaner** (`csharp`, `dotnet-publish`): Husky.Net + doc gates.
