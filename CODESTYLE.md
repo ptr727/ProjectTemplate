@@ -129,7 +129,7 @@ This is packaged as the `python-codestyle` Skill at `.agents/skills/python-codes
 
 ## Shell
 
-*This section applies only to shell scripts. A repo with no shell scripts still carries it (the file is carried whole) and ignores it.*
+*This section applies only to Bash and POSIX `sh` scripts. A repo with none still carries it (the file is carried whole) and ignores it.*
 
 A bootstrap, a program that must run before the interpreter or a development toolchain exists, is written in the platform's native shell. That is Bash on Linux and PowerShell on Windows. Logic that needs its failure cases tested is Python, with a test under its own scripts tree's `tests/` directory. The pattern is a platform-native entry point over shared Python logic. The `shell-codestyle` Skill packages the mandatory `set -Eeuo pipefail` header, the pipefail-versus-early-reader pitfall, and self-recursive command shims. It also packages self-locating scripts, the `shellcheck`-plus-`shfmt` clean-compile, and the why-not-what comment rule. It is at `.agents/skills/shell-codestyle/SKILL.md` in the hub, not a repo-relative link since that path is hub-local and not carried into every fleet repo. Read the skill for the full rules. A script's own arguments follow "Command-Line Arguments" under General, which the Skill carries whole. Run the clean-compile check itself per `GOVERNANCE.md` "Running the Linters Locally (Known-Working Invocations)", not by probing `command -v shellcheck`. That section is hub-only, read in a hub checkout rather than carried into every fleet repo.
 
