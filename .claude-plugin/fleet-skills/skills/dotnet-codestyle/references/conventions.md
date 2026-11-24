@@ -109,9 +109,8 @@ project.
 
 ## Comments and documentation
 
-XML documentation is on: `<GenerateDocumentationFile>true</GenerateDocumentationFile>`, and
-missing XML comments for public APIs are suppressed in `.editorconfig`. Every public surface must
-still be documented: a single-line summary, additional details in remarks, documented input
+XML documentation is on: `<GenerateDocumentationFile>true</GenerateDocumentationFile>`. Every
+public surface must be documented: a single-line summary, additional details in remarks, documented input
 parameters, return values, exceptions, and crefs.
 
 ```csharp
