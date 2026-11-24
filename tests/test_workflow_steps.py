@@ -244,6 +244,26 @@ class PromotionHistoryCase(unittest.TestCase):
         self.git("merge", "-q", "--no-ff", "-m", "promote develop", "develop")
         self.assertEqual("keep\ndrop", self.git("show", "main:notes.txt"))
 
+    def test_the_recovery_cut_restores_a_line_the_stale_base_kept(self) -> None:
+        """The cut merges from the stale base too, so its tree check is what catches the kept line."""
+        self.git("checkout", "-q", "develop")
+        self.commit("notes.txt", "keep\n")
+        self.promote()
+        self.git("checkout", "-q", "develop")
+        self.commit("notes.txt", "keep\ndrop\n")
+        self.squash()
+        self.git("checkout", "-q", "develop")
+        self.commit("notes.txt", "keep\n")
+        self.git("checkout", "-q", "-b", "promote/develop-to-main", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "merge develop", "develop")
+        self.assertEqual("notes.txt", self.git("diff", "--name-only", "develop", "HEAD"))
+        self.git("checkout", "develop", "--", "notes.txt")
+        self.git("commit", "-qm", "restore develop's notes")
+        self.assertEqual("", self.git("diff", "--name-only", "develop", "HEAD"))
+        code, log = self.check("promote/develop-to-main")
+        self.assertEqual(0, code, log)
+        self.assertIn("confirm its tree matches develop's", log)
+
     def test_the_floor_excludes_itself_and_older_history(self) -> None:
         self.feature()
         older = self.squash()

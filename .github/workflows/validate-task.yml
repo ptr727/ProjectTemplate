@@ -754,6 +754,7 @@ jobs:
           if [[ "$held" == true ]]; then
             echo "$BASE_REF's first-parent chain $since holds ${#singles[@]} single-parent commit(s): ${singles[*]}."
             echo "The head already holds each of them, so merging it restores the merge base with develop."
+            echo "The cut merged develop from the stale base, so confirm its tree matches develop's before it merges."
             exit 0
           fi
           for commit in "${singles[@]}"; do
