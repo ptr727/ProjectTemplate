@@ -126,7 +126,7 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    So under the hub's default review policy, the hosted review runs once per change, at the
    promotion in step 6. `wait` sends each request the repository's review policy asks for, so
    the drive never asks whether a reviewer starts on its own.
-4. This step's merge and post-merge `cleanup` run only on the go-ahead "What Invoking This Skill
+4. Run this step's merge and post-merge `cleanup` only on the go-ahead "What Invoking This Skill
    Authorizes" states. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge "<number>" --repo "<owner>/<repo>" --cleanup --checkout ~/repos/"<Repo>"`,
    run from a hub checkout outside the task's worktree, `~/repos/<Repo>` being the repository's
