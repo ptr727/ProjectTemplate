@@ -569,6 +569,8 @@ class WiringCase(unittest.TestCase):
                 "apply_labels() { :; }\napply_ruleset() { :; }\napply_secrets() { :; }\n"
                 "interaction_origin() { :; }\napply_interaction() { :; }\n"
                 'apply_project() { echo "the link write ran with $1"; }\n'
+                "workflow_permissions_problem() { :; }\nworkflow_permissions_live() { :; }\n"
+                "apply_workflow_permissions() { :; }\n"
                 'gh() { printf "false\\n"; }\njq() { printf "{}\\n"; }\n'
                 'jqr() { printf "1\\n"; }\n'
             )
@@ -617,6 +619,7 @@ class WiringCase(unittest.TestCase):
                 "check_settings",
                 "check_interaction",
                 "check_security",
+                "check_workflow_permissions",
                 "check_labels",
                 "check_environments",
                 "check_agent_policy",
