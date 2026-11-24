@@ -32,6 +32,7 @@ from pr_review_rounds import (
     newest_of,
     open_threads,
     opened_by,
+    page_flag,
     possible_quota,
     qodo_comment,
     qodo_comments_blind,
@@ -98,6 +99,7 @@ def render(
     hub: str,
     window: int,
     fields_out: list[tuple[str, object]] | None = None,
+    cleaned: str = "",
 ) -> tuple[str, int]:
     """Render the digest and return it with the unresolved count.
 
@@ -105,6 +107,8 @@ def render(
     caller. `run_log` is the caller's `RUN LOG READING` line for that refusal, empty for none.
     Where `seen` is a set, only threads absent from it print, marked new, and are added.
     Where `fields_out` is a list, the header's fields and the counts a gate reads are appended.
+    `cleaned` is the commit CodeRabbit's summary records a clean pass on, read by the caller. It
+    counts only where it is the head, and older comments behind the window leave it unknown.
     """
     head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
@@ -152,8 +156,12 @@ def render(
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
     other_on_head = [
-        login for login in OTHER_REVIEWERS if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
+        login
+        for login in OTHER_REVIEWERS
+        if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
+        or (login == CODERABBIT_LOGIN and cleaned == head)
     ]
+    unread = CODERABBIT_LOGIN not in other_on_head and page_flag(pr, "comments", "hasPreviousPage")
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
     }
@@ -172,6 +180,7 @@ def render(
         ("rounds", len(revs)),
         ("review_on_head", "yes" if on_head else "local" if cover == "local" else "NO"),
         ("other_reviewed", ",".join(other_on_head) or None),
+        ("other_unknown", CODERABBIT_LOGIN if unread else None),
         (
             "other_rate_limited",
             ",".join(f"{login}:{name}" if name else login for login, name in other_limited.items())

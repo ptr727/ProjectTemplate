@@ -97,8 +97,10 @@ Subcommands
            round covers it.
            `review_on_head` and `rounds=` name Copilot's own coverage, never "no review of any
            kind covers this head". `other_reviewed` names a tracked other reviewer that posted on
-           the head, identity and commit only, and its empty body there is its own "reviewed,
-           nothing to flag" shape, not a gap.
+           the head, identity and commit only, or CodeRabbit where its summary records a clean
+           pass on the head. Its empty body there is its own "reviewed, nothing to flag" shape,
+           not a gap. `other_unknown` names CodeRabbit where neither shows and older comments sit
+           behind the window, so its summary may be unread rather than absent.
            `other_rate_limited` names one whose newest comment or review is its own rate-limit
            notice. `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
            the account quota or an error whose run log names a rate limit, `ERROR` for any other
@@ -933,6 +935,7 @@ def digest(
         HUB,
         WINDOW,
         fields_out,
+        side.clean_pass(pr),
     )
 
 
