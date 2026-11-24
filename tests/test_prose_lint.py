@@ -4620,6 +4620,8 @@ class TestPasteSafeRule(BaitCase):
             "sudo apt install -y ssh '<pkg>' '<other>'",
             "git clone https://example.com/x/ssh '<dir>' '<other>'",
             "runuser -u postgres -- psql -c 'CREATE DATABASE <name>'",
+            "command -v sh -c 'ls <dir>'",
+            "sudo -l sh -c 'ls <dir>'",
         ):
             with self.subTest(span=span):
                 self.assertEqual([], self.hits(f"Run `{span}` here.\n"))
@@ -4631,26 +4633,40 @@ class TestPasteSafeRule(BaitCase):
     def test_a_second_shell_opening_a_backtick_substitution_is_read(self) -> None:
         self.assertEqual([2], self.lines("```sh\necho `bash -c 'ls <dir>'`\n```\n"))
 
-    def test_a_shape_in_a_second_shell_string_keeps_its_own_advice(self) -> None:
+    def test_a_shape_in_a_second_shell_string_is_told_to_quote_it_there(self) -> None:
+        """A bracket or a pipe there may be a pattern rather than a placeholder."""
         for span, advice in (
-            ("bash -c 'deploy release|operational'", "write the common value"),
-            ("bash -c 'ls [--all]'", "leave it out"),
-            ("bash -c 'ls [RepoName]'", 'the second shell receives "<RepoName>"'),
-            (
-                "bash -c 'ls <dir>'",
-                'quote it inside that string, so the second shell receives "<dir>"',
-            ),
+            ("bash -c 'deploy release|operational'", "or write the common value there"),
+            ("bash -c 'ls [--all]'", "or leave it out where it is an optional flag"),
+            ("bash -c 'ls [RepoName]'", 'or write "<RepoName>" there'),
+            ("ssh '<host>' grep '[Ee]rror' log", "quote it inside that string, as a pattern is"),
+            ("bash -c 'ls <dir>'", "quote it inside that string, so the second shell receives"),
         ):
             with self.subTest(span=span):
                 found = self.hits(f"Run `{span}` here.\n")
                 self.assertEqual(1, len(found), found)
                 self.assertIn(advice, found[0][1])
-                self.assertIn("the string 'bash' hands a second shell", found[0][1])
+                self.assertIn("hands a second shell", found[0][1])
 
-    def test_an_unquoted_argument_ssh_joins_is_reported_once(self) -> None:
-        found = self.hits("Run `ssh '<host>' ls [RepoName]` here.\n")
-        self.assertEqual(1, len(found), found)
-        self.assertIn("in a copy-and-run command", found[0][1])
+    def test_a_placeholder_the_first_shell_reports_is_reported_once(self) -> None:
+        for span in ("ssh '<host>' ls [RepoName]", "ssh '<host>' ls \"$d\"/<name>"):
+            with self.subTest(span=span):
+                found = self.hits(f"Run `{span}` here.\n")
+                self.assertEqual(1, len(found), found)
+                self.assertIn("in a copy-and-run command", found[0][1])
+
+    def test_a_second_shell_wrapped_across_a_span_line_is_read(self) -> None:
+        for text in (
+            "Run `sudo sh -c\n'echo on > <file>'` here.\n",
+            "Run `ssh '<host>'\n'ls <file>'` here.\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([2], self.lines(text))
+
+    def test_each_second_shell_and_launcher_opens_a_command_span(self) -> None:
+        tables = prose_lint.COMMANDS["second_shells"]
+        names = {n for spec in tables["shells"] for n in spec["names"]} | set(tables["launchers"])
+        self.assertEqual(set(), names - prose_lint.COMMAND_NAMES)
 
     def test_a_second_shell_after_a_heredoc_label_is_read(self) -> None:
         text = "```sh\ncat <<'END' | sudo sh -c 'cat > <file>'\nbody\nEND\n```\n"
