@@ -233,6 +233,23 @@ def heading_slug(text):
     return re.sub(r"[^\w\- ]", "", text.lower()).replace(" ", "-")
 
 
+def heading_regions(text, key, want):
+    """`(heading, end)` for each heading at any level whose `key(text)` is `want`, in order.
+
+    The heading line is inside the region and the next heading at its level or above ends it, level
+    one included. `end` is that heading's line, or None for a region that runs to the end of the
+    document, so `lines[h.line:end]` slices the region either way. A level-two region a manifest
+    names ends only at the next H2, which `sections` decides instead. The caller picks the duplicate
+    policy, since one caller takes the first match and another refuses two.
+    """
+    found = headings(text)
+    return [
+        (h, next((n.line for n in found[i + 1 :] if n.level <= h.level), None))
+        for i, h in enumerate(found)
+        if key(h.text) == want
+    ]
+
+
 def extract_anchored(text, anchor):
     """The normalized region of the first heading at any level whose slug is `anchor`, or None.
 
@@ -240,12 +257,11 @@ def extract_anchored(text, anchor):
     duplicate heading's `-1` suffix is not modeled, so `anchor` names the first heading it slugs to.
     """
     base = normalize(text)
-    found = headings(base)
-    for i, h in enumerate(found):
-        if heading_slug(h.text) == anchor:
-            end = next((n.line for n in found[i + 1 :] if n.level <= h.level), None)
-            return "\n".join(base.split("\n")[h.line : end])
-    return None
+    found = heading_regions(base, heading_slug, anchor)
+    if not found:
+        return None
+    h, end = found[0]
+    return "\n".join(base.split("\n")[h.line : end])
 
 
 def strip_sections(text, names, keep_pins=False):

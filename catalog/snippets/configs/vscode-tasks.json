@@ -122,12 +122,12 @@
             }
         },
         // Lint group, run on demand.
-        // The EditorConfig, Workflows, Markdown, and Spelling tasks go through the hub's scripts/docker_lint.py, fetched by hub_fetch_run.py.
+        // The EditorConfig, Workflows, Markdown, Spelling, ShellCheck, and shfmt tasks go through the hub's scripts/docker_lint.py, fetched by hub_fetch_run.py.
         // Each container therefore sees a read-only snapshot of the tracked and unignored files, with no network.
-        // It mirrors the CI lint gate.
+        // A carrier holding PowerShell adds a "Lint: PSScriptAnalyzer" task the same way, with `--linter PSScriptAnalyzer`.
         // Broad live spell-checking is the cspell extension's job.
-        // Pre-commit already runs the prose gate diff-scoped and the EOL gate over the whole tree.
-        // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the hook's own EOL check on demand.
+        // A pre-commit hook that carries the doc gates already runs the prose gate diff-scoped and the EOL configuration check.
+        // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the EOL configuration check on demand.
         {
             "label": "Lint: EditorConfig",
             "type": "process",
@@ -189,6 +189,36 @@
             }
         },
         {
+            "label": "Lint: ShellCheck",
+            "type": "process",
+            "command": "python3",
+            "args": [ "${workspaceFolder}/hub_fetch_run.py", "scripts/docker_lint.py", "--linter", "shellcheck" ],
+            "windows": {
+                "command": "py",
+                "args": [ "-3", "${workspaceFolder}/hub_fetch_run.py", "scripts/docker_lint.py", "--linter", "shellcheck" ]
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: shfmt",
+            "type": "process",
+            "command": "python3",
+            "args": [ "${workspaceFolder}/hub_fetch_run.py", "scripts/docker_lint.py", "--linter", "shfmt" ],
+            "windows": {
+                "command": "py",
+                "args": [ "-3", "${workspaceFolder}/hub_fetch_run.py", "scripts/docker_lint.py", "--linter", "shfmt" ]
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
             "label": "Lint: Prose",
             "type": "process",
             "command": "python3",
@@ -226,8 +256,10 @@
                 "Lint: Workflows",
                 "Lint: Markdown",
                 "Lint: Spelling",
-                "Lint: Prose",
-                "Lint: EOL"
+                "Lint: ShellCheck",
+                "Lint: shfmt",
+                "Lint: EOL",
+                "Lint: Prose"
             ],
             "problemMatcher": []
         }

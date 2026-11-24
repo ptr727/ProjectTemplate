@@ -19,16 +19,15 @@ description: >-
 ## Why this exists
 
 This is the shell-specific half of the fleet's code style guide, kept in one place instead of
-re-derived per repo or per session. Shell is the fleet's exception language, reached for only
-where Python cannot run yet. So its rules exist to keep that narrow surface safe rather than to
-cover general scripting style.
+re-derived per repo or per session. Shell is the fleet's exception language, so its rules exist to
+keep that narrow surface safe rather than to cover general scripting style.
 
 ## When shell, not Python
 
-Bash, and only where a program cannot be Python: a bootstrap that installs the interpreter cannot
-be written in it. Nor can a host tool that must run before a development toolchain exists depend on
-Python. Everything else is Python, with a test under its own scripts tree's
-`tests/` directory.
+A bootstrap, a program that must run before the interpreter or a development toolchain exists, is
+written in the platform's native shell. That is Bash on Linux and PowerShell on Windows. Logic that
+needs its failure cases tested is Python, with a test under its own scripts tree's `tests/`
+directory. The pattern is a platform-native entry point over shared Python logic.
 
 ## Rules
 

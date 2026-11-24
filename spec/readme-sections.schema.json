@@ -114,7 +114,7 @@
                         "required": ["kind"],
                         "additionalProperties": false,
                         "properties": {
-                            "kind": { "enum": ["always", "publish", "secret"] },
+                            "kind": { "enum": ["always", "publish", "secret", "coverage"] },
                             "target": { "type": "string", "minLength": 1 },
                             "name": { "type": "string", "minLength": 1 }
                         }

@@ -99,7 +99,7 @@ neither `uv sync` nor `uv run`, since either writes a `uv.lock` that, once commi
 directory the uv form. A pip-form directory builds its environment as the pip-form block below
 shows. A
 **lint-only** Scripts profile has no `uv.lock` to sync and no pytest to run. For it, substitute
-`uvx` per tool and `unittest` per the Two Profiles section above:
+`uvx` per tool and `unittest` per the Two profiles section above:
 
 ```sh
 uv sync                          # creates .venv, installs deps + dev group
@@ -118,7 +118,7 @@ The flags keep ruff from reporting or rewriting the helper, which stays byte-ide
 
 The **build**-profile Python clean-compile, in its uv form, is `uv run ruff format` +
 `uv run ruff check` + the repo's type checker. That checker is `uv run pyright`, or `uv run mypy`
-where mypy is the CI checker, or both where the repo runs both (see Type checking above). Where the
+where mypy is the CI checker, or both where the repo runs both (see Toolchain above). Where the
 config sits in the project directory, CI passes the checker no path, so the config's own target
 settings decide what is checked. mypy left with no target that way exits with an error. A declared
 subdirectory with no config of its own uses the repository root's instead. CI then runs the checker
@@ -161,7 +161,7 @@ way, as in `<dir>/.venv/bin/python -m mypy <dir>`. On Windows each interpreter p
 clean-compile, run with pytest before committing.
 
 A **lint-only** profile's clean-compile substitutes its `uvx` and `unittest` equivalents, per Two
-Profiles above, and has no such command to run before committing beyond those. These are documented
+profiles above, and it runs only those before committing. These are documented
 commands. The hub's `vscode-tasks-python.json` snippet carries the VS Code tasks mirror of the uv
 form that the fleet baseline expects. Its header names the pip-form and lint-only adaptations. Every command-executing task in it is `type: process`, and every aggregator is
 `dependsOn`-only. Neither chains with `&&`, so the mirror runs the same on any task shell.

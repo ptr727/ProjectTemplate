@@ -46,6 +46,8 @@ import pr_review_check_lines
 import pr_review_checks
 import pr_review_copilot
 import pr_review_hold
+import pr_review_payload
+import pr_review_policy
 import pr_review_rounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
@@ -90,6 +92,7 @@ GATE_SOURCES = (
     "pr_review_payload.py",
     "pr_review_promotion.py",
     "pr_review_hold.py",
+    "pr_review_summary.py",
 )
 WRITE_SCANNED = (*GATE_SOURCES, "pr_review_side.py", "pr_review_policy.py")
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
@@ -109,6 +112,7 @@ READER_IMPORTS = frozenset(
         "pr_review_payload",
         "pr_review_promotion",
         "pr_review_rounds",
+        "pr_review_summary",
     }
 )
 # One import each reader module is known to make, the floor under the allowlist above.
@@ -121,6 +125,7 @@ READER_FLOORS = {
     "pr_review_payload": "typing",
     "pr_review_promotion": "pr_review_rounds",
     "pr_review_hold": "pr_review_checks",
+    "pr_review_summary": "pr_review_rounds",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
@@ -876,8 +881,8 @@ class TestDigest(GqlCase):
 CROWDED_DIGEST = "\n".join(
     (
         (
-            "repo=o/r pr=7 head=aaaaaaaa rounds=2 review_on_head=yes effort=unknown "
-            "effort_source=unknown coverage=full shapes=ok refusal=no threads=2+ unresolved=2+ "
+            "repo=o/r pr=7 head=aaaaaaaa rounds=2 review_on_head=yes other_unknown=coderabbitai "
+            "effort=unknown effort_source=unknown coverage=full shapes=ok refusal=no threads=2+ unresolved=2+ "
             f"({pr_review_rounds.REVIEWER}=1 other=1) suppressed=0 (on_head=0 earlier=0) "
             "overview=?/0 qodo_open=unknown answered_outside_review=unknown requested=no "
             "merge=BLOCKED checks=0/1 stuck=FAILED new=2"
@@ -1007,6 +1012,9 @@ class TestReviewPaging(unittest.TestCase):
         self.assertEqual({"headRefOid": HEAD}, self.read(pr_review.Q_CLAIMS, answer)[0])
 
 
+RUNNING = "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n\nProcessing."
+
+
 class TestOtherReviewers(GqlCase):
     """Thread resolution, head-presence, and the rate-limit marker's own structural pattern,
     generalized past Copilot to the other review bots this repository has trialed. Free-text
@@ -1107,6 +1115,58 @@ class TestOtherReviewers(GqlCase):
         self.answer(payload([review()]))
         out, _ = pr_review.digest("o", "r", 7)
         self.assertNotIn("other_reviewed", out)
+
+    def rabbit_summary(self, end: str, clean: bool = True) -> dict:
+        """CodeRabbit's summary comment, recording one reviewed range ending at `end`."""
+        verdict = "No actionable comments were generated in the recent review.\n\n" if clean else ""
+        body = f"{verdict}Reviewing files that changed between {'c' * 40} and {end}."
+        return comment(login="coderabbitai", at=EARLY, body=body)
+
+    def test_other_reviewed_names_coderabbit_for_a_clean_pass_on_the_head_alone(self) -> None:
+        """That pass leaves no review object, so only its summary tells it from no pass at all.
+
+        A clean pass on an earlier head, or a summary with findings, covers nothing here.
+        """
+        for summary, named in (
+            (self.rabbit_summary(HEAD), True),
+            (self.rabbit_summary(OLD), False),
+            (self.rabbit_summary(HEAD, clean=False), False),
+        ):
+            self.answer(payload([review()], comments=[summary]))
+            with self.subTest(body=summary["body"]):
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertEqual(named, "other_reviewed=coderabbitai" in out)
+                self.assertNotIn("other_unknown", out)
+
+    def rabbit_policy(self, pr: dict, bases: str = "^develop$") -> dict:
+        """`pr` carrying the default policy with CodeRabbit asked explicitly on `bases`."""
+        data = json.loads((REPO / "spec" / "agent-policy.default.json").read_text(encoding="utf-8"))
+        rabbit = {"trigger": "explicit", "bases": [bases], "command": "full review"}
+        data["review"]["bots"]["coderabbit"] = rabbit
+        pr[pr_review_payload.POLICY_KEY] = pr_review_policy.parse(data, "test")
+        return pr
+
+    def test_a_blind_comments_window_leaves_coderabbit_unknown_rather_than_unreviewed(self) -> None:
+        """The summary is an early comment, so older comments past the window can hold it unseen.
+
+        A review on the head or any summary in view decides, since CodeRabbit edits that one
+        summary in place. A base the policy does not cover CodeRabbit on expects no summary at all.
+        """
+        for reviews, comments, bases, field in (
+            ([review()], [], "^develop$", "other_unknown=coderabbitai"),
+            ([review()], [self.rabbit_summary(HEAD, clean=False)], "^develop$", ""),
+            ([review()], [comment("coderabbitai", EARLY, RUNNING)], "^develop$", ""),
+            ([review()], [self.rabbit_summary(OLD)], "^develop$", ""),
+            ([review()], [], "^main$", ""),
+            ([review()], [self.rabbit_summary(HEAD)], "^develop$", "other_reviewed=coderabbitai"),
+            ([review(), self.other_review("coderabbitai")], [], "^develop$", "other_reviewed"),
+        ):
+            self.answer(self.rabbit_policy(payload(reviews, comments=comments, older=True), bases))
+            with self.subTest(field=field, bases=bases, comments=len(comments)):
+                out, _ = pr_review.digest("o", "r", 7)
+                self.assertIn(field, out)
+                for absent in {"other_reviewed", "other_unknown"} - {field.split("=")[0]}:
+                    self.assertNotIn(absent, out)
 
     def test_reviewer_nodes_defaults_to_copilot_but_reads_any_login_explicitly(self) -> None:
         pr = payload([review(), self.other_review("coderabbitai")])
@@ -9030,32 +9090,37 @@ class TestWaitInterrupt(unittest.TestCase):
     `gh` on PATH holds the first read open, so the signal lands mid-wait with a child to stop.
     """
 
+    def start_wait(self, root: Path, stderr: int) -> tuple[subprocess.Popen[str], Path]:
+        """Start `wait` from a scripts copy under `root`, returning it and the stand-in's marker."""
+        scripts = root / "checkout" / "scripts"
+        shutil.copytree(REPO / "scripts", scripts, ignore=shutil.ignore_patterns("__pycache__"))
+        env = without_git_location()
+        git = ["git", "-C", str(scripts.parent)]
+        subprocess.run(["git", "init", "--quiet", str(scripts.parent)], check=True, env=env)
+        origin = "https://github.com/acme/widget.git"
+        subprocess.run([*git, "remote", "add", "origin", origin], check=True, env=env)
+        bin_dir, ready = root / "bin", root / "gh.started"
+        bin_dir.mkdir()
+        stand_in = f'#!/bin/sh\necho $$ > "{root}/gh.pid"\n: > "{ready}"\nexec sleep 300\n'
+        write_executable(bin_dir / "gh", stand_in)
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        env["PYTHONIOENCODING"] = "utf-8"
+        argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
+        proc = subprocess.Popen(
+            [*argv, "--repo", "acme/widget", "--timeout", "600"],
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=stderr,
+            text=True,
+            encoding="utf-8",
+            start_new_session=True,
+        )
+        return proc, ready
+
     def test_sigterm_mid_wait_prints_one_line_and_ends_by_that_signal(self) -> None:
         """The signal goes half a second after the stand-in starts, once the read is under way."""
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            scripts = root / "checkout" / "scripts"
-            shutil.copytree(REPO / "scripts", scripts, ignore=shutil.ignore_patterns("__pycache__"))
-            env = without_git_location()
-            git = ["git", "-C", str(scripts.parent)]
-            subprocess.run(["git", "init", "--quiet", str(scripts.parent)], check=True, env=env)
-            origin = "https://github.com/acme/widget.git"
-            subprocess.run([*git, "remote", "add", "origin", origin], check=True, env=env)
-            bin_dir, ready = root / "bin", root / "gh.started"
-            bin_dir.mkdir()
-            write_executable(bin_dir / "gh", f'#!/bin/sh\n: > "{ready}"\nexec sleep 300\n')
-            env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-            env["PYTHONIOENCODING"] = "utf-8"
-            argv = [sys.executable, str(scripts / "pr_review.py"), "wait", "7"]
-            proc = subprocess.Popen(
-                [*argv, "--repo", "acme/widget", "--timeout", "600"],
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                start_new_session=True,
-            )
+            proc, ready = self.start_wait(Path(tmp), subprocess.PIPE)
             try:
                 wait_until_started(proc, ready)
                 time.sleep(0.5)
@@ -9063,6 +9128,55 @@ class TestWaitInterrupt(unittest.TestCase):
                 _, err = proc.communicate(timeout=60)
             finally:
                 end_group(proc)
+            self.assertEqual(-signal.SIGTERM, proc.returncode, err)
+            self.assertEqual("pr_review.py: interrupted by SIGTERM.\n", err)
+            assert_group_ended(proc.pid)
+
+    def test_a_second_sigterm_during_the_interrupted_line_is_passed_over(self) -> None:
+        """`timeout` over `uv run` sends SIGTERM twice, and the second one used to break the print.
+
+        Standard error is a pipe this case fills before the start, so the script's one line blocks
+        until the case drains it. The second signal goes once the script has killed the stand-in,
+        which follows `subprocess`'s own interrupt grace, so it lands inside the blocked print.
+        Popen leaves a child it killed on an interrupt unreaped, so the kill reads as a zombie.
+        """
+        read_end, write_end = os.pipe()
+        os.set_blocking(write_end, False)
+        filled = 0
+        with contextlib.suppress(BlockingIOError):
+            while True:
+                filled += os.write(write_end, b"x" * 512)
+        os.set_blocking(write_end, True)
+        with tempfile.TemporaryDirectory() as tmp, os.fdopen(read_end, "rb") as stream:
+            root = Path(tmp)
+            try:
+                proc, ready = self.start_wait(root, write_end)
+            finally:
+                os.close(write_end)
+            try:
+                wait_until_started(proc, ready)
+                time.sleep(0.5)
+                proc.send_signal(signal.SIGTERM)
+                stand_in = int((root / "gh.pid").read_text(encoding="utf-8"))
+                deadline = time.monotonic() + 60
+                while time.monotonic() < deadline:
+                    ps = ["ps", "-o", "stat=", "-p", str(stand_in)]
+                    found = subprocess.run(
+                        ps, capture_output=True, text=True, encoding="utf-8", check=False
+                    )
+                    state = found.stdout
+                    if state.strip()[:1] in ("Z", ""):
+                        break
+                    time.sleep(0.05)
+                else:
+                    self.fail("the script never killed the stand-in")
+                time.sleep(0.5)
+                proc.send_signal(signal.SIGTERM)
+                self.assertEqual(filled, len(stream.read(filled)))
+                proc.communicate(timeout=60)
+            finally:
+                end_group(proc)
+            err = stream.read().decode("utf-8")
             self.assertEqual(-signal.SIGTERM, proc.returncode, err)
             self.assertEqual("pr_review.py: interrupted by SIGTERM.\n", err)
             assert_group_ended(proc.pid)

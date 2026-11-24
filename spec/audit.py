@@ -16,7 +16,6 @@ A shallow hub clone makes a sweep report one ERROR per repo, and `--issue` exits
 """
 
 import argparse
-import base64
 import fnmatch
 import functools
 import hashlib
@@ -58,7 +57,9 @@ from fidelity_text import (
 )
 from secret_names import (  # noqa: F401  # re-exported, since the tests and helpers name them on audit
     EMPTY_TREE_SHA,
+    blob_reader,
     compare_stores,
+    contents_text,
     coverage_candidate_types,
     coverage_claiming_types,
     coverage_types,
@@ -1035,51 +1036,23 @@ def driftnote_findings(entry, spec, open_count):
                 continue
             owner, in_catalog = catalog_owner(spec, cid)
             if not (in_catalog or registered_check(cid)):
-                out.append(
-                    (
-                        "DRIFT",
-                        f"registry: driftNote names check '{cid}', which neither spec/checks.json nor spec/project-types.json defines - fix the id or drop the note: {quoted}",
-                    )
-                )
+                why = "which neither spec/checks.json nor spec/project-types.json defines - fix the id or drop the note"
             elif not in_catalog:
-                out.append(
-                    (
-                        "DRIFT",
-                        f"registry: driftNote names check '{cid}', which this audit evaluates (spec/checks.json) - delete the note once that check passes: {quoted}",
-                    )
-                )
+                why = "which this audit evaluates (spec/checks.json) - delete the note once that check passes"
             elif owner and owner not in declared_types(entry):
-                out.append(
-                    (
-                        "DRIFT",
-                        f"registry: driftNote names check '{cid}', whose type '{owner}' this repo does not declare: {quoted}",
-                    )
-                )
+                why = f"whose type '{owner}' this repo does not declare"
             else:
-                out.append(
-                    (
-                        "DRIFT",
-                        f"registry: driftNote names check '{cid}', which this audit does not evaluate by id (AUDIT.md section 4) - judge it by hand and delete the note once it passes: {quoted}",
-                    )
-                )
+                why = "which this audit does not evaluate by id (AUDIT.md section 4) - judge it by hand and delete the note once it passes"
+            out.append(("DRIFT", f"registry: driftNote names check '{cid}', {why}: {quoted}"))
         marker = next(
             (w for w in PENDING_MARKERS if re.search(rf"\b{re.escape(w)}\b", note, re.IGNORECASE)),
             None,
         )
-        if marker and not open_count:
-            out.append(
-                (
-                    "DRIFT",
-                    f"registry: driftNote says '{marker}' but the audit is clean - verify and reconcile: {quoted}",
-                )
-            )
-        elif marker:
-            out.append(
-                (
-                    "DRIFT",
-                    f"registry: driftNote says '{marker}' while {open_count} finding(s) are open - confirm it describes one of them rather than closed work: {quoted}",
-                )
-            )
+        if marker:
+            why = f"while {open_count} finding(s) are open - confirm it describes one of them rather than closed work"
+            if not open_count:
+                why = "but the audit is clean - verify and reconcile"
+            out.append(("DRIFT", f"registry: driftNote says '{marker}' {why}: {quoted}"))
     return out
 
 
@@ -1271,6 +1244,7 @@ def split_jobs(text):
     }
 
 
+PULL_REQUEST_TYPES = {"opened", "synchronize", "reopened"}
 # A job name yielding its first string only on a pull_request run, the shape WORKFLOW.md D1.5 gives a ruleset-bound name.
 # It matches the tight form _strip_unquoted_space gives, which leaves the quoted names intact.
 PR_ONLY_NAME = re.compile(r"\$\{\{github\.event_name=='pull_request'&&'([^']*)'\|\|'([^']*)'\}\}")
@@ -1285,6 +1259,40 @@ def workflow_events(doc):
     return {str(event) for event in on} if isinstance(on, (dict, list)) else {str(on)}
 
 
+def job_names(jobs):
+    """`(names, matches)` over the jobs posting their own `name:`, which a `uses:` call does not, and their PR_ONLY_NAME matches."""
+    names = {
+        key: node.value
+        for key, job in jobs.items()
+        if "uses" not in _mapping(job)
+        if isinstance(node := _mapping(job).get("name"), yaml.ScalarNode)
+    }
+    matches = {
+        key: m
+        for key, v in names.items()
+        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v)))
+    }
+    return names, matches
+
+
+def posts_check(text, name, branch):
+    """Whether every pull request into `branch` runs the workflow `text` with a job posting the check `name`."""
+    root = _compose(text)
+    if "pull_request" not in workflow_events(_plain(root) if root is not None else None):
+        return False
+    trigger = _mapping(_mapping(_mapping(root).get("on")).get("pull_request"))
+    want, skip = (_plain_list(trigger.get(key)) for key in ("branches", "branches-ignore"))
+    if any(p.startswith("!") for p in want) or any(fnmatch.fnmatchcase(branch, p) for p in skip):
+        return False
+    kinds = set(_plain_list(trigger.get("types"))) if "types" in trigger else PULL_REQUEST_TYPES
+    if "branches" in trigger and not any(fnmatch.fnmatchcase(branch, p) for p in want):
+        return False
+    if trigger.keys() & {"paths", "paths-ignore"} or not PULL_REQUEST_TYPES <= kinds:
+        return False
+    names, matches = job_names(_mapping(_mapping(root).get("jobs")))
+    return name in {matches[key][1] if key in matches else v for key, v in names.items()}
+
+
 def check_interface(path, contract, text):
     """DRIFT where a workflow breaks its fixed contract by name and wiring, never its body (spec/fidelity-model.md)."""
     root, parsed = _yaml(text, compose=True)
@@ -1296,16 +1304,7 @@ def check_interface(path, contract, text):
         if k not in jobs:
             findings.append(("DRIFT", f"interface: {path} missing required job '{k}'"))
     name = contract.get("requiredCheckName")
-    names = {
-        key: node.value
-        for key, job in jobs.items()
-        if isinstance(node := _mapping(job).get("name"), yaml.ScalarNode)
-    }
-    matches = {
-        key: m
-        for key, v in names.items()
-        if (m := PR_ONLY_NAME.fullmatch(_strip_unquoted_space(v)))
-    }
+    names, matches = job_names(jobs)
     gated = {m[1] for m in matches.values() if m[1] != m[2]}
     # Each job is its own finding, since neither a gated job nor a missing one excuses another yielding the name off a pull_request run.
     events = workflow_events(_plain(root) if root is not None else None)
@@ -1317,28 +1316,16 @@ def check_interface(path, contract, text):
         and (matches[key][2] if key in matches else value) == name
     ]
     if name and events and "pull_request" not in events:
-        findings.append(
-            (
-                "DRIFT",
-                f"interface: {path} has no pull_request trigger, so no pull request run posts the ruleset-bound check '{name}' with that run's gates. Add a pull_request trigger (WORKFLOW.md D1.5)",
-            )
-        )
+        untriggered = f"interface: {path} has no pull_request trigger, so no pull request run posts the ruleset-bound check '{name}' with that run's gates. Add a pull_request trigger (WORKFLOW.md D1.5)"
+        findings.append(("DRIFT", untriggered))
     # An expression naming the check on every event is already its job's off-PR finding where another event triggers the workflow.
     every_event = any(m[1] == m[2] == name for m in matches.values())
     if name and name not in gated and name not in names.values() and not (off_pr and every_event):
-        findings.append(
-            (
-                "DRIFT",
-                f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives",
-            )
-        )
+        unnamed = f"interface: {path} names the ruleset-bound check '{name}' neither as a literal job name nor through the pull_request-only expression WORKFLOW.md D1.5 gives"
+        findings.append(("DRIFT", unnamed))
     for key in off_pr:
-        findings.append(
-            (
-                "DRIFT",
-                f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)",
-            )
-        )
+        off_run = f"interface: {path} job '{key}' is named '{name}' on a run other than pull_request, so a run the pull request did not start can post the required check on its head (WORKFLOW.md D1.5)"
+        findings.append(("DRIFT", off_run))
     job_views = {job: f"  {job}:\n{code_view(node, 2)}" for job, node in jobs.items()}
     event_types = [
         str(t)
@@ -1850,16 +1837,6 @@ def intent_ref(item, path):
     return path, None
 
 
-def contents_text(content):
-    """The decoded text of a contents API response, or None where it holds no inline file content.
-
-    An empty file decodes to an empty string.
-    """
-    if not isinstance(content, dict) or content.get("encoding") != "base64":
-        return None
-    return base64.b64decode(content["content"]).decode("utf-8", "replace")
-
-
 def read_baseline_file(slug, ref, path):
     """A baseline file's contents response at `ref`, a branch or a commit, or None where it is absent."""
     return gh(f"repos/{slug}/contents/{path}?ref={ref}", ok404=True)
@@ -2071,6 +2048,7 @@ class Run:
     head: Any = None
     findings: list = field(default_factory=list)
     content: dict = field(default_factory=dict)
+    projects: dict = field(default_factory=dict)
 
     @functools.cached_property
     def hub(self):
@@ -2094,7 +2072,17 @@ class Run:
 
     @functools.cached_property
     def coverage_types(self):
-        return coverage_types(self.spec["secrets"], self.entry, self.tree)
+        return coverage_types(self.spec["secrets"], self.entry, self.tree, self.read_project)
+
+    @functools.cached_property
+    def blob_text(self):
+        return blob_reader(self.blobs or {}, lambda sha: gh(f"repos/{self.slug}/git/blobs/{sha}"))
+
+    def read_project(self, path):
+        """A C# project's text at the blob the tree listing named, read once per run, for the coverage detection."""
+        if path not in self.projects:
+            self.projects[path] = self.blob_text(path)
+        return self.projects[path]
 
     @functools.cached_property
     def baseline(self):
@@ -2130,6 +2118,12 @@ class Run:
     def read_text(self, path):
         url = f"repos/{self.slug}/contents/{urllib.parse.quote(path)}?ref={self.ref}"
         return contents_text(gh(url))
+
+    def branch_workflow(self, branch):
+        """The pull request workflow's text at `branch`'s head, None where the branch or the file is absent."""
+        head = {"main": self.main, "develop": self.develop}.get(branch)
+        sha = head and head["commit"]["sha"]
+        return sha and contents_text(read_baseline_file(self.slug, sha, WORKFLOW_MODEL_CALLER))
 
     def unread(self, family, path, purpose):
         return (
@@ -2221,24 +2215,16 @@ def check_branch_drift(run):
         for name, t in trees.items()
     }
     behind, diverged = classify_branch_drift(objs["base"], objs["main"], objs["develop"])
-    findings = []
-    if behind:
-        shown = ", ".join(behind[:8]) + (" ..." if len(behind) > 8 else "")
-        findings.append(
-            (
-                "DRIFT",
-                f"branch: {len(behind)} main-side path change(s) develop is behind on (forward-sync needed): {shown}",
-            )
+    behind_why = "main-side path change(s) develop is behind on (forward-sync needed)"
+    diverged_why = "path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main)"
+    return [
+        (
+            "DRIFT",
+            f"branch: {len(paths)} {why}: {', '.join(paths[:8])}{' ...' if len(paths) > 8 else ''}",
         )
-    if diverged:
-        shown = ", ".join(diverged[:8]) + (" ..." if len(diverged) > 8 else "")
-        findings.append(
-            (
-                "DRIFT",
-                f"branch: {len(diverged)} path(s) changed on both main and develop since the merge-base - reconcile before promoting (develop may already supersede main): {shown}",
-            )
-        )
-    return findings
+        for paths, why in ((behind, behind_why), (diverged, diverged_why))
+        if paths
+    ]
 
 
 def check_settings_general(run):
@@ -2252,12 +2238,8 @@ def check_settings_general(run):
         if key in expected and run.live.get(key) != expected[key]
     ]
     if run.main is not None and run.live.get("default_branch") != "main":
-        findings.append(
-            (
-                "DEFECT",
-                f"settings: default_branch is {run.live.get('default_branch')}, expected main",
-            )
-        )
+        wrong = f"settings: default_branch is {run.live.get('default_branch')}, expected main"
+        findings.append(("DEFECT", wrong))
     return findings
 
 
@@ -2268,6 +2250,31 @@ def expected_rulesets(registry_data, entry, model):
     sources = policy.ruleset_sources(model, config)
     paths = {branch: path.relative_to(ROOT).as_posix() for branch, path in sources.items()}
     return paths, policy.rulesets(registry_data, entry["name"], model, config)
+
+
+def stale_pull_request_check(entry, sources, read):
+    """DRIFT where `pullRequestCheck: false` drops a check each branch's source payload requires, and `read` finds it posted."""
+    if entry.get("pullRequestCheck") is not False:
+        return []
+    gated = {
+        branch: [
+            check["context"]
+            for rule in load(path)["rules"]
+            if rule.get("type") == "required_status_checks"
+            for check in rule["parameters"]["required_status_checks"]
+        ]
+        for branch, path in sources.items()
+    }
+    gated = {branch: names for branch, names in gated.items() if names}
+    for branch, names in gated.items():
+        text = read(branch)
+        if text is None or not all(posts_check(text, name, branch) for name in names):
+            return []
+    if not gated:
+        return []
+    checks = ", ".join(sorted({f"'{name}'" for names in gated.values() for name in names}))
+    stale = f"registry: pullRequestCheck is false, yet {WORKFLOW_MODEL_CALLER} on {' and '.join(gated)} posts {checks} on a pull request run. Drop the field and apply the rulesets again, so they require the check"
+    return [("DRIFT", stale)]
 
 
 def check_rulesets_payload(run):
@@ -2287,16 +2294,11 @@ def check_rulesets_payload(run):
             )
         live_rs = gh(f"repos/{run.slug}/rulesets/{ids[0]}")
         if normalize_ruleset(live_rs) != normalize_ruleset(payload):
-            source = sources[name]
-            findings.append(
-                (
-                    "DEFECT",
-                    f"ruleset: {name} diverges from the payload configure.sh composes from {source} (normalized diff)",
-                )
-            )
+            diverged = f"ruleset: {name} diverges from the payload configure.sh composes from {sources[name]} (normalized diff)"
+            findings.append(("DEFECT", diverged))
     for stray in [r["name"] for r in live_list if r["name"] not in expect]:
         findings.append(("DRIFT", f"ruleset: stray ruleset '{stray}'"))
-    return findings
+    return findings + stale_pull_request_check(run.entry, sources, run.branch_workflow)
 
 
 def check_python_directories_declared(run):
@@ -2327,7 +2329,7 @@ def check_secrets_names(run):
     for store in ("actions", "dependabot"):
         data = gh(f"repos/{run.slug}/{store}/secrets?per_page=100")
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
-    required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree)
+    required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree, run.read_project)
     return [f for f in compare_stores(required, forbidden, stores) if f[0] != "OK"]
 
 
@@ -2683,7 +2685,9 @@ def check_readme_sections(run):
 
 def check_readme_shields(run):
     text = _readme(run)
-    return [] if text is None else readme_shield_findings(text, run.spec["readme"], run.entry)
+    if text is None:
+        return []
+    return readme_shield_findings(text, run.spec["readme"], run.entry, run.coverage_types)
 
 
 def check_readme_links(run):

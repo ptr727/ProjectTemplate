@@ -8,6 +8,7 @@ So nothing reaches GitHub and no real secrets directory is touched.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import io
 import json
@@ -32,6 +33,11 @@ SECRETS: dict[str, Any] = json.loads((HUB / "spec" / "secrets.json").read_text(e
 
 TESTED = {"tests/test_a.py", "pyproject.toml"}
 UNTESTED = {"src/pkg/__init__.py", "pyproject.toml"}
+
+TEST_PROJECT = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup></Project>'
+LIBRARY = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+CSHARP_TESTED = {"src/App/App.csproj": LIBRARY, "src/appunittest.csproj": TEST_PROJECT}
+CSHARP_NAMED_ONLY = {"src/App/App.csproj": LIBRARY, "tests/App.Tests/App.Tests.csproj": LIBRARY}
 
 
 def entry(**fields: Any) -> dict[str, Any]:
@@ -127,11 +133,23 @@ class ResolveSecretStoresCase(unittest.TestCase):
 class AuditAgreementCase(unittest.TestCase):
     """The audit's secret check and the provisioning plan are one resolver, so they cannot disagree."""
 
-    def audit_missing(self, e: dict[str, Any], tree: set[str]) -> dict[str, set[str]]:
-        run = SimpleNamespace(
-            spec={"secrets": SECRETS}, entry=e, tree=tree, slug="owner/ExampleRepo"
-        )
-        with unittest.mock.patch.object(audit, "gh", return_value={"secrets": []}):
+    def audit_missing(
+        self, e: dict[str, Any], tree: set[str], projects: dict[str, str] | None = None
+    ) -> dict[str, set[str]]:
+        """The names the audit reports missing, its tree listed and its projects read through the audit's own readers."""
+
+        def answer(path: str, ok404: bool = False) -> Any:
+            if "/git/trees/" in path:
+                listing = [{"type": "blob", "path": p, "sha": f"sha-{p}"} for p in tree]
+                return {"tree": listing, "truncated": False}
+            if "/git/blobs/sha-" in path:
+                text = (projects or {})[path.partition("/git/blobs/sha-")[2]]
+                return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
+            return {"secrets": []}
+
+        head = {"commit": {"sha": "c1", "commit": {"tree": {"sha": TREE_SHA}}}}
+        run = audit.Run(e, {"secrets": SECRETS}, "owner/ExampleRepo", "main", {}, None, None, head)
+        with unittest.mock.patch.object(audit, "gh", answer):
             findings = audit.check_secrets_names(run)
         missing: dict[str, set[str]] = {"actions": set(), "dependabot": set()}
         for severity, text in findings:
@@ -157,6 +175,28 @@ class AuditAgreementCase(unittest.TestCase):
                         from_plan[store].add(row["name"])
                 self.assertEqual(self.audit_missing(e, tree), from_plan)
 
+    def test_the_audit_and_the_resolver_read_one_csharp_tree_the_same_way(self) -> None:
+        for label, projects, owed in (
+            ("a project saying it is a test project", CSHARP_TESTED, True),
+            ("a project only named as one", CSHARP_NAMED_ONLY, False),
+        ):
+            with self.subTest(label):
+                e = entry(types=["csharp"])
+                gh = FakeGh(tuple(projects), projects=projects)
+                with unittest.mock.patch.object(
+                    resolve_secrets.gh_graphql_module(), "run_subprocess", gh
+                ):
+                    listed = resolve_secrets.read_tree("owner/ExampleRepo", "main")
+                    plan = secret_names.secret_plan(
+                        SECRETS, e, listed.paths, "ExampleRepo", None, listed.read_project
+                    )
+                from_plan: dict[str, set[str]] = {"actions": set(), "dependabot": set()}
+                for row in plan["rows"]:
+                    for store in row["stores"]:
+                        from_plan[store].add(row["name"])
+                self.assertEqual(self.audit_missing(e, set(projects), projects), from_plan)
+                self.assertEqual("CODECOV_TOKEN" in from_plan["actions"], owed)
+
     def test_an_empty_root_commit_reads_as_the_same_tree_in_the_audit_and_the_resolver(
         self,
     ) -> None:
@@ -165,7 +205,7 @@ class AuditAgreementCase(unittest.TestCase):
             audited = audit.repo_tree("owner/ExampleRepo", empty_head)
         gh = FakeGh(("tests/test_a.py",), tree_sha=secret_names.EMPTY_TREE_SHA)
         with unittest.mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh):
-            resolved = resolve_secrets.read_tree("owner/ExampleRepo", "main")
+            resolved = resolve_secrets.read_tree("owner/ExampleRepo", "main").paths
         self.assertEqual(audited, resolved)
         assert audited is not None
         plan = secret_names.secret_plan(SECRETS, entry(), resolved, "ExampleRepo")
@@ -183,7 +223,11 @@ class AuditAgreementCase(unittest.TestCase):
             "dependabot": {"CODEGEN_APP_PRIVATE_KEY", "CODECOV_TOKEN"},
         }
         run = SimpleNamespace(
-            spec={"secrets": SECRETS}, entry=e, tree=TESTED, slug="owner/ExampleRepo"
+            spec={"secrets": SECRETS},
+            entry=e,
+            tree=TESTED,
+            slug="owner/ExampleRepo",
+            read_project=lambda path: None,
         )
 
         def answer(path: str, ok404: bool = False) -> Any:
@@ -199,6 +243,7 @@ class AuditAgreementCase(unittest.TestCase):
 
     def test_the_names_moved_out_of_audit_are_still_importable_from_it(self) -> None:
         for moved in (
+            "contents_text",
             "in_test_directory",
             "is_python_test_module",
             "is_csharp_test_project",
@@ -263,6 +308,7 @@ class FakeGh:
     A spawned stub `gh` cannot, since Windows' CreateProcess finds only a `gh.exe`.
     The branch read answers tree_sha, TREE_SHA standing for any tree that holds files, and a tree read answers only for that SHA.
     GitHub answers a tree read of the empty tree with 404, so the stub does too.
+    Each blob's SHA is made from its path, and a blob read answers the text `projects` holds for that path.
     """
 
     def __init__(
@@ -274,8 +320,10 @@ class FakeGh:
         missing_gh: bool = False,
         branch_status: str | None = None,
         tree_sha: str = TREE_SHA,
+        projects: dict[str, str] | None = None,
     ) -> None:
         self.tree = tree
+        self.projects = projects or {}
         self.truncated = truncated
         self.tree_status = tree_status
         self.live = live or {}
@@ -302,10 +350,16 @@ class FakeGh:
             if sha != self.tree_sha or sha == secret_names.EMPTY_TREE_SHA:
                 return gh_failure("404")
             payload = {
-                "tree": [{"type": "blob", "path": p} for p in self.tree],
+                "tree": [{"type": "blob", "path": p, "sha": f"sha-{p}"} for p in self.tree],
                 "truncated": self.truncated,
             }
             return 0, json.dumps(payload), ""
+        if "/git/blobs/" in endpoint:
+            path = endpoint.partition("/git/blobs/sha-")[2]
+            if path not in self.projects:
+                return gh_failure("404")
+            content = base64.b64encode(self.projects[path].encode("utf-8")).decode("ascii")
+            return 0, json.dumps({"content": content, "encoding": "base64"}), ""
         store = endpoint.split("/")[-2]
         return 0, "".join(f"{n}\n" for n in self.live.get(store, ())), ""
 
@@ -356,6 +410,39 @@ class NamesCliCase(unittest.TestCase):
         self.assertIn("CODECOV_TOKEN", [r["name"] for r in json.loads(out)["rows"]])
         _, out, _, _ = self.run_names(registry, "ExampleRepo", FakeGh(("src/a.py",)))
         self.assertNotIn("CODECOV_TOKEN", [r["name"] for r in json.loads(out)["rows"]])
+
+    def test_the_csharp_projects_the_stub_serves_decide_codecov_by_their_text(self) -> None:
+        registry = {"repos": [entry(types=["csharp"])]}
+        for label, projects, owed in (
+            ("a project saying it is a test project", CSHARP_TESTED, True),
+            ("a project only named as one", CSHARP_NAMED_ONLY, False),
+        ):
+            with self.subTest(label):
+                gh = FakeGh(tuple(projects), projects=projects)
+                code, out, err, _ = self.run_names(registry, "ExampleRepo", gh)
+                self.assertEqual(code, 0, err)
+                names = [r["name"] for r in json.loads(out)["rows"]]
+                self.assertEqual("CODECOV_TOKEN" in names, owed)
+
+    def test_a_bare_path_set_reads_no_project_and_keeps_the_claim(self) -> None:
+        registry = {"repos": [entry(types=["csharp"])]}
+        gh = FakeGh(missing_gh=True)
+        with unittest.mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh):
+            plan = resolve_secrets.resolve_names(
+                SECRETS,
+                registry,
+                "ExampleRepo",
+                "owner/ExampleRepo",
+                lambda slug, branch: set(CSHARP_NAMED_ONLY),
+            )
+        self.assertIn("CODECOV_TOKEN", [r["name"] for r in plan["rows"]])
+        self.assertEqual(gh.calls, [])
+
+    def test_a_failed_project_read_exits_one_naming_the_repo(self) -> None:
+        gh = FakeGh(("src/App.csproj",))
+        code, _, err, _ = self.run_names({"repos": [entry(types=["csharp"])]}, "ExampleRepo", gh)
+        self.assertEqual(code, 1)
+        self.assertIn("owner/ExampleRepo", err)
 
     def test_a_path_holding_a_newline_stays_one_path(self) -> None:
         code, out, err, _ = self.run_names(

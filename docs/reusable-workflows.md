@@ -148,7 +148,6 @@ Adoptable since `2.0.338`. Each repo replaces the whole of its `.github/workflow
 - [x] Utilities: adopted on `develop` in ptr727/Utilities#451 at `78c081b`, merged 2026-08-30 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] Vantage-Config: adopted on `develop` in ptr727/Vantage-Config#19 at `e4fd8e2`, merged 2026-09-27 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [ ] AudioCleaner (carries no merge-bot today, takes the stub on its next standup or resync, since the manifest applies it to every repo)
-- [ ] DevKitCIoT (same)
 - [ ] EspDinIoT (same)
 - [x] Financial-Modeling (same): adopted on `develop` in ptr727/Financial-Modeling#116 at `66a550a`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
 - [x] HolidayLights (same): adopted on `develop` in ptr727/HolidayLights#15 at `28a714c`, merged 2026-10-24 and carried on `main`, its ground-truth branch, where `merge-bot-pull-request.yml` calls `merge-bot-task.yml` by pin.
@@ -180,7 +179,6 @@ The remaining repos are one checkbox each below. The sweep list is every catalog
 - [ ] EspDinIoT: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
 - [x] ESPHome-Config: adopted on `develop` in ptr727/ESPHome-Config#100 at `a21dfd7`, merged 2026-08-19 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [x] HomeAssistant-Config: adopted on `develop` in ptr727/HomeAssistant-Config#33 at `f980637`, merged 2026-08-20 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
-- [ ] DevKitCIoT: not yet adopted, its ground-truth branch carrying no hub `validate-task.yml` caller.
 - [x] MediaTools: adopted on `develop` in ptr727/MediaTools#32 at `7ed693e`, merged 2026-09-26 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.
 - [ ] AudioCleaner: Its `test-pull-request.yml` calls a local `validate-task.yml` copy rather than the hub's.
 - [x] Vantage-Config: adopted on `develop` in ptr727/Vantage-Config#19 at `e4fd8e2`, merged 2026-09-27 and carried on `main`, its ground-truth branch, where `test-pull-request.yml` calls `validate-task.yml` by pin.

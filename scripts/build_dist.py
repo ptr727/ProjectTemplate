@@ -417,33 +417,32 @@ def heading_body(lines, heading, key):
     """The lines under the one heading whose text case-folds to `heading`, up to the next heading at its level or above.
 
     Any level from two down. So a key can name a GOVERNANCE.md section, an AGENTS.md subsection, or
-    a section of a sibling skill with one vocabulary. Headings come from spec/fidelity_text.py,
-    which the fidelity checks also use. Only a top-level `#` heading counts. One inside a code block,
-    a blockquote, or a list item is content to both, and so is a setext heading.
+    a section of a sibling skill with one vocabulary. The region comes from spec/fidelity_text.py
+    `heading_regions`, which its `extract_anchored` also uses. Only a top-level `#` heading counts.
+    One inside a code block, a blockquote, or a list item is content to both, and so is a setext
+    heading.
     They match on the parsed text case-folded, so a re-cased heading still resolves. Two matches are
     two answers to one question, refused rather than resolved to the first. A body ends at any
     heading of its level or above, level one included. One that runs to the end of the file ends
-    before the file's trailing link-reference definitions instead, which belong to the whole document. A fidelity region ends only at the next
-    level-two heading.
+    before the file's trailing link-reference definitions instead, which belong to the whole
+    document. A manifest section, which spec/fidelity_text.py `sections` decides, ends only at the
+    next level-two heading.
     """
     reader = _fidelity_text()
     want = reader.section_key(heading)
     text = "\n".join(lines)
     # Every level, so a level-one heading ends a body, though a key names level two down.
     # That is because a level-one heading is a document's title rather than a section a skill would carry.
-    headings = [(h.line, h.level, reader.section_key(h.text)) for h in reader.headings(text)]
-    matches = [(index, depth) for index, depth, name in headings if name == want and depth > 1]
+    regions = reader.heading_regions(text, reader.section_key, want)
+    matches = [(h.line, end) for h, end in regions if h.level > 1]
     if not matches:
         raise ValueError(f"include {key!r}: no heading {heading.strip()!r} in its source")
     if len(matches) > 1:
         raise ValueError(
             f"include {key!r}: {len(matches)} headings match, so the region cannot choose one"
         )
-    start, depth = matches[0]
-    end = next(
-        (index for index, level, _ in headings if index > start and level <= depth), len(lines)
-    )
-    if end == len(lines):
+    start, end = matches[0]
+    if end is None:
         end = _trailing_definitions(lines, start, reader)
     blocks = [b for b in reader.code_blocks(text) if start < b.start < end]
     if any(b.fenced and not b.closed for b in blocks):

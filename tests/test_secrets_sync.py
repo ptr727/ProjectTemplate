@@ -61,16 +61,23 @@ def opt(argv: Sequence[str], flag: str) -> str:
     return argv[list(argv).index(flag) + 1]
 
 
-def unstamped(tags: object) -> tuple[str, ...]:
-    """The tags other than the content-time tag, which a push sets from the file's mtime."""
-    assert isinstance(tags, tuple)
-    return tuple(t for t in tags if not t.startswith(ss.CONTENT_PREFIX))
+CONTENT = f"{ss.CONTENT_FIELD}="
+ASSIGNMENT = re.compile(rf"{ss.SYNC_SECTION}\.([a-z]+)\[text\]=(.*)")
 
 
-def stamps(tags: object) -> list[str]:
-    """The content-time tags alone."""
-    assert isinstance(tags, tuple)
-    return [t for t in tags if t.startswith(ss.CONTENT_PREFIX)]
+def unstamped(fields: object) -> tuple[str, ...]:
+    """The `sync` fields other than the content time, which a push sets from the file's mtime.
+
+    The fake holds an item's `sync` fields as `label=value` strings, in order.
+    """
+    assert isinstance(fields, tuple)
+    return tuple(f for f in fields if not f.startswith(CONTENT))
+
+
+def stamps(fields: object) -> list[str]:
+    """The content-time fields alone."""
+    assert isinstance(fields, tuple)
+    return [f for f in fields if f.startswith(CONTENT)]
 
 
 def key_of(argv: Sequence[str]) -> tuple[str, ...]:
@@ -98,8 +105,9 @@ class FakeOp:
         )
         self.signin_token = "constructed-token"
         self.edit_moves_id = False
-        self.merge_tags = False
-        self.drop_content_tag = False
+        self.duplicate_fields = False
+        self.drop_content_field = False
+        self.section_labels = True
         self.archive_noop = False
         self.omit_updated = False
         self.signin_ambient = False
@@ -124,13 +132,16 @@ class FakeOp:
         vid: str,
         title: str,
         content: bytes,
-        tags: Sequence[str] = ("mode:0600",),
+        fields: Sequence[str] = ("mode=0600",),
         updated: str = "",
+        tags: Sequence[str] = (),
     ) -> str:
+        """Add an item whose `sync` section holds `fields`, each a `label=value` string."""
         iid = f"i{next(self.ids)}"
         self.items[vid][iid] = {
             "title": title,
             "content": content,
+            "fields": tuple(fields),
             "tags": tuple(tags),
             "updated_at": updated or self.stamp(),
         }
@@ -206,12 +217,58 @@ class FakeOp:
                     row["tags"] = list(tags) if isinstance(tags, tuple) else tags
                 rows.append(row)
             return ok(json.dumps(rows).encode())
+        if key == ("item", "get"):
+            got = vault.get(argv[2])
+            if got is None:
+                return FAILED
+            fields, tags = got["fields"], got["tags"]
+            assert isinstance(fields, tuple) and isinstance(tags, tuple)
+            listed: list[dict[str, object]] = [
+                {"id": "notesPlain", "type": "STRING", "purpose": "NOTES", "label": "notesplain"}
+            ]
+            for n, entry in enumerate(fields):
+                label, _, value = entry.partition("=")
+                listed.append(
+                    {
+                        "id": f"f{n}",
+                        "type": "STRING",
+                        "label": label,
+                        "value": value,
+                        "section": {"id": "constructed-section", "label": ss.SYNC_SECTION},
+                    }
+                )
+            listed.append(
+                {
+                    "id": "other",
+                    "type": "STRING",
+                    "label": ss.MODE_FIELD,
+                    "value": "0777",
+                    "section": {"id": "other-section", "label": "other"},
+                }
+            )
+            if not self.section_labels:
+                for entry in listed:
+                    section = entry.get("section")
+                    if isinstance(section, dict):
+                        section.pop("label")
+            sections = [
+                {"id": "constructed-section", "label": ss.SYNC_SECTION},
+                {"id": "other-section", "label": "other"},
+            ]
+            body = {
+                "id": argv[2],
+                "title": got["title"],
+                "tags": list(tags),
+                "sections": sections,
+                "fields": listed,
+            }
+            return ok(json.dumps(body).encode())
         if key == ("document", "create") and self.drop_create:
             return ok()
         if key == ("document", "create"):
-            tags = opt(argv, "--tags").split(",") if "--tags" in argv else []
+            assert "--tags" not in argv, argv
             self.add_item(
-                opt(argv, "--vault"), opt(argv, "--title"), Path(argv[2]).read_bytes(), tags
+                opt(argv, "--vault"), opt(argv, "--title"), Path(argv[2]).read_bytes(), ()
             )
             return ok()
         if key == ("document", "edit"):
@@ -225,13 +282,20 @@ class FakeOp:
             assert isinstance(content, bytes)
             return ok(content + (b"corrupted" if self.corrupt else b""))
         if key == ("item", "edit"):
-            tags = tuple(opt(argv, "--tags").split(","))
-            previous = vault[argv[2]]["tags"]
-            if self.merge_tags and isinstance(previous, tuple):
-                tags = (*previous, *tags)
-            if self.drop_content_tag:
-                tags = tuple(t for t in tags if not t.startswith(ss.CONTENT_PREFIX))
-            vault[argv[2]].update(tags=tags, updated_at=self.stamp())
+            assert "--tags" not in argv, argv
+            fields = vault[argv[2]]["fields"]
+            assert isinstance(fields, tuple)
+            for arg in argv[3:]:
+                match = ASSIGNMENT.fullmatch(arg)
+                if match is None:
+                    continue
+                label, value = match.groups()
+                if self.drop_content_field and label == ss.CONTENT_FIELD:
+                    continue
+                if not self.duplicate_fields:
+                    fields = tuple(f for f in fields if f.partition("=")[0] != label)
+                fields = (*fields, f"{label}={value}")
+            vault[argv[2]].update(fields=fields, updated_at=self.stamp())
             if self.edit_moves_id:
                 vault[f"i{next(self.ids)}"] = vault.pop(argv[2])
             return ok()
@@ -687,15 +751,16 @@ class TestPush(Case):
         vid = next(iter(self.fake.vaults))
         item = self.item(vid, ".secrets/alpha_api_token")
         self.assertEqual(item["content"], SECRET)
-        self.assertEqual(unstamped(item["tags"]), ("mode:0640",))
+        self.assertEqual(unstamped(item["fields"]), ("mode=0640",))
         self.assertEqual(len(self.asked), 1)
         self.assertIn(("document", "get"), self.fake.keys())
         self.assert_quiet(out, err)
 
-    def test_an_update_edits_in_place_and_replaces_only_its_mode_and_content_tags(self) -> None:
+    def test_an_update_edits_in_place_and_writes_its_sync_fields_and_no_tag(self) -> None:
         vid = self.vault()
+        tags = ("keep-me", "mode:0600", f"mtime:{EARLY}")
         iid = self.fake.add_item(
-            vid, ".secrets/alpha_api_token", b"old\n", ("keep-me", "mode:0600")
+            vid, ".secrets/alpha_api_token", b"old\n", ("mode=0600",), tags=tags
         )
         self.write(".secrets/alpha_api_token", mode=0o600)
         os.chmod(self.home / ".secrets/alpha_api_token", 0o640)
@@ -703,10 +768,122 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(list(self.fake.items[vid]), [iid])
         self.assertEqual(self.fake.items[vid][iid]["content"], SECRET)
-        self.assertEqual(unstamped(self.fake.items[vid][iid]["tags"]), ("keep-me", "mode:0640"))
+        self.assertEqual(unstamped(self.fake.items[vid][iid]["fields"]), ("mode=0640",))
+        self.assertEqual(self.fake.items[vid][iid]["tags"], tags)
         edit = [argv for argv in self.fake.writes() if key_of(argv) == ("document", "edit")]
         self.assertEqual(edit[0][2], iid)
         self.assert_quiet(out, err)
+
+    def test_a_create_writes_the_document_then_its_sync_fields(self) -> None:
+        path = self.write(".secrets/alpha", mode=0o640)
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(
+            [key_of(a) for a in self.fake.writes()],
+            [("vault", "create"), ("document", "create"), ("item", "edit")],
+        )
+        item = self.item(next(iter(self.fake.vaults)), ".secrets/alpha")
+        self.assertEqual(unstamped(item["fields"]), ("mode=0640",))
+        self.assertEqual(len(stamps(item["fields"])), 1)
+        self.assertEqual(item["tags"], ())
+
+    def test_a_field_write_failing_after_a_create_names_its_recovery(self) -> None:
+        path = self.write(".secrets/alpha")
+        self.fake.fail_before.add(("item", "edit"))
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 2)
+        self.assertIn("push it again by name with --mode", err)
+        self.fake.fail_before.clear()
+        code, _, err = self.push()
+        self.assertEqual(code, 1)
+        self.assertIn("by name with --mode", err)
+        code, _, err = self.push("--mode", "0600", str(path))
+        self.assertEqual(code, 0, err)
+        item = self.item(next(iter(self.fake.vaults)), ".secrets/alpha")
+        self.assertEqual(unstamped(item["fields"]), ("mode=0600",))
+
+    def test_every_way_a_create_can_stop_before_its_fields_names_its_recovery(self) -> None:
+        recovery = "push it again by name with --mode"
+        for case in (
+            "create-unconfirmed",
+            "create-interrupted",
+            "relist-fails",
+            "field-write-fails",
+            "interrupt",
+        ):
+            with self.subTest(case=case):
+                fake = FakeOp()
+                path = self.write(".secrets/alpha")
+                if case == "create-unconfirmed":
+                    fake.fail_after.add(("document", "create"))
+                    fake.fail_before.add(("item", "list"))
+                elif case == "create-interrupted":
+                    fake.raise_on[("document", "create")] = KeyboardInterrupt()
+                elif case == "relist-fails":
+                    plain = fake.dispatch
+
+                    def failing(
+                        key: tuple[str, ...],
+                        argv: list[str],
+                        env: Mapping[str, str],
+                        fake: FakeOp = fake,
+                        plain: object = plain,
+                    ) -> ss.Outcome:
+                        if key == ("document", "create"):
+                            fake.fail_before.add(("item", "list"))
+                        assert callable(plain)
+                        result = plain(key, argv, env)
+                        assert isinstance(result, ss.Outcome)
+                        return result
+
+                    fake.dispatch = failing  # type: ignore[method-assign]
+                elif case == "field-write-fails":
+                    fake.fail_before.add(("item", "edit"))
+                else:
+                    fake.raise_on[("item", "edit")] = KeyboardInterrupt()
+                err = io.StringIO()
+                with (
+                    unittest.mock.patch.object(ss, "run_op", fake),
+                    unittest.mock.patch.object(sys, "stderr", err),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    try:
+                        code = ss.main(["push", "--bucket", "alpha", str(path)])
+                    except KeyboardInterrupt:
+                        code = None
+                self.assertEqual(
+                    code, None if case.endswith("interrupted") or case == "interrupt" else 2
+                )
+                self.assertIn(recovery, err.getvalue())
+
+    def test_a_field_naming_its_section_by_id_alone_is_read_through_the_sections(self) -> None:
+        self.fake.section_labels = False
+        vid = self.vault()
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0640", f"mtime={EARLY}"))
+        path = self.write(".secrets/alpha")
+        code, _, err = self.push(str(path))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["fields"]), ("mode=0600",))
+        code, out, err = self.run_main("status", "--bucket", "alpha")
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out, r"same\s+\.secrets/alpha")
+
+    def test_an_item_carrying_only_tags_is_refused_until_its_fields_exist(self) -> None:
+        """No tag is read, so an item whose metadata is still in tags refuses like one with none."""
+        vid = self.vault()
+        tags = ("mode:0600", f"mtime:{EARLY}")
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, (), tags=tags)
+        self.write(".secrets/alpha")
+        for argv in (
+            ("pull", "--bucket", "alpha", "--home", str(self.home)),
+            ("status", "--bucket", "alpha"),
+            ("push", "--bucket", "alpha"),
+        ):
+            with self.subTest(argv=argv[0]):
+                code, _, err = self.run_main(*argv)
+                self.assertEqual(code, 1, err)
+                self.assertIn("0 sync.mode field(s)", err)
+        self.assertEqual(self.fake.writes(), [])
 
     def test_no_paths_refreshes_only_members_that_differ(self) -> None:
         vid = self.vault()
@@ -741,7 +918,7 @@ class TestPush(Case):
             with self.subTest(content=content):
                 fake = FakeOp()
                 vid = fake.add_vault("Secrets alpha")
-                iid = fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+                iid = fake.add_item(vid, ".secrets/alpha", SECRET, ("mode=0600", f"mtime={EARLY}"))
                 self.write(".secrets/alpha", content, mode)
 
                 def elsewhere(
@@ -758,7 +935,7 @@ class TestPush(Case):
                 self.assertEqual(code, 1, err)
                 self.assertIn("changed remotely after the plan was printed", err)
                 self.assertEqual(fake.writes(), [])
-                self.assertEqual(fake.items[vid][iid]["tags"], ("mode:0600", f"mtime:{EARLY}"))
+                self.assertEqual(fake.items[vid][iid]["fields"], ("mode=0600", f"mtime={EARLY}"))
 
     def test_an_item_archived_or_created_during_the_prompt_is_refused(self) -> None:
         vid = self.vault()
@@ -785,9 +962,9 @@ class TestPush(Case):
         self.assertIn("changed remotely", err)
         self.assertEqual(self.fake.writes(), [])
 
-    def test_a_tag_write_failing_after_the_content_names_its_recovery(self) -> None:
+    def test_a_field_write_failing_after_the_content_names_its_recovery(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{EARLY}"))
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0600", f"mtime={EARLY}"))
         path = self.write(".secrets/alpha")
         self.fake.fail_before.add(("item", "edit"))
         code, _, err = self.push(str(path))
@@ -802,19 +979,20 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         mtime = ss.read_local(path).mtime
         assert mtime is not None
-        (tag,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
-        self.assertGreaterEqual(ss.datetime.datetime.fromisoformat(tag[len("mtime:") :]), mtime)
+        (field,) = stamps(self.item(vid, ".secrets/alpha")["fields"])
+        self.assertGreaterEqual(ss.datetime.datetime.fromisoformat(field[len(CONTENT) :]), mtime)
 
     def test_a_named_forced_push_never_moves_a_content_time_backward(self) -> None:
         vid = self.vault()
         self.fake.add_item(
-            vid, ".secrets/alpha", SECRET, ("mode:0600", "mtime:2099-01-01T00:00:00Z")
+            vid, ".secrets/alpha", SECRET, ("mode=0600", "mtime=2099-01-01T00:00:00Z")
         )
         path = self.write(".secrets/alpha")
         code, _, err = self.push("--overwrite-newer", str(path))
         self.assertEqual(code, 0, err)
         self.assertEqual(
-            stamps(self.item(vid, ".secrets/alpha")["tags"]), ["mtime:2099-01-01T00:00:00.000001Z"]
+            stamps(self.item(vid, ".secrets/alpha")["fields"]),
+            ["mtime=2099-01-01T00:00:00.000001Z"],
         )
 
     def test_every_way_an_update_can_stop_midway_names_its_recovery(self) -> None:
@@ -823,7 +1001,7 @@ class TestPush(Case):
             with self.subTest(case=case):
                 fake = FakeOp()
                 vid = fake.add_vault("Secrets alpha")
-                fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{EARLY}"))
+                fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0600", f"mtime={EARLY}"))
                 path = self.write(".secrets/alpha")
                 if case == "document-edit-landed":
                     fake.fail_after.add(("document", "edit"))
@@ -862,9 +1040,9 @@ class TestPush(Case):
                 if case == "relist-fails":
                     self.assertIn("op item edit failed", err.getvalue())
 
-    def test_a_retag_whose_tag_write_fails_warns_of_no_lost_content(self) -> None:
+    def test_a_fields_only_write_that_fails_warns_of_no_lost_content(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode=0600", f"mtime={EARLY}"))
         self.write(".secrets/alpha", mode=0o640)
         self.fake.fail_before.add(("item", "edit"))
         code, _, err = self.push()
@@ -952,7 +1130,7 @@ class TestPush(Case):
         self.assertEqual(code, 1, err)
         self.assertIn("collide case-insensitively", err)
 
-    def test_a_tag_write_reported_failed_but_landed_is_verified(self) -> None:
+    def test_a_field_write_reported_failed_but_landed_is_verified(self) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", b"old\n")
         path = self.write(".secrets/alpha")
@@ -1038,31 +1216,31 @@ class TestPush(Case):
         self.assertEqual(code, 0, err)
         self.assertIn(("document", "create"), [key_of(a) for a in self.fake.writes()])
 
-    def test_only_a_differing_mode_is_a_retag(self) -> None:
+    def test_only_a_differing_mode_is_a_fields_only_write(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600",))
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode=0600",))
         self.write(".secrets/alpha", mode=0o640)
         code, _, err = self.push()
         self.assertEqual(code, 0, err)
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("item", "edit")])
-        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0640",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["fields"]), ("mode=0640",))
 
     def test_a_mode_only_change_is_planned_without_a_time_check(self) -> None:
         vid = self.vault()
         self.fake.add_item(
-            vid, ".secrets/alpha", SECRET, ("mode:0600",), updated="2099-01-01T00:00:00Z"
+            vid, ".secrets/alpha", SECRET, ("mode=0600",), updated="2099-01-01T00:00:00Z"
         )
         self.write(".secrets/alpha", mode=0o644)
         code, out, err = self.push()
         self.assertEqual(code, 0, err)
-        self.assertRegex(out, r"retag\s+\.secrets/alpha")
+        self.assertRegex(out, r"fields\s+\.secrets/alpha")
         self.assertEqual(len(self.asked), 1)
         self.assertEqual([key_of(a) for a in self.fake.writes()], [("item", "edit")])
-        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0644",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["fields"]), ("mode=0644",))
 
-    def test_a_malformed_tag_on_an_existing_item_needs_mode(self) -> None:
+    def test_a_malformed_mode_field_on_an_existing_item_needs_mode(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", "mode:0644"))
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0600", "mode=0644"))
         self.write(".secrets/alpha")
         code, _, err = self.push()
         self.assertEqual(code, 1)
@@ -1073,10 +1251,10 @@ class TestPush(Case):
         self.assertIn("name the files", err)
         code, _, err = self.push("--mode", "0600", str(self.home / ".secrets/alpha"))
         self.assertEqual(code, 0, err)
-        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0600",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["fields"]), ("mode=0600",))
 
     def test_a_plan_shows_a_mode_the_write_changes(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode:0600",))
+        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode=0600",))
         self.write(".secrets/alpha", mode=0o644)
         code, out, err = self.push("--dry-run")
         self.assertEqual(code, 0, err)
@@ -1194,10 +1372,10 @@ class TestPush(Case):
         self.assertEqual(code, 2)
         self.assertIn("different item", err)
 
-    def test_tags_that_merge_rather_than_replace_fail(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode:0640",))
+    def test_fields_that_repeat_rather_than_replace_fail(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode=0640",))
         self.write(".secrets/alpha")
-        self.fake.merge_tags = True
+        self.fake.duplicate_fields = True
         code, _, err = self.push()
         self.assertEqual(code, 2)
         self.assertIn("after the write", err)
@@ -1306,20 +1484,20 @@ class TestWindowsModes(Case):
         code, _, err = self.run_main("push", "--bucket", "alpha", "--mode", "0640", str(path))
         self.assertEqual(code, 0, err)
         self.assertEqual(
-            unstamped(self.item(next(iter(self.fake.vaults)), ".secrets/alpha")["tags"]),
-            ("mode:0640",),
+            unstamped(self.item(next(iter(self.fake.vaults)), ".secrets/alpha")["fields"]),
+            ("mode=0640",),
         )
 
-    def test_an_update_keeps_the_existing_tag(self) -> None:
+    def test_an_update_keeps_the_existing_mode_field(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0640",))
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0640",))
         self.write(".secrets/alpha")
         code, _, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
-        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["tags"]), ("mode:0640",))
+        self.assertEqual(unstamped(self.item(vid, ".secrets/alpha")["fields"]), ("mode=0640",))
 
-    def test_a_pull_ignores_the_tag(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:bogus",))
+    def test_a_pull_ignores_the_mode_field(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode=bogus",))
         code, _, err = self.run_main("pull", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
         self.assertEqual((self.home / ".secrets/alpha").read_bytes(), SECRET)
@@ -1329,7 +1507,7 @@ class TestWindowsModes(Case):
 class TestPull(Case):
     def test_a_pull_writes_each_item_with_its_mode_and_new_parents_at_0700(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".config/alpha/deep/token", SECRET, ("mode:0640",))
+        self.fake.add_item(vid, ".config/alpha/deep/token", SECRET, ("mode=0640",))
         (self.home / ".config").mkdir(mode=0o755)
         os.chmod(self.home / ".config", 0o755)
         code, out, err = self.run_main("pull", "--bucket", "alpha")
@@ -1354,23 +1532,23 @@ class TestPull(Case):
         self.assertEqual(path.read_bytes(), SECRET)
         self.assertEqual(len(self.asked), 2)
 
-    def test_a_missing_or_malformed_mode_tag_is_refused(self) -> None:
-        for tags in (
+    def test_a_missing_or_malformed_mode_field_is_refused(self) -> None:
+        for fields in (
             (),
-            ("mode:999",),
-            ("mode:0600", "mode:0640"),
-            ("mode:17777",),
-            ("mode:",),
-            ("mode:4755",),
-            ("mode:1777",),
+            ("mode=999",),
+            ("mode=0600", "mode=0640"),
+            ("mode=17777",),
+            ("mode=",),
+            ("mode=4755",),
+            ("mode=1777",),
         ):
-            with self.subTest(tags=tags):
+            with self.subTest(fields=fields):
                 fake = FakeOp()
-                fake.add_item(fake.add_vault("Secrets alpha"), ".secrets/alpha", SECRET, tags)
+                fake.add_item(fake.add_vault("Secrets alpha"), ".secrets/alpha", SECRET, fields)
                 with unittest.mock.patch.object(ss, "run_op", fake):
                     code, _, err = self.run_main("pull", "--bucket", "alpha")
                 self.assertEqual(code, 1, err)
-                self.assertIn("mode tag", err)
+                self.assertIn("sync.mode field", err)
                 self.assertFalse((self.home / ".secrets").exists())
 
     def test_a_symlink_on_the_path_is_never_written_through(self) -> None:
@@ -1398,7 +1576,7 @@ class TestPull(Case):
         self.assertFalse((self.home / ".secrets").exists())
 
     def test_the_secret_lands_in_a_temporary_file_that_is_0600_before_its_mode_is_set(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:0644",))
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode=0644",))
         seen: list[int] = []
         real_fsync = os.fsync
 
@@ -1476,7 +1654,7 @@ class TestPull(Case):
         self.assertFalse((self.home / ".secrets").exists())
 
     def test_a_differing_mode_is_set_on_confirmation(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:0600",))
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode=0600",))
         path = self.write(".secrets/alpha", mode=0o644)
         self.assertEqual(self.run_main("pull", "--bucket", "alpha", "--yes")[0], 0)
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
@@ -1585,57 +1763,59 @@ LATER = "2010-02-01T00:00:00.000000Z"
 
 @POSIX_ONLY
 class TestContentTime(Case):
-    """Staleness is judged by the content-time tag, so a retag never reads as newer content."""
+    """Staleness is judged by the content-time field, so a fields-only write never reads as newer content."""
 
     def stamped(self, path: Path, moment: str) -> Path:
         ns = ss.to_ns(ss.datetime.datetime.fromisoformat(moment))
         os.utime(path, ns=(ns, ns))
         return path
 
-    def test_a_create_and_an_update_tag_the_file_mtime(self) -> None:
+    def test_a_create_and_an_update_record_the_file_mtime(self) -> None:
         path = self.stamped(self.write(".secrets/alpha"), EARLY)
         self.assertEqual(self.run_main("push", "--bucket", "alpha", str(path))[0], 0)
         vid = next(iter(self.fake.vaults))
-        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{EARLY}"])
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["fields"]), [f"mtime={EARLY}"])
         self.stamped(self.write(".secrets/alpha", b"rotated\n"), LATER)
         code, _, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
-        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{LATER}"])
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["fields"]), [f"mtime={LATER}"])
 
     def test_an_update_at_the_same_content_time_still_moves_it_forward(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{EARLY}"))
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0600", f"mtime={EARLY}"))
         path = self.stamped(self.write(".secrets/alpha"), EARLY)
         code, _, err = self.run_main("push", "--bucket", "alpha", str(path))
         self.assertEqual(code, 0, err)
-        (after,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
-        moved = ss.datetime.datetime.fromisoformat(after[len("mtime:") :])
+        (after,) = stamps(self.item(vid, ".secrets/alpha")["fields"])
+        moved = ss.datetime.datetime.fromisoformat(after[len(CONTENT) :])
         self.assertGreater(moved, ss.datetime.datetime.fromisoformat(EARLY))
 
-    def test_a_retag_keeps_the_content_time(self) -> None:
+    def test_a_fields_only_write_keeps_the_content_time(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode=0600", f"mtime={EARLY}"))
         self.write(".secrets/alpha", mode=0o640)
         code, _, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
-        self.assertEqual(self.item(vid, ".secrets/alpha")["tags"], ("mode:0640", f"mtime:{EARLY}"))
+        self.assertEqual(
+            self.item(vid, ".secrets/alpha")["fields"], ("mode=0640", f"mtime={EARLY}")
+        )
 
-    def test_a_forced_retag_keeps_a_valid_content_time(self) -> None:
+    def test_a_forced_fields_only_write_keeps_a_valid_content_time(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{LATER}"))
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode=0600", f"mtime={LATER}"))
         self.stamped(self.write(".secrets/alpha", mode=0o640), EARLY)
         code, _, err = self.run_main("push", "--bucket", "alpha", "--overwrite-newer")
         self.assertEqual(code, 0, err)
-        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{LATER}"])
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["fields"]), [f"mtime={LATER}"])
 
     def test_a_forced_update_reads_as_newer_than_what_it_replaced(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{LATER}"))
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0600", f"mtime={LATER}"))
         path = self.stamped(self.write(".secrets/alpha"), EARLY)
         code, _, err = self.run_main("push", "--bucket", "alpha", "--overwrite-newer", str(path))
         self.assertEqual(code, 0, err)
-        (tag,) = stamps(self.item(vid, ".secrets/alpha")["tags"])
-        moment = ss.datetime.datetime.fromisoformat(tag[len("mtime:") :])
+        (field,) = stamps(self.item(vid, ".secrets/alpha")["fields"])
+        moment = ss.datetime.datetime.fromisoformat(field[len(CONTENT) :])
         self.assertGreater(moment, ss.datetime.datetime.fromisoformat(LATER))
         second = self.scratch / "second"
         second.mkdir(mode=0o700)
@@ -1645,17 +1825,21 @@ class TestContentTime(Case):
         self.assertEqual(code, 0, err)
         self.assertEqual(stale.read_bytes(), SECRET)
 
-    def test_a_retag_of_an_untagged_item_records_its_update_time(self) -> None:
+    def test_a_fields_only_write_of_an_item_with_no_content_field_records_its_update_time(
+        self,
+    ) -> None:
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/alpha", SECRET, updated="2011-01-01T00:00:00Z")
         self.write(".secrets/alpha", mode=0o640)
         self.assertEqual(self.run_main("push", "--bucket", "alpha")[0], 0)
         self.assertEqual(
-            self.item(vid, ".secrets/alpha")["tags"],
-            ("mode:0640", "mtime:2011-01-01T00:00:00.000000Z"),
+            self.item(vid, ".secrets/alpha")["fields"],
+            ("mode=0640", "mtime=2011-01-01T00:00:00.000000Z"),
         )
 
-    def test_a_retag_on_one_host_does_not_overwrite_a_newer_copy_on_another(self) -> None:
+    def test_a_fields_only_write_on_one_host_does_not_overwrite_a_newer_copy_on_another(
+        self,
+    ) -> None:
         first = self.home
         path = self.stamped(self.write(".secrets/alpha"), EARLY)
         self.assertEqual(self.run_main("push", "--bucket", "alpha", str(path))[0], 0)
@@ -1673,9 +1857,11 @@ class TestContentTime(Case):
             str(self.item(vid, ".secrets/alpha")["updated_at"])
         )
         self.assertGreater(
-            moved, ss.datetime.datetime.fromisoformat(LATER), "the retag moved updated_at past it"
+            moved,
+            ss.datetime.datetime.fromisoformat(LATER),
+            "the fields-only write moved updated_at past it",
         )
-        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["tags"]), [f"mtime:{EARLY}"])
+        self.assertEqual(stamps(self.item(vid, ".secrets/alpha")["fields"]), [f"mtime={EARLY}"])
         self.home = second
         code, out, err = self.run_main("pull", "--bucket", "alpha", "--yes")
         self.assertEqual(code, 0, err)
@@ -1687,13 +1873,13 @@ class TestContentTime(Case):
 
     def test_a_pull_sets_the_file_mtime_to_the_content_time(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/tagged", SECRET, ("mode:0600", f"mtime:{EARLY}"))
-        self.fake.add_item(vid, ".secrets/untagged", SECRET, updated="2011-01-01T00:00:00Z")
+        self.fake.add_item(vid, ".secrets/stamped", SECRET, ("mode=0600", f"mtime={EARLY}"))
+        self.fake.add_item(vid, ".secrets/unstamped", SECRET, updated="2011-01-01T00:00:00Z")
         code, _, err = self.run_main("pull", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
         for title, moment in (
-            (".secrets/tagged", EARLY),
-            (".secrets/untagged", "2011-01-01T00:00:00Z"),
+            (".secrets/stamped", EARLY),
+            (".secrets/unstamped", "2011-01-01T00:00:00Z"),
         ):
             with self.subTest(title=title):
                 want = ss.to_ns(ss.datetime.datetime.fromisoformat(moment))
@@ -1702,37 +1888,37 @@ class TestContentTime(Case):
         self.assertEqual(code, 0)
         self.assertIn("Nothing to pull", out)
 
-    def test_a_malformed_content_tag_reads_as_the_update_time_with_a_warning(self) -> None:
-        for tags in (
-            ("mode:0600", "mtime:bogus"),
-            ("mode:0600", f"mtime:{EARLY}", f"mtime:{LATER}"),
+    def test_a_malformed_content_field_reads_as_the_update_time_with_a_warning(self) -> None:
+        for fields in (
+            ("mode=0600", "mtime=bogus"),
+            ("mode=0600", f"mtime={EARLY}", f"mtime={LATER}"),
         ):
-            with self.subTest(tags=tags):
+            with self.subTest(fields=fields):
                 fake = FakeOp()
                 vid = fake.add_vault("Secrets alpha")
-                fake.add_item(vid, ".secrets/alpha", SECRET, tags, "2011-01-01T00:00:00Z")
+                fake.add_item(vid, ".secrets/alpha", SECRET, fields, "2011-01-01T00:00:00Z")
                 path = self.home / ".secrets/alpha"
                 with unittest.mock.patch.object(ss, "run_op", fake):
                     code, _, err = self.run_main("pull", "--bucket", "alpha")
                     self.assertEqual(code, 0, err)
-                    self.assertIn("malformed or repeated content-time tag", err)
+                    self.assertIn("malformed or repeated sync.mtime field", err)
                     want = ss.to_ns(ss.datetime.datetime.fromisoformat("2011-01-01T00:00:00Z"))
                     self.assertEqual(path.stat().st_mtime_ns, want)
                     os.chmod(path, 0o640)
                     code, _, err = self.run_main("push", "--bucket", "alpha")
                 self.assertEqual(code, 0, err)
                 only = next(iter(fake.items[vid].values()))
-                self.assertEqual(stamps(only["tags"]), ["mtime:2011-01-01T00:00:00.000000Z"])
+                self.assertEqual(stamps(only["fields"]), ["mtime=2011-01-01T00:00:00.000000Z"])
                 path.unlink()
 
-    def test_a_push_retags_a_malformed_content_tag_where_nothing_else_differs(self) -> None:
+    def test_a_push_rewrites_a_malformed_content_field_where_nothing_else_differs(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", "mtime:bogus"))
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode=0600", "mtime=bogus"))
         self.write(".secrets/alpha")
         code, out, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
-        self.assertRegex(out, r"retag\s+\.secrets/alpha")
-        self.assertEqual(len(stamps(self.item(vid, ".secrets/alpha")["tags"])), 1)
+        self.assertRegex(out, r"fields\s+\.secrets/alpha")
+        self.assertEqual(len(stamps(self.item(vid, ".secrets/alpha")["fields"])), 1)
         code, out, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
         self.assertIn("same", out)
@@ -1740,7 +1926,7 @@ class TestContentTime(Case):
 
     def test_a_pull_re_times_an_unchanged_file_without_a_prompt(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.fake.add_item(vid, ".secrets/alpha", SECRET, ("mode=0600", f"mtime={EARLY}"))
         path = self.write(".secrets/alpha")
         code, out, err = self.run_main("pull", "--bucket", "alpha")
         self.assertEqual(code, 0, err)
@@ -1757,8 +1943,8 @@ class TestContentTime(Case):
         vid = self.vault()
         self.fake.add_item(vid, ".secrets/absent", SECRET)
         self.fake.add_item(vid, ".secrets/stale", SECRET, updated="2099-01-01T00:00:00Z")
-        self.fake.add_item(vid, ".secrets/moded", SECRET, ("mode:0600",))
-        self.fake.add_item(vid, ".secrets/timed", SECRET, ("mode:0600", f"mtime:{EARLY}"))
+        self.fake.add_item(vid, ".secrets/moded", SECRET, ("mode=0600",))
+        self.fake.add_item(vid, ".secrets/timed", SECRET, ("mode=0600", f"mtime={EARLY}"))
         self.write(".secrets/stale", b"stale\n")
         self.write(".secrets/moded", mode=0o644)
         self.write(".secrets/timed")
@@ -1775,32 +1961,36 @@ class TestContentTime(Case):
         self.assertEqual(code, 0, err)
         self.assertIn("wrote 2 file(s), re-moded 1 file(s), re-timed 1 file(s).", out)
 
-    def test_a_malformed_tag_warns_once_per_run(self) -> None:
+    def test_a_malformed_content_field_warns_once_per_run(self) -> None:
         vid = self.vault()
-        self.fake.add_item(vid, ".secrets/broken", SECRET, ("mode:0600", "mtime:bogus"))
-        paths = [str(self.write(f".secrets/new_{n}")) for n in range(2)]
-        code, _, err = self.run_main("push", "--bucket", "alpha", *paths)
-        self.assertEqual(code, 0, err)
-        self.assertEqual(err.count("malformed or repeated content-time tag"), 1)
+        self.fake.add_item(vid, ".secrets/broken", SECRET, ("mode=0600", "mtime=bogus"))
+        op = ss.Op(None, dry_run=False)
+        vault = ss.Vault(vid, "Secrets alpha")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            for _ in range(2):
+                ss.detailed(op, vault, ss.members(op, vault)[".secrets/broken"])
+        self.assertEqual(err.getvalue().count("malformed or repeated sync.mtime field"), 1)
 
     def test_a_forced_update_past_a_future_content_time_still_moves_it_forward(self) -> None:
         vid = self.vault()
         future = "2099-01-01T00:00:00.000000Z"
-        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode:0600", f"mtime:{future}"))
+        self.fake.add_item(vid, ".secrets/alpha", b"old\n", ("mode=0600", f"mtime={future}"))
         path = self.write(".secrets/alpha")
         code, _, err = self.run_main("push", "--bucket", "alpha", "--overwrite-newer", str(path))
         self.assertEqual(code, 0, err)
         self.assertEqual(
-            stamps(self.item(vid, ".secrets/alpha")["tags"]), ["mtime:2099-01-01T00:00:00.000001Z"]
+            stamps(self.item(vid, ".secrets/alpha")["fields"]),
+            ["mtime=2099-01-01T00:00:00.000001Z"],
         )
 
-    def test_a_content_tag_missing_after_the_write_fails(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode:0600",))
+    def test_a_content_field_missing_after_the_write_fails(self) -> None:
+        self.fake.add_item(self.vault(), ".secrets/alpha", b"old\n", ("mode=0600",))
         self.write(".secrets/alpha")
-        self.fake.drop_content_tag = True
+        self.fake.drop_content_field = True
         code, _, err = self.run_main("push", "--bucket", "alpha")
         self.assertEqual(code, 2)
-        self.assertIn("mtime:", err)
+        self.assertIn("sync.mtime reads", err)
 
 
 @POSIX_ONLY
@@ -1821,7 +2011,7 @@ class TestOwnership(Case):
         self.assertEqual(self.asked, [])
 
     def test_a_mode_change_on_a_file_another_user_owns_is_refused(self) -> None:
-        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode:0600",))
+        self.fake.add_item(self.vault(), ".secrets/alpha", SECRET, ("mode=0600",))
         path = self.write(".secrets/alpha", mode=0o644)
         with self.other_uid():
             code, _, err = self.run_main("pull", "--bucket", "alpha", "--yes")
@@ -1854,6 +2044,7 @@ class TestStatus(Case):
         self.assertIn(".secrets/unheld", out)
         self.assertIn("not a bucket name", out)
         self.assertNotIn(("document", "get"), self.fake.keys())
+        self.assertNotIn(("item", "get"), self.fake.keys())
 
     def test_the_unheld_list_never_changes_the_exit_status(self) -> None:
         self.write(".secrets/unheld")
@@ -1871,7 +2062,7 @@ class TestStatus(Case):
             ("only-remote", SECRET),
             ("mode", SECRET),
         ):
-            self.fake.add_item(vid, f".secrets/{title}", content, ("mode:0600",))
+            self.fake.add_item(vid, f".secrets/{title}", content, ("mode=0600",))
         self.write(".secrets/same")
         self.write(".secrets/differs")
         self.write(".secrets/mode", mode=0o644)
@@ -2009,7 +2200,8 @@ class TestSelftest(Case):
         for name in (
             "crlf",
             "nul-bytes",
-            "item edit --tags replaces",
+            "item edit replaces the sync fields",
+            "document edit keeps the sync fields",
             "updated_at advances",
             "archived item",
         ):
@@ -2022,6 +2214,15 @@ class TestSelftest(Case):
             code, out, _ = self.run_main("selftest")
         self.assertEqual(code, 1)
         self.assertIn("FAILS", out)
+        self.assertEqual(self.fake.vaults, {})
+
+    def test_fields_an_edit_repeats_rather_than_replaces_are_reported(self) -> None:
+        self.fake.duplicate_fields = True
+        with unittest.mock.patch.object(tempfile, "tempdir", str(self.scratch)):
+            code, out, _ = self.run_main("selftest")
+        self.assertEqual(code, 1)
+        self.assertRegex(out, r"holds\s+item edit sets the sync fields")
+        self.assertRegex(out, r"FAILS\s+item edit replaces the sync fields")
         self.assertEqual(self.fake.vaults, {})
 
     def test_a_missing_update_time_field_is_measured_before_it_stops_the_run(self) -> None:
@@ -2096,7 +2297,6 @@ class TestOutput(Case):
 
     def test_a_listing_of_an_unexpected_shape_fails_loudly(self) -> None:
         for bad in (
-            {"tags": "mode:0600"},
             {"updated_at": None},
             {"updated_at": "yesterday"},
             {"updated_at": "2020-01-01T00:00:00"},
@@ -2109,6 +2309,29 @@ class TestOutput(Case):
                 with unittest.mock.patch.object(ss, "run_op", fake):
                     code, out, err = self.run_main("status")
                 self.assertEqual(code, 2, err)
+                self.assertNotIn('{"', out + err)
+
+    def test_an_item_get_of_an_unexpected_shape_fails_loudly(self) -> None:
+        section = {"id": "constructed-section", "label": "sync"}
+        for bad, message in (
+            ([], "not an object"),
+            ({"fields": {}}, "not an array"),
+            ({"fields": [1]}, "field that is not an object"),
+            ({"sections": {}}, "'sections'"),
+            ({"sections": [1]}, "'sections'"),
+            ({"fields": [{"label": "mode", "value": "0600", "section": "sync"}]}, "'section'"),
+            ({"fields": [{"label": "mode", "value": 600, "section": section}]}, "string label"),
+        ):
+            with self.subTest(bad=bad):
+                fake = FakeOp()
+                vid = fake.add_vault("Secrets alpha")
+                iid = fake.add_item(vid, ".secrets/alpha", SECRET)
+                body = {"id": iid, **bad} if isinstance(bad, dict) else bad
+                fake.raw[("item", "get")] = json.dumps(body).encode()
+                with unittest.mock.patch.object(ss, "run_op", fake):
+                    code, out, err = self.run_main("status", "--bucket", "alpha")
+                self.assertEqual(code, 2, err)
+                self.assertIn(message, err)
                 self.assertNotIn('{"', out + err)
 
     def test_help_exits_zero_and_an_unknown_flag_is_refused(self) -> None:

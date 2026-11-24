@@ -20,6 +20,7 @@ pull request, and workflow run beside its `html_url`, for a consumer rendering i
 Usage
   uv run --no-project --script scripts/backlog_metrics.py [--owner OWNER] [--repo NAME ...]
                                                            [--days N] [--format markdown|json]
+                                                           [--billing] [--stale-days N]
 
 It is a uv script because it imports the review gate's own readers, which parse Markdown. A copy
 of those readers here would drift from the gate and report figures the gate would not.
@@ -36,16 +37,20 @@ by that signal.
 Exit codes
   0  the report was written.
   1  a `gh` call for issues, pull requests, or runs failed, so no number is guessed and no report
-     is written. A failed review query still writes the backlog and billing report. It adds one
-     line saying the review figures were unavailable and names the error on stderr, then exits 1.
+     is written. A failed review query still writes the backlog report, with billing where asked
+     for. It adds one line saying the review figures were unavailable and names the error on
+     stderr, then exits 1.
      Four reads fail more softly: the default branch, whether `develop` exists, the policy file,
      and its history. A failed one still writes the report, names that read on stderr, and
-     exits 1. Where the policy itself went unread, the report shows `error` in its place.
+     exits 1. Where the policy itself went unread, the report shows `error` in its place. A failed
+     read of the attention lists, which `--format json` makes, writes the report too. Each
+     repository's `attention` is then `null`, one note says so, and the exit status is 1.
   2  the command line was wrong.
 """
 
 import argparse
 import contextlib
+import dataclasses
 import datetime
 import json
 import os
@@ -60,7 +65,7 @@ from typing import Any
 import pr_review_rounds as rounds
 import pr_review_side as side
 from gh_graphql import GraphQLError, request, run_subprocess, said_absent, walk
-from pr_review_checks import utc_instant
+from pr_review_checks import CHECKS_WINDOW, check_nodes, checks_truncated, utc_instant
 from pr_review_copilot import VOCABULARIES
 from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 
@@ -88,6 +93,11 @@ CONNECTION_CAPS = {
 INTEGRATION_BRANCH = "develop"
 HISTORY_CAP = 10
 FAILED_STATES = frozenset({"FAILURE", "ERROR"})
+FAILING_CHECKS = frozenset({"FAILURE", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"})
+FAILING_RUNS = frozenset({"failure", "timed_out", "startup_failure"})
+UNDECIDED_RUNS = frozenset({"cancelled", "skipped", "neutral"})
+PR_EVENTS = frozenset({"pull_request", "pull_request_target"})
+ATTENTION_RUN_LIMIT = 200
 LABELS = ("pre-existing", "prose", "documentation", "bug", "script", "enhancement", "decision")
 
 Items = Sequence[Mapping[str, Any]]
@@ -115,6 +125,8 @@ class RepoMetrics:
     truncated: bool = False
     url: str = ""
     items: Mapping[str, Items] = field(default_factory=dict)
+    truncated_lists: tuple[str, ...] = ()
+    attention: Mapping[str, Any] | None = None
 
 
 def run_gh(args: Sequence[str]) -> Any:
@@ -196,7 +208,14 @@ def compute_metrics(
     url: str = "",
 ) -> RepoMetrics:
     """Reduce one repository's parsed lists to the report's counts and the items behind each."""
-    lists = (opened_items, closed_items, open_items, merged_prs, runs)
+    lists = {
+        "issues_opened": opened_items,
+        "issues_closed": closed_items,
+        "issues_open": open_items,
+        "prs_merged": merged_prs,
+        "workflow_runs": runs,
+    }
+    cut = tuple(key for key, items in lists.items() if len(items) >= LIST_LIMIT)
 
     def issues(items: Items, handoff: bool) -> list[dict[str, Any]]:
         return [issue_item(i) for i in items if (HANDOFF_LABEL in label_names(i)) == handoff]
@@ -212,7 +231,8 @@ def compute_metrics(
         merged=len(merged_prs),
         runs=len(runs),
         review_runs=count_named(runs, REVIEW_WORKFLOW),
-        truncated=any(len(items) >= LIST_LIMIT for items in lists),
+        truncated=bool(cut),
+        truncated_lists=cut,
         url=url,
         items={
             "issues_opened": issues(opened_items, False),
@@ -724,9 +744,11 @@ def render_json(
     metrics: Sequence[RepoMetrics],
     billing: Sequence[str],
     reviews: Sequence[ReviewMetrics],
-    billing_figures: Mapping[str, Any],
+    billing_figures: Mapping[str, Any] | None,
 ) -> str:
     """The report as one JSON document, the headline totals at its top level.
+
+    `billing` is `null` where the run skipped the billing read, which is the default.
 
     `notes` holds the billing lines and the notes the Markdown report lists after its label lines.
     A consumer can then print what this run noted without re-deriving it. `scripts/README.md`
@@ -738,7 +760,7 @@ def render_json(
         "start": start.isoformat(),
         "end": end.isoformat(),
         "totals": counts(metrics),
-        "billing": dict(billing_figures),
+        "billing": None if billing_figures is None else dict(billing_figures),
         "notes": [*billing, *notes(metrics), *review_notes(reviews)],
         "repositories": [
             {
@@ -747,6 +769,8 @@ def render_json(
                 **counts([m]),
                 "open_issues_by_label": dict(m.open_by_label),
                 "truncated": m.truncated,
+                "truncated_lists": list(m.truncated_lists),
+                "attention": None if m.attention is None else dict(m.attention),
                 "items": {key: list(value) for key, value in m.items.items()},
                 "review": review_data(by_name[m.name]) if m.name in by_name else None,
             }
@@ -833,19 +857,21 @@ for _token, _cap in (
 def graphql(query: str, variables: dict[str, object]) -> dict[str, Any]:
     """Run one GraphQL document through the shared reader, so a null node or error raises.
 
-    The one caller reads through `walked`, which names a `GraphQLError` as a `GhError`.
+    Each caller reads through `walked`, which names a `GraphQLError` as a `GhError`.
     """
     return dict(request(query, variables).data)
 
 
-def walked(fetch: Callable[[str | None], dict]) -> Iterator[dict]:
-    """Each page of the search, a walk's own `GraphQLError` raised as a `GhError`.
+def walked(
+    fetch: Callable[[str | None], dict], path: Sequence[str] = ("search",)
+) -> Iterator[dict]:
+    """Each page of the connection at `path`, a walk's own `GraphQLError` raised as a `GhError`.
 
     The walk raises for a page claiming another without a moving cursor, as `request` raises for
     a failed query. Both then reach `main` as the one error type it names on stderr.
     """
     try:
-        yield from walk(fetch, ["search"])
+        yield from walk(fetch, path)
     except GraphQLError as error:
         raise GhError(f"{error} {error.detail}".strip()) from error
 
@@ -969,6 +995,188 @@ def collect_reviews(owner: str, name: str, since: datetime.date) -> ReviewMetric
     return result
 
 
+ATTENTION_QUERY = (
+    """
+query($owner: String!, $name: String!, $after: String) {
+  repository(owner: $owner, name: $name) {
+    defaultBranchRef { name }
+    develop: ref(qualifiedName: "refs/heads/@INTEGRATION@") { name }
+    pullRequests(states: OPEN, first: @PAGE@, after: $after,
+                 orderBy: {field: UPDATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        number
+        title
+        url
+        isDraft
+        updatedAt
+        baseRefName
+        headRefOid
+        author { login }
+        commits(last: 1) { nodes { commit {
+          oid
+          statusCheckRollup { contexts(first: @CHECK@) {
+            pageInfo { hasNextPage }
+            nodes {
+              __typename
+              ... on CheckRun { name status conclusion startedAt completedAt
+                checkSuite { databaseId status app { slug databaseId }
+                  workflowRun { databaseId workflow { databaseId } } } }
+              ... on StatusContext { context state createdAt creator { login } }
+            }
+          } }
+          checkSuites(last: 50) { nodes { databaseId status createdAt app { slug }
+            workflowRun { databaseId workflow { databaseId } } } }
+        } } }
+      }
+    }
+  }
+}
+""".replace("@PAGE@", str(PAGE_SIZE))
+    .replace("@CHECK@", str(CHECKS_WINDOW))
+    .replace("@INTEGRATION@", INTEGRATION_BRANCH)
+)
+
+
+def failing_checks(pr: Mapping[str, Any]) -> list[str]:
+    """The names of a pull request's failing checks, read as the review gate reads them.
+
+    `check_nodes` keeps the newest suite per workflow, so a workflow re-run on the same commit
+    counts by its latest run. A finished check a newer run is replacing is left out as well.
+    """
+    return [
+        str(node["name"])
+        for node in check_nodes(dict(pr))
+        if node["conclusion"] in FAILING_CHECKS | FAILED_STATES and not node.get("superseded")
+    ]
+
+
+def pr_attention(pr: Mapping[str, Any]) -> dict[str, Any]:
+    author = pr.get("author") or {}
+    return {
+        **pr_item(pr),
+        "author": str(author.get("login") or ""),
+        "base_branch": str(pr.get("baseRefName") or ""),
+    }
+
+
+def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[list, list]:
+    """The workflows whose latest completed run on `branch` failed, and those that recovered.
+
+    `runs` is newest first, as `gh run list` prints it. A cancelled, skipped, or neutral run
+    decided nothing, so it is never a workflow's latest. A pull request's run is left out, since a
+    fork's branch can share the name. So is a Copilot review run, which carries the reviewed pull
+    request's head branch. A workflow is keyed by its database id, since two workflow files can
+    share a display name. A workflow recovered where a run failed in the window and its latest
+    completed run did not.
+    """
+    latest: dict[str, Mapping[str, Any]] = {}
+    failed: dict[str, list[Mapping[str, Any]]] = {}
+    for run in runs:
+        workflow = str(run.get("workflowName") or "")
+        key = str(run.get("workflowDatabaseId"))
+        if not run.get("conclusion") or run["conclusion"] in UNDECIDED_RUNS:
+            continue
+        if run.get("event") in PR_EVENTS or REVIEW_WORKFLOW in (workflow, run.get("name")):
+            continue
+        latest.setdefault(key, run)
+        if run["conclusion"] in FAILING_RUNS and str(run.get("createdAt") or "")[:10] >= str(since):
+            failed.setdefault(key, []).append(run)
+    still, recovered = [], []
+    for key, run in latest.items():
+        workflow = str(run.get("workflowName") or "")
+        in_window = failed.get(key, [])
+        if run["conclusion"] in FAILING_RUNS:
+            still.append(
+                {
+                    "branch": branch,
+                    "workflow": workflow,
+                    "conclusion": run["conclusion"],
+                    "html_url": str(run.get("url") or ""),
+                    "failed_runs_in_window": len(in_window),
+                }
+            )
+        elif in_window:
+            recovered.append(
+                {
+                    "branch": branch,
+                    "workflow": workflow,
+                    "html_url": str(in_window[0].get("url") or ""),
+                    "failed_runs_in_window": len(in_window),
+                }
+            )
+    return still, recovered
+
+
+def collect_attention(
+    owner: str, name: str, since: datetime.date, now: datetime.datetime, stale_days: int
+) -> dict[str, Any]:
+    """What needs the maintainer now in one repository: failing and stale pull requests, branches.
+
+    Open pull requests are read, up to `PR_CAP`, drafts counting toward it and in no list. A stale
+    one has had no update for `stale_days`, to the instant, and has no failing check. The default
+    branch and `develop`, where it exists, are read for two kinds of workflow. One kind's latest
+    completed run failed. The other kind failed in the window and recovered.
+    """
+
+    def fetch(after: str | None) -> dict:
+        variables: dict[str, object] = {"owner": owner, "name": name}
+        if after is not None:
+            variables["after"] = after
+        return graphql(ATTENTION_QUERY, variables)
+
+    result: dict[str, Any] = {
+        "failing_pull_requests": [],
+        "stale_pull_requests": [],
+        "failing_branches": [],
+        "recovered_branches": [],
+        "truncated": [],
+    }
+    stale_before = now - datetime.timedelta(days=stale_days)
+    branches: list[str] = []
+    seen = 0
+    for page in walked(fetch, ("repository", "pullRequests")):
+        for ref in ("defaultBranchRef", "develop"):
+            branch = str((page.get(ref) or {}).get("name") or "")
+            if branch and branch not in branches:
+                branches.append(branch)
+        for pr in page["pullRequests"].get("nodes") or []:
+            if seen >= PR_CAP:
+                break
+            seen += 1
+            if pr.get("isDraft"):
+                continue
+            names = failing_checks(pr)
+            if checks_truncated(dict(pr)):
+                result["truncated"].append(f"checks of #{pr.get('number')} cut at {CHECKS_WINDOW}")
+            if names:
+                result["failing_pull_requests"].append(
+                    {**pr_attention(pr), "failing_checks": names}
+                )
+            elif (
+                updated := utc_instant(str(pr.get("updatedAt") or ""))
+            ) and updated <= stale_before:
+                result["stale_pull_requests"].append(
+                    {**pr_attention(pr), "updated_at": str(pr.get("updatedAt") or "")}
+                )
+        if seen >= PR_CAP:
+            if (page["pullRequests"].get("pageInfo") or {}).get("hasNextPage"):
+                result["truncated"].append(f"open pull requests cut at {PR_CAP}")
+            break
+    for branch in branches:
+        runs = run_gh(
+            ["run", "list", "--repo", f"{owner}/{name}", "--branch", branch]
+            + ["--limit", str(ATTENTION_RUN_LIMIT)]
+            + ["--json", "name,workflowName,workflowDatabaseId,url,conclusion,createdAt,event"]
+        )
+        still, recovered = branch_attention(branch, runs, since)
+        result["failing_branches"] += still
+        result["recovered_branches"] += recovered
+        if len(runs) >= ATTENTION_RUN_LIMIT:
+            result["truncated"].append(f"runs of {branch} cut at {ATTENTION_RUN_LIMIT}")
+    return result
+
+
 def fetch_billing(owner: str, today: datetime.date) -> tuple[Mapping[str, Any] | None, str]:
     path = f"/users/{owner}/settings/billing/usage?year={today.year}&month={today.month:02d}"
     try:
@@ -1004,6 +1212,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--days", type=positive_int, default=7, help="window length in days")
     parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    parser.add_argument(
+        "--billing",
+        action="store_true",
+        help="also read the owner's billing, which a user account's fine-grained token cannot do",
+    )
+    parser.add_argument(
+        "--stale-days",
+        type=positive_int,
+        default=7,
+        help="days without an update before an open pull request is stale, read for --format json",
+    )
     return parser
 
 
@@ -1012,7 +1231,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     default_owner, default_names = registry_defaults()
     owner = args.owner or default_owner
     names = args.repo or default_names
-    end = datetime.datetime.now(datetime.UTC).date()
+    now = datetime.datetime.now(datetime.UTC)
+    end = now.date()
     start = window_start(end, args.days)
     try:
         metrics = [collect(owner, name, start) for name in names]
@@ -1026,13 +1246,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     except GhError as error:
         review_error = str(error)
         print(f"backlog_metrics.py: reading the review figures failed: {error}", file=sys.stderr)
-    usage, error_text = fetch_billing(owner, end)
+    attention_error = ""
+    if args.format == "json":
+        try:
+            attention = {n: collect_attention(owner, n, start, now, args.stale_days) for n in names}
+            metrics = [dataclasses.replace(m, attention=attention[m.name]) for m in metrics]
+        except GhError as error:
+            attention_error = str(error)
+            print(
+                f"backlog_metrics.py: reading the attention lists failed: {error}", file=sys.stderr
+            )
     month = f"{end.year}-{end.month:02d}"
-    billing = billing_lines(month, names, usage, error_text)
+    billing: list[str] = []
+    figures: dict[str, Any] | None = None
+    if args.billing:
+        usage, error_text = fetch_billing(owner, end)
+        billing = billing_lines(month, names, usage, error_text)
+        figures = billing_data(month, names, usage, error_text)
     if review_error:
         billing.append(f"Review figures were unavailable: {review_error}")
+    if attention_error:
+        billing.append(f"Attention lists were unavailable: {attention_error}")
     if args.format == "json":
-        figures = billing_data(month, names, usage, error_text)
         sys.stdout.write(render_json(start, end, metrics, billing, reviews, figures))
     else:
         sys.stdout.write(render_markdown(start, end, metrics, billing, reviews))
@@ -1044,7 +1279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ]
     for line in failed:
         print(line, file=sys.stderr)
-    return 1 if failed or review_error else 0
+    return 1 if failed or review_error or attention_error else 0
 
 
 received: list[int] = []

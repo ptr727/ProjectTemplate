@@ -118,6 +118,13 @@ class CountingTests(unittest.TestCase):
         self.assertTrue(bm.compute_metrics("alpha", full, [], [], [], []).truncated)
         self.assertFalse(bm.compute_metrics("alpha", [issue()], [], [], [], []).truncated)
 
+    def test_each_cut_list_is_named_beside_the_flag(self) -> None:
+        full = [issue()] * bm.LIST_LIMIT
+        result = bm.compute_metrics("alpha", [], full, [issue()], [], full)
+        self.assertEqual(result.truncated_lists, ("issues_closed", "workflow_runs"))
+        self.assertTrue(result.truncated)
+        self.assertEqual(bm.compute_metrics("alpha", [], [], [], [], []).truncated_lists, ())
+
     def test_a_ratio_has_one_decimal_and_na_without_a_merge(self) -> None:
         self.assertEqual(bm.ratio_text(bm.ratio(7, 2)), "3.5")
         self.assertEqual(bm.ratio_text(bm.ratio(1, 3)), "0.3")
@@ -291,6 +298,7 @@ class RenderingTests(unittest.TestCase):
         self.assertEqual({k: entry[k] for k in doc["totals"]}, doc["totals"])
         self.assertEqual(entry["open_issues_by_label"]["bug"], 1)
         self.assertFalse(entry["truncated"])
+        self.assertEqual((entry["truncated_lists"], entry["attention"]), ([], None))
         linked = {"number": 7, "title": "A title", "html_url": item["url"], "labels": ["bug"]}
         self.assertEqual(entry["items"]["issues_opened"], [linked])
         self.assertEqual(entry["items"]["issues_open"], [linked])
@@ -312,8 +320,8 @@ class RenderingTests(unittest.TestCase):
         )
         self.assertEqual(
             list(entry),
-            ["name", "html_url", *doc["totals"], "open_issues_by_label", "truncated", "items"]
-            + ["review"],
+            ["name", "html_url", *doc["totals"], "open_issues_by_label", "truncated"]
+            + ["truncated_lists", "attention", "items", "review"],
         )
         review = entry["review"]
         self.assertEqual(
@@ -1159,7 +1167,7 @@ class ReviewCollectTests(unittest.TestCase):
             contextlib.redirect_stdout(out),
             contextlib.redirect_stderr(err),
         ):
-            code = bm.main(["--owner", "o", "--repo", "alpha"])
+            code = bm.main(["--owner", "o", "--repo", "alpha", "--billing"])
         self.assertEqual(code, 1)
         report = out.getvalue()
         self.assertIn("| [alpha](https://github.com/o/alpha) |", report)
@@ -1193,6 +1201,385 @@ class ReviewCollectTests(unittest.TestCase):
         )
         self.assertEqual(row[start : start + 3], ["4", "2", "1"])
         self.assertEqual(len(row), len(bm.REVIEW_BOT_HEADERS))
+
+
+def attention_page(
+    prs: list[dict[str, object]], more: bool = False, develop: bool = True
+) -> dict[str, object]:
+    return {
+        "repository": {
+            "defaultBranchRef": {"name": "main"},
+            "develop": {"name": "develop"} if develop else None,
+            "pullRequests": {
+                "pageInfo": {"hasNextPage": more, "endCursor": "c" if more else None},
+                "nodes": prs,
+            },
+        }
+    }
+
+
+def open_pr(number: int, *contexts: dict[str, object], **fields: object) -> dict[str, object]:
+    rollup = {"contexts": {"pageInfo": {"hasNextPage": False}, "nodes": list(contexts)}}
+    return {
+        "number": number,
+        "title": f"PR {number}",
+        "url": f"u{number}",
+        "isDraft": False,
+        "updatedAt": "2026-11-23T00:00:00Z",
+        "baseRefName": "develop",
+        "author": {"login": "dependabot"},
+        "headRefOid": "h",
+        "commits": {"nodes": [{"commit": {"oid": "h", "statusCheckRollup": rollup}}]},
+    } | fields
+
+
+def check(
+    name: str, conclusion: str, suite: int | None = None, status: str = "COMPLETED"
+) -> dict[str, object]:
+    node: dict[str, object] = {
+        "__typename": "CheckRun",
+        "name": name,
+        "status": status,
+        "conclusion": conclusion,
+    }
+    if suite is not None:
+        node["checkSuite"] = {
+            "databaseId": suite,
+            "status": status,
+            "workflowRun": {"databaseId": suite, "workflow": {"databaseId": 1}},
+        }
+    return node
+
+
+def run_record(
+    workflow: str, conclusion: str, day: str, url: str, event: str = "push"
+) -> dict[str, object]:
+    return {
+        "event": event,
+        "workflowDatabaseId": sum(map(ord, workflow)),
+        "workflowName": workflow,
+        "conclusion": conclusion,
+        "createdAt": f"{day}T00:00:00Z",
+        "url": url,
+    }
+
+
+class AttentionTests(unittest.TestCase):
+    START = datetime.date(2026, 11, 17)
+    NOW = datetime.datetime(2026, 11, 24, 8, 0, tzinfo=datetime.UTC)
+
+    def attention(
+        self,
+        prs: list[dict[str, object]],
+        runs: dict[str, list[dict[str, object]]] | None = None,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        runs = runs or {}
+
+        def fake(args: list[str]) -> object:
+            return runs.get(args[args.index("--branch") + 1], [])
+
+        with (
+            unittest.mock.patch.object(
+                bm,
+                "graphql",
+                side_effect=[attention_page(prs, **kwargs)],  # type: ignore[arg-type]
+            ),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
+        ):
+            return bm.collect_attention("o", "alpha", self.START, self.NOW, 7)
+
+    def test_a_failing_check_or_status_names_the_pull_request(self) -> None:
+        failing = open_pr(
+            1,
+            check("compile", "FAILURE"),
+            check("lint", "SUCCESS"),
+            {
+                "__typename": "StatusContext",
+                "context": "ci/legacy",
+                "state": "ERROR",
+                "createdAt": "2026-11-23T00:00:00Z",
+            },
+        )
+        result = self.attention([failing])
+        self.assertEqual(
+            result["failing_pull_requests"],
+            [
+                {
+                    "number": 1,
+                    "title": "PR 1",
+                    "html_url": "u1",
+                    "author": "dependabot",
+                    "base_branch": "develop",
+                    "failing_checks": ["compile", "ci/legacy"],
+                }
+            ],
+        )
+
+    def test_each_failing_conclusion_counts_and_cancelled_does_not(self) -> None:
+        for conclusion in sorted(bm.FAILING_CHECKS):
+            with self.subTest(conclusion=conclusion):
+                result = self.attention([open_pr(1, check("x", conclusion))])
+                self.assertEqual(len(result["failing_pull_requests"]), 1)  # type: ignore[arg-type]
+        result = self.attention([open_pr(1, check("x", "CANCELLED"))])
+        self.assertEqual(result["failing_pull_requests"], [])
+
+    def test_a_draft_is_in_no_list(self) -> None:
+        draft = open_pr(1, check("x", "FAILURE"), isDraft=True, updatedAt="2026-01-01T00:00:00Z")
+        result = self.attention([draft])
+        self.assertEqual((result["failing_pull_requests"], result["stale_pull_requests"]), ([], []))
+
+    def test_a_stale_pull_request_has_no_failing_check_and_a_failing_one_is_not_stale(self) -> None:
+        old = "2026-11-17T08:00:00Z"
+        stale = open_pr(1, check("x", "SUCCESS"), updatedAt=old)
+        failing = open_pr(2, check("x", "FAILURE"), updatedAt=old)
+        fresh = open_pr(3, updatedAt="2026-11-17T08:00:01Z")
+        result = self.attention([stale, failing, fresh])
+        self.assertEqual([p["number"] for p in result["stale_pull_requests"]], [1])  # type: ignore[attr-defined]
+        self.assertEqual(result["stale_pull_requests"][0]["updated_at"], old)  # type: ignore[index]
+        self.assertEqual([p["number"] for p in result["failing_pull_requests"]], [2])  # type: ignore[attr-defined]
+
+    def test_a_rerun_workflow_counts_by_its_newest_run(self) -> None:
+        rerun = open_pr(
+            1, check("compile", "FAILURE", suite=10), check("compile", "SUCCESS", suite=11)
+        )
+        self.assertEqual(self.attention([rerun])["failing_pull_requests"], [])
+        failed_again = open_pr(
+            2, check("compile", "SUCCESS", suite=10), check("compile", "FAILURE", suite=11)
+        )
+        self.assertEqual(len(self.attention([failed_again])["failing_pull_requests"]), 1)  # type: ignore[arg-type]
+
+    def test_a_failure_of_a_workflow_with_a_newer_unfinished_run_is_superseded(self) -> None:
+        superseded = open_pr(
+            1,
+            check("lint", "FAILURE", suite=10),
+            check("compile", "", suite=11, status="IN_PROGRESS"),
+        )
+        self.assertEqual(self.attention([superseded])["failing_pull_requests"], [])
+
+    def test_two_workflows_sharing_a_name_are_told_apart_by_id(self) -> None:
+        failing = {**run_record("CI", "failure", "2026-11-22", "a"), "workflowDatabaseId": 1}
+        passing = {**run_record("CI", "success", "2026-11-23", "b"), "workflowDatabaseId": 2}
+        result = self.attention([], {"main": [passing, failing]})
+        self.assertEqual([e["html_url"] for e in result["failing_branches"]], ["a"])  # type: ignore[attr-defined]
+        self.assertEqual(result["recovered_branches"], [])
+
+    def test_the_query_reads_the_head_check_suites_the_gate_reads(self) -> None:
+        self.assertIn("checkSuites(last: 50)", bm.ATTENTION_QUERY)
+        self.assertIn(f"contexts(first: {bm.CHECKS_WINDOW})", bm.ATTENTION_QUERY)
+
+    def test_a_copilot_review_run_is_not_a_branch_failure(self) -> None:
+        runs = {
+            "develop": [run_record(bm.REVIEW_WORKFLOW, "failure", "2026-11-23", "c", "dynamic")]
+        }
+        self.assertEqual(self.attention([], runs)["failing_branches"], [])
+
+    def test_a_review_run_named_by_its_run_name_is_not_a_branch_failure(self) -> None:
+        review = {**run_record("dynamic/copilot", "failure", "2026-11-23", "c", "dynamic")}
+        review["name"] = bm.REVIEW_WORKFLOW
+        self.assertEqual(self.attention([], {"develop": [review]})["failing_branches"], [])
+
+    def test_a_cancelled_run_after_a_failure_is_neither_recovery_nor_latest(self) -> None:
+        runs = {
+            "main": [
+                run_record("Build", "cancelled", "2026-11-23", "b2"),
+                run_record("Build", "failure", "2026-11-22", "b1"),
+                run_record("Fork", "failure", "2026-11-23", "f1", event="pull_request"),
+            ]
+        }
+        result = self.attention([], runs)
+        self.assertEqual([e["html_url"] for e in result["failing_branches"]], ["b1"])  # type: ignore[attr-defined]
+        self.assertEqual(result["recovered_branches"], [])
+
+    def test_the_caps_are_named_where_reached(self) -> None:
+        prs = [open_pr(n) for n in range(1, bm.PR_CAP + 2)]
+        runs = {
+            "main": [run_record("Build", "success", "2026-11-23", "r")] * bm.ATTENTION_RUN_LIMIT
+        }
+        result = self.attention(prs, runs, more=True)
+        self.assertEqual(
+            result["truncated"],
+            [
+                f"open pull requests cut at {bm.PR_CAP}",
+                f"runs of main cut at {bm.ATTENTION_RUN_LIMIT}",
+            ],
+        )
+
+    def test_stale_days_reaches_the_read(self) -> None:
+        seen: list[int] = []
+
+        def read(owner: str, name: str, since: object, now: object, stale_days: int) -> dict:
+            seen.append(stale_days)
+            return {}
+
+        with (
+            unittest.mock.patch.object(bm, "collect_attention", side_effect=read),
+            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=quiet_rest),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            bm.main(["--owner", "o", "--repo", "alpha", "--format", "json", "--stale-days", "3"])
+        self.assertEqual(seen, [3])
+
+    def test_a_cut_check_list_is_named(self) -> None:
+        pr = open_pr(5, check("x", "SUCCESS"))
+        pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {  # type: ignore[index]
+            "hasNextPage": True
+        }
+        self.assertEqual(
+            self.attention([pr])["truncated"], [f"checks of #5 cut at {bm.CHECKS_WINDOW}"]
+        )
+
+    def test_a_failing_latest_run_names_the_workflow_and_a_recovered_one_is_apart(self) -> None:
+        runs = {
+            "main": [
+                run_record("Build", "failure", "2026-11-23", "b2"),
+                run_record("Build", "failure", "2026-11-22", "b1"),
+                run_record("Build", "success", "2026-11-21", "b0"),
+                run_record("CodeQL", "success", "2026-11-23", "c2"),
+                run_record("CodeQL", "failure", "2026-11-20", "c1"),
+                run_record("Old", "failure", "2026-10-01", "o1"),
+                run_record("Cancelled", "cancelled", "2026-11-23", "x1"),
+                run_record("Running", "", "2026-11-23", "r1"),
+            ],
+            "develop": [run_record("Build", "timed_out", "2026-11-23", "d1")],
+        }
+        result = self.attention([], runs)
+        self.assertEqual(
+            result["failing_branches"],
+            [
+                {
+                    "branch": "main",
+                    "workflow": "Build",
+                    "conclusion": "failure",
+                    "html_url": "b2",
+                    "failed_runs_in_window": 2,
+                },
+                {
+                    "branch": "main",
+                    "workflow": "Old",
+                    "conclusion": "failure",
+                    "html_url": "o1",
+                    "failed_runs_in_window": 0,
+                },
+                {
+                    "branch": "develop",
+                    "workflow": "Build",
+                    "conclusion": "timed_out",
+                    "html_url": "d1",
+                    "failed_runs_in_window": 1,
+                },
+            ],
+        )
+        self.assertEqual(
+            result["recovered_branches"],
+            [
+                {
+                    "branch": "main",
+                    "workflow": "CodeQL",
+                    "html_url": "c1",
+                    "failed_runs_in_window": 1,
+                }
+            ],
+        )
+
+    def test_only_the_default_branch_is_read_where_develop_is_absent(self) -> None:
+        with (
+            unittest.mock.patch.object(
+                bm, "graphql", side_effect=[attention_page([], develop=False)]
+            ),
+            unittest.mock.patch.object(bm, "run_gh", return_value=[]) as run,
+        ):
+            bm.collect_attention("o", "alpha", self.START, self.NOW, 7)
+        self.assertEqual(
+            [c.args[0][c.args[0].index("--branch") + 1] for c in run.call_args_list], ["main"]
+        )
+
+    def test_pull_request_pages_are_followed(self) -> None:
+        pages = [attention_page([open_pr(1, check("x", "FAILURE"))], more=True)]
+        pages.append(attention_page([open_pr(2, check("x", "FAILURE"))]))
+        with (
+            unittest.mock.patch.object(bm, "graphql", side_effect=pages),
+            unittest.mock.patch.object(bm, "run_gh", return_value=[]),
+        ):
+            result = bm.collect_attention("o", "alpha", self.START, self.NOW, 7)
+        self.assertEqual([p["number"] for p in result["failing_pull_requests"]], [1, 2])
+
+    def test_a_failed_read_leaves_attention_null_and_exits_one(self) -> None:
+        def graphql(query: str, variables: dict[str, object]) -> dict[str, object]:
+            if "pullRequests" in query:
+                raise bm.GhError("attention down")
+            return page([], False, 0)
+
+        out, err = io.StringIO(), io.StringIO()
+        with (
+            unittest.mock.patch.object(bm, "graphql", side_effect=graphql),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=quiet_rest),
+            contextlib.redirect_stdout(out),
+            contextlib.redirect_stderr(err),
+        ):
+            code = bm.main(["--owner", "o", "--repo", "alpha", "--format", "json"])
+        self.assertEqual(code, 1)
+        doc = json.loads(out.getvalue())
+        self.assertIsNone(doc["repositories"][0]["attention"])
+        self.assertIn("Attention lists were unavailable: attention down", doc["notes"])
+        self.assertIn("reading the attention lists failed", err.getvalue())
+
+    def test_markdown_reads_no_attention_lists(self) -> None:
+        def graphql(query: str, variables: dict[str, object]) -> dict[str, object]:
+            self.assertNotIn("pullRequests", query)
+            return page([], False, 0)
+
+        with (
+            unittest.mock.patch.object(bm, "graphql", side_effect=graphql),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=quiet_rest),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(bm.main(["--owner", "o", "--repo", "alpha"]), 0)
+
+
+class BillingOptInTests(unittest.TestCase):
+    def read(self, *flags: str) -> tuple[str, list[str]]:
+        calls: list[list[str]] = []
+
+        def fake(args: list[str]) -> object:
+            calls.append(args)
+            if args[0] == "api" and "contents" in args[1]:
+                raise bm.GhError("gh: Not Found (HTTP 404)")
+            return {"usageItems": []} if args[0] == "api" and "usage" in args[1] else []
+
+        out = io.StringIO()
+        with (
+            unittest.mock.patch.object(
+                bm,
+                "graphql",
+                side_effect=lambda q, v: (
+                    attention_page([]) if "pullRequests" in q else page([], False, 0)
+                ),
+            ),
+            unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
+            contextlib.redirect_stdout(out),
+        ):
+            bm.main(["--owner", "o", "--repo", "alpha", *flags])
+        return out.getvalue(), [" ".join(c) for c in calls if "billing" in " ".join(c)]
+
+    def test_billing_is_not_read_by_default_and_prints_nothing(self) -> None:
+        text, billing_calls = self.read()
+        self.assertEqual(billing_calls, [])
+        self.assertNotIn("illing", text)
+        self.assertNotIn("Actions minutes", text)
+
+    def test_json_billing_is_null_and_noteless_where_skipped(self) -> None:
+        text, billing_calls = self.read("--format", "json")
+        doc = json.loads(text)
+        self.assertEqual(billing_calls, [])
+        self.assertIsNone(doc["billing"])
+        self.assertEqual(doc["notes"], [])
+
+    def test_the_flag_reads_billing_and_prints_it(self) -> None:
+        text, billing_calls = self.read("--billing")
+        self.assertEqual(len(billing_calls), 1)
+        self.assertIn("Actions minutes", text)
 
 
 class MainTests(unittest.TestCase):
@@ -1238,15 +1625,19 @@ class MainTests(unittest.TestCase):
                 return [{"databaseId": 5, "name": "Build", "url": "r5"}]
             return [{"number": 2, "url": "https://github.com/o/alpha/pull/2"}]
 
+        def graphql(query: str, variables: dict[str, object]) -> dict[str, object]:
+            return attention_page([]) if "pullRequests" in query else page([], False, 0)
+
         out = io.StringIO()
         with (
-            unittest.mock.patch.object(bm, "graphql", return_value=page([], False, 0)),
+            unittest.mock.patch.object(bm, "graphql", side_effect=graphql),
             unittest.mock.patch.object(bm, "run_gh", side_effect=fake),
             contextlib.redirect_stdout(out),
         ):
-            code = bm.main(["--owner", "o", "--repo", "alpha", "--format", "json"])
+            code = bm.main(["--owner", "o", "--repo", "alpha", "--format", "json", "--billing"])
         self.assertEqual(code, 0)
         doc = json.loads(out.getvalue())
+        self.assertEqual(doc["repositories"][0]["attention"]["failing_pull_requests"], [])
         self.assertEqual(doc["totals"]["prs_merged"], 1)
         self.assertEqual(doc["billing"]["error"], "billing denied")
         self.assertIn("Billing was unavailable", doc["notes"][0])

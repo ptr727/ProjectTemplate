@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types as types_module
 import unittest
 from collections.abc import Callable
 from typing import Any
@@ -2227,6 +2228,8 @@ README_CASES = [
 
 DOCKER_SHIELD = "[![Docker Latest][e]][x]\n"
 DOCKER_DEFINITION = "[e]: https://img.shields.io/docker/v/o/r/latest\n"
+COVERAGE_SHIELD = "[![Coverage][f]][x]\n"
+COVERAGE_DEFINITION = "[f]: https://img.shields.io/codecov/c/github/o/r/main\n"
 
 INLINE_ALL = re.sub(
     r"!\[([^\]]*)\]\[([a-z-]+)\]",
@@ -2970,11 +2973,37 @@ class ReadmeCase(unittest.TestCase):
             label, text, ent, wantn = case[:4]
             want_text = case[4] if len(case) > 4 else None
             with self.subTest(label):
-                got = audit_markdown.readme_shield_findings(text, self.rm, ent)
+                got = audit_markdown.readme_shield_findings(text, self.rm, ent, ())
                 good = len(got) == wantn and (
                     want_text is None or any(want_text in t for _, t in got)
                 )
                 self.assertTrue(good, f"readme shields: {label} want={wantn} {want_text} -> {got}")
+
+    def test_coverage_class_follows_the_coverage_predicate(self) -> None:
+        covered = CONFORMANT.replace(
+            "[![Last Commit][b]][x]\n", "[![Last Commit][b]][x]\\\n" + COVERAGE_SHIELD
+        ).replace("[license-shield]:", COVERAGE_DEFINITION + "[license-shield]:")
+        cases = [
+            ("a repo owing coverage and carrying the badge", covered, ["python"], 0),
+            ("the same repo without the badge", CONFORMANT, ["python"], 1),
+            ("a repo owing no coverage owes no badge", CONFORMANT, [], 0),
+        ]
+        for label, text, types, wantn in cases:
+            with self.subTest(label):
+                got = audit_markdown.readme_shield_findings(text, self.rm, {}, types)
+                self.assertEqual(len(got), wantn, f"coverage shield: {label} -> {got}")
+                self.assertTrue(all("`coverage` shield class" in t for _, t in got), got)
+
+    def test_the_audit_hands_its_coverage_types_to_the_shield_check(self) -> None:
+        for types, wantn in ((["csharp"], 1), ([], 0)):
+            with self.subTest(types=types):
+                run = types_module.SimpleNamespace(
+                    docs={"README.md": CONFORMANT},
+                    spec={"readme": self.rm},
+                    entry={},
+                    coverage_types=types,
+                )
+                self.assertEqual(len(audit.check_readme_shields(run)), wantn)
 
     def test_link_cases(self) -> None:
         for label, text, want_letter, want_drift in LINK_CASES:
@@ -3558,6 +3587,16 @@ class AnchoredLastChangeCase(unittest.TestCase):
                 self.assertIsNotNone(audit.extract_anchored(text, anchor))
 
 
+LIBRARY = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+FLAG = "<PropertyGroup><IsTestProject>%s</IsTestProject></PropertyGroup>"
+REFERENCE = '<ItemGroup><PackageReference Include="%s" /></ItemGroup>'
+
+
+def project(*parts: str) -> str:
+    """An SDK-style project text holding PARTS, each a property or item group."""
+    return '<Project Sdk="Microsoft.NET.Sdk">' + "".join(parts) + "</Project>"
+
+
 class CoverageTypesCase(unittest.TestCase):
     """Holds the coverage-candidate and coverage-claiming type helpers."""
 
@@ -3578,8 +3617,9 @@ class CoverageTypesCase(unittest.TestCase):
                 self.assertEqual(got, expected)
 
     def test_coverage_claiming_types(self) -> None:
+        """A dict tree maps each path to the project text its reader answers, and a set tree has no reader."""
         type_mechs = {"csharp": "codecov", "python": "codecov"}
-        coverage_cases = [
+        coverage_cases: list[tuple[list[str], Any, list[str], str]] = [
             (["python"], {"src/pkg/__init__.py", "pyproject.toml"}, [], "python, no tests"),
             (["python"], {"tests/test_a.py", "pyproject.toml"}, ["python"], "python with tests"),
             (
@@ -3588,21 +3628,108 @@ class CoverageTypesCase(unittest.TestCase):
                 ["python"],
                 "python lint-only, with tests, owes the claim same as build",
             ),
-            (["csharp"], {"src/App/App.csproj"}, [], "csharp, no test project"),
-            (["csharp"], {"test/App.Tests/App.Tests.csproj"}, ["csharp"], "csharp with tests"),
-            (["csharp"], {"src/Tests/App.csproj"}, ["csharp"], "csharp, located under Tests/"),
+            (["csharp"], {"src/App/App.csproj": LIBRARY}, [], "csharp, no test project"),
             (
                 ["csharp"],
-                {"test/Specs.csproj"},
+                {"test/App.Tests/App.Tests.csproj": project(REFERENCE % "xunit.v3")},
                 ["csharp"],
-                "csharp, located as a test, named nothing",
+                "csharp, a test project by its framework reference",
             ),
             (
                 ["csharp"],
-                {"src/App/App.csproj", "docs/x.md"},
+                {"test/App.Tests/App.Tests.csproj": LIBRARY, "src/Tests/App.csproj": LIBRARY},
                 [],
-                "csharp, neither named nor located as a test",
+                "csharp, named and located as tests while neither project says so",
             ),
+            (
+                ["csharp"],
+                {"src/appunittest.csproj": project(FLAG % "true")},
+                ["csharp"],
+                "csharp, a name no pattern matched, carrying IsTestProject",
+            ),
+            (
+                ["csharp"],
+                {"src/app_unit_test.csproj": project(REFERENCE % "Microsoft.NET.Test.Sdk")},
+                ["csharp"],
+                "csharp, a name no pattern matched, carrying only a package reference",
+            ),
+            (
+                ["csharp"],
+                {
+                    "src/Testament.csproj": LIBRARY,
+                    "src/TestUtilities.csproj": project(REFERENCE % "xunit.v3.assert"),
+                    "src/Contest.csproj": LIBRARY,
+                    "src/Latest.csproj": LIBRARY,
+                },
+                [],
+                "csharp, names carrying Test where no project says it is one",
+            ),
+            (
+                ["csharp"],
+                {
+                    "src/A.csproj": project(
+                        REFERENCE % "xunit.v3.core.mtp-v2", REFERENCE % "AwesomeAssertions"
+                    )
+                },
+                ["csharp"],
+                "csharp, a framework core without its assertions",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": project(FLAG % " True ")},
+                ["csharp"],
+                "csharp, the property compared as MSBuild does, ignoring case and space",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": project(FLAG % "false", REFERENCE % "Microsoft.NET.Test.Sdk")},
+                [],
+                "csharp, a literal false property outweighs a framework reference",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": project(FLAG % "$(Flag)")},
+                ["csharp"],
+                "csharp, a property only an evaluation could read keeps the claim",
+            ),
+            (
+                ["csharp"],
+                {
+                    "src/A.csproj": (
+                        '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">'
+                        + (REFERENCE % "NUnit3TestAdapter")
+                        + "</Project>"
+                    )
+                },
+                ["csharp"],
+                "csharp, a namespaced legacy project read by its local names",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": '<Project Sdk="Microsoft.NET.Sdk;MSTest.Sdk/3.6.1" />'},
+                ["csharp"],
+                "csharp, a test SDK named in a versioned Sdk list",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": '<Project><Sdk Name="mstest.sdk" /></Project>'},
+                ["csharp"],
+                "csharp, a test SDK element, its id compared case-insensitively",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": None},
+                ["csharp"],
+                "csharp, an unread project keeps the claim",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": "<Project>"},
+                ["csharp"],
+                "csharp, an unparsable project keeps the claim",
+            ),
+            (["csharp"], {"src/A.csproj"}, ["csharp"], "csharp, no reader keeps the claim"),
+            (["csharp"], {"src/A.cs", "README.md"}, [], "csharp, a tree holding no project"),
             (
                 ["python"],
                 {"test_app.py", "pyproject.toml"},
@@ -3634,24 +3761,6 @@ class CoverageTypesCase(unittest.TestCase):
                 "python, a test directory holding Python",
             ),
             (
-                ["csharp"],
-                {"test/App.UnitTest.csproj"},
-                ["csharp"],
-                "csharp, singular Test in the name",
-            ),
-            (
-                ["csharp"],
-                {"src/widget.tests.csproj"},
-                ["csharp"],
-                "csharp, a lowercase test segment outside a test directory",
-            ),
-            (
-                ["csharp"],
-                {"src/Contest.csproj", "src/Latest.csproj"},
-                [],
-                "csharp, names carrying those letters inside a word rather than as a segment",
-            ),
-            (
                 ["python"],
                 {"test/test_a.py", "pyproject.toml"},
                 ["python"],
@@ -3661,7 +3770,10 @@ class CoverageTypesCase(unittest.TestCase):
             (["python"], {"tests"}, [], "python, a file named tests is not a directory"),
             (
                 ["csharp", "python"],
-                {"test/App.Tests/App.Tests.csproj", "tools/py/pyproject.toml"},
+                {
+                    "test/App.Tests/App.Tests.csproj": project(FLAG % "true"),
+                    "tools/py/pyproject.toml": None,
+                },
                 ["csharp"],
                 "mixed repo, the tested C# side claims coverage, the untested lint-only python side does not",
             ),
@@ -3670,8 +3782,51 @@ class CoverageTypesCase(unittest.TestCase):
         ]
         for types_in, tree_in, expected, label in coverage_cases:
             with self.subTest(label):
-                got = audit.coverage_claiming_types(types_in, type_mechs, tree_in)
+                read = tree_in.get if isinstance(tree_in, dict) else None
+                paths = None if tree_in is None else set(tree_in)
+                got = audit.coverage_claiming_types(types_in, type_mechs, paths, read)
                 self.assertEqual(got, expected)
+
+    def test_projects_are_read_in_path_order_until_one_is_a_test_project(self) -> None:
+        texts = {
+            "b/B.csproj": project(FLAG % "true"),
+            "a/A.csproj": LIBRARY,
+            "c/C.csproj": project(FLAG % "true"),
+            "a/A.cs": None,
+        }
+        reads: list[str] = []
+
+        def read(path: str) -> str | None:
+            reads.append(path)
+            return texts[path]
+
+        got = audit.coverage_claiming_types(["csharp"], {"csharp": "codecov"}, set(texts), read)
+        self.assertEqual(got, ["csharp"])
+        self.assertEqual(reads, ["a/A.csproj", "b/B.csproj"])
+        reads.clear()
+        audit.coverage_claiming_types(["python"], {"python": "codecov"}, set(texts), read)
+        self.assertEqual(reads, [], "a type that reads no project reads none")
+
+    def test_the_audit_reads_each_project_once_at_its_listed_blob(self) -> None:
+        head = {"commit": {"sha": "c1", "commit": {"tree": {"sha": "t1"}}}}
+        text = project(FLAG % "true")
+        calls: list[str] = []
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            calls.append(path)
+            if "/git/trees/" in path:
+                blob = {"type": "blob", "path": "src/A.csproj", "sha": "b1", "mode": "100644"}
+                return {"tree": [blob], "truncated": False}
+            if path == "repos/owner/R/git/blobs/b1":
+                return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
+            return None
+
+        spec = {"secrets": {"typeMechanisms": {"csharp": "codecov"}}}
+        run = audit.Run({"types": ["csharp"]}, spec, "owner/R", "main", {}, None, None, head)
+        with mock.patch.object(audit, "gh", fake_gh):
+            self.assertEqual(run.coverage_types, ["csharp"])
+            self.assertEqual(run.read_project("src/A.csproj"), text)
+        self.assertEqual([c for c in calls if "/git/blobs/" in c], ["repos/owner/R/git/blobs/b1"])
 
 
 class PythonTypeFindingsCase(unittest.TestCase):
@@ -6064,6 +6219,122 @@ class ExpectedRulesetsCase(unittest.TestCase):
         sources, _ = audit.expected_rulesets({"repos": []}, {"name": "Fixture"}, "operational")
         self.assertEqual(sources["develop"], "repo-config/operational/develop.json")
         self.assertEqual(sources["main"], "repo-config/main.json")
+
+
+class StalePullRequestCheckCase(unittest.TestCase):
+    """A pullRequestCheck: false is stale only where every branch requiring the check posts it on a pull request run."""
+
+    POSTING = PR_HEAD + PR_CHECK
+
+    @staticmethod
+    def findings(
+        workflows: dict[str, str | None], model: str = "release", declared: bool | None = False
+    ) -> list[tuple[str, str]]:
+        entry: dict[str, Any] = {"name": "Fixture"}
+        if declared is not None:
+            entry["pullRequestCheck"] = declared
+        sources, _ = audit.expected_rulesets({"repos": [entry]}, entry, model)
+        return audit.stale_pull_request_check(entry, sources, workflows.__getitem__)
+
+    def test_a_false_every_gated_branch_outgrew_is_drift(self) -> None:
+        got = self.findings({"main": self.POSTING, "develop": self.POSTING})
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0][0], "DRIFT")
+        self.assertIn("pullRequestCheck is false", got[0][1])
+        self.assertIn(f"on main and develop posts '{PR_CHECK_NAME}'", got[0][1])
+
+    def test_a_branch_lacking_the_workflow_keeps_the_false(self) -> None:
+        self.assertEqual(self.findings({"main": self.POSTING, "develop": None}), [])
+        self.assertEqual(self.findings({"main": None, "develop": self.POSTING}), [])
+
+    def test_a_check_posted_under_another_name_keeps_the_false(self) -> None:
+        other = self.POSTING.replace(PR_CHECK_NAME, "Check workflow status job")
+        self.assertEqual(self.findings({"main": self.POSTING, "develop": other}), [])
+
+    def test_a_kept_check_is_never_stale(self) -> None:
+        for declared in (True, None):
+            with self.subTest(declared=declared):
+                self.assertEqual(self.findings({}, declared=declared), [])
+
+    def test_an_operational_repo_reads_only_the_branch_its_rulesets_gate(self) -> None:
+        got = self.findings({"main": self.POSTING}, model="operational")
+        self.assertEqual(len(got), 1)
+        self.assertIn("on main posts", got[0][1])
+
+    def test_the_pull_request_only_expression_posts_the_check(self) -> None:
+        both = self.POSTING.replace("on: pull_request", "on: [pull_request, push]").replace(
+            f"name: {PR_CHECK_NAME}", f'name: "{PR_ONLY_EXPRESSION}"'
+        )
+        self.assertEqual(len(self.findings({"main": both, "develop": both})), 1)
+
+    def test_a_workflow_no_pull_request_into_the_branch_runs_keeps_the_false(self) -> None:
+        cases = {
+            "no pull_request trigger": "on: push",
+            "branches excluding it": "on:\n  pull_request:\n    branches: [main]",
+            "branches-ignore naming it": "on:\n  pull_request:\n    branches-ignore: [dev*]",
+            "a negated pattern": "on:\n  pull_request:\n    branches: ['**', '!develop']",
+            "a paths filter": "on:\n  pull_request:\n    paths: ['src/**']",
+            "a paths-ignore filter": "on:\n  pull_request:\n    paths-ignore: ['docs/**']",
+            "types missing synchronize": "on:\n  pull_request:\n    types: [opened, reopened]",
+        }
+        for label, trigger in cases.items():
+            with self.subTest(case=label):
+                develop = self.POSTING.replace("on: pull_request", trigger)
+                self.assertEqual(self.findings({"main": self.POSTING, "develop": develop}), [])
+        listed = self.POSTING.replace(
+            "on: pull_request", "on:\n  pull_request:\n    branches: [main, develop]"
+        )
+        self.assertEqual(len(self.findings({"main": listed, "develop": listed})), 1)
+        typed = self.POSTING.replace(
+            "on: pull_request",
+            "on:\n  pull_request:\n    types: [opened, synchronize, reopened, labeled]",
+        )
+        self.assertEqual(len(self.findings({"main": typed, "develop": typed})), 1)
+
+    def test_a_reusable_workflow_call_job_does_not_post_its_own_name(self) -> None:
+        called = self.POSTING.replace("    runs-on: ubuntu-latest\n", "    uses: ./x.yml\n")
+        self.assertIn("uses: ./x.yml", called)
+        self.assertEqual(self.findings({"main": called, "develop": called}), [])
+        unnamed = audit.check_interface("p.yml", PR_CONTRACT, called)
+        self.assertTrue(any("neither as a literal job name" in f[1] for f in unnamed), unnamed)
+
+    def test_the_rulesets_check_reports_it_from_each_branch_head(self) -> None:
+        entry = {"name": "Fixture", "pullRequestCheck": False}
+        heads = {"main": {"commit": {"sha": "m1"}}, "develop": {"commit": {"sha": "d1"}}}
+        spec = {"registry": {"repos": [entry], "defaults": {}}}
+        run = audit.Run(entry, spec, "o/r", "main", {}, heads["main"], heads["develop"])
+        posting = base64.b64encode(self.POSTING.encode()).decode()
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            if "/rulesets" in path:
+                return []
+            self.assertRegex(path, r"\?ref=(m1|d1)$")
+            return {"encoding": "base64", "content": posting}
+
+        with mock.patch.object(audit, "gh", fake_gh):
+            got = audit.check_rulesets_payload(run)
+        stale = [f for f in got if f[1].startswith("registry: pullRequestCheck is false,")]
+        self.assertEqual([f[0] for f in stale], ["DRIFT"], got)
+
+    def test_each_branch_is_read_at_its_own_head(self) -> None:
+        heads = {"main": {"commit": {"sha": "m1"}}, "develop": {"commit": {"sha": "d1"}}}
+        run = audit.Run({}, {}, "o/r", "main", {}, heads["main"], heads["develop"])
+        reads: list[tuple[str, bool]] = []
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            reads.append((path, ok404))
+            if path.endswith("?ref=d1"):
+                return None
+            return {"encoding": "base64", "content": base64.b64encode(b"main text").decode()}
+
+        with mock.patch.object(audit, "gh", fake_gh):
+            self.assertEqual(run.branch_workflow("main"), "main text")
+            self.assertIsNone(run.branch_workflow("develop"))
+            self.assertIsNone(
+                audit.Run({}, {}, "o/r", "main", {}, None, None).branch_workflow("main")
+            )
+        path = "repos/o/r/contents/.github/workflows/test-pull-request.yml?ref="
+        self.assertEqual(reads, [(path + "m1", True), (path + "d1", True)])
 
 
 if __name__ == "__main__":

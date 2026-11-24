@@ -9,8 +9,10 @@ imports are absent.
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from typing import Any
+from xml.etree import ElementTree
 
 STORES = ("actions", "dependabot")
 
@@ -23,6 +25,30 @@ SECRET_SCOPES = ("fleet", "repository")
 FILE_PREFIX = "github_"
 
 EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+TEST_FRAMEWORK_PACKAGES = frozenset(
+    {
+        "microsoft.net.test.sdk",
+        "mstest",
+        "mstest.sdk",
+        "mstest.testadapter",
+        "nunit3testadapter",
+        "tunit",
+        "tunit.engine",
+        "xunit",
+        "xunit.core",
+        "xunit.v3",
+        "xunit.v3.core",
+        "xunit.v3.core.mtp-off",
+        "xunit.v3.core.mtp-v1",
+        "xunit.v3.core.mtp-v2",
+        "xunit.v3.mtp-off",
+        "xunit.v3.mtp-v1",
+        "xunit.v3.mtp-v2",
+    }
+)
+
+ProjectReader = Callable[[str], str | None]
 
 
 class SecretNameError(Exception):
@@ -78,6 +104,30 @@ def read_tree_blobs(sha: str, read: Callable[[str], Any]) -> dict[str, tuple[Any
     return tree_blobs(read(sha))
 
 
+def contents_text(content: Any) -> str | None:
+    """The decoded text of a contents or git blobs API response, or None where it holds no inline file content.
+
+    An empty file decodes to an empty string.
+    """
+    if not isinstance(content, dict) or content.get("encoding") != "base64":
+        return None
+    return base64.b64decode(content["content"]).decode("utf-8", "replace")
+
+
+def blob_reader(blobs: dict[str, tuple[Any, Any]], read: Callable[[str], Any]) -> ProjectReader:
+    """A reader of one of BLOBS by path through the object SHA its listing named, so a later push cannot move it.
+
+    `read` is each caller's own gh read of a git blobs API response for a SHA.
+    It answers None for a path with no SHA or a response holding no inline content.
+    """
+
+    def read_path(path: str) -> str | None:
+        sha = blobs.get(path, (None, None))[0]
+        return contents_text(read(sha)) if sha else None
+
+    return read_path
+
+
 def in_test_directory(path: str) -> bool:
     """Whether any directory segment of path names a test directory, compared case-insensitively."""
     return any(segment.lower() in ("test", "tests") for segment in path.split("/")[:-1])
@@ -89,17 +139,40 @@ def is_python_test_module(path: str) -> bool:
     return name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py"))
 
 
-def is_csharp_test_project(path: str) -> bool:
-    """Whether path is a C# project either named or located as a test project."""
-    if not path.endswith(".csproj"):
-        return False
-    name = path.rsplit("/", 1)[-1]
-    segments = name[: -len(".csproj")].lower().split(".")
-    return (
-        "Test" in name
-        or any(segment in ("test", "tests") for segment in segments)
-        or in_test_directory(path)
-    )
+def is_csharp_test_project(text: str | None) -> bool:
+    """Whether a C# project's own text makes it a test project, its file name and directory deciding nothing.
+
+    Its IsTestProject property decides where the project sets one, and only a literal false says no.
+    Otherwise a reference to a TEST_FRAMEWORK_PACKAGES package or SDK decides, its id compared case-insensitively as NuGet does.
+    A PackageReference names it, as does an Sdk element or a `;` list of Sdk attribute names, each with an optional `/<version>`.
+    A framework's core without assertions is in it, such as xunit.v3.core beside AwesomeAssertions.
+    An assertion or extensibility package such as NUnit or MSTest.TestFramework is not in that set.
+    A test-helper library references those without being a test project.
+    So `appunittest.csproj` is a test project when it says so, and `Testament.csproj` is not unless it does.
+
+    The tolerated error is a claim too many, because a wrong claim is a visible finding and a wrong drop a silent clean report.
+    So text that was not read, or does not parse, reads as a test project.
+    The one drop left is a project made a test project only by a file it imports, such as Directory.Build.props.
+    """
+    if text is None:
+        return True
+    try:
+        root = ElementTree.fromstring(text)
+    except ElementTree.ParseError:
+        return True
+    flags, names = [], []
+    for element in root.iter():
+        tag = str(element.tag).rpartition("}")[2]
+        if tag == "IsTestProject":
+            flags.append((element.text or "").strip().lower())
+        elif tag == "PackageReference":
+            names += [element.get("Include", ""), element.get("Update", "")]
+        elif tag == "Sdk":
+            names.append(element.get("Name", ""))
+        names += [part.partition("/")[0] for part in element.get("Sdk", "").split(";")]
+    if flags:
+        return any(flag != "false" for flag in flags)
+    return any(name.strip().lower() in TEST_FRAMEWORK_PACKAGES for name in names)
 
 
 def coverage_candidate_types(types: list[str], repo_profiles: Any) -> list[str]:
@@ -109,14 +182,23 @@ def coverage_candidate_types(types: list[str], repo_profiles: Any) -> list[str]:
 
 
 def coverage_claiming_types(
-    types: list[str], type_mechanisms: dict[str, Any], tree: set[str] | None
+    types: list[str],
+    type_mechanisms: dict[str, Any],
+    tree: set[str] | None,
+    read_project: ProjectReader | None = None,
 ) -> list[str]:
     """The declared types that owe Codecov coverage, meaning the CODECOV_TOKEN secret and .codecov.yml.
 
     `tree` is the blob path set, or None when unread, and then every candidate keeps its claim.
+    `read_project` reads a `.csproj` path's text for is_csharp_test_project().
+    Without one no project is read, so a tree holding any `.csproj` keeps the csharp claim.
+    Projects are read in path order only until one is a test project.
     """
+    read = read_project or (lambda path: None)
     detectors = {
-        "csharp": lambda paths: any(is_csharp_test_project(p) for p in paths),
+        "csharp": lambda paths: any(
+            is_csharp_test_project(read(p)) for p in sorted(paths) if p.endswith(".csproj")
+        ),
         "python": lambda paths: any(
             (p.endswith(".py") and in_test_directory(p)) or is_python_test_module(p) for p in paths
         ),
@@ -132,28 +214,36 @@ def coverage_claiming_types(
 
 
 def coverage_types(
-    secrets: dict[str, Any], entry: dict[str, Any], tree: set[str] | None
+    secrets: dict[str, Any],
+    entry: dict[str, Any],
+    tree: set[str] | None,
+    read_project: ProjectReader | None = None,
 ) -> list[str]:
     """The declared types of ENTRY that owe Codecov coverage, the one composition the audit and provisioning share.
 
     So the audit's .codecov.yml check and the CODECOV_TOKEN it owes cannot disagree.
     """
     candidates = coverage_candidate_types(declared_types(entry), entry.get("profiles", {}))
-    return coverage_claiming_types(candidates, secrets.get("typeMechanisms", {}), tree)
+    return coverage_claiming_types(
+        candidates, secrets.get("typeMechanisms", {}), tree, read_project
+    )
 
 
 def resolve_secret_stores(
-    secrets: dict[str, Any], entry: dict[str, Any], tree: set[str] | None
+    secrets: dict[str, Any],
+    entry: dict[str, Any],
+    tree: set[str] | None,
+    read_project: ProjectReader | None = None,
 ) -> tuple[dict[str, set[str]], set[str]]:
     """The secret names each store must hold for this repo, and the names that must be absent from every store.
 
     The mechanisms come from the declared publish targets and the declared types, never from workflow content.
-    A repo's tree decides only whether a csharp or python repo owes the codecov mechanism, through its tests.
+    A repo's tree, and its C# projects' text, decide only whether a csharp or python repo owes the codecov mechanism, through its tests.
     """
     mechanisms = [
         secrets["targetMechanisms"].get(p.get("target")) for p in entry.get("publish", [])
     ]
-    claiming = coverage_types(secrets, entry, tree)
+    claiming = coverage_types(secrets, entry, tree, read_project)
     for name in declared_types(entry):
         mechanism = secrets.get("typeMechanisms", {}).get(name)
         if mechanism != "codecov" or name in claiming:
@@ -258,6 +348,7 @@ def secret_plan(
     tree: set[str] | None,
     repo: str,
     live: dict[str, set[str]] | None = None,
+    read_project: ProjectReader | None = None,
 ) -> dict[str, Any]:
     """One row per required secret name, the forbidden names, and the wrong-scope file names for this repo.
 
@@ -265,7 +356,7 @@ def secret_plan(
     A stray is the file the name would have at the other scope.
     Given the live names per store, the plan also carries the findings of compare_stores.
     """
-    required, forbidden = resolve_secret_stores(secrets, entry, tree)
+    required, forbidden = resolve_secret_stores(secrets, entry, tree, read_project)
     rows = []
     strays = set()
     for name in sorted(set().union(*required.values())):

@@ -1691,23 +1691,34 @@ def blanked(value: str) -> str:
     return re.sub(r"[^\n]", " ", value)
 
 
+def heredoc_rest(value: str) -> tuple[int, int] | None:
+    """Where a heredoc token's opening line resumes past its label and where that line ends.
+
+    None where `value` opens no heredoc. The text between the two is ordinary shell code. A match
+    always holds a line break, since `HEREDOC` requires one after the opening line.
+    """
+    if not (m := re.match(HEREDOC, value)):
+        return None
+    return m.end(4) + len(m[2]), value.find("\n")
+
+
 def shell_literals(text: str, lexer: str) -> str:
     """The command with what its shell takes literally blanked, each line break kept.
 
     That is a quotation, an escape, a comment, a `${...}` expansion, and a heredoc's label and body,
     as the shell's lexer reads them. So a `$(...)` inside a double quotation stays code. A heredoc's
-    opening line past its label is code too. A line break is added for the lexer, since its
-    comment rule ends on one and a code span has none.
+    opening line past its label is read as any other command is, its own literals blanked. A line
+    break is added for the lexer, since its comment rule ends on one and a code span has none.
     """
     out: list[str] = []
     depth = 0
     for kind, value in lexer_for(lexer).get_tokens(text + "\n"):
         opens = kind in String.Interpol and value == "${"
         depth += opens - (depth > 0 and kind in String.Interpol and value == "}")
-        if kind in String.Heredoc and (m := re.match(HEREDOC, value)):
-            cut, eol = m.end(4) + len(m[2]), value.find("\n")
-            eol = len(value) if eol < 0 else eol
-            out.append(blanked(value[:cut]) + value[cut:eol] + blanked(value[eol:]))
+        if kind in String.Heredoc and (split := heredoc_rest(value)):
+            cut, eol = split
+            rest = shell_literals(value[cut:eol], lexer)
+            out.append(blanked(value[:cut]) + rest + blanked(value[eol:]))
         elif opens or depth or kind in Comment or (kind in String and kind not in String.Backtick):
             out.append(blanked(value))
         else:
@@ -1772,9 +1783,8 @@ def shell_char_kinds(text: str, lexer: str) -> str:
             out.append("#" * len(value))
         elif kind in String.Escape and value == "\\\n":
             out.append("ww")
-        elif kind in String.Heredoc and (m := re.match(HEREDOC, value)):
-            cut, eol = m.end(4) + len(m[2]), value.find("\n")
-            eol = len(value) if eol < 0 else eol
+        elif kind in String.Heredoc and (split := heredoc_rest(value)):
+            cut, eol = split
             rest = shell_char_kinds(value[cut:eol], lexer)
             out.append("h" * cut + rest + "H" * (len(value) - eol))
         elif kind in String.Heredoc:

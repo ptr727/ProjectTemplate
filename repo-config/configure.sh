@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure or validate a repository against the committed fleet config in this directory, via the GitHub API.
 #
-#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational] [--checkout <path>] [--dry-run]   # create-or-update settings + labels + rulesets + the fleet project link + secrets (writes), and with --checkout the agent policy files
+#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational] [--checkout <path>] [--dry-run] [--lower-workflow-token]   # create-or-update settings + workflow token defaults + labels + rulesets + the fleet project link + secrets (writes), and with --checkout the agent policy files
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it.
@@ -10,12 +10,15 @@
 # The repo defaults to the current gh repo, and the model to the registry lookup.
 # The model may be passed as the sole positional, as in `configure.sh check operational`.
 #
-# The apply mode writes five groups, in order.
+# The apply mode writes six groups, in order.
 # It adds the agent policy files when --checkout names a local checkout of the repo.
 # A last group of secrets follows.
 # First settings.json via PATCH, plus has_discussions (public community repos only) and default_branch (main, only when it exists).
 # The same group then sets the interaction limit the registry's publicInteraction declares, on a public repo only, for six months.
+# It sets none until interaction-verification.json records a pilot's bot verification, and check owes none before then.
 # Then the Dependabot vulnerability alerts and automated security updates.
+# Then the Actions workflow token defaults from workflow-permissions.json, written only where the live values differ.
+# Lowering a repository's write default is held back unless --lower-workflow-token confirms it, and the run then ends non-zero.
 # Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
 # Then the link to the fleet project declared in project.json, written only when the live link list does not already hold it.
@@ -53,8 +56,9 @@
 # That still survives the GitHub API normalizing a stored ruleset, since the comparison is over parsed JSON with sorted keys rather than a byte diff.
 # The derived settings apply computes are asserted by name rather than from a payload, meaning has_discussions and default_branch.
 # The interaction limit is asserted the same way.
-# A limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
+# Once a verification is recorded, a limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
+# The workflow token defaults are compared with workflow-permissions.json, and a write default apply held back reads as drift.
 # The agent policy files are checked too, read from the repo's default branch and compared with the render.
 # The project link is checked by resolving the declared project to a node id.
 # The check then asserts that id is among the ones the repository is linked to.
@@ -84,6 +88,7 @@ Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
        repo-config/configure.sh apply|check release|operational
        repo-config/configure.sh apply [owner/repo] [release|operational] --checkout <path>
        repo-config/configure.sh apply [owner/repo] [release|operational] --dry-run
+       repo-config/configure.sh apply [owner/repo] [release|operational] --lower-workflow-token
        repo-config/configure.sh --help
 
   apply   create or update the fleet configuration on the repo (writes)
@@ -91,6 +96,8 @@ Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
 
   --checkout <path>   with apply only, also write the agent policy files into this local checkout of the repo
   --dry-run           with apply only, run the pre-flight and print the secrets that would be set, writing nothing
+  --lower-workflow-token
+                      with apply only, lower a write default workflow token to read, once no job relies on the implicit write
 
 The repo defaults to the current gh repo, and the model to the registry lookup.
 USAGE
@@ -115,6 +122,7 @@ esac
 checkout=""
 checkout_given=false
 dry_run=false
+lower_workflow_token=false
 positional=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -137,6 +145,10 @@ while [ "$#" -gt 0 ]; do
         ;;
     --dry-run)
         dry_run=true
+        shift
+        ;;
+    --lower-workflow-token)
+        lower_workflow_token=true
         shift
         ;;
     -*) refuse "Unknown option '$1'" ;;
@@ -162,6 +174,9 @@ if [ "$checkout_given" = true ]; then
 fi
 if [ "$dry_run" = true ] && [ "$cmd" != apply ]; then
     refuse "Option '--dry-run' is valid only with apply"
+fi
+if [ "$lower_workflow_token" = true ] && [ "$cmd" != apply ]; then
+    refuse "Option '--lower-workflow-token' is valid only with apply"
 fi
 if [ "$#" -gt 2 ]; then
     refuse "Too many arguments (expected at most a repo and a model)"
@@ -202,6 +217,33 @@ name="${repo##*/}"
 # The \r bash expands here, a literal byte rather than sed's own backslash-escape.
 # That is because sed's own escape is a GNU extension a BSD sed would not honor.
 jqr() { jq -r "$@" | sed $'s/\r$//'; }
+
+# Call as `payload_problem FILE STEP...`, each step a jq filter over the slurped file, then @@, then the reason it prints on a failure.
+# Each step runs its own jq, so a payload that parses but fails a step is told apart from a jq that failed.
+payload_problem() {
+    local file="$1" err status step
+    shift
+    status=0
+    err="$(jq empty "$file" 2>&1)" || status=$?
+    if [ "$status" -ne 0 ] && [[ "$err" == *"parse error"* ]]; then
+        echo "did not parse (${err//$'\n'/ })"
+        return 1
+    elif [ "$status" -ne 0 ]; then
+        echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
+        return 1
+    fi
+    for step in "$@"; do
+        status=0
+        err="$(jq -s -e "${step%%@@*}" "$file" 2>&1 >/dev/null)" || status=$?
+        if [ "$status" -eq 1 ]; then
+            echo "${step#*@@}"
+            return 1
+        elif [ "$status" -ne 0 ]; then
+            echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
+            return 1
+        fi
+    done
+}
 
 archived_status=""
 # shellcheck disable=SC2016  # $n is a jq --arg variable, not a shell expansion
@@ -254,6 +296,7 @@ esac
 settings_file="$script_dir/settings.json"
 labels_file="$script_dir/labels.json"
 project_file="$script_dir/project.json"
+workflow_permissions_file="$script_dir/workflow-permissions.json"
 
 # ----- Resolve the public interaction policy (shared by apply and check) -----
 # The registry's publicInteraction names who may interact with the repo while it is public.
@@ -304,6 +347,24 @@ elif python3 -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>
 else
     echo "No Python 3.10 or newer found (python3 or py -3), the oldest that runs this repo's Python scripts. This repo targets Python 3.13 (see docs/host-setup.md)." >&2
     exit 1
+fi
+
+# ----- Resolve the bot verification record that gates the interaction limit (shared by apply and check) -----
+# A limit that silenced a review bot would read as a false green, so none is set until a pilot verifies the bots.
+# A committed record rather than a flag carries that evidence, so an operator who skips the README still cannot set an unverified limit.
+interaction_record="$script_dir/interaction-verification.json"
+interaction_verified=false
+if [ -e "$interaction_record" ]; then
+    if ! record_problem="$(payload_problem "$interaction_record" \
+        'length == 1@@does not hold exactly one JSON document' \
+        '.[0] | type == "object"@@is not a JSON object' \
+        '.[0] | keys == ["bots", "date", "pilot"]@@does not hold exactly the keys pilot, date, and bots' \
+        '.[0] | (.pilot | type == "string" and length > 0) and (.date | type == "string" and length > 0)@@does not name the pilot repository and the date as non-empty strings' \
+        '.[0] | (.bots | type == "array") and (.bots | sort) == ["CodeRabbit", "Copilot", "Dependabot", "Qodo"]@@does not name exactly the four bots Copilot, CodeRabbit, Qodo, and Dependabot')"; then
+        echo "The interaction verification record $interaction_record $record_problem, per repo-config/README.md \"Public Interaction\". Fix or remove it. Stopping before any write." >&2
+        exit 1
+    fi
+    interaction_verified=true
 fi
 
 # ----- Compose the ruleset payloads from the agent policy and the registry (shared by apply and check) -----
@@ -441,7 +502,7 @@ report_secret_problems() { # secrets-dir
 }
 
 # Print what the secrets group would set, per store, without writing or printing a value, then the problems, and exit.
-# The exit status is the one a real apply would end with, so a dry run that exits 0 predicts a run that does.
+# The exit status is the one the secrets alone predict, and cmd_apply adds a held workflow token group to it.
 # Only the secrets group has a dry run, and the message says so rather than imply the other groups were previewed.
 dry_run_secrets() { # secrets-dir
     local store sname scope file stores
@@ -578,6 +639,38 @@ repo_projects() {
     jq -c '{ id: .data.repository.id, projects: [.data.repository.projectsV2.nodes[].id] }' <<<"$out"
 }
 
+# ----- Actions workflow token defaults (shared by apply and check) -----
+# They decide what GITHUB_TOKEN holds in a workflow declaring no permissions block, and whether a workflow may approve a pull request.
+# They sit on an endpoint of their own rather than on the repository object, so settings.json's PATCH cannot carry them.
+# Call as `why="$(workflow_permissions_problem)"`, which prints why workflow-permissions.json fails its contract, or nothing when it meets it.
+# The contract is the two keys the endpoint takes, each holding a value it accepts, so a mistyped key is refused here rather than sent.
+workflow_permissions_problem() {
+    if [ ! -e "$workflow_permissions_file" ]; then
+        echo "was not found"
+        return 1
+    fi
+    payload_problem "$workflow_permissions_file" \
+        'length == 1@@does not hold exactly one JSON document' \
+        '.[0] | type == "object"@@is not a JSON object' \
+        '.[0] | keys == ["can_approve_pull_request_reviews", "default_workflow_permissions"]@@does not hold exactly the keys default_workflow_permissions and can_approve_pull_request_reviews' \
+        '.[0] | (.default_workflow_permissions == "read" or .default_workflow_permissions == "write") and (.can_approve_pull_request_reviews | type == "boolean")@@declares a value the endpoint does not take (default_workflow_permissions read or write, can_approve_pull_request_reviews true or false)'
+}
+
+# Print the live defaults as one compact JSON object with sorted keys, the form apply compares with the payload.
+# It fails with its own message on a read error or a body without both keys, so a caller never compares against a partial read.
+workflow_permissions_live() {
+    local live
+    if ! live="$(gh api "repos/$repo/actions/permissions/workflow")"; then
+        echo "Failed to read the Actions workflow token defaults of $repo. Either the token lacks admin on the repository or the endpoint is unavailable there." >&2
+        return 1
+    fi
+    if ! jq_has -s 'length == 1 and (.[0] | type == "object" and has("default_workflow_permissions") and has("can_approve_pull_request_reviews"))' <<<"$live"; then
+        echo "The Actions workflow token defaults of $repo did not read as one JSON object holding both keys." >&2
+        return 1
+    fi
+    jqr -c -S '{default_workflow_permissions, can_approve_pull_request_reviews}' <<<"$live"
+}
+
 # =============================== apply ===============================
 apply_ruleset() { # payload-file - create-or-update the ruleset by name
     local file="$1" rname id live_bypass body
@@ -623,37 +716,13 @@ apply_ruleset() { # payload-file - create-or-update the ruleset by name
 #   - a six-digit lowercase hex color, which is how GitHub stores it
 #   - a description of at most 100 characters
 # Each is a string holding no tab or line break.
-# Each step runs its own jq and prints its own reason on a failure.
-# A payload that is malformed, empty, out of contract, or repeats a name is therefore told apart from a jq that failed.
 labels_payload_ok() {
-    local err status step
-    local -a steps=(
-        'length == 1@@does not hold exactly one JSON document'
-        '.[0] | type=="array"@@is not an array'
-        '.[0] | length > 0@@is empty'
-        '.[0] | all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)'
+    payload_problem "$labels_file" \
+        'length == 1@@does not hold exactly one JSON document' \
+        '.[0] | type=="array"@@is not an array' \
+        '.[0] | length > 0@@is empty' \
+        '.[0] | all(.[]; type=="object" and (.name|type=="string") and (.color|type=="string") and (.description|type=="string") and (.name|length) > 0 and (.color|test("^[0-9a-f]{6}$")) and (.description|length) <= 100 and ((.name+.color+.description)|test("[\t\r\n]")|not))@@holds a label outside the field contract (non-empty name, six-digit lowercase hex color, description of at most 100 characters, no tab or line break)' \
         '.[0] | (map(.name | ascii_downcase) | unique | length) == length@@names a label more than once, ignoring case'
-    )
-    status=0
-    err="$(jq empty "$labels_file" 2>&1)" || status=$?
-    if [ "$status" -ne 0 ] && [[ "$err" == *"parse error"* ]]; then
-        echo "did not parse (${err//$'\n'/ })"
-        return 1
-    elif [ "$status" -ne 0 ]; then
-        echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
-        return 1
-    fi
-    for step in "${steps[@]}"; do
-        status=0
-        err="$(jq -s -e "${step%%@@*}" "$labels_file" 2>&1 >/dev/null)" || status=$?
-        if [ "$status" -eq 1 ]; then
-            echo "${step#*@@}"
-            return 1
-        elif [ "$status" -ne 0 ]; then
-            echo "could not be checked because jq failed (exit $status: ${err//$'\n'/ })"
-            return 1
-        fi
-    done
 }
 
 apply_labels() { # create-or-update every label labels.json declares, by name
@@ -706,6 +775,40 @@ apply_project() { # project-node-id
     echo "Linked $repo to project '$title' ($owner, number $number)"
 }
 
+# Test with `workflow_permissions_held LIVE`, true where applying would lower a write default with no --lower-workflow-token to confirm it.
+# Lowering write to read fails any job that relied on the implicit write.
+# The operator passes the option once a read of the repository's workflows finds no such job.
+workflow_permissions_held() { # live-defaults-json
+    [ "$lower_workflow_token" != true ] &&
+        [ "$(jqr '.default_workflow_permissions' <<<"$1")" = write ] &&
+        [ "$(jqr '.default_workflow_permissions' "$workflow_permissions_file")" = read ]
+}
+
+# Write the defaults workflow-permissions.json declares, only where the live ones cmd_apply's pre-flight read differ.
+# A held group writes nothing, and cmd_apply's pre-flight has already decided the run ends non-zero for it.
+# The endpoint answers a write with no body, so the values are read back to confirm it rather than trusted from the status alone.
+apply_workflow_permissions() { # live-defaults-json
+    local want got=""
+    want="$(jqr -c -S '.' "$workflow_permissions_file")"
+    if [ "$1" = "$want" ]; then
+        echo "Workflow token defaults already match $want"
+        return
+    fi
+    if workflow_permissions_held "$1"; then
+        echo "Held back the workflow token defaults ($1, declared $want), since lowering the write default fails any job relying on the implicit write. Confirm that every job writing through GITHUB_TOKEN declares its scope, then apply again with --lower-workflow-token."
+        return
+    fi
+    if ! gh api --method PUT "repos/$repo/actions/permissions/workflow" --input "$workflow_permissions_file"; then
+        echo "Failed to set the Actions workflow token defaults of $repo from $1 to $want." >&2
+        exit 1
+    fi
+    if ! got="$(workflow_permissions_live)" || [ "$got" != "$want" ]; then
+        echo "Setting the Actions workflow token defaults of $repo reported success, but they read back as ${got:-unreadable} rather than $want, so the write is unconfirmed." >&2
+        exit 1
+    fi
+    echo "Set the workflow token defaults from $1 to $want"
+}
+
 # Set every ready secret in every store that needs it, then report what could not be set and fail if anything could not.
 # The plan was computed by cmd_apply's pre-flight, so a stray or an unreadable tree never reaches here.
 # Each value goes to gh on stdin from its file and is never in an argument or echoed.
@@ -753,8 +856,12 @@ interaction_limits() {
 }
 
 # It prints the origin of the live limit, or nothing when none is in force.
+# Without a verification record apply writes no limit, so no origin can block one and nothing is read.
 interaction_origin() {
     local live
+    if [ "$interaction_verified" != true ]; then
+        return 0
+    fi
     live="$(interaction_limits)" || return 1
     jqr '.origin // empty' <<<"$live"
 }
@@ -766,13 +873,17 @@ apply_interaction() { # private
         echo "Skipped the interaction limit, since $repo is private and GitHub offers none there"
         return
     fi
+    if [ "$interaction_verified" != true ]; then
+        echo "Skipped the interaction limit, since no pilot's bot verification is recorded at $interaction_record. See repo-config/README.md \"Public Interaction\""
+        return
+    fi
     jq -n --arg l "$interaction_limit" '{limit: $l, expiry: "six_months"}' |
         gh api --method PUT "repos/$repo/interaction-limits" --input - >/dev/null
     echo "Set the interaction limit to $interaction_limit for six months (publicInteraction=$interaction). GitHub then removes it silently, so apply again before it lapses."
 }
 
 cmd_apply() {
-    local f private disc payload project_id why origin
+    local f private disc payload project_id why origin workflow_live workflow_held=false held_status=0
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
     for f in "$settings_file" "$labels_file" "$project_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
@@ -804,8 +915,26 @@ cmd_apply() {
     fi
     # The project is resolved here rather than in apply_project.
     # That is because it is a read.
-    # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with four groups of writes already applied.
+    # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with earlier groups of writes already applied.
     project_id="$(project_node_id "$(jqr '.owner' "$project_file")" "$(jqr '.number' "$project_file")" "$(jqr '.title' "$project_file")")"
+    # The workflow token defaults are validated and read here for the same reason.
+    # A payload outside its contract, or an endpoint the token cannot read, then stops the run with nothing written.
+    if ! why="$(workflow_permissions_problem)"; then
+        echo "Workflow token payload $workflow_permissions_file $why. Aborting before any write." >&2
+        exit 1
+    fi
+    if ! workflow_live="$(workflow_permissions_live)"; then
+        echo "Aborting before any write." >&2
+        exit 1
+    fi
+    # A held group is decided here, so every dry-run exit below and every end of the run accounts for it.
+    if workflow_permissions_held "$workflow_live"; then
+        workflow_held=true
+        held_status=1
+        if [ "$dry_run" = true ]; then
+            echo "Dry run for $repo. The workflow token defaults would be held back without --lower-workflow-token, so apply would end non-zero."
+        fi
+    fi
     # The visibility and any live interaction limit are read here too.
     # GitHub refuses a repository limit while the owning account or organization has one in force.
     # Found in apply_interaction, that refusal would follow the settings write.
@@ -821,7 +950,7 @@ cmd_apply() {
         fi
     fi
     # The secret plan is computed here too, since the tree and the files it reads can fail after every API write otherwise.
-    # A stray exits inside plan_secrets, and a dry run exits inside dry_run_secrets, so neither reaches a write.
+    # A stray exits inside plan_secrets, and a dry run exits below once dry_run_secrets returns, so neither reaches a write.
     if [ "$secrets_registered" = true ]; then
         if ! load_secret_names; then
             echo "Aborting before any write." >&2
@@ -836,12 +965,15 @@ cmd_apply() {
         else
             plan_secrets "${HOME:?}/.secrets"
             if [ "$dry_run" = true ]; then
-                dry_run_secrets "$HOME/.secrets"
+                # The function exits with the status the secrets alone predict.
+                # So it runs in a subshell, and a held group still ends the dry run non-zero.
+                (dry_run_secrets "$HOME/.secrets") || exit
+                exit "$held_status"
             fi
         fi
     elif [ "$dry_run" = true ]; then
         echo "Dry run for $repo. Secrets are provisioned only for a cataloged registry entry, and $secrets_skip_reason, so there is nothing to preview."
-        exit 0
+        exit "$held_status"
     fi
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
@@ -872,6 +1004,8 @@ cmd_apply() {
     gh api --method PUT "repos/$repo/vulnerability-alerts" >/dev/null
     gh api --method PUT "repos/$repo/automated-security-fixes" >/dev/null
     echo "Enabled Dependabot vulnerability alerts + automated security updates"
+    # ----- Actions workflow token defaults -----
+    apply_workflow_permissions "$workflow_live"
     # ----- Fleet label set -----
     apply_labels
     # ----- Branch rulesets (main shared, develop selected by workflow model) -----
@@ -887,6 +1021,10 @@ cmd_apply() {
         echo "Note: the agent policy files were not written. Run '$0 apply${repo_arg:+ $repo} --checkout <path>' to write them into a checkout, then commit them through a pull request."
     fi
     # ----- Secrets, read from the host's ~/.secrets/ and written last -----
+    # A failing secrets group ends the run with its own summary, so a held group is reported before it rather than after.
+    if [ "$workflow_held" = true ]; then
+        echo "Note: the workflow token defaults were held back as noted above, so this run ends non-zero." >&2
+    fi
     if [ "$secrets_registered" = true ] && [ -n "$secret_names_skip" ]; then
         echo "Note: no secret was set, since $secret_names_skip."
     elif [ "$secrets_registered" = true ]; then
@@ -896,6 +1034,10 @@ cmd_apply() {
     fi
     if [ -n "$secret_names_skip" ]; then
         echo "Configuration applied to $repo except for the secrets, which were not set. Run it again once the branch exists." >&2
+        exit 1
+    fi
+    if [ "$workflow_held" = true ]; then
+        echo "Configuration applied to $repo except for the workflow token defaults, which were held back as noted above." >&2
         exit 1
     fi
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
@@ -1088,6 +1230,15 @@ check_interaction() {
     fi
     got="$(jqr '.limit // "none"' <<<"$live")"
     origin="$(jqr '.origin // "none"' <<<"$live")"
+    # A limit in force before any record, such as the pilot's, is named with its expiry, since nothing renews it.
+    if [ "$interaction_verified" != true ]; then
+        if [ "$got" = none ]; then
+            note "interaction limit: none is owed until a pilot's bot verification is recorded at $interaction_record, and apply sets none before then"
+        else
+            note "interaction limit: $got is in force on the $origin until $(jqr '.expires_at // "an unread expiry"' <<<"$live"), and apply neither renews nor replaces it until a pilot's bot verification is recorded at $interaction_record"
+        fi
+        return
+    fi
     # The origin is tested first, since apply refuses to replace a limit the owning account set, so naming apply there would be unfollowable.
     if [ "$got" != none ] && [ "$origin" != repository ]; then
         fail "interaction limit $got is set on the owning $origin rather than on the repository, which apply cannot replace. Remove it there, then apply sets $interaction_limit"
@@ -1126,6 +1277,25 @@ check_security() {
         assert "Dependabot automated security updates enabled" jq_has '.enabled == true' <<<"$sec"
     else
         fail "Dependabot automated security updates - could not read the setting"
+    fi
+}
+
+# The live defaults are compared whole, in the form apply compares, so the two modes agree on what drift is.
+check_workflow_permissions() {
+    local why live want
+    if ! why="$(workflow_permissions_problem)"; then
+        fail "workflow token payload $workflow_permissions_file $why"
+        return
+    fi
+    if ! live="$(workflow_permissions_live)"; then
+        fail "could not read the Actions workflow token defaults"
+        return
+    fi
+    want="$(jqr -c -S '.' "$workflow_permissions_file")"
+    if [ "$live" = "$want" ]; then
+        pass "workflow token defaults = $want"
+    else
+        fail "workflow token defaults = $want, live $live"
     fi
 }
 
@@ -1235,7 +1405,7 @@ check_environments() {
     # The authority on this shape is spec/validate.py, but this script runs against whatever hub checkout the operator has.
     # Every read below is therefore preceded by one test rather than left bare.
     # A bare read of a malformed entry aborts the whole run under set -e, mid-check.
-    # That happens after the five groups above have printed their pass lines and before cmd_check reaches its drift summary.
+    # That happens after the groups above have printed their pass lines and before cmd_check reaches its drift summary.
     # This test is narrower than spec/validate.py's, which refuses shapes this one admits.
     # A registry that never ran the validator can therefore still report drift rather than the malformation causing it.
     if ! jq_has 'type == "array"' <<<"$entries"; then
@@ -1354,6 +1524,7 @@ cmd_check() {
     check_settings
     check_interaction
     check_security
+    check_workflow_permissions
     check_labels
     check_project
     check_environments

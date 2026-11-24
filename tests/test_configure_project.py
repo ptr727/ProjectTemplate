@@ -75,7 +75,9 @@ def run_bash(script: str, *tools: str) -> subprocess.CompletedProcess[str]:
 
 
 JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
-LABELS_OK = lift(r"^(labels_payload_ok\(\) \{\n.*?\n\}\n)")
+LABELS_OK = lift(r"^(payload_problem\(\) \{\n.*?\n\}\n)") + lift(
+    r"^(labels_payload_ok\(\) \{\n.*?\n\}\n)"
+)
 LABELS = ROOT / "repo-config" / "labels.json"
 PAYLOAD_OK = lift(r"^(project_payload_ok\(\) \{\n.*?\n\}\n)")
 NODE_ID = lift(r"^(project_node_id\(\) \{ # owner number title\n.*?\n\}\n)")
@@ -567,6 +569,8 @@ class WiringCase(unittest.TestCase):
                 "apply_labels() { :; }\napply_ruleset() { :; }\napply_secrets() { :; }\n"
                 "interaction_origin() { :; }\napply_interaction() { :; }\n"
                 'apply_project() { echo "the link write ran with $1"; }\n'
+                "workflow_permissions_problem() { :; }\nworkflow_permissions_live() { :; }\n"
+                "workflow_permissions_held() { return 1; }\napply_workflow_permissions() { :; }\n"
                 'gh() { printf "false\\n"; }\njq() { printf "{}\\n"; }\n'
                 'jqr() { printf "1\\n"; }\n'
             )
@@ -615,6 +619,7 @@ class WiringCase(unittest.TestCase):
                 "check_settings",
                 "check_interaction",
                 "check_security",
+                "check_workflow_permissions",
                 "check_labels",
                 "check_environments",
                 "check_agent_policy",

@@ -61,10 +61,13 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 
 - Naming this skill, and answering its how-far question, is the maintainer's explicit, current
   go-ahead. It covers every feature -> develop squash merge the drive performs to reach that target.
+  It also covers opening each pull request the drive needs. And it covers the whole post-merge
+  `cleanup` after each feature -> develop merge, a peer's merge included.
 - A dispatched drive answers no such question. So what stands in its place is the go-ahead the
-  dispatching seat holds, per "How Far to Drive" above. The drive performs the same merges on it.
+  dispatching seat holds, per "How Far to Drive" above. The drive performs the same writes on it.
   Reading this bullet list is not how such a drive establishes that. That is because a worker
-  cannot verify a grant made in a seat it has no access to.
+  cannot verify a grant made in a seat it has no access to. Its brief can also withhold one of
+  those writes. A `backlog-burndown` worker's brief withholds the post-merge `cleanup`, for one.
 - It is never authorization to merge the develop -> main promotion PR, or to dispatch a release.
   Those stay in merge-and-release, invoked on its own so the maintainer keeps a checkpoint before
   the harder-to-reverse step.
@@ -123,7 +126,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
    So under the hub's default review policy, the hosted review runs once per change, at the
    promotion in step 6. `wait` sends each request the repository's review policy asks for, so
    the drive never asks whether a reviewer starts on its own.
-4. Merge the feature PR into
+4. Run this step's merge and post-merge `cleanup` only on the go-ahead "What Invoking This Skill
+   Authorizes" states. Merge the feature PR into
    develop with `uv run --no-project --script scripts/pr_review.py merge "<number>" --repo "<owner>/<repo>" --cleanup --checkout ~/repos/"<Repo>"`,
    run from a hub checkout outside the task's worktree, `~/repos/<Repo>` being the repository's
    primary clone. That path is the convention layout, and a machine not yet migrated passes its actual primary clone instead. Spell every `scripts/pr_review.py` call this skill prints as `pr-review-conduct`

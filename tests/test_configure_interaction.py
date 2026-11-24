@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise repo-config/configure.sh's interaction-limit policy: its registry resolution, apply write, pre-flight, and check.
+"""Exercise repo-config/configure.sh's interaction-limit policy: its registry resolution, verification record, apply write, pre-flight, and check.
 
 The shell is lifted out of the file, through the lift helper test_configure_archived.py already shares, rather than restated here.
 An edit that drops a guard therefore fails these tests.
@@ -50,7 +50,11 @@ RESOLVE = lift(
 PREFLIGHT = lift(
     r"^(    # The visibility and any live interaction limit are read here too\.\n.*?\n        fi\n    fi\n)"
 )
+RECORD = lift(r"^(# ----- Resolve the bot verification record .*?\n^fi\n)")
+PAYLOAD_PROBLEM = function("payload_problem")
 REPO = "ptr727/Fixture"
+RECORD_PATH = "/fixture/repo-config/interaction-verification.json"
+BOTS = ["Copilot", "CodeRabbit", "Qodo", "Dependabot"]
 
 
 def expiry(days: float) -> str:
@@ -96,14 +100,15 @@ class Harness(unittest.TestCase):
     def run_script(self, body: str) -> subprocess.CompletedProcess[str]:
         return run_bash(body, "jq")
 
-    def resolved(self, interaction: str) -> str:
-        """The variables the resolution block derives, set as it would set them."""
+    def resolved(self, interaction: str, verified: bool = True) -> str:
+        """The variables the resolution blocks derive, set as they would set them."""
         limit = "existing_users" if interaction == "community" else "collaborators_only"
         discussions = "true" if interaction == "community" else "false"
         return (
             f"interaction={interaction}\ninteraction_limit={limit}\n"
             f"public_discussions={discussions}\ninteraction_warn_days=30\n"
             f"py_cmd=({shlex.quote(Path(sys.executable).as_posix())})\n"
+            f"interaction_record={RECORD_PATH}\ninteraction_verified={str(verified).lower()}\n"
         )
 
 
@@ -153,17 +158,93 @@ class ResolveCase(Harness):
         self.assertIn("resolved collaborators collaborators_only false", result.stdout)
 
 
+class RecordCase(Harness):
+    """The committed verification record decides whether a limit is owed, and a malformed one stops the run."""
+
+    def record(self, content: str | None) -> subprocess.CompletedProcess[str]:
+        if content is not None:
+            (self.tmp / "interaction-verification.json").write_text(content, encoding="utf-8")
+        script = (
+            f"script_dir={shlex.quote(self.tmp.as_posix())}\n"
+            f"py_cmd=({shlex.quote(Path(sys.executable).as_posix())})\n"
+            f'{PAYLOAD_PROBLEM}{RECORD}echo "verified=$interaction_verified"\n'
+        )
+        return self.run_script(script)
+
+    def entry(self, **fields: object) -> str:
+        record: dict[str, object] = {"pilot": REPO, "date": "2026-12-01", "bots": BOTS}
+        record.update(fields)
+        return json.dumps(record)
+
+    def refused(self, content: str, why: str) -> None:
+        result = self.record(content)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(why, result.stderr)
+        self.assertIn("Stopping before any write", result.stderr)
+        self.assertNotIn("verified=", result.stdout)
+
+    def test_an_absent_record_is_unverified(self) -> None:
+        result = self.record(None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("verified=false", result.stdout)
+
+    def test_a_complete_record_is_verified(self) -> None:
+        result = self.record(self.entry())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("verified=true", result.stdout)
+
+    def test_the_bots_may_be_listed_in_any_order(self) -> None:
+        result = self.record(self.entry(bots=list(reversed(BOTS))))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("verified=true", result.stdout)
+
+    def test_invalid_json_stops_the_run(self) -> None:
+        self.refused('{"pilot": ', "did not parse")
+
+    def test_an_empty_file_stops_the_run(self) -> None:
+        self.refused("", "does not hold exactly one JSON document")
+
+    def test_two_values_stop_the_run(self) -> None:
+        self.refused(self.entry() + self.entry(), "does not hold exactly one JSON document")
+
+    def test_a_non_object_stops_the_run(self) -> None:
+        self.refused(json.dumps([self.entry()]), "is not a JSON object")
+
+    def test_a_missing_key_stops_the_run(self) -> None:
+        self.refused(json.dumps({"pilot": REPO, "bots": BOTS}), "exactly the keys")
+
+    def test_an_extra_key_stops_the_run(self) -> None:
+        self.refused(self.entry(evidence="a pull request"), "exactly the keys")
+
+    def test_a_pilot_or_date_that_is_not_a_non_empty_string_stops_the_run(self) -> None:
+        for field, value in (("pilot", ""), ("pilot", 7), ("date", ""), ("date", None)):
+            with self.subTest(field=field, value=value):
+                self.refused(self.entry(**{field: value}), "as non-empty strings")
+
+    def test_anything_but_the_four_bots_stops_the_run(self) -> None:
+        for bots in (BOTS[:3], [*BOTS, "Renovate"], [*BOTS[:3], BOTS[0]], "Copilot", None):
+            with self.subTest(bots=bots):
+                self.refused(self.entry(bots=bots), "exactly the four bots")
+
+
 class ApplyCase(Harness):
-    """The write sets the declared limit for six months on a public repo and skips a private one."""
+    """The write sets the declared limit for six months on a verified public repo and skips any other."""
 
     def apply(
-        self, private: str, interaction: str = "collaborators"
+        self, private: str, interaction: str = "collaborators", verified: bool = True
     ) -> subprocess.CompletedProcess[str]:
         script = (
-            f"repo={REPO}\n{self.resolved(interaction)}{gh_stub(private, '{}', self.capture)}"
+            f"repo={REPO}\n{self.resolved(interaction, verified)}"
+            f"{gh_stub(private, '{}', self.capture)}"
             f"{function('apply_interaction')}apply_interaction {private}\n"
         )
         return self.run_script(script)
+
+    def test_an_unverified_public_repo_is_skipped_with_no_write(self) -> None:
+        result = self.apply("false", verified=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.capture.exists())
+        self.assertIn("no pilot's bot verification is recorded", result.stdout)
 
     def test_a_public_collaborators_repo_gets_collaborators_only(self) -> None:
         result = self.apply("false")
@@ -192,9 +273,12 @@ class ApplyCase(Harness):
 class PreflightCase(Harness):
     """The pre-flight reads the visibility and the live limit's origin before any write."""
 
-    def preflight(self, private: str, limit: str | None) -> subprocess.CompletedProcess[str]:
+    def preflight(
+        self, private: str, limit: str | None, verified: bool = True
+    ) -> subprocess.CompletedProcess[str]:
         script = (
-            f"repo={REPO}\n{HELPERS}{gh_stub(private, limit, self.capture)}"
+            f"repo={REPO}\ninteraction_verified={str(verified).lower()}\n"
+            f"{HELPERS}{gh_stub(private, limit, self.capture)}"
             f"{function('interaction_limits')}{function('interaction_origin')}"
             f"cmd_apply() {{\n    local private origin\n{PREFLIGHT}    echo reached-the-writes\n}}\ncmd_apply\n"
         )
@@ -236,15 +320,27 @@ class PreflightCase(Harness):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("reached-the-writes", result.stdout)
 
+    def test_an_unverified_repo_never_reads_the_limit(self) -> None:
+        """Apply then writes no limit, so neither an unreadable limit nor an account one may stop it."""
+        for limit in (None, json.dumps({"limit": "collaborators_only", "origin": "user"})):
+            with self.subTest(limit=limit):
+                result = self.preflight("false", limit, verified=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("reached-the-writes", result.stdout)
+
 
 class CheckCase(Harness):
     """The check fails on a missing, wrong, or account-wide limit, and warns inside the threshold."""
 
     def check(
-        self, private: str, limit: str | None, interaction: str = "collaborators"
+        self,
+        private: str,
+        limit: str | None,
+        interaction: str = "collaborators",
+        verified: bool = True,
     ) -> subprocess.CompletedProcess[str]:
         script = (
-            f"repo={REPO}\nFAILED=0\n{self.resolved(interaction)}{HELPERS}"
+            f"repo={REPO}\nFAILED=0\n{self.resolved(interaction, verified)}{HELPERS}"
             f"{gh_stub(private, limit, self.capture)}{function('interaction_limits')}{function('check_interaction')}"
             'check_interaction\necho "FAILED=$FAILED"\n'
         )
@@ -330,6 +426,33 @@ class CheckCase(Harness):
         self.assertIn("is private, so none is owed", result.stdout)
         self.assertIn("FAILED=0", result.stdout)
 
+    def test_an_unverified_public_repo_with_no_limit_is_a_note(self) -> None:
+        """Apply sets no limit before the record, so a check failing on its absence would name an unfollowable fix."""
+        result = self.check("false", "{}", verified=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            f"interaction limit: none is owed until a pilot's bot verification is recorded at {RECORD_PATH}",
+            result.stdout,
+        )
+        self.assertIn("FAILED=0", result.stdout)
+
+    def test_an_unverified_public_repo_names_a_limit_in_force_and_its_expiry(self) -> None:
+        """Nothing renews such a limit, the pilot's hand-set one included, so the check names when it lapses."""
+        live = self.live(limit="existing_users")
+        result = self.check("false", live, verified=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stamp = json.loads(live)["expires_at"]
+        self.assertIn(
+            f"interaction limit: existing_users is in force on the repository until {stamp}",
+            result.stdout,
+        )
+        self.assertIn("FAILED=0", result.stdout)
+
+    def test_an_unverified_public_repo_with_an_unreadable_limit_fails(self) -> None:
+        result = self.check("false", "[]", verified=False)
+        self.assertIn("FAIL live interaction limit for 'ptr727/Fixture'", result.stdout)
+        self.assertIn("FAILED=1", result.stdout)
+
 
 class DiscussionsCase(Harness):
     """check_settings wants Discussions on only for a public community repo."""
@@ -405,6 +528,11 @@ class WiringCase(unittest.TestCase):
         self.assertLess(
             body.index('apply_interaction "$private"'), body.index("vulnerability-alerts")
         )
+
+    def test_the_record_is_resolved_before_either_command_runs(self) -> None:
+        """A malformed record exits the shared block, which only stops every write if it precedes the dispatch."""
+        text = (ROOT / "repo-config" / "configure.sh").read_text(encoding="utf-8")
+        self.assertLess(text.index(RECORD), text.index('\ncase "$cmd" in\napply) cmd_apply ;;'))
 
     def test_check_runs_the_interaction_group(self) -> None:
         body = function("cmd_check")

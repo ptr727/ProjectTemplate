@@ -63,9 +63,7 @@ All builds must complete without warnings, enforced as follows:
   per-clone enablement steps.
 
 **A new port is not a license to silence diagnostics.** Brownfield or just-ported status never
-justifies relaxing analyzer severities or muting newly surfaced warnings. Fix them. (The only
-brownfield allowance in the fleet is the one-time git-signing / line-ending migration described in
-GOVERNANCE.md and README.md. That migration has nothing to do with code analysis.)
+justifies relaxing analyzer severities or muting newly surfaced warnings. Fix them.
 
 ### Central build and package configuration
 

@@ -92,6 +92,9 @@ class UsageCase(unittest.TestCase):
             ("apply", "release", "owner/name"): "The model 'release' comes before the repo",
             ("check", "release", "operational"): "The model 'release' comes before the repo",
             ("check", "owner/name", "--dry-run"): "Option '--dry-run' is valid only with apply",
+            ("check", "owner/name", "--lower-workflow-token"): (
+                "Option '--lower-workflow-token' is valid only with apply"
+            ),
         }
         for args, message in cases.items():
             with self.subTest(args=args):

@@ -126,8 +126,6 @@ the row is checked without a conversion pull request of its own.
       and `main` carries neither file
 - [x] **ESPHome-Config** (`operational`, `lineEndings: lf`): defaults in place
 - [x] **HomeAssistant-Config** (`operational`, `lineEndings: lf`): defaults in place
-- [ ] **DevKitCIoT** (`release`): `main` still sets `[*] end_of_line = crlf` and `* -text`, and
-      `develop` carries neither file
 - [x] **PhotoCleaner** (`release`): defaults in place
 - [x] **MediaTools** (`release`): defaults in place
 - [ ] **AudioCleaner** (`release`): `.editorconfig` sets no `[*]` `end_of_line`, and
