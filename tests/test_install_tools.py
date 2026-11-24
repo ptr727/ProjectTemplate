@@ -594,6 +594,7 @@ printf '%s\\n' "${{NOTES[@]}}" """
         self.assertRegex(text, r'register_apt_source "1password" ')
 
 
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
 class TestLinuxSourceNotes(LinuxFunctionsCase):
     """The gh and node note and `tool_configured` read one test of the sources directory."""
 
@@ -637,6 +638,25 @@ tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
                     self.assertEqual(
                         self.probe(tool, files), ([f"{tool}: {n}" for n in notes], configured)
                     )
+
+    def test_the_note_clause_matches_what_install_does_to_the_one_line_source(self) -> None:
+        stubs = """ensure_prerequisites() { :; }
+install_keyring() { return 1; }
+write_sources() { return 1; }
+remove_stale() { printf 'REMOVE %s\\n' "$@"; }
+apt_install() { :; }
+apt_install_displacing() { :; }
+node_lts_major() { printf '22'; }
+"""
+        removed = {
+            tool: self.run_bash(stubs + f"{tool}_install").stdout.splitlines()
+            for tool in self.STEMS
+        }
+        self.assertEqual(len(removed["gh"]), 2, removed["gh"])
+        self.assertTrue(removed["gh"][0].endswith("/github-cli.list"), removed["gh"])
+        self.assertIn("replaces it", self.ONE_LINE["gh"])
+        self.assertEqual(removed["node"], [])
+        self.assertIn("leaves it", self.ONE_LINE["node"])
 
     def test_the_stem_is_the_name_install_registers(self) -> None:
         text = LINUX_INSTALLER.read_text(encoding="utf-8")
