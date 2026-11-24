@@ -87,8 +87,8 @@ Agent-specific authorization stays in provider-labeled bullets so one agent's co
 not read as a shared requirement:
 
 - **Codex:** execution rules match exact argument prefixes, so they cannot safely cover changing
-  worktree paths and digests. Smart Approvals can prompt per task. No-prompt operation is
-  supported only inside an external sandbox because it removes command-wide protection.
+  worktree paths and digests. Smart Approvals can prompt per task. No-prompt operation removes
+  command-wide protection, so it is supported only inside an external sandbox.
 
 ## Markdown formatting
 
@@ -364,8 +364,9 @@ the `spec/` files and the carried `AUDIT.md` never reference the template repo
 behavior a carried rule needs, not the coordination flow that produced it, the maintainer supplies
 the destination out of band. A contextually relevant link to a related project (the image this
 config feeds, a library this depends on) is not a coordination reference. It is expected. The full
-exceptions are in `references/carried-doc-references.md`. They are a verbatim section that must
-name the hub to do its job, and a pointer to a hub-hosted tool the reader runs.
+exceptions are in `references/carried-doc-references.md`. One is a verbatim section that must
+name the hub to do its job. The other is a pointer to a hub-hosted tool the reader runs, or to a
+procedure the reader carries out against the hub.
 
 ## PR titles and commit messages
 
