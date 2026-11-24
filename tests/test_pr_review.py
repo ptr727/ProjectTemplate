@@ -9133,7 +9133,7 @@ class TestWaitInterrupt(unittest.TestCase):
             assert_group_ended(proc.pid)
 
     def test_a_second_sigterm_during_the_interrupted_line_is_passed_over(self) -> None:
-        """An outer `timeout` over `uv run` sends SIGTERM twice, and the second once broke the print.
+        """`timeout` over `uv run` sends SIGTERM twice, and the second one used to break the print.
 
         Standard error is a pipe this case fills before the start, so the script's one line blocks
         until the case drains it. The second signal goes once the script has killed the stand-in,
@@ -9161,7 +9161,10 @@ class TestWaitInterrupt(unittest.TestCase):
                 deadline = time.monotonic() + 60
                 while time.monotonic() < deadline:
                     ps = ["ps", "-o", "stat=", "-p", str(stand_in)]
-                    state = subprocess.run(ps, capture_output=True, text=True, check=False).stdout
+                    found = subprocess.run(
+                        ps, capture_output=True, text=True, encoding="utf-8", check=False
+                    )
+                    state = found.stdout
                     if state.strip()[:1] in ("Z", ""):
                         break
                     time.sleep(0.05)
