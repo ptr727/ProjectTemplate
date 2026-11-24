@@ -57,17 +57,21 @@ Usage, each command run as `uv run --no-project --script scripts/canonical_revie
     sweep     the units it asks for this round
     report-path --unit '<key>=<digest>'   where each unit's reviewer writes its report, as JSON
     record    --reviewer agent-skill --target develop --unit '<key>=<digest>'
+    prune     --unit '<key>'   retire a pass recorded against a unit the tree no longer holds
     report    render the burn-down to standard output
 """
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
 import pathlib
 import re
+import signal
 import sys
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -105,9 +109,9 @@ LOCK_TIMEOUT = 10.0
 
 LEDGER_NOTE = (
     "What full-content reviews of hub canonical content have covered, one entry per unit, holding"
-    " the most recent pass. Written by scripts/canonical_review.py record, never by hand, and git"
-    " keeps the history. A unit is covered while its digest here matches the content's, so an edit"
-    " to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists."
+    " the most recent pass. Written by scripts/canonical_review.py record and prune, never by hand,"
+    " and git keeps the history. A unit is covered while its digest here matches the content's, so"
+    " an edit to the unit retires the pass. See ptr727/ProjectTemplate#1138 for why the record exists."
 )
 
 # The fidelity values that mean the hub authored the content and a downstream repository receives it.
@@ -461,6 +465,22 @@ def ledger_lock(root: Path) -> Path:
     return local_review.git_dir(root) / LEDGER_LOCK_NAME
 
 
+@contextlib.contextmanager
+def ledger_held(root: Path) -> Iterator[None]:
+    """Hold the ledger lock for the read, merge, and write a ledger change is, releasing it on any exit.
+
+    `local_review.write_pass` takes the same lock for the same reason. Two ledger changes
+    interleaved would each read a ledger without the other's, and the second write would drop it.
+    """
+    lock = ledger_lock(root)
+    fd_lock = local_review.held_lock(lock, LOCK_TIMEOUT)
+    try:
+        yield
+    finally:
+        os.close(fd_lock)
+        Path(str(lock) + ".lock").unlink(missing_ok=True)
+
+
 def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     """Rewrite the ledger as `entries`, one per unit, ordered by unit key.
 
@@ -474,8 +494,17 @@ def write_ledger(root: Path, entries: dict[str, dict[str, Any]]) -> None:
     payload = {"note": LEDGER_NOTE, "passes": [entries[unit] for unit in sorted(entries)]}
     path = root / LEDGER
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Bytes rather than text, since a text-mode write would rewrite the file in the platform's own line ending, per GOVERNANCE.md "Verification Discipline".
-    path.write_bytes((json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".")
+    try:
+        # Bytes rather than text, since a text-mode write would rewrite the file in the platform's own line ending, per GOVERNANCE.md "Verification Discipline".
+        with os.fdopen(fd, "wb") as fh:
+            fh.write((json.dumps(payload, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+        # A file from `mkstemp` is owner-only, and the replace would carry that mode onto a tracked file.
+        os.chmod(tmp, path.stat().st_mode & 0o777 if path.exists() else 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def state_of(unit: str, current: str, ledger: dict[str, dict[str, Any]]) -> str:
@@ -514,7 +543,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         for state in ("covered", "stale", "never")
     }
     # Recorded against a unit the tree no longer holds, which is a renamed or deleted section whose entry is now unreachable.
-    # Reported rather than pruned here, since deciding that a section is gone rather than moved is a reader's call.
+    # Reported rather than pruned here, since retiring one is a reader's call, made with `prune`.
     orphans = sorted(set(ledger) - set(current))
     emit(
         json.dumps(
@@ -679,9 +708,8 @@ def render_sweep(
         ]
     )
     # A pass recorded against a unit the tree no longer holds, which a renamed or deleted section produces.
-    # Reported here rather than left to `status` alone, because no pass closes an orphan.
-    # The new key is read under the backlog above, and the old one stays recorded against a unit the tree no longer holds.
-    # Not counted as work, since deciding that a section is gone rather than moved is a reader's call and no pass closes it.
+    # Reported here rather than left to `status` alone, because no pass closes an orphan and only a reader's `prune` retires one.
+    # Not counted as work, since retiring one is a reader's call rather than a read a sweep can ask for.
     orphans = sorted(set(ledger) - set(current))
     if orphans:
         lines.extend(
@@ -691,8 +719,14 @@ def render_sweep(
                 (
                     "Recorded against a unit this tree no longer holds, so the section was renamed"
                     " or removed after the pass. A renamed one is read again under its new key,"
-                    " which joins the never-read backlog above rather than this list."
+                    " which joins the never-read backlog above rather than this list. A reader"
+                    " retires each pass below by its key, which `prune` refuses for any key the"
+                    " tree still holds:"
                 ),
+                "",
+                "```sh",
+                "uv run --no-project --script scripts/canonical_review.py prune --unit '<key>'",
+                "```",
                 "",
             ]
         )
@@ -831,11 +865,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     # Stamped as the merge-base against the target, not HEAD, since a squash merge discards HEAD and an amend moves it.
     _, base = resolve_base(args.target, root)
-    # The same lock as `local_review.write_pass`, for the same reason.
-    # A record is a read, a merge, and a write, and two of them interleaved lose the pass the second one never read.
-    lock = ledger_lock(root)
-    fd_lock = local_review.held_lock(lock, LOCK_TIMEOUT)
-    try:
+    with ledger_held(root):
         ledger = read_ledger(root)
         for unit, value in wanted.items():
             sha256, findings = reports[unit]
@@ -849,9 +879,6 @@ def cmd_record(args: argparse.Namespace) -> int:
                 "stamp": stamp,
             }
         write_ledger(root, ledger)
-    finally:
-        os.close(fd_lock)
-        Path(str(lock) + ".lock").unlink(missing_ok=True)
     prune_unit_reports(root, current)
     total = sum(findings for _, findings in reports.values())
     emit(
@@ -880,6 +907,48 @@ def cmd_report_path(args: argparse.Namespace) -> int:
             indent=2,
         )
     )
+    return EXIT_COVERED
+
+
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Retire each named pass whose unit the tree no longer holds, refusing every other key.
+
+    The reader decides a key is spent, and this writes that call into the ledger. So the ledger is
+    still never edited by hand. A key the tree still holds is refused, since dropping its pass would
+    report read text as never read. A key no pass names is refused too, since a mistyped orphan
+    would otherwise read as retired. A refusal of any key writes nothing. So a second run over the
+    keys a first run retired is refused, and the ledger stays as the first run wrote it.
+    """
+    keys: list[str] = args.unit
+    repeated = sorted({key for key in keys if keys.count(key) > 1})
+    if repeated:
+        raise CannotRun(f"--unit names '{repeated[0]}' twice")
+    root = local_review.repo_root()
+    current, _ = units(root)
+    live = sorted(set(keys) & set(current))
+    if live:
+        emit("still a carried canonical unit, so its pass is not an orphan:", sys.stderr)
+        for key in live:
+            emit(f"  {key}", sys.stderr)
+        emit("A unit the tree holds takes a fresh pass rather than a prune.", sys.stderr)
+        return EXIT_CANNOT_RUN
+    with ledger_held(root):
+        ledger = read_ledger(root)
+        unknown = sorted(set(keys) - set(ledger))
+        if unknown:
+            emit("no recorded pass names this key, so nothing was pruned:", sys.stderr)
+            for key in unknown:
+                emit(f"  {key}", sys.stderr)
+            emit(
+                "A key pruned already reads this way. 'canonical_review.py status' lists the"
+                " orphaned keys under orphanedPasses.",
+                sys.stderr,
+            )
+            return EXIT_CANNOT_RUN
+        for key in keys:
+            del ledger[key]
+        write_ledger(root, ledger)
+    emit(f"pruned {len(keys)} orphaned pass(es) from {LEDGER}.")
     return EXIT_COVERED
 
 
@@ -949,7 +1018,8 @@ def render_report(
                 "",
                 (
                     "Recorded against a unit this tree no longer holds, so the section was renamed or"
-                    " removed after the pass."
+                    " removed after the pass. A reader retires one by its key with"
+                    " `uv run --no-project --script scripts/canonical_review.py prune --unit '<key>'`."
                 ),
                 "",
             ]
@@ -1037,6 +1107,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_record.set_defaults(handler=cmd_record)
 
+    p_prune = sub.add_parser(
+        "prune",
+        help=(
+            "retire the pass recorded against a unit the tree no longer holds, refusing any key"
+            " the tree still holds or no pass names"
+        ),
+    )
+    p_prune.add_argument(
+        "--unit",
+        required=True,
+        action="append",
+        metavar="KEY",
+        help="a key status lists under orphanedPasses, repeatable",
+    )
+    p_prune.set_defaults(handler=cmd_prune)
+
     p_report = sub.add_parser(
         "report", help="render the burn-down from the ledger to standard output, as Markdown"
     )
@@ -1070,5 +1156,52 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_CANNOT_RUN
 
 
+received: list[int] = []
+
+
+def on_signal(signum: int, _frame: object) -> None:
+    """Record the signal in `received` and raise KeyboardInterrupt, so both unwind one path.
+
+    A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
+    `uv run` forwards to a process group the terminal's SIGINT already reached.
+    """
+    if received:
+        return
+    received.append(signum)
+    raise KeyboardInterrupt
+
+
+def run() -> int | signal.Signals:
+    """Run main, returning its status, or the signal that interrupted it once the unwind ran.
+
+    The unwind releases the ledger lock and removes a ledger write not yet renamed into place. A
+    SIGINT inherited as ignored, as a background child's is, stays ignored.
+    """
+    signal.signal(signal.SIGTERM, on_signal)
+    if signal.getsignal(signal.SIGINT) is signal.default_int_handler:
+        signal.signal(signal.SIGINT, on_signal)
+    try:
+        return main()
+    except KeyboardInterrupt:
+        signum = signal.Signals(received[0] if received else signal.SIGINT)
+        emit(f"canonical_review.py: interrupted by {signum.name}.", sys.stderr)
+        return signum
+
+
+def reraise(signum: signal.Signals) -> None:
+    """End this process by `signum`, so a caller sees the signal rather than an exit status."""
+    with contextlib.suppress(OSError):
+        sys.stdout.flush()
+        sys.stderr.flush()
+    if sys.platform == "win32":
+        sys.exit(130)
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+    sys.exit(128 + signum)
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    status = run()
+    if isinstance(status, signal.Signals):
+        reraise(status)
+    sys.exit(status)
