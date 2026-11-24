@@ -4586,6 +4586,9 @@ class TestPasteSafeRule(BaitCase):
             ("ver=$(ssh '<host>' 'cat <path>')", "<path>", "ssh"),
             ("echo \"$(bash -c 'ls <dir>')\"", "<dir>", "bash"),
             ("sudo -r sysadm_r -t sysadm_t bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("su -- root -c 'id <dir>'", "<dir>", "su"),
+            ("runuser app -- -c 'ls <dir>'", "<dir>", "runuser"),
+            ("$ bash -c 'ls <dir>'", "<dir>", "bash"),
         ):
             with self.subTest(span=span):
                 found = self.hits(f"Run `{span}` here.\n")
@@ -4619,6 +4622,21 @@ class TestPasteSafeRule(BaitCase):
     def test_a_second_shell_string_ends_with_its_command(self) -> None:
         text = "```sh\nssh '<host>'\necho '<not run remotely>'\nbash -c \\\n  'cat <file>'\n```\n"
         self.assertEqual([5], self.lines(text))
+
+    def test_a_second_shell_opening_a_backtick_substitution_is_read(self) -> None:
+        self.assertEqual([2], self.lines("```sh\necho `bash -c 'ls <dir>'`\n```\n"))
+
+    def test_a_shape_in_a_second_shell_string_keeps_its_own_advice(self) -> None:
+        for span, advice in (
+            ("bash -c 'deploy release|operational'", "write the common value"),
+            ("bash -c 'ls [--all]'", "leave it out"),
+            ("bash -c 'ls [RepoName]'", 'quote it as "<RepoName>"'),
+        ):
+            with self.subTest(span=span):
+                found = self.hits(f"Run `{span}` here.\n")
+                self.assertEqual(1, len(found), found)
+                self.assertIn(advice, found[0][1])
+                self.assertIn("the string 'bash' hands a second shell", found[0][1])
 
     def test_a_second_shell_after_a_reserved_word_is_read(self) -> None:
         text = "```sh\nif ssh '<host>' 'test -d <dir>'; then echo ok; fi\n```\n"

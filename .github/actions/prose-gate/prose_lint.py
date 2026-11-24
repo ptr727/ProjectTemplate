@@ -1719,7 +1719,7 @@ SECOND_SHELLS: dict[str, dict[str, Any]] = {
 LAUNCHERS: dict[str, dict[str, Any]] = COMMANDS["second_shells"]["launchers"]
 RESERVED = frozenset(COMMANDS["second_shells"]["reserved"])
 SECOND_SHELL_NAME = re.compile(
-    rf"(?<![^\s;&|(])(?:[^\s;&|()]*/)?(?:{'|'.join(map(re.escape, SECOND_SHELLS))})(?![^\s;&|)])"
+    rf"(?<![^\s;&|(`])(?:[^\s;&|()`]*/)?(?:{'|'.join(map(re.escape, SECOND_SHELLS))})(?![^\s;&|)])"
 )
 REDIRECT = re.compile(r"\d*(?:[<>]|&>)")
 REDIRECT_ALONE = re.compile(r"\d*(?:[<>]+|&>>?)[&|]?")
@@ -1860,14 +1860,16 @@ def handed_strings(
     """The words after a second shell's name that it runs, and where a command it runs as is opens.
 
     An `operand` shell runs its first operand once a flag in `flags` is set, as `sh -c` does. A
-    `value` shell runs the value of an option in `flags`, as `su -c` does. Given none, it runs the
-    command after a `--` as that command is. A `rest` shell runs every operand after its
+    `value` shell runs the value of an option in `flags`, as `su -c` does. An option in `commands`
+    names a user to run a command as, as `runuser -u` does. The command after a `--` then runs as
+    it is. A `rest` shell runs every operand after its
     first, as `ssh` runs all that follows its destination. An option in `values` takes the next
     word as its own, and so does a redirection's operator standing alone.
     """
     mode, flags, values = spec["string"], set(spec["flags"]), set(spec["values"])
+    commands = set(spec.get("commands", []))
     out: list[ShellWord] = []
-    marked = ended = False
+    marked = ended = runs = False
     options = True
     operands = 0
     pending = ""
@@ -1881,15 +1883,16 @@ def handed_strings(
         elif ended:
             out.append(word)
         elif options and v == "--":
-            if mode == "value":
-                return out, None if out else at + 1
-            options = False
+            if mode == "value" and runs and not out:
+                return out, at + 1
+            options = mode == "value"
         elif options and v.startswith("--"):
             name, eq, _ = v.partition("=")
             if name in flags and mode == "value":
                 out += [word] if eq else []
                 pending = "" if eq else "string"
             marked |= name in flags
+            runs |= name in commands
             pending = pending or ("skip" if takes_value(v, values) else "")
         elif options and len(v) > 1 and v[0] in "-+":
             for letter_at, letter in enumerate(v[1:], 2):
@@ -1898,6 +1901,7 @@ def handed_strings(
                     pending = "" if letter_at < len(v) else "string"
                     break
                 marked |= letter in flags
+                runs |= letter in commands
                 if letter in values:
                     pending = "" if letter_at < len(v) else "skip"
                     break
@@ -1914,8 +1918,8 @@ def handed_strings(
 def handed_words(words: list[ShellWord]) -> list[tuple[ShellWord, str]]:
     """Each word of one simple command that a second shell runs, with that shell's name.
 
-    The second shell is the command the simple command runs. It is read past the command's
-    assignments and reserved words. It is read past each launcher too, such as `sudo` or
+    The second shell is the command the simple command runs. It is read past a leading `$`
+    prompt, and past the command's assignments and reserved words. It is read past each launcher too, such as `sudo` or
     `timeout`, with that launcher's own options and operands. A shell's name as another command's
     argument runs no shell.
     """
@@ -1924,7 +1928,8 @@ def handed_words(words: list[ShellWord]) -> list[tuple[ShellWord, str]]:
     while at < len(words):
         word = words[at]
         name = word.value.rsplit("/", 1)[-1] if word.lead == "c" else ""
-        if word.lead == "c" and (ASSIGNMENT.match(word.raw) or word.raw in RESERVED):
+        prompt = at == 0 and word.raw == "$"
+        if word.lead == "c" and (prompt or ASSIGNMENT.match(word.raw) or word.raw in RESERVED):
             at += 1
         elif name in LAUNCHERS:
             at += 1 + launcher_span(words[at + 1 :], LAUNCHERS[name])
@@ -2003,21 +2008,15 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
         dialect = COMMANDS["dialects"][line.dialect]
         for row, shape, m, shell in placeholders(line.text, dialect):
             at = line.number + row
-            if shell:
-                out.append(
-                    finding(
-                        at, "paste-safe", "paste-safe-second-shell", token=m.group(), shell=shell
-                    )
-                )
-            elif shape == "bracket" and m[1].startswith("-"):
-                out.append(finding(at, "paste-safe", "paste-safe-flag", token=m.group()))
+            where = say("paste-safe-in-shell", shell=shell) if shell else say("paste-safe-in")
+            if shape == "bracket" and m[1].startswith("-"):
+                message, fields = "paste-safe-flag", {}
             elif shape == "bracket":
-                out.append(
-                    finding(at, "paste-safe", "paste-safe-bracket", token=m.group(), name=m[1])
-                )
+                message, fields = "paste-safe-bracket", {"name": m[1]}
             else:
                 message = "paste-safe" if shape == "angle" else "paste-safe-alternation"
-                out.append(finding(at, "paste-safe", message, token=m.group()))
+                fields = {}
+            out.append(finding(at, "paste-safe", message, token=m.group(), where=where, **fields))
     return out
 
 

@@ -34,11 +34,12 @@
     "home-path": "absolute home path {path!r} -> use a constructed path, not an observed one",
     "dead-path": "path {token!r} is deleted from this tree -> re-point, rewrite, or remove the stale mention",
     "issue-ref": "issue or pull request reference {ref!r} -> state the constraint it stands for, or drop the clause",
-    "paste-safe": "placeholder {token!r} unquoted in a copy-and-run command, which the shell reads as a redirection -> quote it, as \"{token}\"",
-    "paste-safe-bracket": "placeholder {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> quote it as \"<{name}>\"",
-    "paste-safe-flag": "optional flag {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> leave it out and name it in a parenthetical, or a trailing comment in a fence",
-    "paste-safe-alternation": "alternation {token!r} unquoted in a copy-and-run command, which the shell reads as a pipe -> write the common value and name the other in a parenthetical, or space a real pipe",
-    "paste-safe-second-shell": "placeholder {token!r} unquoted in the string {shell!r} hands a second shell, which reads it as syntax -> quote it inside that string too",
+    "paste-safe": "placeholder {token!r} unquoted {where}, which the shell reads as a redirection -> quote it, as \"{token}\"",
+    "paste-safe-bracket": "placeholder {token!r} unquoted {where}, which the shell reads as a glob -> quote it as \"<{name}>\"",
+    "paste-safe-flag": "optional flag {token!r} unquoted {where}, which the shell reads as a glob -> leave it out and name it in a parenthetical, or a trailing comment in a fence",
+    "paste-safe-alternation": "alternation {token!r} unquoted {where}, which the shell reads as a pipe -> write the common value and name the other in a parenthetical, or space a real pipe",
+    "paste-safe-in": "in a copy-and-run command",
+    "paste-safe-in-shell": "in the string {shell!r} hands a second shell",
     "error-empty-exclude": "--exclude was given an empty value, which matches every path and would report a whole-tree scan as clean. Drop the blank entry rather than passing it, the way the composite action skips a blank line in .github/prose-gate-excludes.",
     "error-not-a-path": "requested path(s) are not a file or a directory: {paths}. Refusing rather than falling back to the current directory, which would scan one tree and choose the rule set from another.",
     "error-many-repositories": "the requested paths span more than one repository ({roots}). Each declares its own workflow model, so no single rule set is correct for all of them. Run the gate once per repository.",
@@ -164,7 +165,7 @@
       "shells": [
         { "names": ["ash", "bash", "dash", "ksh", "mksh", "sh", "zsh"], "string": "operand", "flags": ["c"], "values": ["O", "o", "--init-file", "--rcfile"] },
         {
-          "names": ["runuser", "su"], "string": "value", "flags": ["c", "--command", "--session-command"],
+          "names": ["runuser", "su"], "string": "value", "flags": ["c", "--command", "--session-command"], "commands": ["u", "--user"],
           "values": ["G", "g", "s", "u", "w", "--group", "--shell", "--supp-group", "--user", "--whitelist-environment"]
         },
         {
