@@ -99,7 +99,7 @@ section 3 describes.
    The reason is that it may be an improvement the hub should adopt instead of a mistake to erase.
 4. **Interface workflows.** Honor the named contract, required jobs, the ruleset-bound check name,
    the artifact-name handoff, rather than copying bytes.
-5. **Settings, rulesets, and secrets.** Apply the first public-interaction limit to one pilot repository. Verify there that Copilot, CodeRabbit, Qodo, and Dependabot still work under it, and record the evidence on a pull request. Only then roll the limit out to the other repositories.
+5. **Settings, rulesets, and secrets.** Set the first public-interaction limit by hand on one pilot repository, since `apply` sets none until a committed record says a pilot verified one. Verify there that Copilot, CodeRabbit, Qodo, and Dependabot still work under it. Then commit that record, `repo-config/interaction-verification.json`, through a hub pull request carrying the evidence.
    This is `RESYNC.md` step 5. Run
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
    operational repo), then `apply` for what it reports, never from a carried copy. Both run from
