@@ -2043,7 +2043,7 @@ parse_args() {
         -y | --yes) ASSUME_YES=true ;;
         -o | --optional) WITH_OPTIONAL=true ;;
         --repo)
-            [[ $# -gt 1 ]] || die_usage "--repo needs a path"
+            [[ $# -gt 1 && -n $2 ]] || die_usage "--repo needs a path"
             REPO="$2"
             shift
             ;;

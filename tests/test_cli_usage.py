@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import carry
 from host_capability import bash_or_skip
 from test_configure_archived import lift, run_bash
+from test_pre_commit_hook import assert_group_ended, end_group, wait_until_started
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -746,8 +747,8 @@ class DashLeadingNameCase(unittest.TestCase):
 
 HOST_SCRIPTS = [ROOT / path for path in entry_points() if path.startswith("host-setup/linux/")]
 
-# Records its own process ID where its first argument says, then sleeps until signaled.
-SLEEPING_CHILD = '#!/bin/sh\necho "$$" > "$1"\nexec sleep 60\n'
+# Marks itself started by moving a file into place where its first argument says, then sleeps until signaled.
+SLEEPING_CHILD = '#!/bin/sh\n: > "$1.part"\nmv "$1.part" "$1"\nexec sleep 60\n'
 
 
 def sourced_copy(script: Path, directory: Path) -> Path:
@@ -791,6 +792,7 @@ class HostSetupExitStatusCase(unittest.TestCase):
             ("upgrade-host.sh", ("--dryrun",), 'Unknown option "--dryrun"'),
             ("upgrade-host.sh", ("--status", "--packages"), "More than one action"),
             ("install-tools.sh", ("--repo",), "--repo needs a path"),
+            ("install-tools.sh", ("--install", "--repo", ""), "--repo needs a path"),
             ("install-tools.sh", ("--list", "--repo", empty), "carries no host-tools.json"),
             ("install-tools.sh", ("--report", "--install"), "More than one action"),
             ("install-tools.sh", ("--sudo-timestamp", "jq"), "takes no tool"),
@@ -854,14 +856,14 @@ class HostSetupInterruptCase(unittest.TestCase):
         self.assertEqual(holding, set(self.HOLDERS))
 
     def interrupt(self, name: str, signum: signal.Signals) -> tuple[int, str, Path, int]:
-        """Signal the sourced script mid-run, returning its status, stderr, TMP_DIR, and the child's pid."""
+        """Signal the sourced script's group mid-run, returning its status, stderr, TMP_DIR, and group."""
         copy = sourced_copy(ROOT / "host-setup" / "linux" / name, self.dir)
         child = self.dir / "child.sh"
         child.write_text(SLEEPING_CHILD, encoding="utf-8")
         child.chmod(0o755)
         # One file per run, since a file left by an earlier run would read as this child having started.
-        pid_file = self.dir / f"{name}-{signum.name}.pid"
-        body = f'source "{copy}"\nprintf "%s\\n" "$TMP_DIR"\n"{child}" "{pid_file}"\n'
+        ready = self.dir / f"{name}-{signum.name}.ready"
+        body = f'source "{copy}"\nprintf "%s\\n" "$TMP_DIR"\n"{child}" "{ready}"\n'
         with subprocess.Popen(
             [bash_or_skip(), "-c", body],
             stdin=subprocess.DEVNULL,
@@ -871,27 +873,24 @@ class HostSetupInterruptCase(unittest.TestCase):
             encoding="utf-8",
             start_new_session=True,
         ) as proc:
-            deadline = time.monotonic() + 20
-            while not (pid_file.exists() and pid_file.read_text(encoding="utf-8").strip()):
-                if proc.poll() is not None or time.monotonic() > deadline:
-                    proc.kill()
-                    _, err = proc.communicate(timeout=20)
-                    self.fail(f"{name} never started its child: {err}")
-                time.sleep(0.05)
-            os.killpg(proc.pid, signum)
-            out, err = proc.communicate(timeout=20)
-        return proc.returncode, err, Path(out.strip()), int(pid_file.read_text(encoding="utf-8"))
+            try:
+                wait_until_started(proc, ready)
+                os.killpg(proc.pid, signum)
+                out, err = proc.communicate(timeout=20)
+            finally:
+                end_group(proc)
+        return proc.returncode, err, Path(out.strip()), proc.pid
 
     def test_a_signal_mid_run_ends_the_script_by_it_and_removes_the_directory(self) -> None:
         for name in self.HOLDERS:
             for signum in (signal.SIGINT, signal.SIGTERM):
                 with self.subTest(script=name, signal=signum.name):
-                    status, err, tmp, child = self.interrupt(name, signum)
+                    status, err, tmp, group = self.interrupt(name, signum)
                     self.assertEqual(status, -signum, err)
                     self.assertIn(f"{name}: interrupted by {signum.name}.", err)
                     self.assertTrue(tmp.is_absolute(), tmp)
                     self.assertFalse(tmp.exists(), tmp)
-                    self.assertFalse(Path(f"/proc/{child}").exists(), f"child {child} survived")
+                    assert_group_ended(group)
 
 
 if __name__ == "__main__":
