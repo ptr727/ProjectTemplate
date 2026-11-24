@@ -206,7 +206,7 @@ Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type
 
 A caller stub copied from a snippet carries that snippet's minimum known-good hub pin. Resolve each hub `uses:` pin to the latest hub release before committing it, per [`docs/reusable-workflows.md`][reusable-workflows] "Pinning". Dependabot bumps it from there.
 
-**A `homeassistant` repository's validate step runs `hacs/action`, and three of its checks fail the first run unless the standup prepares for them.**
+**A `homeassistant` repository's validate step runs `hacs/action`, and the checks below fail its first run unless the standup prepares for them.**
 
 - **License.** HACS reads the license GitHub detects on the default branch, `main`, which holds only section 0B's empty root commit until the first promotion. So pass `ignore: license` to `hacs/action`, with a comment naming when it goes. Remove it in the first pull request after the first promotion.
 - **Topics.** Set the repository's topics before the first pull request, each one matching the repository's content.
