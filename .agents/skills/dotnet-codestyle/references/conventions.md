@@ -13,13 +13,21 @@ project.
 
 2. **Nullable reference types**: enabled (`<Nullable>enable</Nullable>`), use nullable annotations
    appropriately, use `required` for mandatory properties.
-3. **Modern C# features**: prefer modern language constructs. Prefer primary constructors when
-   appropriate, top-level statements for console apps, pattern matching over traditional checks.
-   Prefer collection expressions when types loosely match. Prefer extension methods (the classic
-   `this`-parameter form or an `extension(<receiver>) { ... }` block on C# 14+). Prefer implicit
-   object creation when the type is apparent. Prefer range and index operators.
-4. **Expression-bodied members**: use for applicable methods, properties, accessors, operators,
-   lambdas, local functions.
+3. **Modern C# features**: prefer modern language constructs. Each construct below is required
+   wherever its IDE rule matches, since the gate reports each rule at warning:
+   - a primary constructor (IDE0290),
+   - top-level statements in place of a `Program.Main` (IDE0210),
+   - pattern matching over traditional checks (IDE0019, IDE0020, IDE0038, IDE0078, IDE0083,
+     IDE0260),
+   - a collection expression when types loosely match (IDE0028, IDE0300 to IDE0306),
+   - implicit object creation when the type is apparent (IDE0090),
+   - range and index operators (IDE0056, IDE0057).
+
+   Prefer extension methods (the classic `this`-parameter form or an `extension(<receiver>) { ... }`
+   block on C# 14+).
+4. **Expression-bodied members**: each is required wherever its IDE rule matches (IDE0021 to
+   IDE0027, IDE0053, IDE0061). That covers constructors, methods, operators, properties,
+   indexers, accessors, lambdas, and local functions.
 5. **`var` keyword**: do NOT use `var`, always use explicit types:
 
    ```csharp
