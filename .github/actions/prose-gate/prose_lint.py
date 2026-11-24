@@ -1694,12 +1694,12 @@ def blanked(value: str) -> str:
 def heredoc_rest(value: str) -> tuple[int, int] | None:
     """Where a heredoc token's opening line resumes past its label and where that line ends.
 
-    None where `value` opens no heredoc. The text between the two is ordinary shell code.
+    None where `value` opens no heredoc. The text between the two is ordinary shell code. A match
+    always holds a line break, since `HEREDOC` requires one after the opening line.
     """
     if not (m := re.match(HEREDOC, value)):
         return None
-    eol = value.find("\n")
-    return m.end(4) + len(m[2]), len(value) if eol < 0 else eol
+    return m.end(4) + len(m[2]), value.find("\n")
 
 
 def shell_literals(text: str, lexer: str) -> str:
