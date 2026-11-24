@@ -807,6 +807,9 @@ class LedgerCase(RepoCase):
         self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
         self.assertFalse(outdated.exists(), "a report over text no unit holds was kept")
         self.assertTrue(unrecorded.exists(), "a report still recordable was pruned")
+        self.assertEqual(
+            unrecorded.name, cr.unit_report_name("DOC.md > Beta", self.units()["DOC.md > Beta"])
+        )
         self.assertTrue(
             cr.unit_report_path(self.tmp, "DOC.md > Alpha", self.units()["DOC.md > Alpha"]).exists()
         )

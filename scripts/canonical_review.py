@@ -760,10 +760,10 @@ def refused_units(wanted: dict[str, str], current: dict[str, str], window: str) 
     return False
 
 
-def unit_report_path(root: Path, unit: str, value: str) -> Path:
-    """Where the reviewer of `unit` at digest `value` writes its report.
+def unit_report_name(unit: str, value: str) -> str:
+    """The file name the reviewer of `unit` at digest `value` writes its report under.
 
-    In the git directory, like `local_review.report_path`, so it is never untracked content in the
+    It sits in the git directory, like `local_review.report_path`, so it is never untracked content in the
     tree. Its prefix is its own, since sharing that engine's would let its prune delete a unit report
     not yet recorded. It is keyed by a hash over the unit key and its digest. The digest alone would give two
     units of identical text one report, which a generated include does across skills. A hex key also
@@ -771,7 +771,12 @@ def unit_report_path(root: Path, unit: str, value: str) -> Path:
     own first line still names the unit's digest, which `local_review.read_report` compares.
     """
     key = hashlib.sha256(f"{unit}\0{value}".encode()).hexdigest()
-    return local_review.git_dir(root) / f"{UNIT_REPORT_PREFIX}{key}{local_review.REPORT_SUFFIX}"
+    return f"{UNIT_REPORT_PREFIX}{key}{local_review.REPORT_SUFFIX}"
+
+
+def unit_report_path(root: Path, unit: str, value: str) -> Path:
+    """Where the reviewer of `unit` at digest `value` writes its report."""
+    return local_review.git_dir(root) / unit_report_name(unit, value)
 
 
 def prune_unit_reports(root: Path, current: dict[str, str]) -> None:
@@ -781,10 +786,10 @@ def prune_unit_reports(root: Path, current: dict[str, str]) -> None:
     own. A report over a unit's current text is kept, recorded or not, so a pass not yet recorded
     survives the record of another.
     """
-    keep = {unit_report_path(root, unit, value) for unit, value in current.items()}
+    keep = {unit_report_name(unit, value) for unit, value in current.items()}
     pattern = f"{UNIT_REPORT_PREFIX}*{local_review.REPORT_SUFFIX}"
     for stale in local_review.git_dir(root).glob(pattern):
-        if stale not in keep:
+        if stale.name not in keep:
             stale.unlink(missing_ok=True)
 
 
