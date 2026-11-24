@@ -269,10 +269,11 @@ owns formatting and IDE0055 stays `none`.
 1. **Guard clauses**: prefer early returns for validation and error handling. A guard that CA1510
    to CA1513 match calls the throw helper its rule names, such as `ArgumentNullException.ThrowIfNull`.
    That holds even where IDE0046 offers a conditional `return` for it. A `netstandard` project
-   lacks those helpers, so its guard uses a throw expression instead. A local assigned and then
+   lacks those helpers, so a guard there that IDE0016, IDE0046, or IDE0270 matches takes the throw
+   expression instead. A local assigned and then
    null-checked takes `?? throw` on the assignment, per IDE0270. IDE0046 makes any other such
    shape a single conditional `return`, a throw expression included. That shape is an `if` and
-   the `return`, `throw`, or `else` right after it, each branch only returning or throwing. Both
+   the `return`, `throw`, or `else` right after it, each branch only returning a value or throwing. Both
    branches throwing is not that shape. Write that shape as the conditional `return` from the start.
 2. **Async all the way**: avoid blocking calls (`.Result`, `.Wait()`), use `async`/`await`.
 3. **Cancellation tokens**: accept `CancellationToken` as the last parameter and pass it through.
