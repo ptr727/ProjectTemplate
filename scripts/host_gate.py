@@ -39,6 +39,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from run_deadline import run_with_deadline
+
 SPEC = Path(__file__).resolve().parent.parent / "spec" / "host-tools.json"
 NOTES: list[str] = []
 REMEDY_REPO: Path | None = None
@@ -77,16 +79,13 @@ def probe(argv: list[str]) -> str | None:
     one.
     """
     try:
-        p = subprocess.run(
+        p = run_with_deadline(
             argv,
-            capture_output=True,
-            text=True,
+            20,
             encoding="utf-8",
             # A decode failure here is a ValueError that neither handler below catches.
             # A probe answering in some other encoding is unreadable rather than fatal.
             errors="replace",
-            timeout=20,
-            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

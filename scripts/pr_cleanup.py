@@ -64,6 +64,7 @@ import gh_graphql as shared
 import handoff
 import pr_review as core
 from pr_cleanup_rest import CleanupUnread, cleanup_rest, promotion_refusal
+from run_deadline import run_with_deadline
 
 Q_CLEANUP_TARGET = """
 query($o:String!,$r:String!,$n:Int!){
@@ -466,14 +467,8 @@ def cleanup_git(
 ) -> subprocess.CompletedProcess[str]:
     """One git call in `root` as an argv list, raising with its stderr on an unexpected code."""
     try:
-        proc = subprocess.run(
-            ["git", "-C", root, *args],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-            timeout=300,
+        proc = run_with_deadline(
+            ["git", "-C", root, *args], 300, encoding="utf-8", errors="replace"
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise CleanupUnread(f"`git {' '.join(args)}` did not run: {exc}") from exc

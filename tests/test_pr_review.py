@@ -7250,7 +7250,7 @@ class TestClaimsIsReadOnly(unittest.TestCase):
     def test_an_unreadable_archive_reads_as_undecided_rather_than_as_an_empty_tree(self) -> None:
         """An empty tree carries no ref, so reading a failed download as one reports every ref stale."""
         for outcome in (subprocess.CompletedProcess([], 1, b"", b""),):
-            with mock.patch.object(pr_review.subprocess, "run", return_value=outcome):
+            with mock.patch.object(pr_review, "run_with_deadline", return_value=outcome):
                 self.assertIsNone(pr_review.head_carries("ptr727", "ProjectTemplate", HEAD, [PIN]))
 
     def test_gh_being_absent_leaves_the_tree_undecided_rather_than_aborting_claims(self) -> None:
@@ -7259,25 +7259,25 @@ class TestClaimsIsReadOnly(unittest.TestCase):
         Raising here would abort a run mid-way, where every other unreadable answer in this
         subcommand reports undecided and lets the caller see what was decided.
         """
-        with mock.patch.object(pr_review.subprocess, "run", side_effect=FileNotFoundError):
+        with mock.patch.object(pr_review, "run_with_deadline", side_effect=FileNotFoundError):
             self.assertIsNone(pr_review.head_carries("ptr727", "ProjectTemplate", HEAD, [PIN]))
 
     def test_a_hung_download_times_out_rather_than_hanging_the_run(self) -> None:
         with mock.patch.object(
-            pr_review.subprocess, "run", side_effect=subprocess.TimeoutExpired("gh", 1)
+            pr_review, "run_with_deadline", side_effect=subprocess.TimeoutExpired("gh", 1)
         ):
             self.assertIsNone(pr_review.head_carries("ptr727", "ProjectTemplate", HEAD, [PIN]))
 
     def test_the_archive_read_is_bounded_by_a_timeout(self) -> None:
         """An unbounded read of a whole repository is a wait with no end and no message."""
-        with mock.patch.object(pr_review.subprocess, "run") as run:
+        with mock.patch.object(pr_review, "run_with_deadline") as run:
             run.return_value = subprocess.CompletedProcess([], 1, b"", b"")
             pr_review.head_carries("ptr727", "ProjectTemplate", HEAD, [PIN])
-        self.assertEqual(pr_review.TARBALL_TIMEOUT, run.call_args.kwargs["timeout"])
+        self.assertEqual(pr_review.TARBALL_TIMEOUT, run.call_args.args[1])
 
     def test_an_archive_that_is_not_a_readable_tarball_is_undecided(self) -> None:
         proc = subprocess.CompletedProcess([], 0, b"not a gzip stream", b"")
-        with mock.patch.object(pr_review.subprocess, "run", return_value=proc):
+        with mock.patch.object(pr_review, "run_with_deadline", return_value=proc):
             self.assertIsNone(pr_review.head_carries("ptr727", "ProjectTemplate", HEAD, [PIN]))
 
     def test_a_ref_is_matched_as_bytes_so_an_undecodable_file_is_still_searched(self) -> None:
@@ -7303,8 +7303,42 @@ class TestClaimsIsReadOnly(unittest.TestCase):
         self.assertFalse(pr_review.answered_absent(proc))
 
     def test_gh_being_absent_does_not_raise(self) -> None:
-        with mock.patch.object(pr_review.subprocess, "run", side_effect=FileNotFoundError):
+        with mock.patch.object(pr_review, "run_with_deadline", side_effect=FileNotFoundError):
             self.assertEqual(1, pr_review.gh_rest("repos/o/r").returncode)
+
+
+class TestRunDeadline(unittest.TestCase):
+    """`_run` holds its deadline with a grandchild holding the pipes, which a mock cannot show.
+
+    `subprocess.run` waits that grandchild out on Windows. The child launches it with
+    `close_fds=False`, since a default Windows launch inherits no handle."""
+
+    def test_a_stalled_tree_reads_as_unrun_within_the_deadline(self) -> None:
+        pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
+        self.addCleanup(self.reap, pid_file)
+        grandchild = (
+            "import os, pathlib, sys, time; "
+            "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
+        )
+        child = (
+            "import subprocess, sys, time; "
+            f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], close_fds=False); "
+            "time.sleep(30)"
+        )
+        argv = [sys.executable, "-c", child, str(pid_file)]
+        started = time.monotonic()
+        proc = pr_review._run(argv, 5, "could not be run", encoding="utf-8")
+        elapsed = time.monotonic() - started
+        self.assertTrue(pid_file.exists(), "the grandchild did not start before the deadline")
+        self.assertEqual((1, "could not be run"), (proc.returncode, proc.stderr))
+        self.assertLess(elapsed, 25)
+
+    @staticmethod
+    def reap(pid_file: Path) -> None:
+        """A POSIX grandchild outlives the kill by design, so this test ends it."""
+        if os.name != "nt" and pid_file.exists():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(pid_file.read_text()), signal.SIGKILL)
 
 
 class TestContract(unittest.TestCase):
@@ -7656,7 +7690,7 @@ class TestScopeRefusalNamesTheDirectoryItProbed(unittest.TestCase):
     def test_the_probe_reads_the_directory_the_refusal_names(self) -> None:
         """A message naming a directory the probe never read sends the reader at the wrong tree."""
         self.enterContext(mock.patch.object(pr_review, "HERE", self.ANCHOR))
-        with mock.patch.object(pr_review.subprocess, "run") as run:
+        with mock.patch.object(pr_review, "run_with_deadline") as run:
             run.return_value = mock.Mock(stdout="https://github.com/o/r.git\n")
             self.assertEqual("o", pr_review.origin_owner())
         argv = run.call_args.args[0]

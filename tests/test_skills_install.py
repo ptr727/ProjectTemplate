@@ -7,6 +7,7 @@ Run as `python3 tests/test_skills_install.py`, or under `python3 -m unittest dis
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import io
 import json
@@ -18,12 +19,14 @@ import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
 from host_capability import requires_symlink, requires_unprivileged_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+import run_deadline
 import skills_install
 
 
@@ -463,7 +466,7 @@ class RunWithDeadlineCase(unittest.TestCase):
         self.pid_file = Path(self.enterContext(tempfile.TemporaryDirectory())) / "pid"
         self.addCleanup(self.reap)
 
-    def run_stalled_tree(self) -> float:
+    def stalled_tree(self) -> list[str]:
         grandchild = (
             "import os, pathlib, sys, time; "
             "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(30)"
@@ -473,12 +476,12 @@ class RunWithDeadlineCase(unittest.TestCase):
             f"subprocess.Popen([sys.executable, '-c', {grandchild!r}, sys.argv[1]], close_fds=False); "
             "time.sleep(30)"
         )
+        return [sys.executable, "-c", child, str(self.pid_file)]
+
+    def time_stalled(self, run: Callable[[list[str]], object]) -> float:
         started = time.monotonic()
-        with (
-            mock.patch("skills_install.SUBPROCESS_TIMEOUT", 5),
-            self.assertRaises(subprocess.TimeoutExpired),
-        ):
-            skills_install.run_with_deadline([sys.executable, "-c", child, str(self.pid_file)])
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run(self.stalled_tree())
         elapsed = time.monotonic() - started
         self.assertTrue(self.pid_file.exists(), "the grandchild did not start before the deadline")
         return elapsed
@@ -489,12 +492,19 @@ class RunWithDeadlineCase(unittest.TestCase):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(int(self.pid_file.read_text()), signal.SIGKILL)
 
-    def test_a_grandchild_holding_the_pipes_does_not_outlast_the_deadline(self) -> None:
-        self.assertLess(self.run_stalled_tree(), 25)
+    def test_a_grandchild_holding_both_pipes_does_not_outlast_the_deadline(self) -> None:
+        elapsed = self.time_stalled(
+            lambda argv: run_deadline.run_with_deadline(argv, 3, encoding="utf-8")
+        )
+        self.assertLess(elapsed, 25)
+
+    def test_the_report_run_holds_its_deadline(self) -> None:
+        with mock.patch("skills_install.SUBPROCESS_TIMEOUT", 3):
+            self.assertLess(self.time_stalled(skills_install.report_run), 25)
 
     @unittest.skipUnless(os.name == "nt", "only Windows kills the tree")
     def test_windows_kills_the_grandchild_too(self) -> None:
-        self.run_stalled_tree()
+        self.time_stalled(lambda argv: run_deadline.run_with_deadline(argv, 3))
         pid = int(self.pid_file.read_text())
         listing = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
@@ -503,17 +513,56 @@ class RunWithDeadlineCase(unittest.TestCase):
         )
         self.assertNotIn(f'"{pid}"'.encode(), listing.stdout)
 
-    def test_a_finished_child_returns_its_output_and_status(self) -> None:
-        result = skills_install.run_with_deadline(
-            [sys.executable, "-c", "import sys; print('out'); sys.exit(3)"]
+    def test_a_finished_child_returns_both_streams_as_text_mode_reads_them(self) -> None:
+        child = (
+            r"import sys; sys.stdout.buffer.write(b'out\r\n'); "
+            r"sys.stderr.buffer.write(b'err'); sys.exit(3)"
         )
-        self.assertEqual((result.returncode, result.stdout.strip()), (3, "out"))
+        result = run_deadline.run_with_deadline([sys.executable, "-c", child], 60, encoding="utf-8")
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (3, "out\n", "err"))
+
+    def test_output_stays_bytes_where_no_decoding_is_asked_for(self) -> None:
+        child = r"import sys; sys.stdout.buffer.write(b'\xff\r\n')"
+        result = run_deadline.run_with_deadline([sys.executable, "-c", child], 60)
+        self.assertEqual(result.stdout, b"\xff\r\n")
 
     def test_output_that_does_not_decode_is_raised(self) -> None:
         with self.assertRaises(UnicodeDecodeError):
-            skills_install.run_with_deadline(
+            skills_install.report_run(
                 [sys.executable, "-c", r"import sys; sys.stdout.buffer.write(b'\xff')"]
             )
+
+    def test_a_named_error_handler_decodes_what_strict_would_refuse(self) -> None:
+        child = r"import sys; sys.stdout.buffer.write(b'\xff')"
+        result = run_deadline.run_with_deadline(
+            [sys.executable, "-c", child], 60, encoding="utf-8", errors="replace"
+        )
+        self.assertEqual(result.stdout, "\ufffd")
+
+    def test_every_timed_captured_run_in_scripts_goes_through_the_helper(self) -> None:
+        """A new site written the old way would outlast its deadline on Windows again.
+
+        `docker_lint.py` is fetched alone, so it cannot import the helper, and the helper's own
+        `taskkill` is a native binary that starts no child. The helper's own call is the floor,
+        since a scan that matched nothing would read as a pass."""
+        exempt = {"docker_lint.py", "run_deadline.py"}
+        scripts = Path(skills_install.__file__).resolve().parent
+        found = []
+        for path in sorted(scripts.glob("*.py")):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("run", "check_output")
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "subprocess"
+                ):
+                    continue
+                names = {k.arg for k in node.keywords}
+                if "timeout" in names and names & {"capture_output", "stdout", "stderr"}:
+                    found.append(f"{path.name}:{node.lineno}")
+        self.assertTrue(any(f.startswith("run_deadline.py:") for f in found), found)
+        self.assertEqual([], [f for f in found if f.split(":")[0] not in exempt])
 
 
 @unittest.skipUnless(os.name == "nt", "a .cmd shim is a Windows launcher")

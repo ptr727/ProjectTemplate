@@ -129,6 +129,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
 from git_env import GIT_LOCATION_VARS
+from run_deadline import run_with_deadline
 
 RECEIPT_VERSION = 2
 RECEIPT_NAME = "local-review-receipt.json"
@@ -250,13 +251,11 @@ def git(*args: str, root: Path | None = None, env: dict[str, str] | None = None)
     run_env = {k: v for k, v in os.environ.items() if k not in INHERITED_REDIRECTS}
     run_env.update(env or {})
     try:
-        proc = subprocess.run(
+        proc = run_with_deadline(
             ["git", "-c", "core.quotePath=false", *args],
+            GIT_TIMEOUT,
             cwd=str(root) if root else None,
             env=run_env,
-            capture_output=True,
-            check=False,
-            timeout=GIT_TIMEOUT,
             encoding="utf-8",
             errors="surrogateescape",
         )
@@ -954,15 +953,13 @@ def run_coderabbit(base: str, root: Path) -> tuple[int, str]:
     # A relative PATH entry would otherwise resolve against one directory and execute in another.
     exe = str(Path(found).resolve())
     try:
-        proc = subprocess.run(
+        proc = run_with_deadline(
             [exe, "review", "--agent", "--base-commit", base, "--include-untracked"],
+            BACKEND_TIMEOUT,
             cwd=str(root),
             # The same redirects the rest of the engine refuses to inherit.
             # Run from a hook that sets GIT_INDEX_FILE, the CLI would review the wrong tree.
             env={k: v for k, v in os.environ.items() if k not in INHERITED_REDIRECTS},
-            capture_output=True,
-            check=False,
-            timeout=BACKEND_TIMEOUT,
             encoding="utf-8",
             errors="replace",
         )
