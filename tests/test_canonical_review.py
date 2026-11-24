@@ -984,21 +984,19 @@ class PruneCase(OrphanCase):
         self.assertIn("unrecognized arguments: --bogus-flag", err.getvalue())
 
 
-# Run in a child under this interpreter, the script's own `__main__` path with one hold added.
+# Run in a child under this interpreter, executing the script's own `__main__` block with one hold added.
 # The hold stands in for the rename that ends a ledger write, so the lock and the temporary ledger are both held.
 HELD_WRITE = """
-import os, signal, sys, time
+import os, runpy, sys, time
 from pathlib import Path
-sys.path[:0] = [os.environ["CR_SCRIPTS"], os.environ["CR_SPEC"]]
-import canonical_review as cr
+script = os.environ["CR_SCRIPT"]
+sys.path.insert(0, str(Path(script).parent))
 def held(_src, _dst):
     Path(os.environ["CR_READY"]).touch()
     time.sleep(60)
-cr.os.replace = held
-status = cr.run()
-if isinstance(status, signal.Signals):
-    cr.reraise(status)
-sys.exit(status)
+os.replace = held
+sys.argv = [script, *sys.argv[1:]]
+runpy.run_path(script, run_name="__main__")
 """
 
 
@@ -1023,8 +1021,7 @@ class InterruptCase(OrphanCase):
                 ready = self.outside / f"started-{'-'.join(s.name for s in sigs)}"
                 env = {
                     **os.environ,
-                    "CR_SCRIPTS": str(SCRIPTS),
-                    "CR_SPEC": str(SCRIPTS.parent / "spec"),
+                    "CR_SCRIPT": str(SCRIPTS / "canonical_review.py"),
                     "CR_READY": str(ready),
                     "PYTHONIOENCODING": "utf-8",
                 }

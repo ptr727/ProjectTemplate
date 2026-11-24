@@ -469,8 +469,8 @@ def ledger_lock(root: Path) -> Path:
 def ledger_held(root: Path) -> Iterator[None]:
     """Hold the ledger lock for the read, merge, and write a ledger change is, releasing it on any exit.
 
-    `local_review.write_pass` takes the same lock for the same reason. Two ledger changes
-    interleaved would each read a ledger without the other's, and the second write would drop it.
+    `local_review.write_pass` guards its receipt with the same helper for the same reason. Two
+    ledger changes interleaved would each read a ledger without the other's, and the second write would drop it.
     """
     lock = ledger_lock(root)
     fd_lock = local_review.held_lock(lock, LOCK_TIMEOUT)
