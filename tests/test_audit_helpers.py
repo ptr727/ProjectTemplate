@@ -6221,5 +6221,121 @@ class ExpectedRulesetsCase(unittest.TestCase):
         self.assertEqual(sources["main"], "repo-config/main.json")
 
 
+class StalePullRequestCheckCase(unittest.TestCase):
+    """A pullRequestCheck: false is stale only where every branch requiring the check posts it on a pull request run."""
+
+    POSTING = PR_HEAD + PR_CHECK
+
+    @staticmethod
+    def findings(
+        workflows: dict[str, str | None], model: str = "release", declared: bool | None = False
+    ) -> list[tuple[str, str]]:
+        entry: dict[str, Any] = {"name": "Fixture"}
+        if declared is not None:
+            entry["pullRequestCheck"] = declared
+        sources, _ = audit.expected_rulesets({"repos": [entry]}, entry, model)
+        return audit.stale_pull_request_check(entry, sources, workflows.__getitem__)
+
+    def test_a_false_every_gated_branch_outgrew_is_drift(self) -> None:
+        got = self.findings({"main": self.POSTING, "develop": self.POSTING})
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0][0], "DRIFT")
+        self.assertIn("pullRequestCheck is false", got[0][1])
+        self.assertIn(f"on main and develop posts '{PR_CHECK_NAME}'", got[0][1])
+
+    def test_a_branch_lacking_the_workflow_keeps_the_false(self) -> None:
+        self.assertEqual(self.findings({"main": self.POSTING, "develop": None}), [])
+        self.assertEqual(self.findings({"main": None, "develop": self.POSTING}), [])
+
+    def test_a_check_posted_under_another_name_keeps_the_false(self) -> None:
+        other = self.POSTING.replace(PR_CHECK_NAME, "Check workflow status job")
+        self.assertEqual(self.findings({"main": self.POSTING, "develop": other}), [])
+
+    def test_a_kept_check_is_never_stale(self) -> None:
+        for declared in (True, None):
+            with self.subTest(declared=declared):
+                self.assertEqual(self.findings({}, declared=declared), [])
+
+    def test_an_operational_repo_reads_only_the_branch_its_rulesets_gate(self) -> None:
+        got = self.findings({"main": self.POSTING}, model="operational")
+        self.assertEqual(len(got), 1)
+        self.assertIn("on main posts", got[0][1])
+
+    def test_the_pull_request_only_expression_posts_the_check(self) -> None:
+        both = self.POSTING.replace("on: pull_request", "on: [pull_request, push]").replace(
+            f"name: {PR_CHECK_NAME}", f'name: "{PR_ONLY_EXPRESSION}"'
+        )
+        self.assertEqual(len(self.findings({"main": both, "develop": both})), 1)
+
+    def test_a_workflow_no_pull_request_into_the_branch_runs_keeps_the_false(self) -> None:
+        cases = {
+            "no pull_request trigger": "on: push",
+            "branches excluding it": "on:\n  pull_request:\n    branches: [main]",
+            "branches-ignore naming it": "on:\n  pull_request:\n    branches-ignore: [dev*]",
+            "a negated pattern": "on:\n  pull_request:\n    branches: ['**', '!develop']",
+            "a paths filter": "on:\n  pull_request:\n    paths: ['src/**']",
+            "a paths-ignore filter": "on:\n  pull_request:\n    paths-ignore: ['docs/**']",
+            "types missing synchronize": "on:\n  pull_request:\n    types: [opened, reopened]",
+        }
+        for label, trigger in cases.items():
+            with self.subTest(case=label):
+                develop = self.POSTING.replace("on: pull_request", trigger)
+                self.assertEqual(self.findings({"main": self.POSTING, "develop": develop}), [])
+        listed = self.POSTING.replace(
+            "on: pull_request", "on:\n  pull_request:\n    branches: [main, develop]"
+        )
+        self.assertEqual(len(self.findings({"main": listed, "develop": listed})), 1)
+        typed = self.POSTING.replace(
+            "on: pull_request",
+            "on:\n  pull_request:\n    types: [opened, synchronize, reopened, labeled]",
+        )
+        self.assertEqual(len(self.findings({"main": typed, "develop": typed})), 1)
+
+    def test_a_reusable_workflow_call_job_does_not_post_its_own_name(self) -> None:
+        called = self.POSTING.replace("    runs-on: ubuntu-latest\n", "    uses: ./x.yml\n")
+        self.assertIn("uses: ./x.yml", called)
+        self.assertEqual(self.findings({"main": called, "develop": called}), [])
+        unnamed = audit.check_interface("p.yml", PR_CONTRACT, called)
+        self.assertTrue(any("neither as a literal job name" in f[1] for f in unnamed), unnamed)
+
+    def test_the_rulesets_check_reports_it_from_each_branch_head(self) -> None:
+        entry = {"name": "Fixture", "pullRequestCheck": False}
+        heads = {"main": {"commit": {"sha": "m1"}}, "develop": {"commit": {"sha": "d1"}}}
+        spec = {"registry": {"repos": [entry], "defaults": {}}}
+        run = audit.Run(entry, spec, "o/r", "main", {}, heads["main"], heads["develop"])
+        posting = base64.b64encode(self.POSTING.encode()).decode()
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            if "/rulesets" in path:
+                return []
+            self.assertRegex(path, r"\?ref=(m1|d1)$")
+            return {"encoding": "base64", "content": posting}
+
+        with mock.patch.object(audit, "gh", fake_gh):
+            got = audit.check_rulesets_payload(run)
+        stale = [f for f in got if f[1].startswith("registry: pullRequestCheck is false,")]
+        self.assertEqual([f[0] for f in stale], ["DRIFT"], got)
+
+    def test_each_branch_is_read_at_its_own_head(self) -> None:
+        heads = {"main": {"commit": {"sha": "m1"}}, "develop": {"commit": {"sha": "d1"}}}
+        run = audit.Run({}, {}, "o/r", "main", {}, heads["main"], heads["develop"])
+        reads: list[tuple[str, bool]] = []
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            reads.append((path, ok404))
+            if path.endswith("?ref=d1"):
+                return None
+            return {"encoding": "base64", "content": base64.b64encode(b"main text").decode()}
+
+        with mock.patch.object(audit, "gh", fake_gh):
+            self.assertEqual(run.branch_workflow("main"), "main text")
+            self.assertIsNone(run.branch_workflow("develop"))
+            self.assertIsNone(
+                audit.Run({}, {}, "o/r", "main", {}, None, None).branch_workflow("main")
+            )
+        path = "repos/o/r/contents/.github/workflows/test-pull-request.yml?ref="
+        self.assertEqual(reads, [(path + "m1", True), (path + "d1", True)])
+
+
 if __name__ == "__main__":
     unittest.main()
