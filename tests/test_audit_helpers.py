@@ -6273,6 +6273,9 @@ class StalePullRequestCheckCase(unittest.TestCase):
             "branches excluding it": "on:\n  pull_request:\n    branches: [main]",
             "branches-ignore naming it": "on:\n  pull_request:\n    branches-ignore: [dev*]",
             "a negated pattern": "on:\n  pull_request:\n    branches: ['**', '!develop']",
+            "a paths filter": "on:\n  pull_request:\n    paths: ['src/**']",
+            "a paths-ignore filter": "on:\n  pull_request:\n    paths-ignore: ['docs/**']",
+            "types missing synchronize": "on:\n  pull_request:\n    types: [opened, reopened]",
         }
         for label, trigger in cases.items():
             with self.subTest(case=label):
@@ -6282,6 +6285,16 @@ class StalePullRequestCheckCase(unittest.TestCase):
             "on: pull_request", "on:\n  pull_request:\n    branches: [main, develop]"
         )
         self.assertEqual(len(self.findings({"main": listed, "develop": listed})), 1)
+        typed = self.POSTING.replace(
+            "on: pull_request",
+            "on:\n  pull_request:\n    types: [opened, synchronize, reopened, labeled]",
+        )
+        self.assertEqual(len(self.findings({"main": typed, "develop": typed})), 1)
+
+    def test_a_reusable_workflow_call_job_does_not_post_its_own_name(self) -> None:
+        called = self.POSTING.replace("    runs-on: ubuntu-latest\n", "    uses: ./x.yml\n")
+        self.assertIn("uses: ./x.yml", called)
+        self.assertEqual(self.findings({"main": called, "develop": called}), [])
 
 
 if __name__ == "__main__":

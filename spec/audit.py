@@ -1244,6 +1244,7 @@ def split_jobs(text):
     }
 
 
+PULL_REQUEST_TYPES = {"opened", "synchronize", "reopened"}
 # A job name yielding its first string only on a pull_request run, the shape WORKFLOW.md D1.5 gives a ruleset-bound name.
 # It matches the tight form _strip_unquoted_space gives, which leaves the quoted names intact.
 PR_ONLY_NAME = re.compile(r"\$\{\{github\.event_name=='pull_request'&&'([^']*)'\|\|'([^']*)'\}\}")
@@ -1274,7 +1275,7 @@ def job_names(jobs):
 
 
 def posts_check(text, name, branch):
-    """Whether a pull request into `branch` runs the workflow `text` with a job posting the check `name`."""
+    """Whether every pull request into `branch` runs `text` with a job of its own steps posting the check `name`."""
     root = _compose(text)
     if "pull_request" not in workflow_events(_plain(root) if root is not None else None):
         return False
@@ -1282,9 +1283,13 @@ def posts_check(text, name, branch):
     want, skip = (_plain_list(trigger.get(key)) for key in ("branches", "branches-ignore"))
     if any(p.startswith("!") for p in want) or any(fnmatch.fnmatchcase(branch, p) for p in skip):
         return False
+    kinds = set(_plain_list(trigger.get("types"))) if "types" in trigger else PULL_REQUEST_TYPES
     if "branches" in trigger and not any(fnmatch.fnmatchcase(branch, p) for p in want):
         return False
-    names, matches = job_names(_mapping(_mapping(root).get("jobs")))
+    if trigger.keys() & {"paths", "paths-ignore"} or not PULL_REQUEST_TYPES <= kinds:
+        return False
+    jobs = _mapping(_mapping(root).get("jobs"))
+    names, matches = job_names({k: v for k, v in jobs.items() if "uses" not in _mapping(v)})
     return name in {matches[key][1] if key in matches else v for key, v in names.items()}
 
 
@@ -2117,8 +2122,8 @@ class Run:
     def branch_workflow(self, branch):
         """The pull request workflow's text at `branch`'s head, None where the branch or the file is absent."""
         head = {"main": self.main, "develop": self.develop}.get(branch)
-        path = f"{WORKFLOW_MODEL_CALLER}?ref={head['commit']['sha']}" if head else None
-        return path and contents_text(gh(f"repos/{self.slug}/contents/{path}", ok404=True))
+        sha = head and head["commit"]["sha"]
+        return sha and contents_text(read_baseline_file(self.slug, sha, WORKFLOW_MODEL_CALLER))
 
     def unread(self, family, path, purpose):
         return (
@@ -2233,12 +2238,8 @@ def check_settings_general(run):
         if key in expected and run.live.get(key) != expected[key]
     ]
     if run.main is not None and run.live.get("default_branch") != "main":
-        findings.append(
-            (
-                "DEFECT",
-                f"settings: default_branch is {run.live.get('default_branch')}, expected main",
-            )
-        )
+        wrong = f"settings: default_branch is {run.live.get('default_branch')}, expected main"
+        findings.append(("DEFECT", wrong))
     return findings
 
 
