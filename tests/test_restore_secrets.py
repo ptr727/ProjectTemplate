@@ -129,7 +129,7 @@ class TestLinuxScript(Case):
 
     def test_an_unknown_option_is_refused_before_anything_runs(self) -> None:
         result = self.run_script("--bucket", "alpha", "--everything")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 64, result.stderr)
         self.assertIn('Unknown option "--everything"', result.stderr)
         self.assertEqual(self.calls(), [])
 
@@ -137,7 +137,7 @@ class TestLinuxScript(Case):
         for args in ((), ("--yes",)):
             with self.subTest(args=args):
                 result = self.run_script(*args)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.returncode, 64, result.stderr)
                 self.assertIn("Name at least one bucket", result.stderr)
                 self.assertEqual(self.calls(), [])
 
@@ -145,7 +145,7 @@ class TestLinuxScript(Case):
         for given in ("Alpha", "a_b", "-x", "a b", "alpha/beta", "al.pha", ""):
             with self.subTest(given=given):
                 result = self.run_script("--bucket", given)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.returncode, 64, result.stderr)
                 self.assertEqual(self.calls(), [])
         self.assertIn(
             "lowercase letters, digits, and hyphens", self.run_script("--bucket", "A").stderr
@@ -153,13 +153,14 @@ class TestLinuxScript(Case):
 
     def test_a_bucket_option_with_no_value_is_refused(self) -> None:
         result = self.run_script("--bucket")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 64, result.stderr)
         self.assertIn("--bucket takes a bucket name", result.stderr)
 
     @requires_unprivileged_root
     def test_root_is_refused_before_op_or_python_is_looked_for(self) -> None:
         result = self.run_script("--bucket", "alpha", root=True)
-        self.assertNotEqual(result.returncode, 0)
+        # A refusal of the account rather than of an argument, so it is not the reserved 64.
+        self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("the sync refuses root", result.stderr)
         self.assertEqual(self.calls(), [])
 

@@ -14,10 +14,30 @@ readonly ROOT
 BUCKETS=()
 DRY_RUN=false
 ASSUME_YES=false
+USAGE_REFUSED=false
+
+# Exit status 64 is reserved for a refused argument, per CODESTYLE.md "Command-Line Arguments".
+# Under set -e a failed command's own status becomes the script's, so a 64 that die_usage did not exit leaves as 1.
+# The program this script ends by exec-ing replaces the trap along with the script, and that program never exits 64.
+# shellcheck disable=SC2317,SC2329  # The EXIT trap runs it.
+on_exit() {
+    local status=$?
+    if [[ $status -eq 64 && $USAGE_REFUSED == false ]]; then
+        exit 1
+    fi
+}
+trap on_exit EXIT
 
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+# A refused argument exits 64, EX_USAGE from sysexits.h, so a caller can tell it from a run that started and failed.
+die_usage() {
+    printf 'ERROR: %s\n' "$*" >&2
+    USAGE_REFUSED=true
+    exit 64
 }
 
 usage() {
@@ -37,6 +57,8 @@ Options:
   -n, --dry-run     Print the plan and the op writes, send none
   -y, --yes         Answer the sync's confirmation prompt yes
   -h, --help        Show this help
+
+Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF2
 }
 
@@ -44,8 +66,8 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
         -b | --bucket)
-            [[ $# -ge 2 && -n $2 ]] || die "--bucket takes a bucket name"
-            [[ $2 =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "--bucket takes lowercase letters, digits, and hyphens that start with a letter or digit, not \"$2\""
+            [[ $# -ge 2 && -n $2 ]] || die_usage "--bucket takes a bucket name"
+            [[ $2 =~ ^[a-z0-9][a-z0-9-]*$ ]] || die_usage "--bucket takes lowercase letters, digits, and hyphens that start with a letter or digit, not \"$2\""
             BUCKETS+=("$2")
             shift
             ;;
@@ -55,11 +77,11 @@ parse_args() {
             usage
             exit 0
             ;;
-        *) die "Unknown option \"$1\", --help lists the options" ;;
+        *) die_usage "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
-    [[ ${#BUCKETS[@]} -gt 0 ]] || die "Name at least one bucket with --bucket"
+    [[ ${#BUCKETS[@]} -gt 0 ]] || die_usage "Name at least one bucket with --bucket"
 }
 
 # The sync refuses root, so this says why before the interpreter and op are looked for.

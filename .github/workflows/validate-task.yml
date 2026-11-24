@@ -670,6 +670,101 @@ jobs:
         with:
           exclude-globs: ${{ inputs.repo-gate-exclude-globs }}
 
+      # A promotion and every bot pull request land on the default branch as merge commits.
+      # So a single-parent commit on its first-parent chain since the previous promotion is a squash or a direct push.
+      # A head already holding each such commit is the recovery cut, whose merge restores the merge base with develop.
+      # The floor is the hub's one such commit, recovered long since, and is inert where a caller's history lacks it.
+      - name: Check promotion history step
+        if: github.event.pull_request != null
+        env:
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_REF: ${{ github.base_ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SQUASH_FLOOR: 048a442f293504fe9b75d135bbac93910e4e54b8
+        run: |
+          set -Eeuo pipefail
+          brings_develop() {
+            local commit=$1 onto=$2 shared rc=0
+            shared=$(git merge-base "$commit" "$develop") || rc=$?
+            if [[ "$rc" == 1 ]]; then
+              return 1
+            elif [[ "$rc" != 0 ]]; then
+              exit "$rc"
+            fi
+            git merge-base --is-ancestor "$shared" "$onto" || rc=$?
+            case "$rc" in
+              0) return 1 ;;
+              1) return 0 ;;
+              *) exit "$rc" ;;
+            esac
+          }
+          if [[ "$HEAD_REPOSITORY" != "$REPOSITORY" || "$BASE_REF" != "$DEFAULT_BRANCH" ]]; then
+            echo "The pull request does not run from this repository into its default branch, so it promotes nothing."
+            exit 0
+          fi
+          if ! develop=$(git rev-parse --verify --quiet 'refs/remotes/origin/develop^{commit}'); then
+            echo "The repository has no develop branch, so nothing is promoted."
+            exit 0
+          fi
+          base=$(git rev-parse --verify "refs/remotes/origin/$BASE_REF^{commit}")
+          if ! brings_develop "$HEAD_SHA" "$base"; then
+            echo "The head brings no develop history into $BASE_REF, so it is no promotion."
+            exit 0
+          fi
+          excludes=("^$develop")
+          floor=""
+          if floor=$(git rev-parse --verify --quiet "$SQUASH_FLOOR^{commit}"); then
+            excludes+=("^$floor")
+          fi
+          chain=$(git rev-list --first-parent --parents "$base" "${excludes[@]}")
+          singles=()
+          previous=""
+          while read -r commit first second _; do
+            if [[ -z "$commit" ]]; then
+              continue
+            elif [[ -z "$second" ]]; then
+              singles+=("$commit")
+            elif brings_develop "$second" "$first"; then
+              previous=$commit
+              break
+            fi
+          done <<< "$chain"
+          since="with no promotion merge on it"
+          if [[ -n "$previous" ]]; then
+            since="since its previous promotion merge $previous"
+          elif [[ -n "$floor" ]]; then
+            since="past its floor $floor"
+          fi
+          if (( ${#singles[@]} == 0 )); then
+            echo "Every commit on $BASE_REF's first-parent chain $since is a merge commit."
+            exit 0
+          fi
+          held=true
+          for commit in "${singles[@]}"; do
+            rc=0
+            git merge-base --is-ancestor "$commit" "$HEAD_SHA" || rc=$?
+            if [[ "$rc" == 1 ]]; then
+              held=false
+            elif [[ "$rc" != 0 ]]; then
+              exit "$rc"
+            fi
+          done
+          if [[ "$held" == true ]]; then
+            echo "$BASE_REF's first-parent chain $since holds ${#singles[@]} single-parent commit(s): ${singles[*]}."
+            echo "The head already holds each of them, so merging it restores the merge base with develop."
+            echo "The cut merged develop from the stale base, so confirm its tree matches develop's before it merges."
+            exit 0
+          fi
+          for commit in "${singles[@]}"; do
+            echo "::error::$BASE_REF's first-parent chain $since holds $commit, a single-parent commit: a squash or a direct push into $BASE_REF rather than a merge."
+          done
+          echo "The merge base with develop stays behind that commit, so merging develop conflicts, or silently keeps a line develop has since removed."
+          echo "Recover by cutting a branch from $BASE_REF that merges develop, resolving each conflict as the reference below states, and opening it as the promotion in place of develop."
+          echo "The branching-and-release-model skill's references/branch-protection-and-promotion.md states the cut."
+          exit 1
+
   # No job-level if: here, since GitHub Actions does not evaluate hashFiles in a job condition, only a step one.
   # Every step below carries its own guard instead, a tree-detection one on the .NET half and the resolved Python directories on the Python half.
   # A caller with no *Tests*.csproj and no Python directory runs every guard false.

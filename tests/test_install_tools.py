@@ -276,7 +276,7 @@ report
                     check=False,
                     timeout=30,
                 )
-                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.returncode, 64)
                 self.assertIn("--json", result.stderr)
                 self.assertEqual(result.stdout, "")
 
