@@ -46,7 +46,7 @@ check itself not having run.
 **A pass is recorded from the report its reviewer wrote, never from a count the caller types.** A
 typed count binds the record to nothing the reviewer produced. So a driver that misread or imagined
 a review could record one that never reported. Each unit's report sits at the path `report-path`
-names for it, which is keyed by the unit's digest. It is read by `local_review.py`'s own reader,
+names for it, which is keyed by the unit and its digest. It is read by `local_review.py`'s own reader,
 so the report contract is that engine's: a first line reading `contentDigest: <digest>`, then one
 finding per non-blank line. `record` refuses a unit whose report is absent or names another digest.
 It stores the report's sha256 and derives the count from its lines.
@@ -759,17 +759,19 @@ def refused_units(wanted: dict[str, str], current: dict[str, str], window: str) 
     return False
 
 
-def unit_report_path(root: Path, value: str) -> Path:
-    """Where the reviewer of the unit at digest `value` writes its report.
+def unit_report_path(root: Path, unit: str, value: str) -> Path:
+    """Where the reviewer of `unit` at digest `value` writes its report.
 
-    `local_review.report_path` keyed by the digest's hex alone, since the `sha256:` prefix carries a
-    colon no Windows file name may hold. The report's own first line still names the whole digest,
-    which is what `local_review.read_report` compares.
+    `local_review.report_path` keyed by a hash over the unit key and its digest. The digest alone
+    would give two units of identical text one report, which a generated include does across skills.
+    A hex key also keeps the colon of `sha256:` out of the name, which no Windows file name may hold.
+    The report's own first line still names the unit's digest, which `local_review.read_report` compares.
     The two engines share that one name space in the git directory. So recording a diff pass there
     prunes a unit report not yet recorded, and the record then refuses it as absent. That errs
     toward another pass rather than toward a record nobody's report backs.
     """
-    return local_review.report_path(root, value.removeprefix("sha256:"))
+    key = hashlib.sha256(f"{unit}\0{value}".encode()).hexdigest()
+    return local_review.report_path(root, key)
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -795,7 +797,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     unreported: list[str] = []
     for unit, value in wanted.items():
         try:
-            reports[unit] = local_review.read_report(unit_report_path(root, value), value)
+            reports[unit] = local_review.read_report(unit_report_path(root, unit, value), value)
         except CannotRun as exc:
             unreported.append(f"  {unit}\n    {exc}")
     if unreported:
@@ -854,7 +856,8 @@ def cmd_report_path(args: argparse.Namespace) -> int:
         return EXIT_CANNOT_RUN
     emit(
         json.dumps(
-            {unit: str(unit_report_path(root, value)) for unit, value in wanted.items()}, indent=2
+            {unit: str(unit_report_path(root, unit, value)) for unit, value in wanted.items()},
+            indent=2,
         )
     )
     return EXIT_COVERED

@@ -250,7 +250,7 @@ class RepoCase(unittest.TestCase):
         `digest` is the one the report's first line names, the unit's current digest by default.
         """
         value = self.units()[unit]
-        path = cr.unit_report_path(self.tmp, value)
+        path = cr.unit_report_path(self.tmp, unit, value)
         lines = [f"{cr.local_review.REPORT_HEADER}{digest or value}"]
         lines.extend(f"{unit}: finding {n}" for n in range(findings))
         path.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
@@ -709,7 +709,7 @@ class LedgerCase(RepoCase):
         code, output = self.loud(self.record_argv(unit))
         self.assertEqual(code, cr.EXIT_CANNOT_RUN)
         self.assertIn("no report", output)
-        self.assertIn(str(cr.unit_report_path(self.tmp, self.units()[unit])), output)
+        self.assertIn(str(cr.unit_report_path(self.tmp, unit, self.units()[unit])), output)
         self.assertFalse((self.tmp / cr.LEDGER).exists(), "a pass with no report was recorded")
 
     def test_record_takes_the_count_and_digest_of_the_report(self) -> None:
@@ -765,7 +765,33 @@ class LedgerCase(RepoCase):
         git_dir = Path(run(self.tmp, "rev-parse", "--absolute-git-dir").strip())
         self.assertEqual(path.parent, git_dir)
         self.assertNotIn(":", path.name, "a colon is no valid Windows file name character")
-        self.assertEqual(path, cr.unit_report_path(self.tmp, self.units()[unit]))
+        self.assertEqual(path, cr.unit_report_path(self.tmp, unit, self.units()[unit]))
+
+    def test_two_units_of_identical_text_each_take_their_own_report(self) -> None:
+        """A generated include gives two skills one section's bytes, and so one digest.
+
+        Keyed on the digest alone, the second reviewer's report would overwrite the first's, and
+        each unit could be recorded from the other's pass.
+        """
+        for name in ("demo", "twin"):
+            for tree in (cr.AUTHORED_SKILLS, cr.GENERATED_SKILLS):
+                self.write(f"{tree}/{name}/SKILL.md", "# Demo\n\n## Use It\n\nhow\n")
+        first = f"{cr.AUTHORED_SKILLS}/demo/SKILL.md > Use It"
+        second = f"{cr.AUTHORED_SKILLS}/twin/SKILL.md > Use It"
+        current = self.units()
+        self.assertEqual(current[first], current[second], "the premise needs one shared digest")
+        self.assertNotEqual(
+            cr.unit_report_path(self.tmp, first, current[first]),
+            cr.unit_report_path(self.tmp, second, current[second]),
+        )
+        self.write_report(first, findings=1)
+        code, output = self.loud(self.record_argv(second))
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN, "one unit was recorded from another's report")
+        self.assertIn("no report", output)
+        self.write_report(second, findings=3)
+        self.assertEqual(self.quiet(self.record_argv(first, second)), cr.EXIT_COVERED)
+        ledger = cr.read_ledger(self.tmp)
+        self.assertEqual((ledger[first]["findings"], ledger[second]["findings"]), (1, 3))
 
     def test_report_path_refuses_a_digest_the_content_has_moved_past(self) -> None:
         """Caught before a reviewer spends a pass on text the record would refuse."""
