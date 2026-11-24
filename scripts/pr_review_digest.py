@@ -15,6 +15,7 @@ import pr_review_answers as answers
 import pr_review_copilot as adapter
 from pr_review_check_lines import check_lines
 from pr_review_checks import checks_stuck, checks_tally
+from pr_review_payload import bot_entry, default_branch
 from pr_review_promotion import coverage
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -50,6 +51,7 @@ from pr_review_rounds import (
     uncounted_verdict,
     window_blind,
 )
+from pr_review_summary import clean_pass, summaries
 
 NO_THREAD, NOTED = answers.NO_THREAD, answers.NOTED
 BEHIND_THE_WINDOW = (
@@ -99,7 +101,6 @@ def render(
     hub: str,
     window: int,
     fields_out: list[tuple[str, object]] | None = None,
-    rabbit: tuple[str, bool] = ("", False),
 ) -> tuple[str, int]:
     """Render the digest and return it with the unresolved count.
 
@@ -107,11 +108,8 @@ def render(
     caller. `run_log` is the caller's `RUN LOG READING` line for that refusal, empty for none.
     Where `seen` is a set, only threads absent from it print, marked new, and are added.
     Where `fields_out` is a list, the header's fields and the counts a gate reads are appended.
-    `rabbit` is the commit CodeRabbit's summary records a clean pass on, empty for none. Beside it
-    is whether the policy covers CodeRabbit on this base, both read by the caller. The commit counts
-    only where it is the head. With no clean summary in view, older comments leave it unknown.
     """
-    head, (cleaned, rabbit_covered) = pr["headRefOid"], rabbit
+    head = pr["headRefOid"]
     revs = reviewer_nodes(pr, "reviews")
     on_head = head_reviews(pr)
     newest = newest_of(on_head)
@@ -156,13 +154,15 @@ def render(
     answered = "yes" if answer else ("unknown" if blind else "no")
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
+    cleaned, rabbit = clean_pass(pr), bot_entry(pr, "coderabbit")
     other_on_head = [
         login
         for login in OTHER_REVIEWERS
         if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
         or (login == CODERABBIT_LOGIN and cleaned == head)
     ]
-    unread = rabbit_covered and not cleaned and CODERABBIT_LOGIN not in other_on_head
+    covered = rabbit is not None and rabbit.covers(pr.get("baseRefName") or "", default_branch(pr))
+    unread = covered and not summaries(pr) and CODERABBIT_LOGIN not in other_on_head
     unread = unread and page_flag(pr, "comments", "hasPreviousPage")
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None

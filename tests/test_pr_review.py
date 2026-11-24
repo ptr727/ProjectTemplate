@@ -92,6 +92,7 @@ GATE_SOURCES = (
     "pr_review_payload.py",
     "pr_review_promotion.py",
     "pr_review_hold.py",
+    "pr_review_summary.py",
 )
 WRITE_SCANNED = (*GATE_SOURCES, "pr_review_side.py", "pr_review_policy.py")
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
@@ -111,6 +112,7 @@ READER_IMPORTS = frozenset(
         "pr_review_payload",
         "pr_review_promotion",
         "pr_review_rounds",
+        "pr_review_summary",
     }
 )
 # One import each reader module is known to make, the floor under the allowlist above.
@@ -123,6 +125,7 @@ READER_FLOORS = {
     "pr_review_payload": "typing",
     "pr_review_promotion": "pr_review_rounds",
     "pr_review_hold": "pr_review_checks",
+    "pr_review_summary": "pr_review_rounds",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")
@@ -1143,12 +1146,12 @@ class TestOtherReviewers(GqlCase):
     def test_a_blind_comments_window_leaves_coderabbit_unknown_rather_than_unreviewed(self) -> None:
         """The summary is an early comment, so older comments past the window can hold it unseen.
 
-        A review on the head or a clean summary in view decides, since CodeRabbit edits that one
+        A review on the head or any summary in view decides, since CodeRabbit edits that one
         summary in place. A base the policy does not cover CodeRabbit on expects no summary at all.
         """
         for reviews, comments, bases, field in (
             ([review()], [], "^develop$", "other_unknown=coderabbitai"),
-            ([review()], [self.rabbit_summary(HEAD, clean=False)], "^develop$", "other_unknown"),
+            ([review()], [self.rabbit_summary(HEAD, clean=False)], "^develop$", ""),
             ([review()], [self.rabbit_summary(OLD)], "^develop$", ""),
             ([review()], [], "^main$", ""),
             ([review()], [self.rabbit_summary(HEAD)], "^develop$", "other_reviewed=coderabbitai"),

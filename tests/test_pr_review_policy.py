@@ -35,6 +35,7 @@ import pr_review_payload as payload
 import pr_review_policy as policy
 import pr_review_rounds as rounds
 import pr_review_side as side
+import pr_review_summary as summary
 import test_pr_review as fixtures
 
 REPO = Path(__file__).resolve().parent.parent
@@ -404,6 +405,22 @@ class TestSideReaders(unittest.TestCase):
         self.assertEqual(2, side.side_rounds(pr, "coderabbit", body))
         pr["reviews"]["nodes"].append(fixtures.review(login=rounds.CODERABBIT_LOGIN))
         self.assertEqual(2, side.side_rounds(pr, "coderabbit", body))
+
+    def test_a_summary_is_in_view_clean_or_not_and_a_plain_reply_is_not_one(self) -> None:
+        """Its printed range marks the summary, so one recording findings or a rate limit counts too.
+
+        A reply prints no range, and a range quoted by anyone but CodeRabbit is not its summary.
+        """
+        for comment, seen in (
+            (rabbit_summary(MOVED), True),
+            (rabbit_summary(MOVED, clean=False), True),
+            (rabbit_summary(MOVED, limited=True), True),
+            (fixtures.comment(login=rounds.CODERABBIT_LOGIN, body="Review triggered."), False),
+            ({**rabbit_summary(MOVED), "author": {"login": "maintainer"}}, False),
+        ):
+            pr = fixtures.payload([], comments=[comment])
+            with self.subTest(body=comment["body"][-80:]):
+                self.assertEqual(seen, bool(summary.summaries(pr)))
 
 
 class SideCase(unittest.TestCase):

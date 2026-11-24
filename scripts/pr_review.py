@@ -100,7 +100,7 @@ Subcommands
            the head, identity and commit only, or CodeRabbit where its summary records a clean
            pass on the head. Its empty body there is its own "reviewed, nothing to flag" shape,
            not a gap. `other_unknown` names CodeRabbit where the policy covers it on this base,
-           neither shows, no clean summary is in view, and older comments sit behind the window,
+           neither shows, no summary of its is in view, and older comments sit behind the window,
            so its summary may be unread rather than absent.
            `other_rate_limited` names one whose newest comment or review is its own rate-limit
            notice. `refusal=` reads the newest Copilot review where it is a refusal: `QUOTA` for
@@ -936,7 +936,6 @@ def digest(
         HUB,
         WINDOW,
         fields_out,
-        (side.clean_pass(pr), any(name == "coderabbit" for name, *_ in side.side_reviewers(pr))),
     )
 
 
