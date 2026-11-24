@@ -30,7 +30,7 @@
         // The type-checker swap composes with it: `uvx mypy@latest` for a mypy repo, `uvx pyright@latest` otherwise.
         // It omits "uv Sync" and "uv Upgrade", and "Python Test" runs the unittest command the repository's OPERATIONS.md gives rather than pytest, per the python-codestyle Skill "Two profiles".
         // A `python-directories` input naming several trees takes these tasks per tree, sequenced under "Python Format" and "Python Test".
-        // Each tree's ruff and test tasks set `options.cwd`, and its "Python Types" keeps the command above.
+        // Each tree's ruff and test tasks set `options.cwd` to the tree, and its "Python Types" to the directory that CI command runs in.
         {
             "label": "ruff format",
             "type": "process",
