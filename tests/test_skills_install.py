@@ -24,6 +24,7 @@ from pathlib import Path
 from unittest import mock
 
 from host_capability import requires_symlink, requires_unprivileged_root
+from test_tooling_encoding import spawning_calls
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import run_deadline
@@ -566,19 +567,13 @@ class RunWithDeadlineCase(unittest.TestCase):
         scripts = Path(skills_install.__file__).resolve().parent
         found = []
         for path in sorted(scripts.glob("*.py")):
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                if not (
-                    isinstance(node, ast.Call)
-                    and isinstance(node.func, ast.Attribute)
-                    and node.func.attr in ("run", "check_output")
-                    and isinstance(node.func.value, ast.Name)
-                    and node.func.value.id == "subprocess"
-                ):
-                    continue
-                names = {k.arg for k in node.keywords}
+            for spawn in spawning_calls(ast.parse(path.read_text(encoding="utf-8"))):
+                call = spawn.call
+                names = {k.arg for k in call.keywords}
+                spawner = getattr(call.func, "attr", getattr(call.func, "id", ""))
                 captured = names & {"capture_output", "stdout", "stderr"}
-                if "timeout" in names and (captured or node.func.attr == "check_output"):
-                    found.append(f"{path.name}:{node.lineno}")
+                if "timeout" in names and (captured or spawner == "check_output"):
+                    found.append(f"{path.name}:{call.lineno}")
         self.assertTrue(any(f.startswith("run_deadline.py:") for f in found), found)
         self.assertEqual([], [f for f in found if f.split(":")[0] not in exempt])
 
