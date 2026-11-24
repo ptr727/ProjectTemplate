@@ -100,6 +100,7 @@ LEDGER = "reports/canonical-review.json"
 # So a record killed mid-write leaves its lock where no add can stage it.
 # `held_lock` appends `.lock` to the path it is given.
 LEDGER_LOCK_NAME = "canonical-review-ledger"
+UNIT_REPORT_PREFIX = "canonical-review-report."
 LOCK_TIMEOUT = 10.0
 
 LEDGER_NOTE = (
@@ -762,16 +763,29 @@ def refused_units(wanted: dict[str, str], current: dict[str, str], window: str) 
 def unit_report_path(root: Path, unit: str, value: str) -> Path:
     """Where the reviewer of `unit` at digest `value` writes its report.
 
-    `local_review.report_path` keyed by a hash over the unit key and its digest. The digest alone
-    would give two units of identical text one report, which a generated include does across skills.
-    A hex key also keeps the colon of `sha256:` out of the name, which no Windows file name may hold.
-    The report's own first line still names the unit's digest, which `local_review.read_report` compares.
-    The two engines share that one name space in the git directory. So recording a diff pass there
-    prunes a unit report not yet recorded, and the record then refuses it as absent. That errs
-    toward another pass rather than toward a record nobody's report backs.
+    In the git directory, like `local_review.report_path`, so it is never untracked content in the
+    tree. Its prefix is its own, since sharing that engine's would let its prune delete a unit report
+    not yet recorded. It is keyed by a hash over the unit key and its digest. The digest alone would give two
+    units of identical text one report, which a generated include does across skills. A hex key also
+    keeps the colon of `sha256:` out of the name, which no Windows file name may hold. The report's
+    own first line still names the unit's digest, which `local_review.read_report` compares.
     """
     key = hashlib.sha256(f"{unit}\0{value}".encode()).hexdigest()
-    return local_review.report_path(root, key)
+    return local_review.git_dir(root) / f"{UNIT_REPORT_PREFIX}{key}{local_review.REPORT_SUFFIX}"
+
+
+def prune_unit_reports(root: Path, current: dict[str, str]) -> None:
+    """Remove each unit report written for text no unit holds any more.
+
+    Such a report can never be recorded again, the reason `local_review.prune_reports` gives for its
+    own. A report over a unit's current text is kept, recorded or not, so a pass not yet recorded
+    survives the record of another.
+    """
+    keep = {unit_report_path(root, unit, value) for unit, value in current.items()}
+    pattern = f"{UNIT_REPORT_PREFIX}*{local_review.REPORT_SUFFIX}"
+    for stale in local_review.git_dir(root).glob(pattern):
+        if stale not in keep:
+            stale.unlink(missing_ok=True)
 
 
 def cmd_record(args: argparse.Namespace) -> int:
@@ -833,6 +847,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     finally:
         os.close(fd_lock)
         Path(str(lock) + ".lock").unlink(missing_ok=True)
+    prune_unit_reports(root, current)
     total = sum(findings for _, findings in reports.values())
     emit(
         f"recorded {args.reviewer} over {len(wanted)} unit(s) in {LEDGER},"

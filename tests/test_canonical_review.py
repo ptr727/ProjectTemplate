@@ -793,6 +793,24 @@ class LedgerCase(RepoCase):
         ledger = cr.read_ledger(self.tmp)
         self.assertEqual((ledger[first]["findings"], ledger[second]["findings"]), (1, 3))
 
+    def test_a_unit_report_is_apart_from_the_diff_pass_reports(self) -> None:
+        """`local_review.py record` prunes every report under its own prefix but the one it records."""
+        unit = "DOC.md > Alpha"
+        name = cr.unit_report_path(self.tmp, unit, self.units()[unit]).name
+        self.assertFalse(name.startswith(cr.local_review.REPORT_PREFIX))
+
+    def test_a_record_prunes_only_the_reports_for_text_no_unit_holds(self) -> None:
+        """A report over a unit's current text may still be recorded, so it is kept."""
+        unrecorded = self.write_report("DOC.md > Beta")
+        outdated = self.write_report("DOC.md > Alpha")
+        self.write("DOC.md", "intro\n\n## Alpha\n\nedited\n\n## Beta\n\nb body\n")
+        self.assertEqual(self.record("DOC.md > Alpha"), cr.EXIT_COVERED)
+        self.assertFalse(outdated.exists(), "a report over text no unit holds was kept")
+        self.assertTrue(unrecorded.exists(), "a report still recordable was pruned")
+        self.assertTrue(
+            cr.unit_report_path(self.tmp, "DOC.md > Alpha", self.units()["DOC.md > Alpha"]).exists()
+        )
+
     def test_report_path_refuses_a_digest_the_content_has_moved_past(self) -> None:
         """Caught before a reviewer spends a pass on text the record would refuse."""
         code, output = self.loud(["report-path", "--unit", "DOC.md > Alpha=sha256:00"])
