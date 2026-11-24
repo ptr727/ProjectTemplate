@@ -1256,6 +1256,7 @@ def run_record(
 ) -> dict[str, object]:
     return {
         "event": event,
+        "workflowDatabaseId": sum(map(ord, workflow)),
         "workflowName": workflow,
         "conclusion": conclusion,
         "createdAt": f"{day}T00:00:00Z",

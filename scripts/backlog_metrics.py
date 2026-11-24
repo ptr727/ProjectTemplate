@@ -1065,16 +1065,16 @@ def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[li
 
     `runs` is newest first, as `gh run list` prints it. A cancelled, skipped, or neutral run
     decided nothing, so it is never a workflow's latest. A pull request's run is left out, since a
-    fork's branch can share the name. A workflow is keyed by its database id, since two workflow
-    files can share a display name. So is a Copilot review run, which carries the reviewed pull
-    request's head branch. A workflow recovered where a run failed in the window and its latest
+    fork's branch can share the name. So is a Copilot review run, which carries the reviewed pull
+    request's head branch. A workflow is keyed by its database id, since two workflow files can
+    share a display name. A workflow recovered where a run failed in the window and its latest
     completed run did not.
     """
     latest: dict[str, Mapping[str, Any]] = {}
     failed: dict[str, list[Mapping[str, Any]]] = {}
     for run in runs:
         workflow = str(run.get("workflowName") or "")
-        key = str(run.get("workflowDatabaseId") or workflow)
+        key = str(run.get("workflowDatabaseId"))
         if not run.get("conclusion") or run["conclusion"] in UNDECIDED_RUNS:
             continue
         if run.get("event") in PR_EVENTS or workflow == REVIEW_WORKFLOW:
