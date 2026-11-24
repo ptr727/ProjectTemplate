@@ -144,7 +144,7 @@ A bootstrap, a program that must run before the interpreter or a development too
 
 *This section applies only to PowerShell scripts. A repo with no `.ps1` files still carries it (the file is carried whole) and ignores it.*
 
-PowerShell is the native shell on Windows, so a Windows bootstrap and a Windows entry point over shared Python logic are written in it. PSScriptAnalyzer is the analyzer, and it runs every default rule through a `PSScriptAnalyzerSettings.psd1` at the repo root, which CI reads. A repo with `.ps1` files keeps its own copy, excluding the rules below with the reason its own scripts give.
+PowerShell is the native shell on Windows, so a Windows bootstrap and a Windows entry point over shared Python logic are written in it. PSScriptAnalyzer is the analyzer, and it runs every default rule through a `PSScriptAnalyzerSettings.psd1` at the repo root, which CI reads. A repo with `.ps1` files keeps its own copy. It excludes a rule below only where its own scripts meet that rule's reason, and states the reason there.
 
 - **`PSAvoidUsingWriteHost`.** A script whose purpose is a console report writes it with `Write-Host`. Its functions return exit codes through the pipeline, so text sent with `Write-Output` would reach the caller as a return value.
 - **`PSUseShouldProcessForStateChangingFunctions`.** A script that already carries its own preview and consent step, such as a dry-run switch and a confirm prompt, keeps them. Supporting `ShouldProcess` would add `-WhatIf` and `-Confirm` beside them, a second spelling of each.
