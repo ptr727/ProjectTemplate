@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from host_capability import requires_symlink
+from test_pre_commit_hook import assert_group_ended, end_group, wait_until_started
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -517,6 +519,7 @@ class SweepCase(RepoCase):
         self.assertEqual(code, cr.EXIT_NOT_COVERED)
         self.assertIn("1 pass(es) with no unit", output)
         self.assertIn("DOC.md > Alpha", output)
+        self.assertIn("canonical_review.py prune --unit '<key>'", output, "no way to retire it")
         self.assertIn("DOC.md > Renamed=", output, "the renamed section is read under its new key")
 
     def test_a_tree_holding_every_recorded_unit_reports_no_orphan(self) -> None:
@@ -885,6 +888,165 @@ class LedgerCase(RepoCase):
         self.write("DOC.md", "intro\n\n## Renamed\n\na body\n\n## Beta\n\nb body\n")
         _, output = self.loud(["status"])
         self.assertIn("DOC.md > Alpha", json.loads(output)["orphanedPasses"])
+
+
+class OrphanCase(RepoCase):
+    """A ledger holding a pass for a section renamed away, beside one for a section still held."""
+
+    alpha = "DOC.md > Alpha"
+    renamed = "intro\n\n## Renamed\n\na body\n\n## Beta\n\nb body\n"
+
+    def orphan_alpha(self) -> bytes:
+        """Record Alpha and Beta, rename Alpha away, and return the ledger that leaves."""
+        self.record(self.alpha)
+        self.record("DOC.md > Beta")
+        self.write("DOC.md", self.renamed)
+        return self.ledger_bytes()
+
+    def ledger_bytes(self) -> bytes:
+        return (self.tmp / cr.LEDGER).read_bytes()
+
+    def assert_nothing_held(self) -> None:
+        """No lock and no half-written ledger beside the real one survives the run."""
+        self.assertFalse(Path(str(cr.ledger_lock(self.tmp)) + ".lock").exists(), "lock left")
+        stray = sorted(p.name for p in (self.tmp / "reports").iterdir())
+        self.assertEqual(stray, [Path(cr.LEDGER).name], "a temporary ledger was left")
+
+
+class PruneCase(OrphanCase):
+    """A reader retires an orphaned pass through the engine, and nothing else leaves it."""
+
+    def test_prune_retires_an_orphaned_pass(self) -> None:
+        self.orphan_alpha()
+        code, output = self.loud(["prune", "--unit", self.alpha])
+        self.assertEqual(code, cr.EXIT_COVERED, output)
+        self.assertEqual(sorted(cr.read_ledger(self.tmp)), ["DOC.md > Beta"])
+        _, status = self.loud(["status"])
+        self.assertEqual(json.loads(status)["orphanedPasses"], [])
+        self.assert_nothing_held()
+
+    def test_prune_refuses_a_key_the_tree_still_holds(self) -> None:
+        """Dropping a live pass would report text a reviewer read as never read."""
+        before = self.orphan_alpha()
+        code, output = self.loud(["prune", "--unit", self.alpha, "--unit", "DOC.md > Beta"])
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("still a carried canonical unit", output)
+        self.assertEqual(self.ledger_bytes(), before, "a refused prune still wrote")
+
+    def test_prune_refuses_a_key_no_pass_names(self) -> None:
+        """A mistyped orphan would otherwise read as retired, and the real one would stay."""
+        before = self.orphan_alpha()
+        code, output = self.loud(["prune", "--unit", self.alpha, "--unit", "DOC.md > Alfa"])
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("no recorded pass names this key", output)
+        self.assertIn("DOC.md > Alfa", output)
+        self.assertEqual(self.ledger_bytes(), before, "a refused prune still wrote")
+
+    def test_a_second_prune_of_the_same_keys_writes_nothing(self) -> None:
+        self.orphan_alpha()
+        self.assertEqual(self.quiet(["prune", "--unit", self.alpha]), cr.EXIT_COVERED)
+        after_first = self.ledger_bytes()
+        code, output = self.loud(["prune", "--unit", self.alpha])
+        self.assertEqual(code, cr.EXIT_CANNOT_RUN)
+        self.assertIn("A key pruned already reads this way", output)
+        self.assertEqual(self.ledger_bytes(), after_first)
+        self.assert_nothing_held()
+
+    def test_prune_refuses_a_key_named_twice(self) -> None:
+        before = self.orphan_alpha()
+        argv = ["prune", "--unit", self.alpha, "--unit", self.alpha]
+        self.assertEqual(self.quiet(argv), cr.EXIT_CANNOT_RUN)
+        self.assertEqual(self.ledger_bytes(), before)
+
+    def test_a_held_lock_refuses_the_prune_rather_than_writing_past_it(self) -> None:
+        """A prune and a record interleaved would each write a ledger missing the other's change."""
+        before = self.orphan_alpha()
+        lock = Path(str(cr.ledger_lock(self.tmp)) + ".lock")
+        lock.write_bytes(b"")
+        self.addCleanup(lock.unlink, missing_ok=True)
+        with unittest.mock.patch.object(cr, "LOCK_TIMEOUT", 0.2):
+            self.assertEqual(self.quiet(["prune", "--unit", self.alpha]), cr.EXIT_CANNOT_RUN)
+        self.assertEqual(self.ledger_bytes(), before)
+        lock.unlink()
+        self.assertEqual(self.quiet(["prune", "--unit", self.alpha]), cr.EXIT_COVERED)
+        self.assert_nothing_held()
+
+    def test_prune_answers_help_and_refuses_an_unknown_argument(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as caught:
+            cr.main(["prune", "--help"])
+        self.assertEqual(caught.exception.code, 0)
+        self.assertTrue(out.getvalue().startswith("usage:"), out.getvalue())
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as caught:
+            cr.main(["prune", "--unit", self.alpha, "--bogus-flag"])
+        self.assertNotEqual(caught.exception.code, 0)
+        self.assertIn("unrecognized arguments: --bogus-flag", err.getvalue())
+
+
+# Run in a child under this interpreter, executing the script's own `__main__` block with one hold added.
+# The hold stands in for the rename that ends a ledger write, so the lock and the temporary ledger are both held.
+HELD_WRITE = """
+import os, runpy, sys, time
+from pathlib import Path
+script = os.environ["CR_SCRIPT"]
+sys.path.insert(0, str(Path(script).parent))
+def held(_src, _dst):
+    Path(os.environ["CR_READY"]).touch()
+    time.sleep(60)
+os.replace = held
+sys.argv = [script, *sys.argv[1:]]
+runpy.run_path(script, run_name="__main__")
+"""
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows cannot deliver either signal for a script")
+class InterruptCase(OrphanCase):
+    """A signal mid-write releases the lock, leaves the ledger whole, and ends the script by it.
+
+    The child runs under this interpreter directly, since `uv run` would exit with a status rather
+    than die by the signal.
+    """
+
+    @unittest.skipIf(
+        signal.getsignal(signal.SIGINT) is signal.SIG_IGN,
+        "the script keeps a SIGINT it inherits as ignored, as a background job's is",
+    )
+    def test_a_signal_mid_write_releases_the_lock_and_ends_the_script_by_it(self) -> None:
+        """A SIGTERM right after a SIGINT is the one `uv run` forwards, and the SIGINT decides."""
+        before = self.orphan_alpha()
+        for sigs in ((signal.SIGINT,), (signal.SIGTERM,), (signal.SIGINT, signal.SIGTERM)):
+            sig = sigs[0]
+            with self.subTest(signals=[s.name for s in sigs]):
+                ready = self.outside / f"started-{'-'.join(s.name for s in sigs)}"
+                env = {
+                    **os.environ,
+                    "CR_SCRIPT": str(SCRIPTS / "canonical_review.py"),
+                    "CR_READY": str(ready),
+                    "PYTHONIOENCODING": "utf-8",
+                }
+                child = subprocess.Popen(
+                    [sys.executable, "-c", HELD_WRITE, "prune", "--unit", self.alpha],
+                    cwd=str(self.tmp),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    env=env,
+                    start_new_session=True,
+                )
+                try:
+                    wait_until_started(child, ready)
+                    for each in sigs:
+                        child.send_signal(each)
+                    _, stderr = child.communicate(timeout=60)
+                finally:
+                    end_group(child)
+                self.assertEqual(-sig, child.returncode, stderr)
+                self.assertEqual(f"canonical_review.py: interrupted by {sig.name}.\n", stderr)
+                assert_group_ended(child.pid)
+                self.assertEqual(self.ledger_bytes(), before, "the interrupted write landed")
+                self.assert_nothing_held()
 
 
 class BoundaryCase(RepoCase):
