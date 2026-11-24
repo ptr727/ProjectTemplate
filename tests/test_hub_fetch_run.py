@@ -468,6 +468,8 @@ LINT_TASKS = {
     "Lint: Workflows": "actionlint",
     "Lint: Markdown": "markdownlint",
     "Lint: Spelling": "cspell",
+    "Lint: ShellCheck": "shellcheck",
+    "Lint: shfmt": "shfmt",
 }
 HELPER = "${workspaceFolder}/hub_fetch_run.py"
 TASK_SNIPPETS = ("vscode-tasks.json", "vscode-tasks-python.json")
@@ -500,6 +502,14 @@ class LintTaskTests(unittest.TestCase):
                     with self.subTest(snippet=name, task=label, command=form[0]):
                         self.assertIn(HELPER, form)
                         self.assertEqual(form[-3:], [DOCKER_LINT, "--linter", linter])
+
+    def test_lint_all_runs_every_wrapper_task_and_eol_before_prose(self) -> None:
+        """A sequence stops at its first failure, so the whole-repo prose run goes last."""
+        for name in TASK_SNIPPETS:
+            order = snippet_tasks(name)["Lint: All"]["dependsOn"]
+            with self.subTest(snippet=name):
+                self.assertLessEqual(set(LINT_TASKS), set(order))
+                self.assertEqual(order[-2:], ["Lint: EOL", "Lint: Prose"])
 
     def test_every_helper_reference_names_the_root_copy(self) -> None:
         """A task naming the helper anywhere but the root fails in a repo that keeps it there."""

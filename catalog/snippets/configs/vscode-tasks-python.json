@@ -29,6 +29,7 @@
         // A lint-only Scripts-profile subtree, with no [project], no [build-system], no `uv.lock`, and no `requirements*.txt`, runs every tool via `uvx <tool>` rather than `uv run <tool>`.
         // The type-checker swap composes with it: `uvx mypy@latest` for a mypy repo, `uvx pyright@latest` otherwise.
         // It omits "uv Sync" and "uv Upgrade", and "Python Test" runs the unittest command the repository's OPERATIONS.md gives rather than pytest, per the python-codestyle Skill "Two profiles".
+        // A `python-directories` input naming several trees takes these tasks per tree with `options.cwd`, sequenced under "Python Format" and "Python Test".
         {
             "label": "ruff format",
             "type": "process",
@@ -137,13 +138,13 @@
             }
         },
         // Lint group, run on demand.
-        // The EditorConfig, Workflows, Markdown, and Spelling tasks go through the hub's scripts/docker_lint.py, fetched by hub_fetch_run.py.
+        // The EditorConfig, Workflows, Markdown, Spelling, ShellCheck, and shfmt tasks go through the hub's scripts/docker_lint.py, fetched by hub_fetch_run.py.
         // Each container therefore sees a read-only snapshot of the tracked and unignored files, with no network.
-        // It mirrors the CI lint gate.
+        // A carrier holding PowerShell adds a "Lint: PSScriptAnalyzer" task the same way, with `--linter PSScriptAnalyzer`.
         // Broad live spell-checking is the cspell extension's job.
-        // Pre-commit already runs the prose gate diff-scoped and the EOL gate over the whole tree.
+        // Pre-commit already runs the prose gate diff-scoped and the EOL configuration check.
         // Lint: Prose below adds the prose gate in whole-repo mode, and Lint: EOL runs the hook's own EOL check on demand.
-        // Every Lint task is language-agnostic, the same check as in the .NET snippet's Lint group.
+        // Every Lint task is the same check as in the .NET snippet's Lint group.
         {
             "label": "Lint: EditorConfig",
             "type": "process",
@@ -189,6 +190,28 @@
             }
         },
         {
+            "label": "Lint: ShellCheck",
+            "type": "process",
+            "command": "uv",
+            "args": [ "run", "--no-project", "python", "${workspaceFolder}/hub_fetch_run.py", "scripts/docker_lint.py", "--linter", "shellcheck" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
+            "label": "Lint: shfmt",
+            "type": "process",
+            "command": "uv",
+            "args": [ "run", "--no-project", "python", "${workspaceFolder}/hub_fetch_run.py", "scripts/docker_lint.py", "--linter", "shfmt" ],
+            "problemMatcher": [],
+            "presentation": {
+                "showReuseMessage": false,
+                "clear": false
+            }
+        },
+        {
             "label": "Lint: Prose",
             "type": "process",
             "command": "uv",
@@ -218,8 +241,10 @@
                 "Lint: Workflows",
                 "Lint: Markdown",
                 "Lint: Spelling",
-                "Lint: Prose",
-                "Lint: EOL"
+                "Lint: ShellCheck",
+                "Lint: shfmt",
+                "Lint: EOL",
+                "Lint: Prose"
             ],
             "problemMatcher": []
         }
