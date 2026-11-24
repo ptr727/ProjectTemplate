@@ -43,8 +43,11 @@ All builds must complete without warnings, enforced as follows:
 - **Analyzer configuration.** `<EnableNETAnalyzers>true</EnableNETAnalyzers>` with
   `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (the full
   analyzer set), plus `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`. With that, any diagnostic
-  surfaced as a warning fails the build. Such a diagnostic must be fixed or deliberately suppressed at the
-  narrowest scope that fits (see Analyzer suppressions below), never left to accumulate.
+  the build surfaces as a warning fails it. `EnforceCodeStyleInBuild` is left unset, so the IDE code-style
+  rules do not run in the build, and the `dotnet format style` step fails on their warnings instead. Such a diagnostic must be fixed or deliberately suppressed at the
+  narrowest scope that fits (see Analyzer suppressions below), never left to accumulate. IDE0079 is
+  the exception, since neither that step nor the build reports it. Remove a suppression the IDE
+  flags under IDE0079 only once the format step and every configuration and target framework CI builds pass without it.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
   and not carried into every fleet repo. Its hook needs a .NET tool manifest declaring
@@ -216,6 +219,11 @@ The .NET mechanics, narrowest first:
   `dotnet_analyzer_diagnostic.severity`) to push a brownfield port through the build is exactly
   what this forbids.
 
+A code-style option in the root `.editorconfig` takes a `dotnet_diagnostic.<RULE>.severity = warning`
+entry for each rule it configures. An option alone leaves its rule at the default severity, often
+hidden, which the format gate never reports. A formatting option is the exception, since CSharpier
+owns formatting and IDE0055 stays `none`.
+
 ## Error handling and logging
 
 1. **Structured logging**: use structured message templates. Serilog is the application's concrete
@@ -258,12 +266,21 @@ The .NET mechanics, narrowest first:
 
 ## Code patterns
 
-1. **Guard clauses**: prefer early returns for validation and error handling.
+1. **Guard clauses**: prefer early returns for validation and error handling. A guard that CA1510
+   to CA1513 match calls the throw helper its rule names, such as `ArgumentNullException.ThrowIfNull`.
+   That holds even where IDE0046 offers a conditional `return` for it. A `netstandard` project
+   lacks those helpers, so a guard there that IDE0016, IDE0046, or IDE0270 matches takes the throw
+   expression instead. A local assigned and then
+   null-checked takes `?? throw` on the assignment, per IDE0270. IDE0046 makes any other such
+   shape a single conditional `return`, a throw expression included. That shape is an `if` and
+   the `return`, `throw`, or `else` right after it, each branch only returning a value or throwing. Both
+   branches throwing is not that shape. Write that shape as the conditional `return` from the start.
 2. **Async all the way**: avoid blocking calls (`.Result`, `.Wait()`), use `async`/`await`.
 3. **Cancellation tokens**: accept `CancellationToken` as the last parameter and pass it through.
 4. **ConfigureAwait**: in library code, use `ConfigureAwait(false)` unless context is required. Do
    not call `ConfigureAwait(false)` in xUnit tests (see xUnit1030).
-5. **Disposables**: use `await using` for async disposables, prefer `using` declarations.
+5. **Disposables**: use `await using` for async disposables. A `using` declaration is required
+   wherever IDE0063 matches.
 6. **LINQ vs loops**: use LINQ for clarity, loops for hot paths or allocations.
 7. **HTTP**: reuse `HttpClient` via factory, never per-request instantiation.
 8. **Collections**: prefer `IReadOnlyList<T>`/`IReadOnlyCollection<T>` for public APIs.

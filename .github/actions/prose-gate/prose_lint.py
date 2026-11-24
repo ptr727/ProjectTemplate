@@ -38,6 +38,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -630,7 +631,8 @@ class Line(NamedTuple):
     """One source line of a unit, a comment's text without its marker and `raw` with it.
 
     `trailed` marks a line where code follows the comment's closer, so deleting it deletes code.
-    `dialect` names the shell a `command` line is pasted into.
+    `dialect` names the shell a `command` line is pasted into. `wrapped` marks a code span, whose
+    line breaks render as spaces.
     """
 
     number: int
@@ -640,6 +642,7 @@ class Line(NamedTuple):
     help: bool = False
     trailed: bool = False
     dialect: str = ""
+    wrapped: bool = False
 
 
 class Unit(NamedTuple):
@@ -1165,7 +1168,7 @@ def command_spans(texts: list[str], first: int, cell: bool) -> list[Line]:
             content = content.replace("\\|", "|") if in_cell else content
             at = number + text[: m.start()].count("\n")
             if opens_command(content):
-                out.append(Line(at, content, dialect="shell"))
+                out.append(Line(at, content, dialect="shell", wrapped=True))
     return out
 
 
@@ -1712,39 +1715,376 @@ def shell_literals(text: str, lexer: str) -> str:
     return "".join(out)[: len(text)]
 
 
+SECOND_SHELLS: dict[str, dict[str, Any]] = {
+    name: spec for spec in COMMANDS["second_shells"]["shells"] for name in spec["names"]
+}
+LAUNCHERS: dict[str, dict[str, Any]] = COMMANDS["second_shells"]["launchers"]
+RESERVED = frozenset(COMMANDS["second_shells"]["reserved"])
+SECOND_SHELL_NAME = re.compile(
+    rf"(?<![^\s;&|(`])(?:[^\s;&|()`]*/)?(?:{'|'.join(map(re.escape, SECOND_SHELLS))})(?![^\s;&|)])"
+)
+REDIRECT = re.compile(r"\d*(?:[<>]|&>)")
+REDIRECT_ALONE = re.compile(r"\d*(?:[<>]+|&>>?)[&|]?")
+
+
+class ShellWord(NamedTuple):
+    start: int
+    raw: str
+    lead: str
+    value: str
+    handed: str | None
+
+
+def dequoted(raw: str) -> str | None:
+    """`raw` with its quoting removed as a POSIX shell removes it, or None where a quote is open."""
+    try:
+        return " ".join(shlex.split(raw))
+    except ValueError:
+        return None
+
+
+def shell_char_kinds(text: str, lexer: str) -> str:
+    """One letter per character of `text`, saying how the shell reading it splits it into words.
+
+    `c` is code and `s` a command substitution's text, which the shell runs rather than passes
+    on, with `S` the outermost substitution's own delimiters. `w` is a line continuation and `#` a
+    comment. `h` is a heredoc's label and `H` its body, and the rest of its opening line is code.
+    `x` is a quotation, an escape, a `${...}` expansion, or any other literal.
+    """
+    out: list[str] = []
+    depth = subst = 0
+    tick = False
+    for kind, value in lexer_for(lexer).get_tokens(text + "\n"):
+        opens = kind in Keyword and value in ("$(", "$((")
+        closes = subst > 0 and kind in Keyword and value in (")", "))")
+        if kind in String.Backtick and value == "`" and not subst:
+            tick = not tick
+            out.append("S")
+        elif opens or closes:
+            subst += 1 if opens else -1
+            out.append(("S" if subst == int(opens) else "s") * len(value))
+        elif subst or tick:
+            out.append("s" * len(value))
+        elif depth or (kind in String.Interpol and value == "${"):
+            depth += (value == "${") - (value == "}" and kind in String.Interpol)
+            out.append("x" * len(value))
+        elif kind in Comment:
+            out.append("#" * len(value))
+        elif kind in String.Escape and value == "\\\n":
+            out.append("ww")
+        elif kind in String.Heredoc and (m := re.match(HEREDOC, value)):
+            cut, eol = m.end(4) + len(m[2]), value.find("\n")
+            eol = len(value) if eol < 0 else eol
+            rest = shell_char_kinds(value[cut:eol], lexer)
+            out.append("h" * cut + rest + "H" * (len(value) - eol))
+        elif kind in String.Heredoc:
+            out.append("h" * len(value))
+        elif kind in String:
+            out.append("x" * len(value))
+        else:
+            out.append("c" * len(value))
+    return "".join(out)[: len(text)]
+
+
+def shell_commands(text: str, kinds: str) -> list[list[ShellWord]]:
+    """The simple commands in `text`, each as its words, split as `kinds` marks the characters.
+
+    A word's value is its text once the shell removes its quoting. What it hands on is that text
+    with the first shell's own code blanked, which that shell has already read. An ampersand
+    beside an angle bracket is part of a redirection, as in `2>&1` and `&>`, rather than the end
+    of a command.
+    """
+    commands: list[list[ShellWord]] = [[]]
+    start = -1
+
+    def flush(end: int, ends: bool) -> None:
+        nonlocal start
+        if start >= 0:
+            raw, marks = text[start:end], kinds[start:end]
+            masked = "".join(" " if k in "csS" else c for c, k in zip(raw, marks, strict=True))
+            value = dequoted(raw)
+            value = raw if value is None else value
+            word = ShellWord(start, raw, marks[0], value, dequoted(masked))
+            commands[-1].append(word)
+            start = -1
+        if ends and commands[-1]:
+            commands.append([])
+
+    for i, (ch, kind) in enumerate(zip(text, kinds, strict=True)):
+        redirects = text[i - 1 : i] in ("<", ">") or text[i + 1 : i + 2] == ">"
+        if kind in "#H" or (kind == "c" and (ch in "\n;|()" or (ch == "&" and not redirects))):
+            flush(i, True)
+        elif kind == "w" or (kind == "c" and ch in " \t"):
+            flush(i, False)
+        elif start < 0:
+            start = i
+    flush(len(text), True)
+    return [c for c in commands if c]
+
+
+def takes_value(option: str, values: set[str]) -> bool:
+    """Whether an option word takes the next word as its value, as `values` names the options."""
+    if option.startswith("--"):
+        name, eq, _ = option.partition("=")
+        return name in values and not eq
+    letters = cluster(option, values)
+    return letters[-1:] in values and len(letters) == len(option) - 1
+
+
+def cluster(option: str, values: set[str]) -> str:
+    """A short option cluster's own letters, up to and including the first that takes a value."""
+    letters = option[1:]
+    taken = next((at for at, letter in enumerate(letters) if letter in values), len(letters))
+    return letters[: taken + 1]
+
+
+def is_redirect(word: ShellWord) -> bool:
+    return word.lead in "ch" and bool(REDIRECT.match(word.raw))
+
+
+def launcher_span(words: list[ShellWord], spec: dict[str, Any]) -> int | None:
+    """How many words a launcher's own options and operands take before the command it runs.
+
+    None means an option in `no_run` is set, such as `command -v`, so the launcher runs nothing.
+    """
+    values, operands = set(spec["values"]), spec["operands"]
+    no_run = set(spec.get("no_run", []))
+    options, pending = True, False
+    for at, word in enumerate(words):
+        v = word.value
+        if pending:
+            pending = False
+        elif is_redirect(word):
+            pending = bool(REDIRECT_ALONE.fullmatch(word.raw))
+        elif options and v == "--":
+            options = False
+        elif options and len(v) > 1 and v[0] == "-":
+            if v.partition("=")[0] in no_run or (v[1] != "-" and no_run & set(cluster(v, values))):
+                return None
+            pending = takes_value(v, values)
+        elif ASSIGNMENT.match(word.raw):
+            continue
+        elif operands:
+            operands -= 1
+        else:
+            return at
+    return len(words)
+
+
+def handed_strings(
+    words: list[ShellWord], spec: dict[str, Any]
+) -> tuple[list[ShellWord], int | None]:
+    """The words after a second shell's name that it runs, and where a command it runs as is opens.
+
+    An `operand` shell runs its first operand once a flag in `flags` is set, as `sh -c` does. Each
+    letter of its option cluster in `values` takes a following word, and the cluster reads on, as
+    in `bash -oc pipefail`. A `value` shell runs the value of an option in `flags`, as `su -c`
+    does. An option in `commands` names a user to run a command as, as `runuser -u` does. The
+    command after a `--` then runs as it is. A `rest` shell runs every operand after its first, as
+    `ssh` runs all that follows its destination. In a `value` or `rest` shell, an option in
+    `values` takes the rest of its cluster or the next word, as getopt reads it. A redirection's
+    operator standing alone takes the next word too.
+    """
+    mode, flags, values = spec["string"], set(spec["flags"]), set(spec["values"])
+    commands = set(spec.get("commands", []))
+    out: list[ShellWord] = []
+    marked = ended = runs = string_next = False
+    options = True
+    operands = skip = 0
+    for at, word in enumerate(words):
+        v = word.value
+        if string_next:
+            out.append(word)
+            string_next = False
+        elif skip:
+            skip -= 1
+        elif is_redirect(word):
+            skip = int(bool(REDIRECT_ALONE.fullmatch(word.raw)))
+        elif ended:
+            out.append(word)
+        elif options and v == "--":
+            if mode == "value" and runs and not out:
+                return out, at + 1
+            options = mode == "value"
+        elif options and v.startswith("--"):
+            name, eq, _ = v.partition("=")
+            if name in flags and mode == "value":
+                out += [word] if eq else []
+                string_next = not eq
+            marked |= name in flags
+            runs |= name in commands
+            skip = int(not string_next and takes_value(v, values))
+        elif options and len(v) > 1 and v[0] in "-+" and mode == "operand":
+            marked |= any(letter in flags for letter in v[1:])
+            skip = sum(letter in values for letter in v[1:])
+        elif options and len(v) > 1 and v[0] in "-+":
+            letters = cluster(v, values | flags if mode == "value" else values)
+            runs |= bool(commands & set(letters))
+            if mode == "value" and letters[-1:] in flags:
+                attached = len(letters) < len(v) - 1
+                out += [word] if attached else []
+                string_next = not attached
+            else:
+                skip = int(takes_value(v, values))
+        elif v != "-" or not options:
+            operands += 1
+            if mode == "operand":
+                return [word] if marked else [], None
+            if mode == "rest" and operands > 1:
+                out.append(word)
+                ended = True
+    return out, None
+
+
+def handed_words(words: list[ShellWord]) -> list[tuple[list[ShellWord], str, str]]:
+    """Each run of words in one simple command that a second shell runs, with its name and mode.
+
+    The second shell is the command the simple command runs. It is read past a leading `$`
+    prompt, and past the command's assignments and reserved words. It is read past each launcher
+    too, such as `sudo` or `timeout`, with that launcher's own options and operands. A shell's
+    name as another command's argument runs no shell.
+    """
+    out: list[tuple[list[ShellWord], str, str]] = []
+    at = 0
+    while at < len(words):
+        word = words[at]
+        name = word.value.rsplit("/", 1)[-1] if word.lead == "c" else ""
+        prompt = at == 0 and word.raw == "$"
+        if word.lead == "c" and (prompt or ASSIGNMENT.match(word.raw) or word.raw in RESERVED):
+            at += 1
+        elif name in LAUNCHERS:
+            span = launcher_span(words[at + 1 :], LAUNCHERS[name])
+            if span is None:
+                break
+            at += 1 + span
+        elif name in SECOND_SHELLS:
+            spec = SECOND_SHELLS[name]
+            strings, rest = handed_strings(words[at + 1 :], spec)
+            if spec["string"] == "rest":
+                out += [(strings, word.value, "rest")] if strings else []
+            else:
+                out += [([string], word.value, spec["string"]) for string in strings]
+            if rest is None:
+                break
+            at += 1 + rest
+        else:
+            break
+    return out
+
+
+def joined_command(text: str, kinds: str, words: list[ShellWord], found: list[range]) -> str | None:
+    """The one command `ssh` builds from `words`, joined by spaces, or None where a quote is open.
+
+    A line break of `text` between two words becomes a line continuation. So the command stays
+    one line to the shell reading it, and each placeholder keeps its line. Each word is read as
+    `kinds` marks it, a wrapped span's line breaks being spaces there.
+
+    Each placeholder the first shell already reported is blanked from its word first, and so is
+    each command substitution, which the first shell runs itself. The word's quoting is then
+    removed, so the second reading reports neither.
+    """
+    parts: list[str] = []
+    end = 0
+    for word in words:
+        spans = range(word.start, word.start + len(word.raw))
+        kept = (
+            " " if kinds[i] in "sS" or any(i in r for r in found) else c
+            for i, c in zip(spans, word.raw, strict=True)
+        )
+        piece = dequoted("".join(kept))
+        if piece is None:
+            return None
+        gap = text[end : word.start].count("\n")
+        parts += [" " + "\\\n" * gap if parts else "\n" * gap, piece]
+        end = spans.stop
+    return "".join(parts)
+
+
+def second_shell_texts(
+    text: str, bare: str, lexer: str, found: list[range], wrapped: bool = False
+) -> list[tuple[str, str]]:
+    """Each string `text` hands to a second shell, as that shell receives it, with its name.
+
+    Each is led by the line breaks before it in `text`, so a line counted in it is a line of
+    `text`. A string whose quoting does not close is not read. `found` holds the spans the first
+    shell's own reading reported. A command substitution's commands are read on their own, each
+    delimiter standing as a command's end. A `wrapped` text's line breaks are read as spaces.
+    """
+    if not SECOND_SHELL_NAME.search(bare):
+        return []
+    split = text.replace("\n", " ") if wrapped else text
+    kinds = shell_char_kinds(split, lexer)
+    out: list[tuple[str, str]] = []
+    for words in shell_commands(split, kinds):
+        for strings, name, mode in handed_words(words):
+            if mode == "rest":
+                handed = joined_command(text, kinds, strings, found)
+            elif (handed := strings[0].handed) is not None:
+                handed = "\n" * text[: strings[0].start].count("\n") + handed
+            if handed is not None:
+                out.append((handed, name))
+    if "S" in kinds:
+        inner = "".join(
+            c if k == "s" else ";" if k == "S" else "\n" if c == "\n" else " "
+            for c, k in zip(text, kinds, strict=True)
+        )
+        out += second_shell_texts(inner, shell_literals(inner, lexer), lexer, found, wrapped)
+    return out
+
+
+def placeholders(
+    text: str, dialect: dict[str, Any], shell: str = "", wrapped: bool = False
+) -> list[tuple[int, str, re.Match[str], str]]:
+    """Each placeholder `text` holds as its shell reads it, by line, shape, match, and second shell.
+
+    A string handed to a second shell is read again, as the command that shell runs.
+    """
+    bare = shell_literals(text, dialect["lexer"])
+    taken = [range(m.start(), m.end()) for m in CASE_ARM.finditer(bare)]
+    regexes = [range(m.start(1), m.end(1)) for m in REGEX_OPERAND.finditer(bare)]
+    globs = [range(m.start(1), m.end(1)) for m in GLOB_OPERAND.finditer(bare)]
+    out: list[tuple[int, str, re.Match[str], str]] = []
+    found: list[range] = []
+    for shape in dialect["shapes"]:
+        for m in PASTE_SHAPES[shape].finditer(bare):
+            exempt = regexes if shape == "alternation" else regexes + globs
+            if any(m.start() in r for r in taken) or (
+                shape != "angle" and any(m.start() in r for r in exempt)
+            ):
+                continue
+            taken.append(range(m.start(), m.end()))
+            found.append(taken[-1])
+            out.append((bare[: m.start()].count("\n"), shape, m, shell))
+    if dialect.get("second_shells"):
+        for inner, name in second_shell_texts(text, bare, dialect["lexer"], found, wrapped):
+            out += placeholders(inner, dialect, name)
+    return out
+
+
 def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
     """A placeholder in a Markdown command that the shell reads as syntax when it is pasted.
 
     Each command is a code span opening with a command or a shell fence's content. Each finding is
     reported on the line holding the placeholder. A string handed to a second shell, as `sh -c`
-    takes one, is read as the quotation it is to the first. A `case` arm's pattern is the shell's own syntax, and so is a `[[ ]]` operand.
-    A `=~` operand may hold a bracket or an alternation, and a glob operand a bracket only.
+    takes one, is quoted to the first and read again as the command the second runs. A `case`
+    arm's pattern is the shell's own syntax, and so is a `[[ ]]` operand. A `=~` operand may hold
+    a bracket or an alternation, and a glob operand a bracket only.
     """
     out: list[Finding] = []
     for line in unit.lines:
         dialect = COMMANDS["dialects"][line.dialect]
-        bare = shell_literals(line.text, dialect["lexer"])
-        taken = [range(m.start(), m.end()) for m in CASE_ARM.finditer(bare)]
-        regexes = [range(m.start(1), m.end(1)) for m in REGEX_OPERAND.finditer(bare)]
-        globs = [range(m.start(1), m.end(1)) for m in GLOB_OPERAND.finditer(bare)]
-        for shape in dialect["shapes"]:
-            for m in PASTE_SHAPES[shape].finditer(bare):
-                exempt = regexes if shape == "alternation" else regexes + globs
-                if any(m.start() in r for r in taken) or (
-                    shape != "angle" and any(m.start() in r for r in exempt)
-                ):
-                    continue
-                taken.append(range(m.start(), m.end()))
-                at = line.number + bare[: m.start()].count("\n")
-                if shape == "bracket" and m[1].startswith("-"):
-                    out.append(finding(at, "paste-safe", "paste-safe-flag", token=m.group()))
-                elif shape == "bracket":
-                    out.append(
-                        finding(at, "paste-safe", "paste-safe-bracket", token=m.group(), name=m[1])
-                    )
-                else:
-                    message = "paste-safe" if shape == "angle" else "paste-safe-alternation"
-                    out.append(finding(at, "paste-safe", message, token=m.group()))
+        for row, shape, m, shell in placeholders(line.text, dialect, wrapped=line.wrapped):
+            at = line.number + row
+            fields: dict[str, str] = {"shell": shell} if shell else {}
+            if shape == "bracket" and m[1].startswith("-"):
+                message = "paste-safe-flag"
+            elif shape == "bracket":
+                message, fields["name"] = "paste-safe-bracket", m[1]
+            else:
+                message = "paste-safe" if shape == "angle" else "paste-safe-alternation"
+            if shell:
+                message += "-in-shell"
+            out.append(finding(at, "paste-safe", message, token=m.group(), **fields))
     return out
 
 

@@ -308,6 +308,7 @@ from pr_review_rounds import (
     thread_author,
     threads_truncated,
 )
+from run_deadline import run_with_deadline
 
 mutated = shared.mutated
 
@@ -1218,16 +1219,14 @@ def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
 def _run(argv: list[str], timeout: float, unrun: str, **options) -> subprocess.CompletedProcess:
     """Run one command captured, returning a failure to start or finish as exit 1 with `unrun`."""
     try:
-        return subprocess.run(argv, capture_output=True, timeout=timeout, check=False, **options)
+        return run_with_deadline(argv, timeout, **options)
     except (OSError, subprocess.SubprocessError):
         return subprocess.CompletedProcess(argv, 1, "", unrun)
 
 
 def _git(checkout: str, *args: str) -> subprocess.CompletedProcess:
     """One read-only git command in `checkout`, returned whole rather than raised."""
-    return _run(
-        ["git", "-C", checkout, *args], 30, "git could not be run", text=True, encoding="utf-8"
-    )
+    return _run(["git", "-C", checkout, *args], 30, "git could not be run", encoding="utf-8")
 
 
 POLL_DELAYS = (15, 20, 30, 45, 60, 120)

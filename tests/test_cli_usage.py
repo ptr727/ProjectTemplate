@@ -58,6 +58,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import carry
 from host_capability import bash_or_skip
 from test_configure_archived import lift, run_bash
+from test_pre_commit_hook import assert_group_ended, end_group, wait_until_started
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -506,6 +507,9 @@ class EntryPointCase(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertTrue(opens_on_usage(result.stdout, path), result.stdout)
                     self.assertEqual(effects, "")
+                    if path.startswith("host-setup/linux/"):
+                        # The contract CODESTYLE.md "Command-Line Arguments" asks the help to state.
+                        self.assertIn("No other failure exits 64.", " ".join(result.stdout.split()))
                     outputs[flag] = result.stdout
             if len(outputs) == 2:
                 with self.subTest(path=path, flag="both"):
@@ -523,6 +527,9 @@ class EntryPointCase(unittest.TestCase):
                     self.assertEqual(effects, "")
                     if before == before_flag:
                         self.assertRegex(output, REFUSED_AS_OPTION)
+                    if path.startswith("host-setup/linux/"):
+                        # The status CODESTYLE.md "Command-Line Arguments" reserves for a refused argument.
+                        self.assertEqual(result.returncode, 64, output)
 
     def test_before_flag_alone_would_expose_a_script_that_carries_on(self) -> None:
         """The control: each BEFORE_FLAG set alone exits 0 or leaves an effect.
@@ -736,6 +743,162 @@ class DashLeadingNameCase(unittest.TestCase):
             result = run_bash(script)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "A short tagline.")
+
+
+HOST_SCRIPTS = [ROOT / path for path in entry_points() if path.startswith("host-setup/linux/")]
+
+# Marks itself started by moving a file into place where its first argument says, then sleeps until signaled.
+SLEEPING_CHILD = '#!/bin/sh\n: > "$1.part"\nmv "$1.part" "$1"\nexec sleep 60\n'
+
+
+def sourced_copy(script: Path, directory: Path) -> Path:
+    """`script` without its closing `main "$@"`, so a body sourcing it runs under its own traps."""
+    lines = script.read_text(encoding="utf-8").rstrip("\n").split("\n")
+    if lines[-1] != 'main "$@"':
+        raise AssertionError(f"{script.name} no longer ends with its main call: {lines[-1]!r}")
+    copy = directory / script.name
+    copy.write_text("\n".join(lines[:-1]) + "\n", encoding="utf-8")
+    return copy
+
+
+@unittest.skipUnless(sys.platform == "linux", "runs the host-setup/linux scripts")
+class HostSetupExitStatusCase(unittest.TestCase):
+    """Each host-setup/linux script exits 64 for a refused argument, and for no other failure.
+
+    The set is discovered from the tree, so a new script there is held to it once it is tracked.
+    """
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def run_body(self, script: Path, body: str) -> subprocess.CompletedProcess[str]:
+        copy = sourced_copy(script, self.dir)
+        return subprocess.run(
+            [bash_or_skip(), "-c", f'source "{copy}"\n{body}\n'],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            stdin=subprocess.DEVNULL,
+            check=False,
+            timeout=30,
+        )
+
+    def test_the_set_is_found(self) -> None:
+        self.assertGreaterEqual(len(HOST_SCRIPTS), 8)
+
+    def test_each_refusal_exits_the_reserved_status(self) -> None:
+        empty = str(self.dir)
+        for name, arguments, message in [
+            ("upgrade-host.sh", ("--dryrun",), 'Unknown option "--dryrun"'),
+            ("upgrade-host.sh", ("--status", "--packages"), "More than one action"),
+            ("install-tools.sh", ("--repo",), "--repo needs a path"),
+            ("install-tools.sh", ("--install", "--repo", ""), "--repo needs a path"),
+            ("install-tools.sh", ("--list", "--repo", empty), "carries no host-tools.json"),
+            ("install-tools.sh", ("--report", "--install"), "More than one action"),
+            ("install-tools.sh", ("--sudo-timestamp", "jq"), "takes no tool"),
+            ("install-tools.sh", ("--list", "nosuch"), 'Unknown tool "nosuch"'),
+            ("install-agents.sh", ("--install", "--all", "claude"), "--all and a tool name"),
+            ("setup-github.sh", ("--name",), "--name takes a value"),
+            ("setup-github.sh", ("--email",), "--email takes a value"),
+            ("setup-github.sh", ("--shared-checkout",), "--shared-checkout takes the path"),
+            ("setup-github.sh", ("--name", ""), "--name takes a value"),
+            ("setup-github.sh", ("--email", ""), "--email takes a value"),
+            ("setup-github.sh", ("--shared-checkout", ""), "--shared-checkout takes the path"),
+            ("setup-github.sh", ("--status", "--configure"), "More than one action"),
+        ]:
+            with self.subTest(script=name, arguments=arguments):
+                script = ROOT / "host-setup" / "linux" / name
+                result, effects = run_sandboxed([bash_or_skip(), str(script), *arguments])
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(effects, "")
+
+    def test_a_refusal_through_die_usage_exits_the_reserved_status(self) -> None:
+        # The control for the case below: the sourced copy keeps a real refusal's status.
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result = self.run_body(script, 'die_usage "A constructed refusal"\necho CARRIED ON')
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertNotIn("CARRIED ON", result.stdout)
+
+    def test_another_failure_carrying_the_reserved_status_exits_1(self) -> None:
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result = self.run_body(script, "sh -c 'exit 64'\necho CARRIED ON")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn("CARRIED ON", result.stdout)
+
+    def test_another_failure_keeps_its_own_status(self) -> None:
+        for script in HOST_SCRIPTS:
+            with self.subTest(script=script.name):
+                result = self.run_body(script, "sh -c 'exit 3'")
+                self.assertEqual(result.returncode, 3, result.stderr)
+
+
+@unittest.skipUnless(
+    sys.platform == "linux", "Windows cannot deliver SIGINT or SIGTERM to a script"
+)
+class HostSetupInterruptCase(unittest.TestCase):
+    """A host-setup/linux script holding a temporary directory dies by the signal and leaves nothing.
+
+    The signal goes to the process group while a foreground command runs, as Ctrl-C does.
+    """
+
+    HOLDERS = ("install-agents.sh", "install-tools.sh", "setup-github.sh", "upgrade-host.sh")
+
+    def setUp(self) -> None:
+        self.dir = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def test_the_holders_are_the_scripts_with_a_temporary_directory(self) -> None:
+        holding = {
+            script.name
+            for script in HOST_SCRIPTS
+            if "TMP_DIR=$(mktemp -d)" in script.read_text(encoding="utf-8")
+        }
+        self.assertEqual(holding, set(self.HOLDERS))
+
+    def interrupt(self, name: str, signum: signal.Signals) -> tuple[int, str, Path, int]:
+        """Signal the sourced script's group mid-run, returning its status, stderr, TMP_DIR, and group."""
+        copy = sourced_copy(ROOT / "host-setup" / "linux" / name, self.dir)
+        child = self.dir / "child.sh"
+        child.write_text(SLEEPING_CHILD, encoding="utf-8")
+        child.chmod(0o755)
+        # One file per run, since a file left by an earlier run would read as this child having started.
+        ready = self.dir / f"{name}-{signum.name}.ready"
+        body = f'source "{copy}"\nprintf "%s\\n" "$TMP_DIR"\n"{child}" "{ready}"\n'
+        with subprocess.Popen(
+            [bash_or_skip(), "-c", body],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            start_new_session=True,
+        ) as proc:
+            try:
+                try:
+                    wait_until_started(proc, ready)
+                except AssertionError:
+                    end_group(proc)
+                    _, err = proc.communicate(timeout=20)
+                    self.fail(f"{name} never started its child before {signum.name}: {err}")
+                os.killpg(proc.pid, signum)
+                out, err = proc.communicate(timeout=20)
+            finally:
+                end_group(proc)
+        return proc.returncode, err, Path(out.strip()), proc.pid
+
+    def test_a_signal_mid_run_ends_the_script_by_it_and_removes_the_directory(self) -> None:
+        for name in self.HOLDERS:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                with self.subTest(script=name, signal=signum.name):
+                    status, err, tmp, group = self.interrupt(name, signum)
+                    self.assertEqual(status, -signum, err)
+                    self.assertIn(f"{name}: interrupted by {signum.name}.", err)
+                    self.assertTrue(tmp.is_absolute(), tmp)
+                    self.assertFalse(tmp.exists(), tmp)
+                    assert_group_ended(group)
 
 
 if __name__ == "__main__":

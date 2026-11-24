@@ -699,7 +699,7 @@ class TestInstallAgents(unittest.TestCase):
 
     def test_install_names_what_it_installs(self) -> None:
         result = self.run_script("--install", "--yes")
-        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.returncode, 64, result.stderr)
         self.assertIn("nothing is installed by default", result.stderr)
 
     def test_install_leaves_an_installed_tool_alone(self) -> None:
@@ -916,7 +916,7 @@ class TestInstallAgents(unittest.TestCase):
         ]:
             with self.subTest(arguments=arguments):
                 result = self.run_script(*arguments)
-                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.returncode, 64, result.stderr)
                 self.assertIn(message, result.stderr)
 
     def test_json_string_round_trips_every_escaped_character(self) -> None:

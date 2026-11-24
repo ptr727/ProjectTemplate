@@ -45,9 +45,35 @@ SHARED_CHECKOUT=""
 GH_SSH_PROTOCOL=false
 SUDO=()
 
+USAGE_REFUSED=false
+
 TMP_DIR=$(mktemp -d)
 readonly TMP_DIR
-trap 'rm -rf "$TMP_DIR"' EXIT
+
+# Exit status 64 is reserved for a refused argument, per CODESTYLE.md "Command-Line Arguments".
+# Under set -e a failed command's own status becomes the script's, so a 64 that die_usage did not exit leaves as 1.
+# shellcheck disable=SC2317,SC2329  # The EXIT trap runs it.
+on_exit() {
+    local status=$?
+    rm -rf "$TMP_DIR"
+    if [[ $status -eq 64 && $USAGE_REFUSED == false ]]; then
+        exit 1
+    fi
+}
+
+# An interrupt names the signal and re-raises it, per CODESTYLE.md "Interrupts in Shell".
+# Every command runs in the foreground, per that section's launcher case.
+# The tools apt-get, dpkg, and the installers start do not stop cleanly on SIGTERM.
+# A Ctrl-C that reaches this shell as well runs the trap once the running command returns.
+# shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
+interrupted() {
+    printf 'setup-github.sh: interrupted by SIG%s.\n' "$1" >&2
+    trap - "$1"
+    kill -s "$1" "$$"
+}
+trap on_exit EXIT
+trap 'interrupted INT; exit 130' INT
+trap 'interrupted TERM; exit 143' TERM
 
 # --- Output ---
 
@@ -58,6 +84,13 @@ warn() { printf 'WARNING: %s\n' "$*" >&2; }
 die() {
     printf 'ERROR: %s\n' "$*" >&2
     exit 1
+}
+
+# A refused argument exits 64, EX_USAGE from sysexits.h, so a caller can tell it from a run that started and failed.
+die_usage() {
+    printf 'ERROR: %s\n' "$*" >&2
+    USAGE_REFUSED=true
+    exit 64
 }
 
 ok() { printf '  [ ok ] %s\n' "$*"; }
@@ -98,6 +131,8 @@ registration and prints what to paste. The same key is registered twice, once as
 key and once as a signing key: authentication reaches private repositories, signing is what marks a
 commit verified. Each is checked against the keys GitHub publishes for the account, so a run says
 whether the registration took rather than assuming it.
+
+Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF
 }
 
@@ -734,17 +769,17 @@ parse_args() {
         -n | --dry-run) DRY_RUN=true ;;
         -y | --yes) ASSUME_YES=true ;;
         --name)
-            [[ $# -ge 2 ]] || die "--name takes a value"
+            [[ $# -ge 2 && -n $2 ]] || die_usage "--name takes a value"
             NAME="$2"
             shift
             ;;
         --email)
-            [[ $# -ge 2 ]] || die "--email takes a value"
+            [[ $# -ge 2 && -n $2 ]] || die_usage "--email takes a value"
             EMAIL="$2"
             shift
             ;;
         --shared-checkout)
-            [[ $# -ge 2 ]] || die "--shared-checkout takes the path of the shared checkout"
+            [[ $# -ge 2 && -n $2 ]] || die_usage "--shared-checkout takes the path of the shared checkout"
             SHARED_CHECKOUT="$2"
             shift
             ;;
@@ -753,14 +788,14 @@ parse_args() {
             usage
             exit 0
             ;;
-        *) die "Unknown option \"$1\", --help lists the options" ;;
+        *) die_usage "Unknown option \"$1\", --help lists the options" ;;
         esac
         shift
     done
 
     # The order the actions were given is not a contract, so more than one is a refusal rather than the last one winning.
     if ((${#actions[@]} > 1)); then
-        die "More than one action given (${actions[*]}), name one"
+        die_usage "More than one action given (${actions[*]}), name one"
     fi
     [[ ${#actions[@]} -eq 1 ]] && MODE="${actions[0]}"
     return 0
