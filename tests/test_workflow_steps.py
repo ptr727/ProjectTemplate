@@ -123,7 +123,8 @@ class PromotionHistoryCase(unittest.TestCase):
 
     def check(self, head: str = "develop", **facts: str) -> tuple[int, str]:
         self.git("update-ref", "refs/remotes/origin/main", "main")
-        self.git("update-ref", "refs/remotes/origin/develop", "develop")
+        if self.git("branch", "--list", "develop"):
+            self.git("update-ref", "refs/remotes/origin/develop", "develop")
         env = (
             git_env.without_git_location(os.environ)
             | {
@@ -202,21 +203,66 @@ class PromotionHistoryCase(unittest.TestCase):
         code, log = self.check("promote/develop-to-main")
         self.assertEqual(0, code, log)
         self.assertIn(squashed, log)
-        self.assertIn("already holds main's tip", log)
+        self.assertIn("already holds each of them", log)
         self.git("checkout", "-q", "main")
         self.git("merge", "-q", "--no-ff", "-m", "promote the cut", "promote/develop-to-main")
+        self.assertEqual(
+            self.git("rev-parse", "develop"), self.git("merge-base", "main", "develop")
+        )
         self.feature()
         code, log = self.check()
         self.assertEqual(0, code, log)
         self.assertIn("is a merge commit", log)
 
-    def test_the_floor_excludes_itself_and_older_history(self) -> None:
+    def test_the_recovery_cut_passes_after_a_bot_merge_moves_main(self) -> None:
+        self.feature()
+        self.promote()
         self.feature()
         squashed = self.squash()
         self.feature()
+        self.git("checkout", "-q", "-b", "promote/develop-to-main", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "merge develop", "develop")
+        self.bot_bump()
+        code, log = self.check("promote/develop-to-main")
+        self.assertEqual(0, code, log)
+        self.assertIn(squashed, log)
+
+    def test_a_clean_promotion_over_a_squash_fails_since_it_keeps_a_removed_line(self) -> None:
+        """A promotion that merges cleanly is still wrong, so the step fails it rather than only a conflict."""
+        self.git("checkout", "-q", "develop")
+        self.commit("notes.txt", "keep\n")
+        self.promote()
+        self.git("checkout", "-q", "develop")
+        self.commit("notes.txt", "keep\ndrop\n")
+        squashed = self.squash()
+        self.git("checkout", "-q", "develop")
+        self.commit("notes.txt", "keep\n")
+        code, log = self.check()
+        self.assertEqual(1, code, log)
+        self.assertIn(squashed, log)
+        self.git("checkout", "-q", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "promote develop", "develop")
+        self.assertEqual("keep\ndrop", self.git("show", "main:notes.txt"))
+
+    def test_the_floor_excludes_itself_and_older_history(self) -> None:
+        self.feature()
+        older = self.squash()
+        self.feature()
+        squashed = self.squash()
+        self.feature()
+        code, log = self.check(SQUASH_FLOOR=older)
+        self.assertEqual(1, code, log)
+        self.assertIn(squashed, log)
+        self.assertNotIn(f"holds {older}", log)
         code, log = self.check(SQUASH_FLOOR=squashed)
         self.assertEqual(0, code, log)
         self.assertIn(f"past its floor {squashed}", log)
+
+    def test_a_repository_with_no_develop_promotes_nothing(self) -> None:
+        self.git("branch", "-D", "develop")
+        code, log = self.check("main")
+        self.assertEqual(0, code, log)
+        self.assertIn("has no develop branch", log)
 
     def test_a_bot_pull_request_into_main_is_no_promotion(self) -> None:
         self.feature()

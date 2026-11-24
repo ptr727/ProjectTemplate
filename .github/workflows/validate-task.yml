@@ -672,7 +672,7 @@ jobs:
 
       # A promotion and every bot pull request land on the default branch as merge commits.
       # So a single-parent commit on its first-parent chain since the previous promotion is a squash or a direct push.
-      # A head already holding the default branch's tip is the recovery cut, whose merge restores the merge base with develop.
+      # A head already holding each such commit is the recovery cut, whose merge restores the merge base with develop.
       # The floor is the hub's one such commit, recovered long since, and is inert where a caller's history lacks it.
       - name: Check promotion history step
         if: github.event.pull_request != null
@@ -735,26 +735,32 @@ jobs:
           if [[ -n "$previous" ]]; then
             since="since its previous promotion merge $previous"
           elif [[ -n "$floor" ]]; then
-            since="past its floor $floor, with no promotion merge there"
+            since="past its floor $floor"
           fi
           if (( ${#singles[@]} == 0 )); then
             echo "Every commit on $BASE_REF's first-parent chain $since is a merge commit."
             exit 0
           fi
-          rc=0
-          git merge-base --is-ancestor "$base" "$HEAD_SHA" || rc=$?
-          if [[ "$rc" == 0 ]]; then
+          held=true
+          for commit in "${singles[@]}"; do
+            rc=0
+            git merge-base --is-ancestor "$commit" "$HEAD_SHA" || rc=$?
+            if [[ "$rc" == 1 ]]; then
+              held=false
+            elif [[ "$rc" != 0 ]]; then
+              exit "$rc"
+            fi
+          done
+          if [[ "$held" == true ]]; then
             echo "$BASE_REF's first-parent chain $since holds ${#singles[@]} single-parent commit(s): ${singles[*]}."
-            echo "The head already holds $BASE_REF's tip, so merging it restores the merge base with develop."
+            echo "The head already holds each of them, so merging it restores the merge base with develop."
             exit 0
-          elif [[ "$rc" != 1 ]]; then
-            exit "$rc"
           fi
           for commit in "${singles[@]}"; do
             echo "::error::$BASE_REF's first-parent chain $since holds $commit, a single-parent commit: a squash or a direct push into $BASE_REF rather than a merge."
           done
-          echo "The merge base with develop stays behind that commit, so this promotion conflicts wherever develop later edited a line it carried."
-          echo "Recover by cutting a branch from $BASE_REF that merges develop, taking develop's side on each conflict, and opening it as the promotion in place of develop."
+          echo "The merge base with develop stays behind that commit, so merging develop conflicts, or silently keeps a line develop has since removed."
+          echo "Recover by cutting a branch from $BASE_REF that merges develop, resolving each conflict as the reference below states, and opening it as the promotion in place of develop."
           echo "The branching-and-release-model skill's references/branch-protection-and-promotion.md states the cut."
           exit 1
 
