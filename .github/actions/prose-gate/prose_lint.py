@@ -1827,10 +1827,8 @@ def takes_value(option: str, values: set[str]) -> bool:
     if option.startswith("--"):
         name, eq, _ = option.partition("=")
         return name in values and not eq
-    for at, letter in enumerate(option[1:], 2):
-        if letter in values:
-            return at == len(option)
-    return False
+    letters = cluster(option, values)
+    return letters[-1:] in values and len(letters) == len(option) - 1
 
 
 def cluster(option: str, values: set[str]) -> str:

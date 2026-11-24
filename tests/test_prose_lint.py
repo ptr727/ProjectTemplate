@@ -4680,10 +4680,10 @@ class TestPasteSafeRule(BaitCase):
         self.assertEqual([1], self.lines("Run `ssh '<host>' 'sudo sh -c\n\"ls <file>\"'` here.\n"))
         self.assertEqual([], self.lines("Run `ssh '<host>' 'echo # note\n<file>'` here.\n"))
 
-    def test_each_second_shell_and_launcher_opens_a_command_span(self) -> None:
-        tables = prose_lint.COMMANDS["second_shells"]
-        names = {n for spec in tables["shells"] for n in spec["names"]} | set(tables["launchers"])
-        self.assertEqual(set(), names - prose_lint.COMMAND_NAMES)
+    def test_a_launcher_name_alone_opens_no_command_span(self) -> None:
+        """A device console's `time` is prose, so a launcher is read only inside a command."""
+        self.assertEqual([], self.hits("Then type `time <epoch_seconds>` at the console.\n"))
+        self.assertEqual([2], self.lines("```sh\nnice -n 5 dash -c 'ls <dir>'\n```\n"))
 
     def test_a_second_shell_after_a_heredoc_label_is_read(self) -> None:
         text = "```sh\ncat <<'END' | sudo sh -c 'cat > <file>'\nbody\nEND\n```\n"
