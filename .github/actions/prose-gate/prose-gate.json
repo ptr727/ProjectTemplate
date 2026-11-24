@@ -160,17 +160,40 @@
       "shell": { "lexer": "bash", "shapes": ["angle", "bracket", "alternation"], "second_shells": true },
       "powershell": { "lexer": "powershell", "shapes": ["angle", "alternation"] }
     },
-    "second_shells": [
-      { "names": ["ash", "bash", "dash", "ksh", "mksh", "sh", "zsh"], "string": "operand", "flags": ["c"], "values": ["O", "o", "--init-file", "--rcfile"] },
-      {
-        "names": ["runuser", "su"], "string": "value", "flags": ["c", "--command"],
-        "values": ["G", "g", "s", "w", "--group", "--shell", "--supp-group", "--whitelist-environment"]
+    "second_shells": {
+      "shells": [
+        { "names": ["ash", "bash", "dash", "ksh", "mksh", "sh", "zsh"], "string": "operand", "flags": ["c"], "values": ["O", "o", "--init-file", "--rcfile"] },
+        {
+          "names": ["runuser", "su"], "string": "value", "flags": ["c", "--command", "--session-command"],
+          "values": ["G", "g", "s", "u", "w", "--group", "--shell", "--supp-group", "--user", "--whitelist-environment"]
+        },
+        {
+          "names": ["ssh"], "string": "rest", "flags": [],
+          "values": ["B", "b", "c", "D", "E", "e", "F", "I", "i", "J", "L", "l", "m", "O", "o", "P", "p", "Q", "R", "S", "W", "w"]
+        }
+      ],
+      "launchers": {
+        "command": { "operands": 0, "values": [] },
+        "doas": { "operands": 0, "values": ["C", "u"] },
+        "env": { "operands": 0, "values": ["C", "S", "u", "--chdir", "--split-string", "--unset"] },
+        "exec": { "operands": 0, "values": ["a"] },
+        "nice": { "operands": 0, "values": ["n", "--adjustment"] },
+        "nohup": { "operands": 0, "values": [] },
+        "setsid": { "operands": 0, "values": [] },
+        "stdbuf": { "operands": 0, "values": ["e", "i", "o", "--error", "--input", "--output"] },
+        "sudo": {
+          "operands": 0,
+          "values": ["C", "D", "g", "p", "R", "T", "U", "u", "--chdir", "--chroot", "--close-from", "--command-timeout", "--group", "--other-user", "--prompt", "--role", "--type", "--user"]
+        },
+        "time": { "operands": 0, "values": ["f", "o", "--format", "--output"] },
+        "timeout": { "operands": 1, "values": ["k", "s", "--kill-after", "--signal"] },
+        "xargs": {
+          "operands": 0,
+          "values": ["a", "d", "E", "I", "L", "n", "P", "s", "--arg-file", "--delimiter", "--max-args", "--max-chars", "--max-lines", "--max-procs", "--replace"]
+        }
       },
-      {
-        "names": ["ssh"], "string": "rest", "flags": [],
-        "values": ["B", "b", "c", "D", "E", "e", "F", "I", "i", "J", "L", "l", "m", "O", "o", "P", "p", "Q", "R", "S", "W", "w"]
-      }
-    ]
+      "reserved": ["!", "{", "do", "elif", "else", "if", "then", "until", "while"]
+    }
   },
   "languages": {
     "python": {

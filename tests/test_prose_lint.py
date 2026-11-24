@@ -4578,6 +4578,10 @@ class TestPasteSafeRule(BaitCase):
             ("ssh -p 22 '<host>' 'rm <path>'", "<path>", "ssh"),
             ("ssh '<host>' -t 'ls' '<dir>'", "<dir>", "ssh"),
             ("ssh '<host>' 'sudo sh -c \"id <account>\"'", "<account>", "sh"),
+            ("su --session-command='id <account>' root", "<account>", "su"),
+            ("sudo -u app bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("runuser -u app -- sh -c 'ls <dir>'", "<dir>", "sh"),
+            ("su -c 'echo '\\''<quoted>'\\'' <dir>' root", "<dir>", "su"),
         ):
             with self.subTest(span=span):
                 found = self.hits(f"Run `{span}` here.\n")
@@ -4598,6 +4602,12 @@ class TestPasteSafeRule(BaitCase):
             "sh -c \"run $(cat '<file>')\"",
             "timeout 600 bash -c 'for n in 1 2; do sleep \"$n\"; done'",
             "git commit -m 'run bash -c <x>'",
+            "su -c 'echo '\\''<account>'\\''' root",
+            "bash -c 'ls '\\''<dir>'\\'",
+            "rsync -av -e ssh '<src>' '<host>:<dst>'",
+            "sudo apt install -y ssh '<pkg>' '<other>'",
+            "git clone https://example.com/x/ssh '<dir>' '<other>'",
+            "runuser -u postgres -- psql -c 'CREATE DATABASE <name>'",
         ):
             with self.subTest(span=span):
                 self.assertEqual([], self.hits(f"Run `{span}` here.\n"))
@@ -4605,6 +4615,10 @@ class TestPasteSafeRule(BaitCase):
     def test_a_second_shell_string_ends_with_its_command(self) -> None:
         text = "```sh\nssh '<host>'\necho '<not run remotely>'\nbash -c \\\n  'cat <file>'\n```\n"
         self.assertEqual([5], self.lines(text))
+
+    def test_a_second_shell_after_a_reserved_word_is_read(self) -> None:
+        text = "```sh\nif ssh '<host>' 'test -d <dir>'; then echo ok; fi\n```\n"
+        self.assertEqual([2], self.lines(text))
 
     def test_the_rule_gates_by_default(self) -> None:
         """CI passes no `--check`, so only a default rule reaches a pull request."""
