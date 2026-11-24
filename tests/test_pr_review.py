@@ -46,6 +46,8 @@ import pr_review_check_lines
 import pr_review_checks
 import pr_review_copilot
 import pr_review_hold
+import pr_review_payload
+import pr_review_policy
 import pr_review_rounds
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "spec"))
@@ -1130,22 +1132,34 @@ class TestOtherReviewers(GqlCase):
                 self.assertEqual(named, "other_reviewed=coderabbitai" in out)
                 self.assertNotIn("other_unknown", out)
 
+    def rabbit_policy(self, pr: dict, bases: str = "^develop$") -> dict:
+        """`pr` carrying the default policy with CodeRabbit asked explicitly on `bases`."""
+        data = json.loads((REPO / "spec" / "agent-policy.default.json").read_text(encoding="utf-8"))
+        rabbit = {"trigger": "explicit", "bases": [bases], "command": "full review"}
+        data["review"]["bots"]["coderabbit"] = rabbit
+        pr[pr_review_payload.POLICY_KEY] = pr_review_policy.parse(data, "test")
+        return pr
+
     def test_a_blind_comments_window_leaves_coderabbit_unknown_rather_than_unreviewed(self) -> None:
         """The summary is an early comment, so older comments past the window can hold it unseen.
 
-        A review or a clean pass in view on the head still decides, so nothing is unknown then.
+        A review on the head or a clean summary in view decides, since CodeRabbit edits that one
+        summary in place. A base the policy does not cover CodeRabbit on expects no summary at all.
         """
-        for reviews, comments, field in (
-            ([review()], [], "other_unknown=coderabbitai"),
-            ([review()], [self.rabbit_summary(OLD)], "other_unknown=coderabbitai"),
-            ([review()], [self.rabbit_summary(HEAD)], "other_reviewed=coderabbitai"),
-            ([review(), self.other_review("coderabbitai")], [], "other_reviewed=coderabbitai"),
+        for reviews, comments, bases, field in (
+            ([review()], [], "^develop$", "other_unknown=coderabbitai"),
+            ([review()], [self.rabbit_summary(HEAD, clean=False)], "^develop$", "other_unknown"),
+            ([review()], [self.rabbit_summary(OLD)], "^develop$", ""),
+            ([review()], [], "^main$", ""),
+            ([review()], [self.rabbit_summary(HEAD)], "^develop$", "other_reviewed=coderabbitai"),
+            ([review(), self.other_review("coderabbitai")], [], "^develop$", "other_reviewed"),
         ):
-            self.answer(payload(reviews, comments=comments, older=True))
-            with self.subTest(field=field, reviews=len(reviews), comments=len(comments)):
+            self.answer(self.rabbit_policy(payload(reviews, comments=comments, older=True), bases))
+            with self.subTest(field=field, bases=bases, comments=len(comments)):
                 out, _ = pr_review.digest("o", "r", 7)
                 self.assertIn(field, out)
-                self.assertNotIn("other_reviewed" if "unknown" in field else "other_unknown", out)
+                for absent in {"other_reviewed", "other_unknown"} - {field.split("=")[0]}:
+                    self.assertNotIn(absent, out)
 
     def test_reviewer_nodes_defaults_to_copilot_but_reads_any_login_explicitly(self) -> None:
         pr = payload([review(), self.other_review("coderabbitai")])

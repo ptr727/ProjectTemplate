@@ -99,7 +99,7 @@ def render(
     hub: str,
     window: int,
     fields_out: list[tuple[str, object]] | None = None,
-    cleaned: str = "",
+    rabbit: tuple[str, bool] = ("", False),
 ) -> tuple[str, int]:
     """Render the digest and return it with the unresolved count.
 
@@ -107,10 +107,11 @@ def render(
     caller. `run_log` is the caller's `RUN LOG READING` line for that refusal, empty for none.
     Where `seen` is a set, only threads absent from it print, marked new, and are added.
     Where `fields_out` is a list, the header's fields and the counts a gate reads are appended.
-    `cleaned` is the commit CodeRabbit's summary records a clean pass on, read by the caller. It
-    counts only where it is the head, and older comments behind the window leave it unknown.
+    `rabbit` is the commit CodeRabbit's summary records a clean pass on, empty for none. Beside it
+    is whether the policy covers CodeRabbit on this base, both read by the caller. The commit counts
+    only where it is the head. With no clean summary in view, older comments leave it unknown.
     """
-    head = pr["headRefOid"]
+    head, (cleaned, rabbit_covered) = pr["headRefOid"], rabbit
     revs = reviewer_nodes(pr, "reviews")
     on_head = head_reviews(pr)
     newest = newest_of(on_head)
@@ -161,7 +162,8 @@ def render(
         if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
         or (login == CODERABBIT_LOGIN and cleaned == head)
     ]
-    unread = CODERABBIT_LOGIN not in other_on_head and page_flag(pr, "comments", "hasPreviousPage")
+    unread = rabbit_covered and not cleaned and CODERABBIT_LOGIN not in other_on_head
+    unread = unread and page_flag(pr, "comments", "hasPreviousPage")
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
     }
