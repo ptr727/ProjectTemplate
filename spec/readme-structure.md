@@ -28,7 +28,7 @@ The order, the requirement, and the shield sets are declared data in [`readme-se
 
 Shields live under **Build and Distribution**, as the **Build Status** and **Releases** sub-sections. There is one exception: **the license shield sits in the closing License section**, below the license line. Each shield is a reference-style link, with the definitions grouped under `<!-- Shields -->` at the bottom of the file. Stack a group's badges by ending each line except the last with a trailing backslash.
 
-The sets are **additive by deliverable**. Every repo carries the base group, and each publishing channel adds its own on top. That is why the label is per-channel rather than one fixed list:
+The sets are **additive by deliverable**. Every repo carries the base group, and each publishing channel adds its own on top, as does a repo that owes test coverage. That is why the label is per-channel rather than one fixed list:
 
 | Class | Applies when | Build Status | Releases |
 | --- | --- | --- | --- |
@@ -36,6 +36,7 @@ The sets are **additive by deliverable**. Every repo carries the base group, and
 | Docker | the repo publishes a Docker image | the Docker build status, where the image builds separately | a version shield per image and channel, `latest` and `develop` for a single-image repo |
 | NuGet | the repo publishes to NuGet.org | none | the NuGet release version |
 | PyPI | the repo publishes to PyPI.org | none | the PyPI release version |
+| Coverage | the repo owes Codecov coverage, by the test that decides its `.codecov.yml` and `CODECOV_TOKEN` | the Codecov coverage of the default branch | none |
 
 **NuGet and PyPI carry one version shield each, not a stable-and-prerelease pair**, and that asymmetry with GitHub and Docker is deliberate. A GitHub pre-release and a Docker `develop` tag are each a separately addressable channel a shield can point at. A NuGet or PyPI prerelease is a property of the version string with no separate address. In fact, shields.io publishes no PyPI prerelease badge at all. Its `nuget/vpre` endpoint renders the newest version *including* prereleases, which is the stable version whenever that is newest. A badge that duplicates the one beside it is worse than an absent one, because it reads as current.
 

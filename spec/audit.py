@@ -2685,7 +2685,9 @@ def check_readme_sections(run):
 
 def check_readme_shields(run):
     text = _readme(run)
-    return [] if text is None else readme_shield_findings(text, run.spec["readme"], run.entry)
+    if text is None:
+        return []
+    return readme_shield_findings(text, run.spec["readme"], run.entry, run.coverage_types)
 
 
 def check_readme_links(run):

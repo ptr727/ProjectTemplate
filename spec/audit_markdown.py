@@ -499,8 +499,11 @@ def third_party_tool_findings(text, catalog):
     return findings
 
 
-def readme_shield_findings(text, model, entry):
-    """Shield presence, by the additive classes in spec/readme-sections.json."""
+def readme_shield_findings(text, model, entry, coverage_types=()):
+    """Shield presence, by the additive classes in spec/readme-sections.json.
+
+    `coverage_types` is the audit's coverage_types() for this repo, which the `coverage` trigger reads.
+    """
     findings = []
     unfenced = unfenced_text(text)
     defs = reference_table(text)
@@ -540,9 +543,10 @@ def readme_shield_findings(text, model, entry):
             t["kind"] == "always"
             or (t["kind"] == "publish" and t.get("target") in targets)
             or (t["kind"] == "secret" and t.get("name") in secrets)
+            or (t["kind"] == "coverage" and coverage_types)
         ):
-            want += cls["shields"]
-    for sh in want:
+            want += [(cls["name"], sh) for sh in cls["shields"]]
+    for name, sh in want:
         region = addressed_region(text, sh["in"])
         if region is None:
             continue
@@ -553,7 +557,7 @@ def readme_shield_findings(text, model, entry):
             findings.append(
                 (
                     "LETTER",
-                    f"readme: `{sh['in']}` carries no {sh['label']} shield ({sh['match']}{queries}), which this repo's deliverables require (spec/readme-structure.md)",
+                    f"readme: `{sh['in']}` carries no {sh['label']} shield ({sh['match']}{queries}), which the `{name}` shield class requires of this repo (spec/readme-structure.md)",
                 )
             )
         if not sh.get("exclusive"):
