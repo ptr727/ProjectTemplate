@@ -44,9 +44,10 @@ All builds must complete without warnings, enforced as follows:
   `<AnalysisLevel>latest-all</AnalysisLevel>` and `<AnalysisMode>All</AnalysisMode>` (the full
   analyzer set), plus `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>`. With that, any diagnostic
   the build surfaces as a warning fails it. The IDE code-style rules do not run in the build, so
-  the `dotnet format style` step fails on their warnings instead. IDE0079 is the exception, since
-  neither that step nor the build reports it. Such a diagnostic must be fixed or deliberately suppressed at the
-  narrowest scope that fits (see Analyzer suppressions below), never left to accumulate.
+  the `dotnet format style` step fails on their warnings instead. Such a diagnostic must be fixed or deliberately suppressed at the
+  narrowest scope that fits (see Analyzer suppressions below), never left to accumulate. IDE0079 is
+  the exception, since neither that step nor the build reports it. Remove a suppression the IDE
+  flags under IDE0079 all the same.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
   and not carried into every fleet repo. Its hook needs a .NET tool manifest declaring
@@ -217,6 +218,11 @@ The .NET mechanics, narrowest first:
   when the rule is genuinely not applicable to any project. Relaxing a batch of `CA*` rules (or
   `dotnet_analyzer_diagnostic.severity`) to push a brownfield port through the build is exactly
   what this forbids.
+
+A code-style option in the root `.editorconfig` takes a `dotnet_diagnostic.<RULE>.severity = warning`
+entry for each rule it configures. An option alone leaves its rule at the default severity, often
+hidden, which the format gate never reports. A formatting option is the exception, since CSharpier
+owns formatting and IDE0055 stays `none`.
 
 ## Error handling and logging
 
