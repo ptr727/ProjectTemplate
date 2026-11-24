@@ -54,7 +54,7 @@ verbatim section is a defect in the canonical. It is fixed once at the source ra
 against every repository carrying it.
 
 **The second exception is a hub-hosted tool the reader is told to run, or a procedure the reader
-carries out against the hub.** It is a different kind of reference. A rule naming a gate, a
+runs from a hub checkout.** It is a different kind of reference. A rule naming a gate, a
 script, or a reference snippet the reader executes or copies states an instruction rather than a
 provenance. So does a procedure whose steps the reader runs from a hub checkout, such as auditing
 a repository and converging what the audit finds. Reporting a discrepancy upstream runs no such

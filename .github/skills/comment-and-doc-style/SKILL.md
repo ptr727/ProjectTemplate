@@ -366,7 +366,7 @@ the destination out of band. A contextually relevant link to a related project (
 config feeds, a library this depends on) is not a coordination reference. It is expected. The full
 exceptions are in `references/carried-doc-references.md`. One is a verbatim section that must
 name the hub to do its job. The other is a pointer to a hub-hosted tool the reader runs, or to a
-procedure the reader carries out against the hub.
+procedure the reader runs from a hub checkout.
 
 ## PR titles and commit messages
 
