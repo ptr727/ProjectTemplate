@@ -551,7 +551,19 @@ class RunWithDeadlineCase(unittest.TestCase):
         )
         self.assertEqual(result.stdout, "\ufffd")
 
-    def test_an_interrupt_kills_the_tree_and_propagates(self) -> None:
+    def test_a_timeout_reaps_the_child_though_its_pipes_stay_open(self) -> None:
+        process = mock.Mock(pid=1)
+        process.communicate.side_effect = subprocess.TimeoutExpired("child", 1)
+        with (
+            mock.patch("run_deadline.subprocess.Popen", return_value=process),
+            mock.patch("run_deadline.kill_process_tree") as kill,
+            self.assertRaises(subprocess.TimeoutExpired),
+        ):
+            run_deadline.run_with_deadline(["child"], 1)
+        kill.assert_called_once_with(process)
+        process.wait.assert_called_once_with()
+
+    def test_an_interrupt_kills_and_reaps_the_tree_and_propagates(self) -> None:
         process = mock.Mock(pid=1)
         process.communicate.side_effect = KeyboardInterrupt
         with (
@@ -561,6 +573,7 @@ class RunWithDeadlineCase(unittest.TestCase):
         ):
             run_deadline.run_with_deadline(["child"], 60)
         kill.assert_called_once_with(process)
+        process.wait.assert_called_once_with()
 
     def test_every_timed_captured_run_in_scripts_goes_through_the_helper(self) -> None:
         """A new site written the old way would outlast its deadline on Windows again.

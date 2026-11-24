@@ -45,8 +45,8 @@ def run_with_deadline(
 
     `text`, `encoding`, and `errors` mean what they mean to `subprocess.run`, newline translation
     included, and with none of them the output stays bytes. Stderr is captured unless `popen` names
-    another `stderr`. Every other keyword goes to `subprocess.Popen` as it is. An interrupt kills
-    the child as well, as it does under `subprocess.run`.
+    another `stderr`. Every other keyword goes to `subprocess.Popen` as it is. A timeout or an
+    interrupt kills and reaps the child, as `subprocess.run` does.
     """
     popen.setdefault("stderr", subprocess.PIPE)
     process = subprocess.Popen(argv, stdout=subprocess.PIPE, **popen)
@@ -56,9 +56,11 @@ def run_with_deadline(
         kill_process_tree(process)
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.communicate(timeout=KILL_GRACE_SECONDS)
+        process.wait()
         raise
     except BaseException:
         kill_process_tree(process)
+        process.wait()
         raise
     if text or encoding is not None or errors is not None:
         stdout, stderr = (_decoded(s, encoding, errors) for s in (stdout, stderr))
