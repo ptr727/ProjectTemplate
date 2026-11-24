@@ -118,7 +118,7 @@ The fleet-standard general settings live in [`settings.json`][settings-json] and
 
 `apply` validates the payload and reads the live values in its pre-flight, before the first of its write groups. So a payload outside its contract, or a token that cannot read the endpoint, stops the run with nothing written. It writes the declared values only where the live ones differ, and prints both. The endpoint answers a write with no body, so `apply` reads the values back and fails the run where they do not match. `check` asserts each key and reports a difference as drift.
 
-Lowering `write` to `read` fails any job that relied on the implicit write. So a repository that reads `write` first needs a read of its workflows. That read confirms every job writing through `GITHUB_TOKEN` declares the scope it needs. The apply itself is an outward write on that repository and waits for the maintainer's go-ahead, per the same decision.
+Lowering `write` to `read` fails any job that relied on the implicit write. So a repository that reads `write` first needs a read of its workflows. That read confirms every job writing through `GITHUB_TOKEN` declares the scope it needs. The same decision makes the write itself wait for the maintainer's go-ahead. So on such a repository `apply` holds this group back, writing nothing for it, and ends non-zero once its other groups are applied. It lowers the default only when run with `--lower-workflow-token`, which the operator passes once the read is done and the go-ahead given. A repository already on `read` needs neither, so its approval setting is written without the option.
 
 ## Public Interaction
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise repo-config/configure.sh's Actions workflow token defaults: the payload contract, the live read, the apply write, and the check.
 
-The shell is lifted out of the file, through the lift helper test_configure_archived.py already shares, rather than restated here.
+The shell is lifted out of the file, through the helpers test_configure_archived.py and test_configure_interaction.py already share, rather than restated here.
 An edit that drops a guard therefore fails these tests.
 Only `gh`, the boundary the functions call out to, is stubbed, and every case runs offline.
 No case reaches a live repository, since the stub answers every call the functions make.
@@ -10,28 +10,22 @@ No case reaches a live repository, since the stub answers every call the functio
 from __future__ import annotations
 
 import json
-import re
+import os
 import shlex
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-from test_configure_archived import lift, run_bash
+from test_configure_archived import lift, require, run_bash
+from test_configure_interaction import HELPERS, function
 
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = ROOT / "repo-config" / "workflow-permissions.json"
 ENDPOINT = "repos/ptr727/Fixture/actions/permissions/workflow"
 
 
-def function(name: str) -> str:
-    """A whole top-level function, from its opening line to the closing brace in column one."""
-    return lift(rf"^({re.escape(name)}\(\) \{{[^\n]*\n.*?\n\}}\n)")
-
-
-JQR = lift(r"^(jqr\(\) \{ jq -r .*?\}\n)")
-JQ_HAS = lift(r"^(jq_has\(\) \{ jq -e .*?\}\n)")
-REPORTERS = lift(r"(FAILED=0\nnote\(\).*?\nfail\(\) \{.*?\n\})") + "\n"
-ASSERT = function("assert")
+CONFIGURE = ROOT / "repo-config" / "configure.sh"
 PROBLEM = function("payload_problem") + function("workflow_permissions_problem")
 LIVE = function("workflow_permissions_live")
 
@@ -137,7 +131,7 @@ class LiveReadCase(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             log = Path(tmp) / "gh-calls.txt"
             result = run_bash(
-                f"repo=ptr727/Fixture\n{JQR}{JQ_HAS}{gh_stub(log, [answer], read_status=status)}{LIVE}"
+                f"repo=ptr727/Fixture\n{HELPERS}{gh_stub(log, [answer], read_status=status)}{LIVE}"
                 "workflow_permissions_live\n",
                 "jq",
                 "sed",
@@ -163,10 +157,14 @@ class LiveReadCase(unittest.TestCase):
 
 
 class ApplyCase(unittest.TestCase):
-    """The write: never repeated, and never reported without the read-back confirming it."""
+    """The write: never repeated, never lowering a write default unconfirmed, and never reported without the read-back."""
 
     def apply(
-        self, before: dict[str, object], reads: list[str], put_status: int = 0
+        self,
+        before: dict[str, object],
+        reads: list[str],
+        put_status: int = 0,
+        lower: bool = True,
     ) -> tuple[str, str, int, str]:
         with tempfile.TemporaryDirectory() as tmp:
             payload = Path(tmp) / "workflow-permissions.json"
@@ -175,9 +173,11 @@ class ApplyCase(unittest.TestCase):
             log.touch()
             result = run_bash(
                 f"repo=ptr727/Fixture\nworkflow_permissions_file={shlex.quote(str(payload))}\n"
-                f"{JQR}{JQ_HAS}{gh_stub(log, reads, put_status=put_status)}{LIVE}"
+                f"lower_workflow_token={str(lower).lower()}\nworkflow_held=false\n"
+                f"{HELPERS}{gh_stub(log, reads, put_status=put_status)}{LIVE}"
                 f"{function('apply_workflow_permissions')}"
-                f"apply_workflow_permissions {shlex.quote(compact(before))}\n",
+                f"apply_workflow_permissions {shlex.quote(compact(before))}\n"
+                'echo "workflow_held=$workflow_held"\n',
                 "jq",
                 "sed",
             )
@@ -199,6 +199,24 @@ class ApplyCase(unittest.TestCase):
         self.assertEqual(lines[1], f"api {ENDPOINT}")
         self.assertIn(f"from {compact(LOOSE)} to {compact(DECLARED)}", out)
 
+    def test_lowering_a_write_default_unconfirmed_is_held_back_with_no_call(self) -> None:
+        """Lowering write to read can fail a job relying on the implicit write, so it waits for the option."""
+        out, err, status, calls = self.apply(LOOSE, [], lower=False)
+        self.assertEqual(status, 0, err)
+        self.assertIn("Held back the workflow token defaults", out)
+        self.assertIn("--lower-workflow-token", out)
+        self.assertIn("workflow_held=true", out)
+        self.assertEqual(calls.strip(), "")
+
+    def test_a_read_default_is_written_without_the_option(self) -> None:
+        """Only the approval setting differs here, so nothing is lowered from write and nothing waits."""
+        before = {**DECLARED, "can_approve_pull_request_reviews": True}
+        out, err, status, calls = self.apply(before, [json.dumps(DECLARED)], lower=False)
+        self.assertEqual(status, 0, err)
+        self.assertIn("workflow_held=false", out)
+        self.assertIn(f"--method PUT {ENDPOINT}", calls)
+        self.assertIn(f"to {compact(DECLARED)}", out)
+
     def test_a_refused_write_stops_the_run_naming_both_values(self) -> None:
         out, err, status, calls = self.apply(LOOSE, [], put_status=1)
         self.assertNotEqual(status, 0)
@@ -215,7 +233,7 @@ class ApplyCase(unittest.TestCase):
 
 
 class CheckCase(unittest.TestCase):
-    """The check group, which reports drift per key and never ends the run on a failed read."""
+    """The check group, which reports drift in the form apply compares and never ends the run on a failed read."""
 
     def check(
         self, answer: str, status: int = 0, document: str | None = None
@@ -228,7 +246,7 @@ class CheckCase(unittest.TestCase):
             log = Path(tmp) / "gh-calls.txt"
             result = run_bash(
                 f"repo=ptr727/Fixture\nworkflow_permissions_file={shlex.quote(str(payload))}\n"
-                f"{JQR}{REPORTERS}{JQ_HAS}{ASSERT}{PROBLEM}{gh_stub(log, [answer], read_status=status)}"
+                f"FAILED=0\n{HELPERS}{PROBLEM}{gh_stub(log, [answer], read_status=status)}"
                 f"{LIVE}{function('check_workflow_permissions')}"
                 'check_workflow_permissions\necho "FAILED=$FAILED"\n',
                 "jq",
@@ -239,27 +257,21 @@ class CheckCase(unittest.TestCase):
     def test_matching_defaults_pass(self) -> None:
         out, err, status = self.check(json.dumps(DECLARED))
         self.assertEqual(status, 0, err)
-        self.assertIn("ok   workflow token default default_workflow_permissions = read", out)
-        self.assertIn("ok   workflow token default can_approve_pull_request_reviews = false", out)
+        self.assertIn(f"ok   workflow token defaults = {compact(DECLARED)}", out)
         self.assertIn("FAILED=0", out)
 
-    def test_each_drifted_key_fails_on_its_own_line(self) -> None:
-        for key, value, line in (
-            (
-                "default_workflow_permissions",
-                "write",
-                "FAIL workflow token default default_workflow_permissions = read",
-            ),
-            (
-                "can_approve_pull_request_reviews",
-                True,
-                "FAIL workflow token default can_approve_pull_request_reviews = false",
-            ),
+    def test_each_drifted_key_fails_naming_the_live_value(self) -> None:
+        for key, value in (
+            ("default_workflow_permissions", "write"),
+            ("can_approve_pull_request_reviews", True),
         ):
             with self.subTest(key=key):
-                out, err, status = self.check(json.dumps({**DECLARED, key: value}))
+                live = {**DECLARED, key: value}
+                out, err, status = self.check(json.dumps(live))
                 self.assertEqual(status, 0, err)
-                self.assertIn(line, out)
+                self.assertIn(
+                    f"FAIL workflow token defaults = {compact(DECLARED)}, live {compact(live)}", out
+                )
                 self.assertIn("FAILED=1", out)
 
     def test_an_unreadable_endpoint_fails_without_ending_the_run(self) -> None:
@@ -329,6 +341,35 @@ class WiringCase(unittest.TestCase):
             body.index('apply_workflow_permissions "$workflow_live"'),
             body.index("\n    apply_labels\n"),
         )
+
+    def test_a_held_group_ends_apply_non_zero(self) -> None:
+        """A run that left a write default in place has not applied the configuration, so it never ends clean."""
+        body = function("cmd_apply")
+        self.assertIn("workflow_held=false", body)
+        guard = body.index('if [ "$workflow_held" = true ]; then')
+        self.assertIn("exit 1", body[guard : guard + 250])
+        self.assertLess(body.index('apply_workflow_permissions "$workflow_live"'), guard)
+
+    def test_the_option_is_refused_outside_apply_before_any_read(self) -> None:
+        """The refusal runs before the first read, which a `gh` that fails every call would otherwise expose."""
+        bash = require("bash")
+        with tempfile.TemporaryDirectory() as tmp:
+            stub = Path(tmp) / "gh"
+            stub.write_text("#!/bin/sh\necho gh-was-called >&2\nexit 1\n", encoding="utf-8")
+            stub.chmod(0o755)
+            env = dict(os.environ, PATH=f"{tmp}{os.pathsep}{os.environ['PATH']}")
+            result = subprocess.run(
+                [bash, str(CONFIGURE), "check", "owner/name", "--lower-workflow-token"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                timeout=30,
+                check=False,
+                env=env,
+            )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Option '--lower-workflow-token' is valid only with apply", result.stderr)
+        self.assertNotIn("gh-was-called", result.stderr)
 
     def test_check_runs_the_workflow_permissions_group(self) -> None:
         self.assertIn("\n    check_workflow_permissions\n", function("cmd_check"))

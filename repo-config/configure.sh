@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Configure or validate a repository against the committed fleet config in this directory, via the GitHub API.
 #
-#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational] [--checkout <path>] [--dry-run]   # create-or-update settings + workflow token defaults + labels + rulesets + the fleet project link + secrets (writes), and with --checkout the agent policy files
+#   Apply:  repo-config/configure.sh apply [owner/repo] [release|operational] [--checkout <path>] [--dry-run] [--lower-workflow-token]   # create-or-update settings + workflow token defaults + labels + rulesets + the fleet project link + secrets (writes), and with --checkout the agent policy files
 #   Check:  repo-config/configure.sh check [owner/repo] [release|operational]   # validate an existing repo, non-zero on drift (reads)
 #
 # Both modes need admin on the repo, because the rulesets endpoints require it.
@@ -18,6 +18,7 @@
 # It sets none until interaction-verification.json records a pilot's bot verification, and check owes none before then.
 # Then the Dependabot vulnerability alerts and automated security updates.
 # Then the Actions workflow token defaults from workflow-permissions.json, written only where the live values differ.
+# Lowering a repository's write default is held back unless --lower-workflow-token confirms it, and the run then ends non-zero.
 # Then the fleet label set from labels.json, create-or-update by name, leaving any label the payload does not declare alone.
 # Then the branch rulesets, main.json shared and the model-specific develop ruleset, create-or-update by name.
 # Then the link to the fleet project declared in project.json, written only when the live link list does not already hold it.
@@ -57,7 +58,7 @@
 # The interaction limit is asserted the same way.
 # Once a verification is recorded, a limit inside 30 days of its expiry is a warning, and a fresh apply renews it.
 # The two Dependabot security features are asserted the same way, since apply enables them and no payload declares them.
-# The workflow token defaults are asserted key by key against workflow-permissions.json.
+# The workflow token defaults are compared with workflow-permissions.json, and a write default apply held back reads as drift.
 # The agent policy files are checked too, read from the repo's default branch and compared with the render.
 # The project link is checked by resolving the declared project to a node id.
 # The check then asserts that id is among the ones the repository is linked to.
@@ -87,6 +88,7 @@ Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
        repo-config/configure.sh apply|check release|operational
        repo-config/configure.sh apply [owner/repo] [release|operational] --checkout <path>
        repo-config/configure.sh apply [owner/repo] [release|operational] --dry-run
+       repo-config/configure.sh apply [owner/repo] [release|operational] --lower-workflow-token
        repo-config/configure.sh --help
 
   apply   create or update the fleet configuration on the repo (writes)
@@ -94,6 +96,8 @@ Usage: repo-config/configure.sh apply|check [owner/repo] [release|operational]
 
   --checkout <path>   with apply only, also write the agent policy files into this local checkout of the repo
   --dry-run           with apply only, run the pre-flight and print the secrets that would be set, writing nothing
+  --lower-workflow-token
+                      with apply only, lower a write default workflow token to read, once no job relies on the implicit write
 
 The repo defaults to the current gh repo, and the model to the registry lookup.
 USAGE
@@ -118,6 +122,7 @@ esac
 checkout=""
 checkout_given=false
 dry_run=false
+lower_workflow_token=false
 positional=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -140,6 +145,10 @@ while [ "$#" -gt 0 ]; do
         ;;
     --dry-run)
         dry_run=true
+        shift
+        ;;
+    --lower-workflow-token)
+        lower_workflow_token=true
         shift
         ;;
     -*) refuse "Unknown option '$1'" ;;
@@ -165,6 +174,9 @@ if [ "$checkout_given" = true ]; then
 fi
 if [ "$dry_run" = true ] && [ "$cmd" != apply ]; then
     refuse "Option '--dry-run' is valid only with apply"
+fi
+if [ "$lower_workflow_token" = true ] && [ "$cmd" != apply ]; then
+    refuse "Option '--lower-workflow-token' is valid only with apply"
 fi
 if [ "$#" -gt 2 ]; then
     refuse "Too many arguments (expected at most a repo and a model)"
@@ -764,13 +776,20 @@ apply_project() { # project-node-id
 }
 
 # Write the defaults workflow-permissions.json declares, only where the live ones cmd_apply's pre-flight read differ.
-# The old and new values are both printed, because lowering write to read fails any job that relied on the implicit write.
+# Lowering write to read fails any job that relied on the implicit write, so it waits for --lower-workflow-token.
+# The operator passes that once a read of the repository's workflows finds no such job.
+# Without it the group writes nothing and sets workflow_held, which cmd_apply turns into a non-zero end once the other groups are applied.
 # The endpoint answers a write with no body, so the values are read back to confirm it rather than trusted from the status alone.
 apply_workflow_permissions() { # live-defaults-json
     local want got=""
     want="$(jqr -c -S '.' "$workflow_permissions_file")"
     if [ "$1" = "$want" ]; then
         echo "Workflow token defaults already match $want"
+        return
+    fi
+    if [ "$lower_workflow_token" != true ] && [ "$(jqr '.default_workflow_permissions' <<<"$1")" = write ] && [ "$(jqr '.default_workflow_permissions' <<<"$want")" = read ]; then
+        echo "Held back the workflow token defaults ($1, declared $want), since lowering the write default fails any job relying on the implicit write. Confirm that every job writing through GITHUB_TOKEN declares its scope, then apply again with --lower-workflow-token."
+        workflow_held=true
         return
     fi
     if ! gh api --method PUT "repos/$repo/actions/permissions/workflow" --input "$workflow_permissions_file"; then
@@ -858,7 +877,7 @@ apply_interaction() { # private
 }
 
 cmd_apply() {
-    local f private disc payload project_id why origin workflow_live
+    local f private disc payload project_id why origin workflow_live workflow_held=false
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
     for f in "$settings_file" "$labels_file" "$project_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
@@ -890,7 +909,7 @@ cmd_apply() {
     fi
     # The project is resolved here rather than in apply_project.
     # That is because it is a read.
-    # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with four groups of writes already applied.
+    # In apply_project, a number that resolves to nothing, or to a project titled otherwise, would abort the run with earlier groups of writes already applied.
     project_id="$(project_node_id "$(jqr '.owner' "$project_file")" "$(jqr '.number' "$project_file")" "$(jqr '.title' "$project_file")")"
     # The workflow token defaults are validated and read here for the same reason.
     # A payload outside its contract, or an endpoint the token cannot read, then stops the run with nothing written.
@@ -994,6 +1013,10 @@ cmd_apply() {
     fi
     if [ -n "$secret_names_skip" ]; then
         echo "Configuration applied to $repo except for the secrets, which were not set. Run it again once the branch exists." >&2
+        exit 1
+    fi
+    if [ "$workflow_held" = true ]; then
+        echo "Configuration applied to $repo except for the workflow token defaults, which were held back as noted above." >&2
         exit 1
     fi
     echo "Configuration applied to $repo. Run '$0 check${repo_arg:+ $repo}' to validate."
@@ -1236,8 +1259,9 @@ check_security() {
     fi
 }
 
+# The live defaults are compared whole, in the form apply compares, so the two modes agree on what drift is.
 check_workflow_permissions() {
-    local why live pairs key want got
+    local why live want
     if ! why="$(workflow_permissions_problem)"; then
         fail "workflow token payload $workflow_permissions_file $why"
         return
@@ -1246,12 +1270,12 @@ check_workflow_permissions() {
         fail "could not read the Actions workflow token defaults"
         return
     fi
-    pairs="$(jqr 'to_entries[] | "\(.key)\t\(.value)"' "$workflow_permissions_file")"
-    while IFS=$'\t' read -r key want; do
-        # shellcheck disable=SC2016  # $k is a jq --arg variable, not a shell expansion
-        got="$(jqr --arg k "$key" '.[$k]' <<<"$live")"
-        assert "workflow token default $key = $want" test "$got" = "$want"
-    done <<<"$pairs"
+    want="$(jqr -c -S '.' "$workflow_permissions_file")"
+    if [ "$live" = "$want" ]; then
+        pass "workflow token defaults = $want"
+    else
+        fail "workflow token defaults = $want, live $live"
+    fi
 }
 
 check_labels() {
@@ -1360,7 +1384,7 @@ check_environments() {
     # The authority on this shape is spec/validate.py, but this script runs against whatever hub checkout the operator has.
     # Every read below is therefore preceded by one test rather than left bare.
     # A bare read of a malformed entry aborts the whole run under set -e, mid-check.
-    # That happens after the five groups above have printed their pass lines and before cmd_check reaches its drift summary.
+    # That happens after the groups above have printed their pass lines and before cmd_check reaches its drift summary.
     # This test is narrower than spec/validate.py's, which refuses shapes this one admits.
     # A registry that never ran the validator can therefore still report drift rather than the malformation causing it.
     if ! jq_has 'type == "array"' <<<"$entries"; then
