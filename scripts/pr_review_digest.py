@@ -71,6 +71,19 @@ def digest_refusal(pr: dict) -> dict | None:
     return stopping_refusal(pr) or (None if head_reviews(pr) else refusing_review(pr))
 
 
+def run_log_reading(state: str, line: str) -> str:
+    """The digest line naming the reading `transient_state` gave, empty where it gave none."""
+    readings = {
+        "owed": "transient. The run log names a fetch failure, not a rate limit, so one "
+        "re-request is owed",
+        "pending": "transient. The one re-request it is owed is pending",
+        "sent": "possible quota. The one re-request it was owed was sent and nothing answered it",
+        "spent": "possible quota. The run log names a fetch failure, but the round before was "
+        "an error refusal too",
+    }
+    return f"  RUN LOG READING: {readings[state]}: {line}" if state else ""
+
+
 def state_fields(pr: dict) -> list[tuple[str, object]]:
     """`state=` and when it changed, where the pull request is no longer open, else nothing."""
     if is_open(pr):
