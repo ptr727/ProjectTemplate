@@ -119,7 +119,7 @@ The default is `collaborators` so that a repository made public starts locked do
 
 **The limit expires.** GitHub's longest expiry is six months, after which it removes the limit silently. Every `apply` that sets a limit sets that longest expiry, so a re-apply is the renewal. Once a limit is owed, `check` asserts the declared limit, set on the repository itself, and warns once fewer than 30 days remain. A lapsed limit reads as missing and fails the check. A limit set on the owning account instead (`PUT /user/interaction-limits`) cannot express the two groups. GitHub then refuses a repository limit, so `apply` stops in its pre-flight with nothing written and `check` fails on the limit's origin.
 
-**No limit is set until a pilot verifies one.** It is not yet verified that a limit leaves the review bots and Dependabot able to work. A limit that silenced a reviewer would read as a false green in the review gate. So `apply` sets no interaction limit until a committed record, `repo-config/interaction-verification.json`, shows that a pilot repository verified one. Without the record, `apply` skips the limit with a note and applies every other group. `check` then notes that no limit is owed. The record is absent until the pilot is done, so the pilot's first limit is set by hand:
+**No limit is set until a pilot verifies one.** It is not yet verified that a limit leaves the review bots and Dependabot able to work. A limit that silenced a reviewer would read as a false green in the review gate. So `apply` sets no interaction limit until a committed record, `repo-config/interaction-verification.json`, shows that a pilot repository verified one. Without the record, `apply` skips the limit with a note and applies every other group. `check` then notes that no limit is owed, or names a limit already in force and its expiry, since nothing renews it. The record is absent until the pilot is done, so the pilot's first limit is set by hand:
 
 1. Pick one public repository as the pilot.
 2. In its settings, under **Moderation options**, open **Interaction limits**. Set the limit its `publicInteraction` declares, for six months.
@@ -136,7 +136,7 @@ The record names the pilot repository, the date of the verification, and the fou
 }
 ```
 
-A record of any other shape, or one dated on a day no calendar holds, stops `apply` and `check` before any write. Each command reads the record from the hub checkout it runs from, so a checkout at `main` honors it once it is promoted. From then on `apply` sets the limit on every public repository, which renews the pilot's hand-set one. Also check that the README of each `collaborators` repository links to no Discussions page, since `apply` turns Discussions off there.
+A record of any other shape stops `apply` and `check` before any write. Each command reads the record from the hub checkout it runs from, so a checkout at `main` honors it once it is promoted. From then on `apply` sets the limit on every public repository, which renews the pilot's hand-set one. Also check that the README of each `collaborators` repository links to no Discussions page, since `apply` turns Discussions off there.
 
 ## Agent Policy
 

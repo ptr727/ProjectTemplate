@@ -51,6 +51,7 @@ PREFLIGHT = lift(
     r"^(    # The visibility and any live interaction limit are read here too\.\n.*?\n        fi\n    fi\n)"
 )
 RECORD = lift(r"^(# ----- Resolve the bot verification record .*?\n^fi\n)")
+PAYLOAD_PROBLEM = function("payload_problem")
 REPO = "ptr727/Fixture"
 RECORD_PATH = "/fixture/repo-config/interaction-verification.json"
 BOTS = ["Copilot", "CodeRabbit", "Qodo", "Dependabot"]
@@ -166,7 +167,7 @@ class RecordCase(Harness):
         script = (
             f"script_dir={shlex.quote(self.tmp.as_posix())}\n"
             f"py_cmd=({shlex.quote(Path(sys.executable).as_posix())})\n"
-            f'{JQR}{RECORD}echo "verified=$interaction_verified"\n'
+            f'{PAYLOAD_PROBLEM}{RECORD}echo "verified=$interaction_verified"\n'
         )
         return self.run_script(script)
 
@@ -198,16 +199,16 @@ class RecordCase(Harness):
         self.assertIn("verified=true", result.stdout)
 
     def test_invalid_json_stops_the_run(self) -> None:
-        self.refused('{"pilot": ', "does not parse as JSON")
+        self.refused('{"pilot": ', "did not parse")
 
     def test_an_empty_file_stops_the_run(self) -> None:
-        self.refused("", "does not hold one JSON object")
+        self.refused("", "does not hold exactly one JSON document")
 
     def test_two_values_stop_the_run(self) -> None:
-        self.refused(self.entry() + self.entry(), "does not hold one JSON object")
+        self.refused(self.entry() + self.entry(), "does not hold exactly one JSON document")
 
     def test_a_non_object_stops_the_run(self) -> None:
-        self.refused(json.dumps([self.entry()]), "does not hold one JSON object")
+        self.refused(json.dumps([self.entry()]), "is not a JSON object")
 
     def test_a_missing_key_stops_the_run(self) -> None:
         self.refused(json.dumps({"pilot": REPO, "bots": BOTS}), "exactly the keys")
@@ -215,20 +216,10 @@ class RecordCase(Harness):
     def test_an_extra_key_stops_the_run(self) -> None:
         self.refused(self.entry(evidence="a pull request"), "exactly the keys")
 
-    def test_a_pilot_not_shaped_owner_name_stops_the_run(self) -> None:
-        for pilot in ("Fixture", "ptr727/Fixture/extra", "ptr727/..", 7):
-            with self.subTest(pilot=pilot):
-                self.refused(self.entry(pilot=pilot), "does not name the pilot repository")
-
-    def test_a_date_not_shaped_yyyy_mm_dd_stops_the_run(self) -> None:
-        for date in ("2026-12-1", "1 December 2026", "2026-12-01T00:00:00Z", None):
-            with self.subTest(date=date):
-                self.refused(self.entry(date=date), "does not date the verification")
-
-    def test_a_day_the_calendar_does_not_hold_stops_the_run(self) -> None:
-        for date in ("2026-02-30", "2026-13-01"):
-            with self.subTest(date=date):
-                self.refused(self.entry(date=date), "a day the calendar does not hold")
+    def test_a_pilot_or_date_that_is_not_a_non_empty_string_stops_the_run(self) -> None:
+        for field, value in (("pilot", ""), ("pilot", 7), ("date", ""), ("date", None)):
+            with self.subTest(field=field, value=value):
+                self.refused(self.entry(**{field: value}), "as non-empty strings")
 
     def test_anything_but_the_four_bots_stops_the_run(self) -> None:
         for bots in (BOTS[:3], [*BOTS, "Renovate"], [*BOTS[:3], BOTS[0]], "Copilot", None):
@@ -435,15 +426,32 @@ class CheckCase(Harness):
         self.assertIn("is private, so none is owed", result.stdout)
         self.assertIn("FAILED=0", result.stdout)
 
-    def test_an_unverified_public_repo_is_a_note_and_never_reads_the_limit(self) -> None:
+    def test_an_unverified_public_repo_with_no_limit_is_a_note(self) -> None:
         """Apply sets no limit before the record, so a check failing on its absence would name an unfollowable fix."""
-        result = self.check("false", None, verified=False)
+        result = self.check("false", "{}", verified=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
             f"interaction limit: none is owed until a pilot's bot verification is recorded at {RECORD_PATH}",
             result.stdout,
         )
         self.assertIn("FAILED=0", result.stdout)
+
+    def test_an_unverified_public_repo_names_a_limit_in_force_and_its_expiry(self) -> None:
+        """Nothing renews such a limit, the pilot's hand-set one included, so the check names when it lapses."""
+        live = self.live(limit="existing_users")
+        result = self.check("false", live, verified=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stamp = json.loads(live)["expires_at"]
+        self.assertIn(
+            f"interaction limit: existing_users is in force on the repository until {stamp}",
+            result.stdout,
+        )
+        self.assertIn("FAILED=0", result.stdout)
+
+    def test_an_unverified_public_repo_with_an_unreadable_limit_fails(self) -> None:
+        result = self.check("false", "[]", verified=False)
+        self.assertIn("FAIL live interaction limit for 'ptr727/Fixture'", result.stdout)
+        self.assertIn("FAILED=1", result.stdout)
 
 
 class DiscussionsCase(Harness):
