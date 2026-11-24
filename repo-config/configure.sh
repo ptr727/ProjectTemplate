@@ -502,7 +502,7 @@ report_secret_problems() { # secrets-dir
 }
 
 # Print what the secrets group would set, per store, without writing or printing a value, then the problems, and exit.
-# The exit status is the one a real apply would end with, so a dry run that exits 0 predicts a run that does.
+# The exit status is the one the secrets alone predict, and cmd_apply adds a held workflow token group to it.
 # Only the secrets group has a dry run, and the message says so rather than imply the other groups were previewed.
 dry_run_secrets() { # secrets-dir
     local store sname scope file stores
@@ -950,7 +950,7 @@ cmd_apply() {
         fi
     fi
     # The secret plan is computed here too, since the tree and the files it reads can fail after every API write otherwise.
-    # A stray exits inside plan_secrets, and a dry run exits inside dry_run_secrets, so neither reaches a write.
+    # A stray exits inside plan_secrets, and a dry run exits below once dry_run_secrets returns, so neither reaches a write.
     if [ "$secrets_registered" = true ]; then
         if ! load_secret_names; then
             echo "Aborting before any write." >&2
