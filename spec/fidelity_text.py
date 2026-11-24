@@ -234,7 +234,7 @@ def heading_slug(text):
 
 
 def heading_regions(text, key, want):
-    """`(heading, end)` for each heading at any level whose `key(text)` is `want`, in order, the one place such a region's extent is decided.
+    """`(heading, end)` for each heading at any level whose `key(text)` is `want`, in order.
 
     The heading line is inside the region and the next heading at its level or above ends it, level
     one included. `end` is that heading's line, or None for a region that runs to the end of the

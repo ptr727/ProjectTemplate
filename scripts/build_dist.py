@@ -424,8 +424,9 @@ def heading_body(lines, heading, key):
     They match on the parsed text case-folded, so a re-cased heading still resolves. Two matches are
     two answers to one question, refused rather than resolved to the first. A body ends at any
     heading of its level or above, level one included. One that runs to the end of the file ends
-    before the file's trailing link-reference definitions instead, which belong to the whole document. A fidelity region ends only at the next
-    level-two heading.
+    before the file's trailing link-reference definitions instead, which belong to the whole
+    document. A manifest section, which spec/fidelity_text.py `sections` decides, ends only at the
+    next level-two heading.
     """
     reader = _fidelity_text()
     want = reader.section_key(heading)
