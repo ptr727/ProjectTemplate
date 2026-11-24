@@ -4582,6 +4582,10 @@ class TestPasteSafeRule(BaitCase):
             ("sudo -u app bash -c 'ls <dir>'", "<dir>", "bash"),
             ("runuser -u app -- sh -c 'ls <dir>'", "<dir>", "sh"),
             ("su -c 'echo '\\''<quoted>'\\'' <dir>' root", "<dir>", "su"),
+            ('bash -c "echo ${1:-a b} <dir>"', "<dir>", "bash"),
+            ("ver=$(ssh '<host>' 'cat <path>')", "<path>", "ssh"),
+            ("echo \"$(bash -c 'ls <dir>')\"", "<dir>", "bash"),
+            ("sudo -r sysadm_r -t sysadm_t bash -c 'ls <dir>'", "<dir>", "bash"),
         ):
             with self.subTest(span=span):
                 found = self.hits(f"Run `{span}` here.\n")

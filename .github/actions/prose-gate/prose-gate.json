@@ -174,7 +174,7 @@
       ],
       "launchers": {
         "command": { "operands": 0, "values": [] },
-        "doas": { "operands": 0, "values": ["C", "u"] },
+        "doas": { "operands": 0, "values": ["a", "C", "u"] },
         "env": { "operands": 0, "values": ["C", "S", "u", "--chdir", "--split-string", "--unset"] },
         "exec": { "operands": 0, "values": ["a"] },
         "nice": { "operands": 0, "values": ["n", "--adjustment"] },
@@ -183,7 +183,10 @@
         "stdbuf": { "operands": 0, "values": ["e", "i", "o", "--error", "--input", "--output"] },
         "sudo": {
           "operands": 0,
-          "values": ["C", "D", "g", "p", "R", "T", "U", "u", "--chdir", "--chroot", "--close-from", "--command-timeout", "--group", "--other-user", "--prompt", "--role", "--type", "--user"]
+          "values": [
+            "a", "C", "c", "D", "g", "p", "R", "r", "T", "t", "U", "u", "--auth-type", "--chdir", "--chroot", "--close-from", "--command-timeout", "--group",
+            "--login-class", "--other-user", "--prompt", "--role", "--type", "--user"
+          ]
         },
         "time": { "operands": 0, "values": ["f", "o", "--format", "--output"] },
         "timeout": { "operands": 1, "values": ["k", "s", "--kill-after", "--signal"] },

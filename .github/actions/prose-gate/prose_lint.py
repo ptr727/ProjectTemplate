@@ -1745,24 +1745,27 @@ def shell_char_kinds(text: str, lexer: str) -> str:
     """One letter per character of `text`, saying how the shell reading it splits it into words.
 
     `c` is code and `s` a command substitution's text, which the shell runs rather than passes
-    on. `w` is a line continuation, `#` a comment, and `h` a heredoc. `x` is a quotation, an
-    escape, or any other literal.
+    on, with `S` the outermost substitution's own delimiters. `w` is a line continuation, `#` a
+    comment, and `h` a heredoc. `x` is a quotation, an escape, a `${...}` expansion, or any other
+    literal.
     """
     out: list[str] = []
-    subst = 0
+    depth = subst = 0
     tick = False
     for kind, value in lexer_for(lexer).get_tokens(text + "\n"):
-        if kind in String.Backtick and value == "`":
+        opens = kind in Keyword and value in ("$(", "$((")
+        closes = subst > 0 and kind in Keyword and value in (")", "))")
+        if kind in String.Backtick and value == "`" and not subst:
             tick = not tick
-            out.append("s")
-        elif kind in Keyword and value in ("$(", "$(("):
-            subst += 1
-            out.append("s" * len(value))
-        elif subst and kind in Keyword and value in (")", "))"):
-            subst -= 1
-            out.append("s" * len(value))
+            out.append("S")
+        elif opens or closes:
+            subst += 1 if opens else -1
+            out.append(("S" if subst == int(opens) else "s") * len(value))
         elif subst or tick:
             out.append("s" * len(value))
+        elif depth or (kind in String.Interpol and value == "${"):
+            depth += (value == "${") - (value == "}" and kind in String.Interpol)
+            out.append("x" * len(value))
         elif kind in Comment:
             out.append("#" * len(value))
         elif kind in String.Escape and value == "\\\n":
@@ -1791,7 +1794,7 @@ def shell_commands(text: str, kinds: str) -> list[list[ShellWord]]:
         nonlocal start
         if start >= 0:
             raw, marks = text[start:end], kinds[start:end]
-            masked = "".join(" " if k in "cs" else c for c, k in zip(raw, marks, strict=True))
+            masked = "".join(" " if k in "csS" else c for c, k in zip(raw, marks, strict=True))
             value = dequoted(raw)
             word = ShellWord(
                 start, raw, marks[0], raw if value is None else value, dequoted(masked)
@@ -1940,15 +1943,23 @@ def second_shell_texts(text: str, bare: str, lexer: str) -> list[tuple[str, str]
     """Each string `text` hands to a second shell, as that shell receives it, with its name.
 
     Each is led by the line breaks before it in `text`, so a line counted in it is a line of
-    `text`. A string whose quoting does not close is not read.
+    `text`. A string whose quoting does not close is not read. A command substitution's commands
+    are read on their own, each delimiter standing as a command's end.
     """
     if not SECOND_SHELL_NAME.search(bare):
         return []
+    kinds = shell_char_kinds(text, lexer)
     out: list[tuple[str, str]] = []
-    for words in shell_commands(text, shell_char_kinds(text, lexer)):
+    for words in shell_commands(text, kinds):
         for word, name in handed_words(words):
             if word.handed is not None:
                 out.append(("\n" * text[: word.start].count("\n") + word.handed, name))
+    if "S" in kinds:
+        inner = "".join(
+            c if k == "s" else ";" if k == "S" else "\n" if c == "\n" else " "
+            for c, k in zip(text, kinds, strict=True)
+        )
+        out += second_shell_texts(inner, shell_literals(inner, lexer), lexer)
     return out
 
 
