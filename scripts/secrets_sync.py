@@ -537,8 +537,8 @@ def members(op: Op, vault: Vault) -> dict[str, Item]:
     return items
 
 
-def sync_fields(data: object, item: Item) -> tuple[tuple[str, str], ...]:
-    """The label and value of each field in the `sync` section of `op item get` JSON for `item`.
+def sync_fields(data: object) -> tuple[tuple[str, str], ...]:
+    """The label and value of each field in the `sync` section of one item's `op item get` JSON.
 
     A field is matched by its section's label, since `op` generates the section's id. A field
     outside any section, such as a Document's notes, is passed over. This shape is unmeasured
@@ -546,8 +546,6 @@ def sync_fields(data: object, item: Item) -> tuple[tuple[str, str], ...]:
     """
     if not isinstance(data, dict):
         raise Execution("op item get returned JSON that is not an object")
-    if data.get("id") != item.id:
-        raise Execution(f"op item get returned another item than {item.title}")
     fields = data.get("fields", [])
     if not isinstance(fields, list):
         raise Execution("op item get returned a 'fields' value that is not an array")
@@ -569,15 +567,18 @@ def sync_fields(data: object, item: Item) -> tuple[tuple[str, str], ...]:
     return tuple(found)
 
 
+def item_get_args(vault: Vault, item: Item) -> list[str]:
+    """The `op item get` call that reads one item's fields, shared with `selftest`."""
+    return ["item", "get", item.id, "--vault", vault.id, "--format", "json"]
+
+
 def detailed(op: Op, vault: Vault, item: Item) -> Item:
     """`item` with its `sync` fields read by `op item get`, which the listing does not carry.
 
     A malformed or repeated content-time field warns once per item per run.
     """
-    data = op.json(
-        ["item", "get", item.id, "--vault", vault.id, "--format", "json"], detail=item.title
-    )
-    found = dataclasses.replace(item, sync=sync_fields(data, item))
+    data = op.json(item_get_args(vault, item), detail=item.title)
+    found = dataclasses.replace(item, sync=sync_fields(data))
     if malformed_content_field(found) and (vault.id, item.title) not in op.warned:
         op.warned.add((vault.id, item.title))
         sys.stderr.write(
@@ -665,6 +666,11 @@ def sync_assignments(mode: int, content: datetime.datetime) -> list[str]:
         f"{SYNC_SECTION}.{MODE_FIELD}[text]={mode_text(mode)}",
         f"{SYNC_SECTION}.{CONTENT_FIELD}[text]={content_text(content)}",
     ]
+
+
+def item_edit_args(vault: Vault, item_id: str, mode: int, content: datetime.datetime) -> list[str]:
+    """The `op item edit` call that sets one item's `sync` fields, shared with `selftest`."""
+    return ["item", "edit", item_id, "--vault", vault.id, *sync_assignments(mode, content)]
 
 
 def carries(item: Item, mode: int, content: datetime.datetime) -> list[str]:
@@ -1068,9 +1074,8 @@ def write_fields(op: Op, vault: Vault, item_id: str, plan: Plan) -> None:
         item = members(op, vault).get(plan.title)
         return item is not None and not carries(detailed(op, vault, item), mode, content)
 
-    args = ["item", "edit", item_id, "--vault", vault.id, *sync_assignments(mode, content)]
     try:
-        op.call(args, write=True, detail=plan.title)
+        op.call(item_edit_args(vault, item_id, mode, content), write=True, detail=plan.title)
     except Execution:
         if not landed(written):
             raise
@@ -1099,8 +1104,8 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
             sys.stderr.write(
                 f"op document create reported a failure, yet {plan.title} is listed, so it is verified\n"
             )
-        created = "<new item>" if op.dry_run else listed(op, vault, plan.title, "the write").id
         try:
+            created = "<new item>" if op.dry_run else listed(op, vault, plan.title, "the write").id
             write_fields(op, vault, created, plan)
         except BaseException:
             sys.stderr.write(
@@ -1393,21 +1398,16 @@ def measure_fields(op: Op, vault: Vault, results: list[Measured]) -> None:
     )
 
 
-def measure_item_get(op: Op, vault: Vault, item: Item, results: list[Measured]) -> None:
-    """Read the raw `op item get` key names before any parse, so a missing `fields` is reported."""
-    raw = op.json(
-        ["item", "get", item.id, "--vault", vault.id, "--format", "json"], detail=item.title
-    )
+def measure_item_get(op: Op, vault: Vault, item: Item, results: list[Measured]) -> Item:
+    """`item` with its `sync` fields, its raw key names measured first so a missing one is reported."""
+    raw = op.json(item_get_args(vault, item), detail=item.title)
     keys = sorted(raw) if isinstance(raw, dict) else []
     results.append(Measured("item get carries 'fields'", "fields" in keys, f"keys {keys}"))
+    return dataclasses.replace(item, sync=sync_fields(raw))
 
 
 def set_fields(op: Op, vault: Vault, item: Item, mode: int, content: datetime.datetime) -> None:
-    op.call(
-        ["item", "edit", item.id, "--vault", vault.id, *sync_assignments(mode, content)],
-        write=True,
-        detail=item.title,
-    )
+    op.call(item_edit_args(vault, item.id, mode, content), write=True, detail=item.title)
 
 
 def fields_measured(name: str, item: Item, want: tuple[tuple[str, str], ...]) -> Measured:
@@ -1437,8 +1437,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         results.append(Measured(f"document round-trip, {label}", back == content, detail))
     first = created["trailing-newline"]
     set_fields(op, vault, first, 0o600, SELFTEST_STAMP)
-    measure_item_get(op, vault, first, results)
-    fielded = detailed(op, vault, listed(op, vault, first.title, "op item edit"))
+    fielded = measure_item_get(op, vault, listed(op, vault, first.title, "op item edit"), results)
     results.append(fields_measured("item edit sets the sync fields", fielded, SELFTEST_FIELDS))
     set_fields(op, vault, first, 0o640, SELFTEST_RESTAMP)
     refielded = detailed(op, vault, listed(op, vault, first.title, "op item edit"))

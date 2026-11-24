@@ -786,6 +786,47 @@ class TestPush(Case):
         item = self.item(next(iter(self.fake.vaults)), ".secrets/alpha")
         self.assertEqual(unstamped(item["fields"]), ("mode=0600",))
 
+    def test_every_way_a_create_can_stop_before_its_fields_names_its_recovery(self) -> None:
+        recovery = "push it again by name with --mode"
+        for case in ("relist-fails", "field-write-fails", "interrupt"):
+            with self.subTest(case=case):
+                fake = FakeOp()
+                path = self.write(".secrets/alpha")
+                if case == "relist-fails":
+                    plain = fake.dispatch
+
+                    def failing(
+                        key: tuple[str, ...],
+                        argv: list[str],
+                        env: Mapping[str, str],
+                        fake: FakeOp = fake,
+                        plain: object = plain,
+                    ) -> ss.Outcome:
+                        if key == ("document", "create"):
+                            fake.fail_before.add(("item", "list"))
+                        assert callable(plain)
+                        result = plain(key, argv, env)
+                        assert isinstance(result, ss.Outcome)
+                        return result
+
+                    fake.dispatch = failing  # type: ignore[method-assign]
+                elif case == "field-write-fails":
+                    fake.fail_before.add(("item", "edit"))
+                else:
+                    fake.raise_on[("item", "edit")] = KeyboardInterrupt()
+                err = io.StringIO()
+                with (
+                    unittest.mock.patch.object(ss, "run_op", fake),
+                    unittest.mock.patch.object(sys, "stderr", err),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    try:
+                        code = ss.main(["push", "--bucket", "alpha", str(path)])
+                    except KeyboardInterrupt:
+                        code = None
+                self.assertEqual(code, None if case == "interrupt" else 2)
+                self.assertIn(recovery, err.getvalue())
+
     def test_an_item_carrying_only_tags_is_refused_until_its_fields_exist(self) -> None:
         """No tag is read, so an item whose metadata is still in tags refuses like one with none."""
         vid = self.vault()
@@ -2233,7 +2274,6 @@ class TestOutput(Case):
         section = {"id": "constructed-section", "label": "sync"}
         for bad, message in (
             ([], "not an object"),
-            ({"id": "another"}, "another item"),
             ({"fields": {}}, "not an array"),
             ({"fields": [1]}, "field that is not an object"),
             ({"fields": [{"label": "mode", "value": "0600", "section": "sync"}]}, "'section'"),
