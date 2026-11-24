@@ -61,8 +61,8 @@ this skill exists to prevent. So is forgetting to loop back to the promotion PR 
 
 - Naming this skill, and answering its how-far question, is the maintainer's explicit, current
   go-ahead. It covers every feature -> develop squash merge the drive performs to reach that target.
-  It also covers opening each pull request the drive needs, and the verified remote branch delete
-  `cleanup` runs after each such merge.
+  It also covers opening each pull request the drive needs. And it covers the verified remote
+  branch delete `cleanup` runs after each feature -> develop merge, a peer's merge included.
 - A dispatched drive answers no such question. So what stands in its place is the go-ahead the
   dispatching seat holds, per "How Far to Drive" above. The drive performs the same writes on it.
   Reading this bullet list is not how such a drive establishes that. That is because a worker
