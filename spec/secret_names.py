@@ -99,7 +99,7 @@ def read_tree_blobs(sha: str, read: Callable[[str], Any]) -> dict[str, tuple[Any
 
 
 def contents_text(content: Any) -> str | None:
-    """The decoded text of a contents API response, or None where it holds no inline file content.
+    """The decoded text of a contents or git blobs API response, or None where it holds no inline file content.
 
     An empty file decodes to an empty string.
     """

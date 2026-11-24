@@ -180,14 +180,9 @@ class AuditAgreementCase(unittest.TestCase):
                 with unittest.mock.patch.object(
                     resolve_secrets.gh_graphql_module(), "run_subprocess", gh
                 ):
-                    tree = resolve_secrets.read_tree("owner/ExampleRepo", "main")
+                    listed = resolve_secrets.read_tree("owner/ExampleRepo", "main")
                     plan = secret_names.secret_plan(
-                        SECRETS,
-                        e,
-                        tree,
-                        "ExampleRepo",
-                        None,
-                        resolve_secrets.project_reader("owner/ExampleRepo", "main"),
+                        SECRETS, e, listed.paths, "ExampleRepo", None, listed.read_project
                     )
                 from_plan: dict[str, set[str]] = {"actions": set(), "dependabot": set()}
                 for row in plan["rows"]:
@@ -204,7 +199,7 @@ class AuditAgreementCase(unittest.TestCase):
             audited = audit.repo_tree("owner/ExampleRepo", empty_head)
         gh = FakeGh(("tests/test_a.py",), tree_sha=secret_names.EMPTY_TREE_SHA)
         with unittest.mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh):
-            resolved = resolve_secrets.read_tree("owner/ExampleRepo", "main")
+            resolved = resolve_secrets.read_tree("owner/ExampleRepo", "main").paths
         self.assertEqual(audited, resolved)
         assert audited is not None
         plan = secret_names.secret_plan(SECRETS, entry(), resolved, "ExampleRepo")
@@ -307,7 +302,7 @@ class FakeGh:
     A spawned stub `gh` cannot, since Windows' CreateProcess finds only a `gh.exe`.
     The branch read answers tree_sha, TREE_SHA standing for any tree that holds files, and a tree read answers only for that SHA.
     GitHub answers a tree read of the empty tree with 404, so the stub does too.
-    A contents read on the main branch answers the text `projects` holds for its path.
+    Each blob's SHA is made from its path, and a blob read answers the text `projects` holds for that path.
     """
 
     def __init__(
@@ -349,13 +344,13 @@ class FakeGh:
             if sha != self.tree_sha or sha == secret_names.EMPTY_TREE_SHA:
                 return gh_failure("404")
             payload = {
-                "tree": [{"type": "blob", "path": p} for p in self.tree],
+                "tree": [{"type": "blob", "path": p, "sha": f"sha-{p}"} for p in self.tree],
                 "truncated": self.truncated,
             }
             return 0, json.dumps(payload), ""
-        if "/contents/" in endpoint:
-            path, _, ref = endpoint.partition("/contents/")[2].partition("?ref=")
-            if ref != "main" or path not in self.projects:
+        if "/git/blobs/" in endpoint:
+            path = endpoint.partition("/git/blobs/sha-")[2]
+            if path not in self.projects:
                 return gh_failure("404")
             content = base64.b64encode(self.projects[path].encode("utf-8")).decode("ascii")
             return 0, json.dumps({"content": content, "encoding": "base64"}), ""
@@ -422,6 +417,20 @@ class NamesCliCase(unittest.TestCase):
                 self.assertEqual(code, 0, err)
                 names = [r["name"] for r in json.loads(out)["rows"]]
                 self.assertEqual("CODECOV_TOKEN" in names, owed)
+
+    def test_a_bare_path_set_reads_no_project_and_keeps_the_claim(self) -> None:
+        registry = {"repos": [entry(types=["csharp"])]}
+        gh = FakeGh(missing_gh=True)
+        with unittest.mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh):
+            plan = resolve_secrets.resolve_names(
+                SECRETS,
+                registry,
+                "ExampleRepo",
+                "owner/ExampleRepo",
+                lambda slug, branch: set(CSHARP_NAMED_ONLY),
+            )
+        self.assertIn("CODECOV_TOKEN", [r["name"] for r in plan["rows"]])
+        self.assertEqual(gh.calls, [])
 
     def test_a_failed_project_read_exits_one_naming_the_repo(self) -> None:
         gh = FakeGh(("src/App.csproj",))
