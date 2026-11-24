@@ -37,7 +37,7 @@ Each language defines a **clean-compile** verification: the combination of build
   1. An **in-code annotation on the specific symbol**, with a justification, in the language's attribute/comment form, never a blanket pragma spanning a region.
   2. The **owning project's local config** when the exception is project-wide for one project (e.g. a test project's own `.editorconfig` / `pyproject.toml`).
   3. The **root / shared config** only when the suppression is genuinely applicable to **every** project in the repo.
-- **Never blanket-relax a batch of rules project-wide** to get a port to build. The per-language mechanics (which attribute, which config key) are in the Skill a language section names.
+- **Never blanket-relax a batch of rules project-wide** to get a port to build. The per-language mechanics (which attribute, which config key) are in the Skill a language section names, where it names one.
 
 ### Operations and Failure Messages
 
