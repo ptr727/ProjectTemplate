@@ -15,7 +15,7 @@
     "home-path": { "default": true, "summary": "an absolute home path naming a real account", "file_exemption": "home_path_exempt" },
     "dead-path": { "default": true, "summary": "a mention of a path git once tracked and the tree no longer holds" },
     "issue-ref": { "default": true, "summary": "an issue or pull request reference in a leading comment, a Python docstring, or instruction text" },
-    "paste-safe": { "default": true, "summary": "a bare <placeholder>, a [Placeholder] or [--flag] glob, or an a|b alternation in a Markdown command a reader copies and runs" }
+    "paste-safe": { "default": true, "summary": "a bare <placeholder>, a [Placeholder] or [--flag] glob, or an a|b alternation in a Markdown command a reader copies and runs, or in a string that command hands a second shell" }
   },
   "messages": {
     "charset": "{name} (U+{code}) -> {hint}",
@@ -38,6 +38,10 @@
     "paste-safe-bracket": "placeholder {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> quote it as \"<{name}>\"",
     "paste-safe-flag": "optional flag {token!r} unquoted in a copy-and-run command, which the shell reads as a glob -> leave it out and name it in a parenthetical, or a trailing comment in a fence",
     "paste-safe-alternation": "alternation {token!r} unquoted in a copy-and-run command, which the shell reads as a pipe -> write the common value and name the other in a parenthetical, or space a real pipe",
+    "paste-safe-in-shell": "placeholder {token!r} unquoted in the string {shell!r} hands a second shell, which reads it as a redirection -> quote it inside that string, so the second shell receives \"{token}\"",
+    "paste-safe-bracket-in-shell": "bracket {token!r} unquoted in the string {shell!r} hands a second shell, which reads it as a glob -> quote it inside that string, as a pattern is, or write \"<{name}>\" there where it is a placeholder",
+    "paste-safe-flag-in-shell": "bracket {token!r} unquoted in the string {shell!r} hands a second shell, which reads it as a glob -> quote it inside that string, as a pattern is, or leave it out where it is an optional flag",
+    "paste-safe-alternation-in-shell": "alternation {token!r} unquoted in the string {shell!r} hands a second shell, which reads it as a pipe -> quote it inside that string, as a pattern is, or write the common value there where it is a placeholder, or space a real pipe",
     "error-empty-exclude": "--exclude was given an empty value, which matches every path and would report a whole-tree scan as clean. Drop the blank entry rather than passing it, the way the composite action skips a blank line in .github/prose-gate-excludes.",
     "error-not-a-path": "requested path(s) are not a file or a directory: {paths}. Refusing rather than falling back to the current directory, which would scan one tree and choose the rule set from another.",
     "error-many-repositories": "the requested paths span more than one repository ({roots}). Each declares its own workflow model, so no single rule set is correct for all of them. Run the gate once per repository.",
@@ -156,8 +160,46 @@
     "script_suffixes": [".bash", ".ps1", ".py", ".sh"],
     "fences": { "bash": "shell", "ps1": "powershell", "powershell": "powershell", "pwsh": "powershell", "sh": "shell", "shell": "shell", "zsh": "shell" },
     "dialects": {
-      "shell": { "lexer": "bash", "shapes": ["angle", "bracket", "alternation"] },
+      "shell": { "lexer": "bash", "shapes": ["angle", "bracket", "alternation"], "second_shells": true },
       "powershell": { "lexer": "powershell", "shapes": ["angle", "alternation"] }
+    },
+    "second_shells": {
+      "shells": [
+        { "names": ["ash", "bash", "dash", "ksh", "mksh", "sh", "zsh"], "string": "operand", "flags": ["c"], "values": ["O", "o", "--init-file", "--rcfile"] },
+        {
+          "names": ["runuser", "su"], "string": "value", "flags": ["c", "--command", "--session-command"], "commands": ["u", "--user"],
+          "values": ["G", "g", "s", "u", "w", "--group", "--shell", "--supp-group", "--user", "--whitelist-environment"]
+        },
+        {
+          "names": ["ssh"], "string": "rest", "flags": [],
+          "values": ["B", "b", "c", "D", "E", "e", "F", "I", "i", "J", "L", "l", "m", "O", "o", "P", "p", "Q", "R", "S", "W", "w"]
+        }
+      ],
+      "launchers": {
+        "command": { "operands": 0, "values": [], "no_run": ["V", "v"] },
+        "doas": { "operands": 0, "values": ["a", "C", "u"] },
+        "env": { "operands": 0, "values": ["C", "S", "u", "--chdir", "--split-string", "--unset"] },
+        "exec": { "operands": 0, "values": ["a"] },
+        "nice": { "operands": 0, "values": ["n", "--adjustment"] },
+        "nohup": { "operands": 0, "values": [] },
+        "setsid": { "operands": 0, "values": [] },
+        "stdbuf": { "operands": 0, "values": ["e", "i", "o", "--error", "--input", "--output"] },
+        "sudo": {
+          "operands": 0,
+          "no_run": ["e", "l", "--edit", "--list"],
+          "values": [
+            "a", "C", "c", "D", "g", "p", "R", "r", "T", "t", "U", "u", "--auth-type", "--chdir", "--chroot", "--close-from", "--command-timeout", "--group",
+            "--login-class", "--other-user", "--prompt", "--role", "--type", "--user"
+          ]
+        },
+        "time": { "operands": 0, "values": ["f", "o", "--format", "--output"] },
+        "timeout": { "operands": 1, "values": ["k", "s", "--kill-after", "--signal"] },
+        "xargs": {
+          "operands": 0,
+          "values": ["a", "d", "E", "I", "L", "n", "P", "s", "--arg-file", "--delimiter", "--max-args", "--max-chars", "--max-procs"]
+        }
+      },
+      "reserved": ["!", "{", "do", "elif", "else", "if", "then", "until", "while"]
     }
   },
   "languages": {

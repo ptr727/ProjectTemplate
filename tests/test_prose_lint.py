@@ -4566,6 +4566,135 @@ class TestPasteSafeRule(BaitCase):
     def test_an_alternation_inside_a_placeholder_is_one_finding(self) -> None:
         self.assertEqual(1, len(self.hits("Run `configure.sh check o/r <release|operational>`.\n")))
 
+    def test_a_placeholder_in_a_string_a_second_shell_runs_is_a_finding(self) -> None:
+        """The first shell takes the string literally, and the second reads it as a command."""
+        for span, token, shell in (
+            ("su -l root -c 'usermod -aG sudo <account>'", "<account>", "su"),
+            ("su --command='id <account>' root", "<account>", "su"),
+            ("runuser -l app -c 'ls [RepoName]'", "[RepoName]", "runuser"),
+            ("sudo sh -c 'echo on > <file>'", "<file>", "sh"),
+            ('bash -c "ls <dir>"', "<dir>", "bash"),
+            ("bash -o pipefail -ec 'deploy release|operational'", "release|operational", "bash"),
+            ("ssh -p 22 '<host>' 'rm <path>'", "<path>", "ssh"),
+            ("ssh '<host>' -t 'ls' '<dir>'", "<dir>", "ssh"),
+            ("ssh '<host>' 'sudo sh -c \"id <account>\"'", "<account>", "sh"),
+            ("su --session-command='id <account>' root", "<account>", "su"),
+            ("sudo -u app bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("runuser -u app -- sh -c 'ls <dir>'", "<dir>", "sh"),
+            ("su -c 'echo '\\''<quoted>'\\'' <dir>' root", "<dir>", "su"),
+            ('bash -c "echo ${1:-a b} <dir>"', "<dir>", "bash"),
+            ("ver=$(ssh '<host>' 'cat <path>')", "<path>", "ssh"),
+            ("echo \"$(bash -c 'ls <dir>')\"", "<dir>", "bash"),
+            ("sudo -r sysadm_r -t sysadm_t bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("timeout 600 bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("env -u LANG bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("xargs -n 1 sh -c 'ls <dir>'", "<dir>", "sh"),
+            ("sudo -upostgres bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("find . | xargs --replace sh -c 'cp {} <dest>'", "<dest>", "sh"),
+            ("xargs --max-lines sh -c 'ls <dir>'", "<dir>", "sh"),
+            ("runuser -lc 'ls <dir>' app", "<dir>", "runuser"),
+            ("ssh '<host>' sudo sh -c \"'ls <dir>'\"", "<dir>", "sh"),
+            ("bash -oc pipefail 'ls <dir>'", "<dir>", "bash"),
+            ("su -- root -c 'id <dir>'", "<dir>", "su"),
+            ("runuser app -- -c 'ls <dir>'", "<dir>", "runuser"),
+            ("$ bash -c 'ls <dir>'", "<dir>", "bash"),
+        ):
+            with self.subTest(span=span):
+                found = self.hits(f"Run `{span}` here.\n")
+                self.assertEqual(1, len(found), found)
+                self.assertIn(repr(token), found[0][1])
+                self.assertIn(f"the string {shell!r} hands a second shell", found[0][1])
+
+    def test_a_placeholder_quoted_for_the_second_shell_passes(self) -> None:
+        for span in (
+            "su -l root -c 'usermod -aG sudo \"<account>\"'",
+            'bash -c "ls \\"<dir>\\""',
+            "ssh -i '<key>' '<host>'",
+            "ssh -p 22 '<host>' 'ls' > '<out>'",
+            "bash -c 'echo \"$1\"' _ '<arg>'",
+            "bash --rcfile '<file>' -c 'ls'",
+            "su -s '<shell>' -c 'id' root",
+            "sudo chsh -s /bin/bash '<account>'",
+            "sh -c \"run $(cat '<file>')\"",
+            "timeout 600 bash -c 'for n in 1 2; do sleep \"$n\"; done'",
+            "git commit -m 'run bash -c <x>'",
+            "su -c 'echo '\\''<account>'\\''' root",
+            "bash -c 'ls '\\''<dir>'\\'",
+            "rsync -av -e ssh '<src>' '<host>:<dst>'",
+            "sudo apt install -y ssh '<pkg>' '<other>'",
+            "git clone https://example.com/x/ssh '<dir>' '<other>'",
+            "runuser -u postgres -- psql -c 'CREATE DATABASE <name>'",
+            "command -v sh -c 'ls <dir>'",
+            "sudo -l sh -c 'ls <dir>'",
+            "ssh '<host>' tail $(cat '<file>')",
+            'ssh \'<host>\' tail "$(cat "<file>")"',
+        ):
+            with self.subTest(span=span):
+                self.assertEqual([], self.hits(f"Run `{span}` here.\n"))
+
+    def test_a_second_shell_string_ends_with_its_command(self) -> None:
+        text = "```sh\nssh '<host>'\necho '<not run remotely>'\nbash -c \\\n  'cat <file>'\n```\n"
+        self.assertEqual([5], self.lines(text))
+
+    def test_a_second_shell_opening_a_backtick_substitution_is_read(self) -> None:
+        self.assertEqual([2], self.lines("```sh\necho `bash -c 'ls <dir>'`\n```\n"))
+
+    def test_a_shape_in_a_second_shell_string_is_told_to_quote_it_there(self) -> None:
+        """A bracket or a pipe there may be a pattern rather than a placeholder."""
+        for span, advice in (
+            ("bash -c 'deploy release|operational'", "or write the common value there"),
+            ("bash -c 'ls|wc -l'", "or space a real pipe"),
+            ("bash -c 'ls [--all]'", "or leave it out where it is an optional flag"),
+            ("bash -c 'ls [RepoName]'", 'or write "<RepoName>" there'),
+            ("ssh '<host>' grep '[Ee]rror' log", "quote it inside that string, as a pattern is"),
+            ("bash -c 'ls <dir>'", "quote it inside that string, so the second shell receives"),
+        ):
+            with self.subTest(span=span):
+                found = self.hits(f"Run `{span}` here.\n")
+                self.assertEqual(1, len(found), found)
+                self.assertIn(advice, found[0][1])
+                self.assertIn("hands a second shell", found[0][1])
+
+    def test_a_placeholder_the_first_shell_reports_is_reported_once(self) -> None:
+        for span in ("ssh '<host>' ls [RepoName]", "ssh '<host>' ls \"$d\"/<name>"):
+            with self.subTest(span=span):
+                found = self.hits(f"Run `{span}` here.\n")
+                self.assertEqual(1, len(found), found)
+                self.assertIn("in a copy-and-run command", found[0][1])
+
+    def test_a_second_shell_wrapped_across_a_span_line_is_read(self) -> None:
+        for text in (
+            "Run `sudo sh -c\n'echo on > <file>'` here.\n",
+            "Run `ssh '<host>'\n'ls <file>'` here.\n",
+            "Run `ssh '<host>' sudo sh -c\n\"'ls <file>'\"` here.\n",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual([2], self.lines(text))
+
+    def test_the_command_ssh_joins_stays_one_line(self) -> None:
+        fence = "```sh\nssh '<host>' sudo sh -c \\\n  \"'ls <dir>'\"\n```\n"
+        self.assertEqual([3], self.lines(fence))
+        self.assertEqual([], self.lines("Run `ssh '<host>' echo\nsh -c \"'ls <dir>'\"` here.\n"))
+
+    def test_a_span_break_inside_a_quoted_ssh_word_renders_as_a_space(self) -> None:
+        self.assertEqual([1], self.lines("Run `ssh '<host>' 'sudo sh -c\n\"ls <file>\"'` here.\n"))
+        self.assertEqual([], self.lines("Run `ssh '<host>' 'echo # note\n<file>'` here.\n"))
+
+    def test_a_launcher_name_alone_opens_no_command_span(self) -> None:
+        """A device console's `time` is prose, so a launcher is read only inside a command."""
+        self.assertEqual([], self.hits("Then type `time <epoch_seconds>` at the console.\n"))
+        self.assertEqual([2], self.lines("```sh\nnice -n 5 dash -c 'ls <dir>'\n```\n"))
+
+    def test_a_second_shell_after_a_heredoc_label_is_read(self) -> None:
+        text = "```sh\ncat <<'END' | sudo sh -c 'cat > <file>'\nbody\nEND\n```\n"
+        found = self.hits(text)
+        self.assertIn(2, [n for n, _ in found])
+        self.assertTrue(any("the string 'sh' hands" in message for _, message in found), found)
+
+    def test_a_second_shell_after_a_reserved_word_is_read(self) -> None:
+        text = "```sh\nif ssh '<host>' 'test -d <dir>'; then echo ok; fi\n```\n"
+        self.assertEqual([2], self.lines(text))
+
     def test_the_rule_gates_by_default(self) -> None:
         """CI passes no `--check`, so only a default rule reaches a pull request."""
         self.assertIn("paste-safe", prose_lint.DEFAULT_RULES)
