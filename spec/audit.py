@@ -16,7 +16,6 @@ A shallow hub clone makes a sweep report one ERROR per repo, and `--issue` exits
 """
 
 import argparse
-import base64
 import fnmatch
 import functools
 import hashlib
@@ -59,6 +58,7 @@ from fidelity_text import (
 from secret_names import (  # noqa: F401  # re-exported, since the tests and helpers name them on audit
     EMPTY_TREE_SHA,
     compare_stores,
+    contents_text,
     coverage_candidate_types,
     coverage_claiming_types,
     coverage_types,
@@ -1850,16 +1850,6 @@ def intent_ref(item, path):
     return path, None
 
 
-def contents_text(content):
-    """The decoded text of a contents API response, or None where it holds no inline file content.
-
-    An empty file decodes to an empty string.
-    """
-    if not isinstance(content, dict) or content.get("encoding") != "base64":
-        return None
-    return base64.b64decode(content["content"]).decode("utf-8", "replace")
-
-
 def read_baseline_file(slug, ref, path):
     """A baseline file's contents response at `ref`, a branch or a commit, or None where it is absent."""
     return gh(f"repos/{slug}/contents/{path}?ref={ref}", ok404=True)
@@ -2071,6 +2061,7 @@ class Run:
     head: Any = None
     findings: list = field(default_factory=list)
     content: dict = field(default_factory=dict)
+    projects: dict = field(default_factory=dict)
 
     @functools.cached_property
     def hub(self):
@@ -2094,7 +2085,13 @@ class Run:
 
     @functools.cached_property
     def coverage_types(self):
-        return coverage_types(self.spec["secrets"], self.entry, self.tree)
+        return coverage_types(self.spec["secrets"], self.entry, self.tree, self.read_project)
+
+    def read_project(self, path):
+        """A C# project's text at the audited commit, read once per run, for the coverage detection."""
+        if path not in self.projects:
+            self.projects[path] = self.read_text(path)
+        return self.projects[path]
 
     @functools.cached_property
     def baseline(self):
@@ -2327,7 +2324,7 @@ def check_secrets_names(run):
     for store in ("actions", "dependabot"):
         data = gh(f"repos/{run.slug}/{store}/secrets?per_page=100")
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
-    required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree)
+    required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree, run.read_project)
     return [f for f in compare_stores(required, forbidden, stores) if f[0] != "OK"]
 
 

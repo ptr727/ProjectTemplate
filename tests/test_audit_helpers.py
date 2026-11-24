@@ -3558,6 +3558,16 @@ class AnchoredLastChangeCase(unittest.TestCase):
                 self.assertIsNotNone(audit.extract_anchored(text, anchor))
 
 
+LIBRARY = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>'
+FLAG = "<PropertyGroup><IsTestProject>%s</IsTestProject></PropertyGroup>"
+REFERENCE = '<ItemGroup><PackageReference Include="%s" /></ItemGroup>'
+
+
+def project(*parts: str) -> str:
+    """An SDK-style project text holding PARTS, each a property or item group."""
+    return '<Project Sdk="Microsoft.NET.Sdk">' + "".join(parts) + "</Project>"
+
+
 class CoverageTypesCase(unittest.TestCase):
     """Holds the coverage-candidate and coverage-claiming type helpers."""
 
@@ -3578,8 +3588,9 @@ class CoverageTypesCase(unittest.TestCase):
                 self.assertEqual(got, expected)
 
     def test_coverage_claiming_types(self) -> None:
+        """A dict tree maps each path to the project text its reader answers, and a set tree has no reader."""
         type_mechs = {"csharp": "codecov", "python": "codecov"}
-        coverage_cases = [
+        coverage_cases: list[tuple[list[str], Any, list[str], str]] = [
             (["python"], {"src/pkg/__init__.py", "pyproject.toml"}, [], "python, no tests"),
             (["python"], {"tests/test_a.py", "pyproject.toml"}, ["python"], "python with tests"),
             (
@@ -3588,21 +3599,98 @@ class CoverageTypesCase(unittest.TestCase):
                 ["python"],
                 "python lint-only, with tests, owes the claim same as build",
             ),
-            (["csharp"], {"src/App/App.csproj"}, [], "csharp, no test project"),
-            (["csharp"], {"test/App.Tests/App.Tests.csproj"}, ["csharp"], "csharp with tests"),
-            (["csharp"], {"src/Tests/App.csproj"}, ["csharp"], "csharp, located under Tests/"),
+            (["csharp"], {"src/App/App.csproj": LIBRARY}, [], "csharp, no test project"),
             (
                 ["csharp"],
-                {"test/Specs.csproj"},
+                {"test/App.Tests/App.Tests.csproj": project(REFERENCE % "xunit.v3")},
                 ["csharp"],
-                "csharp, located as a test, named nothing",
+                "csharp, a test project by its framework reference",
             ),
             (
                 ["csharp"],
-                {"src/App/App.csproj", "docs/x.md"},
+                {"test/App.Tests/App.Tests.csproj": LIBRARY, "src/Tests/App.csproj": LIBRARY},
                 [],
-                "csharp, neither named nor located as a test",
+                "csharp, named and located as tests while neither project says so",
             ),
+            (
+                ["csharp"],
+                {"src/appunittest.csproj": project(FLAG % "true")},
+                ["csharp"],
+                "csharp, a name no pattern matched, carrying IsTestProject",
+            ),
+            (
+                ["csharp"],
+                {"src/app_unit_test.csproj": project(REFERENCE % "Microsoft.NET.Test.Sdk")},
+                ["csharp"],
+                "csharp, a name no pattern matched, carrying only a package reference",
+            ),
+            (
+                ["csharp"],
+                {
+                    "src/Testament.csproj": LIBRARY,
+                    "src/TestUtilities.csproj": project(REFERENCE % "xunit.v3.assert"),
+                    "src/Contest.csproj": LIBRARY,
+                    "src/Latest.csproj": LIBRARY,
+                },
+                [],
+                "csharp, names carrying Test where no project says it is one",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": project(FLAG % " True ")},
+                ["csharp"],
+                "csharp, the property compared as MSBuild does, ignoring case and space",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": project(FLAG % "false", REFERENCE % "Microsoft.NET.Test.Sdk")},
+                [],
+                "csharp, a literal false property outweighs a framework reference",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": project(FLAG % "$(Flag)")},
+                ["csharp"],
+                "csharp, a property only an evaluation could read keeps the claim",
+            ),
+            (
+                ["csharp"],
+                {
+                    "src/A.csproj": (
+                        '<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">'
+                        + (REFERENCE % "NUnit3TestAdapter")
+                        + "</Project>"
+                    )
+                },
+                ["csharp"],
+                "csharp, a namespaced legacy project read by its local names",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": '<Project Sdk="Microsoft.NET.Sdk;MSTest.Sdk/3.6.1" />'},
+                ["csharp"],
+                "csharp, a test SDK named in a versioned Sdk list",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": '<Project><Sdk Name="mstest.sdk" /></Project>'},
+                ["csharp"],
+                "csharp, a test SDK element, its id compared case-insensitively",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": None},
+                ["csharp"],
+                "csharp, an unread project keeps the claim",
+            ),
+            (
+                ["csharp"],
+                {"src/A.csproj": "<Project>"},
+                ["csharp"],
+                "csharp, an unparsable project keeps the claim",
+            ),
+            (["csharp"], {"src/A.csproj"}, ["csharp"], "csharp, no reader keeps the claim"),
+            (["csharp"], {"src/A.cs", "README.md"}, [], "csharp, a tree holding no project"),
             (
                 ["python"],
                 {"test_app.py", "pyproject.toml"},
@@ -3634,24 +3722,6 @@ class CoverageTypesCase(unittest.TestCase):
                 "python, a test directory holding Python",
             ),
             (
-                ["csharp"],
-                {"test/App.UnitTest.csproj"},
-                ["csharp"],
-                "csharp, singular Test in the name",
-            ),
-            (
-                ["csharp"],
-                {"src/widget.tests.csproj"},
-                ["csharp"],
-                "csharp, a lowercase test segment outside a test directory",
-            ),
-            (
-                ["csharp"],
-                {"src/Contest.csproj", "src/Latest.csproj"},
-                [],
-                "csharp, names carrying those letters inside a word rather than as a segment",
-            ),
-            (
                 ["python"],
                 {"test/test_a.py", "pyproject.toml"},
                 ["python"],
@@ -3661,7 +3731,10 @@ class CoverageTypesCase(unittest.TestCase):
             (["python"], {"tests"}, [], "python, a file named tests is not a directory"),
             (
                 ["csharp", "python"],
-                {"test/App.Tests/App.Tests.csproj", "tools/py/pyproject.toml"},
+                {
+                    "test/App.Tests/App.Tests.csproj": project(FLAG % "true"),
+                    "tools/py/pyproject.toml": None,
+                },
                 ["csharp"],
                 "mixed repo, the tested C# side claims coverage, the untested lint-only python side does not",
             ),
@@ -3670,8 +3743,53 @@ class CoverageTypesCase(unittest.TestCase):
         ]
         for types_in, tree_in, expected, label in coverage_cases:
             with self.subTest(label):
-                got = audit.coverage_claiming_types(types_in, type_mechs, tree_in)
+                read = tree_in.get if isinstance(tree_in, dict) else None
+                paths = None if tree_in is None else set(tree_in)
+                got = audit.coverage_claiming_types(types_in, type_mechs, paths, read)
                 self.assertEqual(got, expected)
+
+    def test_projects_are_read_in_path_order_until_one_is_a_test_project(self) -> None:
+        texts = {
+            "b/B.csproj": project(FLAG % "true"),
+            "a/A.csproj": LIBRARY,
+            "c/C.csproj": project(FLAG % "true"),
+            "a/A.cs": None,
+        }
+        reads: list[str] = []
+
+        def read(path: str) -> str | None:
+            reads.append(path)
+            return texts[path]
+
+        got = audit.coverage_claiming_types(["csharp"], {"csharp": "codecov"}, set(texts), read)
+        self.assertEqual(got, ["csharp"])
+        self.assertEqual(reads, ["a/A.csproj", "b/B.csproj"])
+        reads.clear()
+        audit.coverage_claiming_types(["python"], {"python": "codecov"}, set(texts), read)
+        self.assertEqual(reads, [], "a type that reads no project reads none")
+
+    def test_the_audit_reads_each_project_once_at_the_audited_commit(self) -> None:
+        head = {"commit": {"sha": "c1", "commit": {"tree": {"sha": "t1"}}}}
+        text = project(FLAG % "true")
+        calls: list[str] = []
+
+        def fake_gh(path: str, ok404: bool = False) -> Any:
+            calls.append(path)
+            if "/git/trees/" in path:
+                blob = {"type": "blob", "path": "src/A.csproj", "sha": "b1", "mode": "100644"}
+                return {"tree": [blob], "truncated": False}
+            if path == "repos/owner/R/contents/src/A.csproj?ref=c1":
+                return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
+            return None
+
+        spec = {"secrets": {"typeMechanisms": {"csharp": "codecov"}}}
+        run = audit.Run({"types": ["csharp"]}, spec, "owner/R", "main", {}, None, None, head)
+        with mock.patch.object(audit, "gh", fake_gh):
+            self.assertEqual(run.coverage_types, ["csharp"])
+            self.assertEqual(run.read_project("src/A.csproj"), text)
+        self.assertEqual(
+            [c for c in calls if "/contents/" in c], ["repos/owner/R/contents/src/A.csproj?ref=c1"]
+        )
 
 
 class PythonTypeFindingsCase(unittest.TestCase):

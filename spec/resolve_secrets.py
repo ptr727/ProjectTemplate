@@ -6,7 +6,7 @@ Both read a repo's tree on its registry ground branch, the branch the audit read
 
 `names` is run by repo-config/configure.sh for one repo.
 It reads that repo's tree with read-only gh calls.
-The tree decides only whether a repo with tests owes the codecov mechanism.
+The tree, and the text of its C# projects, decide only whether a repo with tests owes the codecov mechanism.
 It prints a JSON object with the rows (name, scope, file, stores), the forbidden names, and the strays.
 A stray is the file a name would have at the wrong scope.
 With `--live` it also reads each secret store and adds the findings of secret_names.compare_stores.
@@ -34,6 +34,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.parse
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -102,13 +103,16 @@ def resolve_names(
             f"the registry entry {name} names {identity}, not {slug}. "
             "Refusing to resolve secrets for a repository the entry does not name"
         )
+    branch = ground_branch(entry, registry)
     try:
-        tree = tree_reader(slug, ground_branch(entry, registry))
+        tree = tree_reader(slug, branch)
     except BranchMissing as e:
         return {"rows": [], "forbidden": [], "strays": [], "skip": str(e)}
     try:
         live = live_reader(slug) if live_reader else None
-        return secret_names.secret_plan(secrets, entry, tree, name, live)
+        return secret_names.secret_plan(
+            secrets, entry, tree, name, live, project_reader(slug, branch)
+        )
     except secret_names.SecretNameError as e:
         raise ResolveError(str(e)) from e
 
@@ -148,6 +152,22 @@ def read_tree(slug: str, branch: str) -> set[str]:
     if blobs is None:
         raise ResolveError(f"{slug}: the {branch} tree is unreadable or truncated")
     return set(blobs)
+
+
+def project_reader(slug: str, branch: str) -> secret_names.ProjectReader:
+    """A reader of one file's text on BRANCH of SLUG, the branch read_tree() listed.
+
+    It answers None for a response holding no inline content, and raises on a failed read.
+    A push landing between the listing and the read is answered at the newer commit, which the next run reads whole.
+    """
+
+    def read(path: str) -> str | None:
+        endpoint = (
+            f"repos/{slug}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}"
+        )
+        return secret_names.contents_text(gh_json(["gh", "api", endpoint], slug))
+
+    return read
 
 
 def gh_run(command: list[str], slug: str) -> str:
@@ -225,14 +245,16 @@ def fleet_expectations(
             raise ResolveError(f"registry entry {name!r} has no name or no GitHub url")
         try:
             try:
-                tree: set[str] | None = tree_reader(slug, ground_branch(entry, registry))
+                branch = ground_branch(entry, registry)
+                tree: set[str] | None = tree_reader(slug, branch)
+                read_project: secret_names.ProjectReader | None = project_reader(slug, branch)
                 skip = None
             except BranchMissing as e:
                 # Without a tree no test directory can be seen, and an unread tree is read as every candidate keeping its claim.
                 # That is the right reading here, since claiming a file too many only keeps it from being called unclaimed.
                 # Nothing is created from it, because only `expected` drives creation.
-                tree, skip = None, str(e)
-            plan = secret_names.secret_plan(secrets, entry, tree, name)
+                tree, read_project, skip = None, None, str(e)
+            plan = secret_names.secret_plan(secrets, entry, tree, name, None, read_project)
         except secret_names.SecretNameError as e:
             raise ResolveError(f"{name}: {e}") from e
         strays |= set(plan["strays"])
