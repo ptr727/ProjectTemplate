@@ -4589,6 +4589,8 @@ class TestPasteSafeRule(BaitCase):
             ("timeout 600 bash -c 'ls <dir>'", "<dir>", "bash"),
             ("env -u LANG bash -c 'ls <dir>'", "<dir>", "bash"),
             ("xargs -n 1 sh -c 'ls <dir>'", "<dir>", "sh"),
+            ("ssh '<host>' sudo sh -c \"'ls <dir>'\"", "<dir>", "sh"),
+            ("bash -oc pipefail 'ls <dir>'", "<dir>", "bash"),
             ("su -- root -c 'id <dir>'", "<dir>", "su"),
             ("runuser app -- -c 'ls <dir>'", "<dir>", "runuser"),
             ("$ bash -c 'ls <dir>'", "<dir>", "bash"),
@@ -4644,6 +4646,11 @@ class TestPasteSafeRule(BaitCase):
                 self.assertEqual(1, len(found), found)
                 self.assertIn(advice, found[0][1])
                 self.assertIn("the string 'bash' hands a second shell", found[0][1])
+
+    def test_an_unquoted_argument_ssh_joins_is_reported_once(self) -> None:
+        found = self.hits("Run `ssh '<host>' ls [RepoName]` here.\n")
+        self.assertEqual(1, len(found), found)
+        self.assertIn("in a copy-and-run command", found[0][1])
 
     def test_a_second_shell_after_a_heredoc_label_is_read(self) -> None:
         text = "```sh\ncat <<'END' | sudo sh -c 'cat > <file>'\nbody\nEND\n```\n"
