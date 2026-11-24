@@ -14,15 +14,21 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import yaml
 from host_capability import bash_or_skip
 from workflow_steps import step_script
 
 REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "spec"))
+import audit
+
 HOOK = REPO / ".github" / "actions" / "resolve-upstream"
 ACTION = HOOK / "action.yml"
 CALLER = REPO / ".github" / "workflows" / "check-host-tool-lines.yml"
@@ -274,6 +280,41 @@ class TrackerShapeTests(unittest.TestCase):
         self.assertEqual({"dotnet", "python"}, set(state))
         self.assertTrue(all(isinstance(value, str) for value in state.values()))
         self.assertEqual(json.dumps(state, indent=2, sort_keys=True) + "\n", text)
+
+
+class HubOnlyCollisionTests(unittest.TestCase):
+    """The audit's hub-only reading leaves a carrier's own resolve-upstream hook alone.
+
+    The task requires every caller to carry that hook, so the hub's copy shares the path and none of
+    the content. A path the ledger does not accept is still reported, so the reading is not vacuous.
+    """
+
+    HOOK_PATH = ".github/actions/resolve-upstream/action.yml"
+    FILTER_PATH = ".github/actions/resolve-upstream/python.jq"
+
+    def findings(self, tree: set[str]) -> list[tuple[str, str]]:
+        spec = {
+            "files": audit.load("spec/files.json"),
+            "divergences": audit.load("spec/divergences.json"),
+        }
+        run = SimpleNamespace(
+            tree=tree,
+            slug="owner/Carrier",
+            ground="main",
+            spec=spec,
+            entry={"name": "Carrier"},
+        )
+        hub = {self.HOOK_PATH, self.FILTER_PATH}
+        with mock.patch.object(audit, "hub_tracked", lambda rev=None: hub):
+            return audit.check_hubonly_carried(run)
+
+    def test_a_carried_hook_is_not_reported(self) -> None:
+        self.assertEqual([], self.findings({self.HOOK_PATH}))
+
+    def test_a_carried_path_the_ledger_does_not_accept_is_reported(self) -> None:
+        found = self.findings({self.FILTER_PATH})
+        self.assertEqual(1, len(found), found)
+        self.assertIn(self.FILTER_PATH, found[0][1])
 
 
 if __name__ == "__main__":
