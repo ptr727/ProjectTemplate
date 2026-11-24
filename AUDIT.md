@@ -234,7 +234,7 @@ flowchart LR
 
 Sections 0-9 (the audit and its report) never edit the target's content. **Converging** is the separate follow-on phase: the drift the report found is **resolved by applying fixes to the target repo**, not left as a report. The fixes apply in the order [`RESYNC.md`][resync] section 3 sets. That order lands the rules before the files they govern, and a deletion before the re-vendor that would refresh it. The convergence loop:
 
-- **Apply a file fix via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`. An operational target may instead commit the fix to `develop` directly, per [GOVERNANCE.md "Operational Repositories"][governance-operational-repositories].
+- **Apply a file fix via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`.
 - **Drive the PR's review to green** - the same loop the hub runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette]). The [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md` covers that one reviewer's mechanics.
 - **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
 - **Re-audit once the fixes land.** Section 1 reads `main` as ground truth, so a file fix lands when it reaches `main`. Section 8's `--branch` run checks it on `develop` before the promotion. A convergence is done once a re-run of the audit measures it. The hub commits the report under its own `reports/`, per section 8.
@@ -259,7 +259,6 @@ The convergence model: the hub audits and the agent **applies** the fixes, and t
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-documentation-style]: ./GOVERNANCE.md#documentation-style-conventions
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
-[governance-operational-repositories]: ./GOVERNANCE.md#operational-repositories
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [governance-repo-scoped-secrets]: ./GOVERNANCE.md#repo-scoped-secrets
 [host-setup]: https://github.com/ptr727/ProjectTemplate/blob/main/docs/host-setup.md
