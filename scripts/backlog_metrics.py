@@ -37,8 +37,9 @@ by that signal.
 Exit codes
   0  the report was written.
   1  a `gh` call for issues, pull requests, or runs failed, so no number is guessed and no report
-     is written. A failed review query still writes the backlog and billing report. It adds one
-     line saying the review figures were unavailable and names the error on stderr, then exits 1.
+     is written. A failed review query still writes the backlog report, with billing where asked for.
+     It adds one line saying the review figures were unavailable and names the error on stderr,
+     then exits 1.
      Four reads fail more softly: the default branch, whether `develop` exists, the policy file,
      and its history. A failed one still writes the report, names that read on stderr, and
      exits 1. Where the policy itself went unread, the report shows `error` in its place. A failed
@@ -1058,18 +1059,19 @@ def pr_attention(pr: Mapping[str, Any]) -> dict[str, Any]:
 def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[list, list]:
     """The workflows whose latest completed run on `branch` failed, and those that recovered.
 
-    `runs` is newest first, as `gh run list` prints it. A cancelled or skipped run decided nothing,
-    so it is never a workflow's latest. A pull request's run is left out, since a fork's branch
-    can share the name. A workflow recovered where a run failed in
-    the window and its latest completed run did not.
+    `runs` is newest first, as `gh run list` prints it. A cancelled, skipped, or neutral run
+    decided nothing, so it is never a workflow's latest. A pull request's run is left out, since a
+    fork's branch can share the name. So is a Copilot review run, which carries the reviewed pull
+    request's head branch. A workflow recovered where a run failed in the window and its latest
+    completed run did not.
     """
     latest: dict[str, Mapping[str, Any]] = {}
     failed: dict[str, list[Mapping[str, Any]]] = {}
     for run in runs:
-        workflow = str(run.get("workflowName") or run.get("name") or "")
+        workflow = str(run.get("workflowName") or "")
         if not run.get("conclusion") or run["conclusion"] in UNDECIDED_RUNS:
             continue
-        if run.get("event") in PR_EVENTS:
+        if run.get("event") in PR_EVENTS or workflow == REVIEW_WORKFLOW:
             continue
         latest.setdefault(workflow, run)
         if run["conclusion"] in FAILING_RUNS and str(run.get("createdAt") or "")[:10] >= str(since):
@@ -1105,8 +1107,8 @@ def collect_attention(
     """What needs the maintainer now in one repository: failing and stale pull requests, branches.
 
     Open pull requests are read, up to `PR_CAP`, drafts counting toward it and in no list. A stale
-    one has had no update for `stale_days`, to the instant, and has no failing check. The default branch and `develop`, where it exists, are
-    read for two kinds of workflow. One kind's latest completed run failed. The other kind failed
+    one has had no update for `stale_days`, to the instant, and has no failing check. The default
+    branch and `develop`, where it exists, are read for two kinds of workflow. One kind's latest completed run failed. The other kind failed
     in the window and recovered.
     """
 
@@ -1158,7 +1160,7 @@ def collect_attention(
         runs = run_gh(
             ["run", "list", "--repo", f"{owner}/{name}", "--branch", branch]
             + ["--limit", str(ATTENTION_RUN_LIMIT)]
-            + ["--json", "databaseId,workflowName,url,conclusion,createdAt,event"]
+            + ["--json", "workflowName,url,conclusion,createdAt,event"]
         )
         still, recovered = branch_attention(branch, runs, since)
         result["failing_branches"] += still

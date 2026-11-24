@@ -1233,17 +1233,19 @@ def open_pr(number: int, *contexts: dict[str, object], **fields: object) -> dict
     } | fields
 
 
-def check(name: str, conclusion: str, suite: int | None = None) -> dict[str, object]:
+def check(
+    name: str, conclusion: str, suite: int | None = None, status: str = "COMPLETED"
+) -> dict[str, object]:
     node: dict[str, object] = {
         "__typename": "CheckRun",
         "name": name,
-        "status": "COMPLETED",
+        "status": status,
         "conclusion": conclusion,
     }
     if suite is not None:
         node["checkSuite"] = {
             "databaseId": suite,
-            "status": "COMPLETED",
+            "status": status,
             "workflowRun": {"databaseId": suite, "workflow": {"databaseId": 1}},
         }
     return node
@@ -1345,6 +1347,20 @@ class AttentionTests(unittest.TestCase):
             2, check("compile", "SUCCESS", suite=10), check("compile", "FAILURE", suite=11)
         )
         self.assertEqual(len(self.attention([failed_again])["failing_pull_requests"]), 1)  # type: ignore[arg-type]
+
+    def test_a_failure_of_a_workflow_with_a_newer_unfinished_run_is_superseded(self) -> None:
+        superseded = open_pr(
+            1,
+            check("lint", "FAILURE", suite=10),
+            check("compile", "", suite=11, status="IN_PROGRESS"),
+        )
+        self.assertEqual(self.attention([superseded])["failing_pull_requests"], [])
+
+    def test_a_copilot_review_run_is_not_a_branch_failure(self) -> None:
+        runs = {
+            "develop": [run_record(bm.REVIEW_WORKFLOW, "failure", "2026-11-23", "c", "dynamic")]
+        }
+        self.assertEqual(self.attention([], runs)["failing_branches"], [])
 
     def test_a_cancelled_run_after_a_failure_is_neither_recovery_nor_latest(self) -> None:
         runs = {
