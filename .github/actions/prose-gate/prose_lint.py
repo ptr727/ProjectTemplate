@@ -1696,8 +1696,8 @@ def shell_literals(text: str, lexer: str) -> str:
 
     That is a quotation, an escape, a comment, a `${...}` expansion, and a heredoc's label and body,
     as the shell's lexer reads them. So a `$(...)` inside a double quotation stays code. A heredoc's
-    opening line past its label is code too. A line break is added for the lexer, since its
-    comment rule ends on one and a code span has none.
+    opening line past its label is read as any other command is, its own literals blanked. A line
+    break is added for the lexer, since its comment rule ends on one and a code span has none.
     """
     out: list[str] = []
     depth = 0
@@ -1707,7 +1707,8 @@ def shell_literals(text: str, lexer: str) -> str:
         if kind in String.Heredoc and (m := re.match(HEREDOC, value)):
             cut, eol = m.end(4) + len(m[2]), value.find("\n")
             eol = len(value) if eol < 0 else eol
-            out.append(blanked(value[:cut]) + value[cut:eol] + blanked(value[eol:]))
+            rest = shell_literals(value[cut:eol], lexer)
+            out.append(blanked(value[:cut]) + rest + blanked(value[eol:]))
         elif opens or depth or kind in Comment or (kind in String and kind not in String.Backtick):
             out.append(blanked(value))
         else:

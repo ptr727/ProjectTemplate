@@ -4691,6 +4691,19 @@ class TestPasteSafeRule(BaitCase):
         self.assertIn(2, [n for n, _ in found])
         self.assertTrue(any("the string 'sh' hands" in message for _, message in found), found)
 
+    def test_a_quotation_after_a_heredoc_label_is_literal(self) -> None:
+        """The rest of a heredoc's opening line is read as any command is, so its twin still fails."""
+        for rest, expected in (
+            ('| tee "<file>"', []),
+            ("| tee '<file>'", []),
+            ("| tee <file>  # <note>", [2]),
+        ):
+            with self.subTest(rest=rest):
+                text = f"```sh\ncat <<'END' {rest}\nbody\nEND\n```\n"
+                self.assertEqual(expected, self.lines(text))
+        text = "```sh\ncat <<'END' - <<'TWO' | tee \"<file>\"\none\nEND\ntwo\nTWO\n```\n"
+        self.assertEqual([], self.lines(text))
+
     def test_a_second_shell_after_a_reserved_word_is_read(self) -> None:
         text = "```sh\nif ssh '<host>' 'test -d <dir>'; then echo ok; fi\n```\n"
         self.assertEqual([2], self.lines(text))
