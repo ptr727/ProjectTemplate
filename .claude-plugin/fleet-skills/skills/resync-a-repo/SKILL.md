@@ -97,8 +97,8 @@ section 3 describes.
 3. **Verbatim re-vendors** for every verbatim finding, the four instruction files only once step 1's
    probe cleared them. A finding classified modified rather than stale gets its diff read before being overwritten.
    The reason is that it may be an improvement the hub should adopt instead of a mistake to erase.
-4. **Interface workflows.** Honor the named contract, required jobs and the ruleset-bound check
-   name, rather than copying bytes.
+4. **Interface workflows.** Honor the named contract rather than copying bytes. `AUDIT.md`
+   section 0 lists the checks that contract covers.
 5. **Settings, rulesets, and secrets.** Set the first public-interaction limit by hand on one `collaborators` pilot repository, since `apply` sets none until a committed record says a pilot verified one. Verify there that Copilot, CodeRabbit, Qodo, and Dependabot still work under it. Then commit that record, `repo-config/interaction-verification.json`, through a hub pull request carrying the evidence.
    This is `RESYNC.md` step 5. Run
    `repo-config/configure.sh check "<owner>/<repo>" release` (substitute `operational` for an
