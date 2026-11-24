@@ -1,0 +1,36 @@
+# A moved key names a pin a human decides on.
+# - python pins the winget id in host-setup/windows/install-tools.ps1, pyproject.toml's version settings, and CI's python-version.
+# - dotnet pins $DOTNET_MAJOR in host-setup/windows/install-tools.ps1 and global.json.
+name: Hub resolve-upstream hook
+description: Resolve the newest released upstream line of each host tool the hub pins to one line.
+
+outputs:
+  versions:
+    description: Compact JSON object of pinned tool name -> newest released line, such as python 3.14 and dotnet 10.
+    value: ${{ steps.resolve.outputs.versions }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve host tool lines step
+      id: resolve
+      shell: bash
+      env:
+        PYTHON_URL: https://peps.python.org/api/release-cycle.json
+        DOTNET_URL: https://builds.dotnet.microsoft.com/dotnet/release-metadata/releases-index.json
+      run: |
+        set -Eeuo pipefail
+        fetch() {
+          if ! curl --silent --show-error --location --fail --max-time 30 --output "$2" "$1"; then
+            echo "::error::Could not read the upstream release data at $1"
+            exit 1
+          fi
+        }
+        fetch "$PYTHON_URL" "$RUNNER_TEMP/python.json"
+        fetch "$DOTNET_URL" "$RUNNER_TEMP/dotnet.json"
+        if ! python="$(jq -r -f "$GITHUB_ACTION_PATH/python.jq" "$RUNNER_TEMP/python.json")" \
+           || ! dotnet="$(jq -r -f "$GITHUB_ACTION_PATH/dotnet.jq" "$RUNNER_TEMP/dotnet.json")"; then
+          echo "::error::The upstream release data did not hold the shape resolve-upstream reads, so no line is reported"
+          exit 1
+        fi
+        echo "versions=$(jq -cn --arg dotnet "$dotnet" --arg python "$python" '{dotnet: $dotnet, python: $python}')" >> "$GITHUB_OUTPUT"

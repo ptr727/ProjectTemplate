@@ -1,0 +1,33 @@
+name: Check host tool lines action
+
+# Thin caller: the line tracker is the hub's reusable check-upstream-version-task.yml, pointed at the hub itself.
+# The resolve-upstream hook resolves the newest released line of each pinned host tool into host-tool-lines.json.
+# The bump pull request waits for a human, who decides whether the pin moves with it.
+
+on:
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+# GOVERNANCE.md "Workflow YAML Conventions" Concurrency exception (5).
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+# Every write in the called workflow uses the App token, so GITHUB_TOKEN gets no scope.
+permissions: {}
+
+jobs:
+
+  check-host-tool-lines:
+    name: Check host tool lines job
+    uses: ./.github/workflows/check-upstream-version-task.yml
+    with:
+      state-file: host-tool-lines.json
+      # The pins live on develop and reach main by promotion.
+      branches: '["develop"]'
+      bump-branch-prefix: host-tool-lines
+      auto-merge: false
+    secrets:
+      CODEGEN_APP_CLIENT_ID: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
+      CODEGEN_APP_PRIVATE_KEY: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
