@@ -42,7 +42,7 @@ These traps were learned the hard way:
   1. Run `git fetch origin`, then cut the branch in a worktree of its own: `git worktree add -b promote/develop-to-main "<worktree>" origin/main`. Run `git merge origin/develop` there.
   2. Take `develop`'s side on each conflict only after the strict-superset check above shows `main` holds nothing `develop` lacks there. Stage each resolved file and commit the merge, so `HEAD` holds it.
   3. Confirm the merged tree equals `develop`'s before the push: `git diff origin/develop HEAD --stat` prints nothing.
-  4. A path it prints holds content `develop` lacks. Redo a resolution that kept `main`'s side. Land genuine `main`-only content on `develop` through a feature pull request first, then merge `origin/develop` again.
+  4. A path it prints holds content `develop` lacks. Redo a resolution that kept `main`'s side. Land genuine `main`-only content on `develop` through a feature pull request first. Then run `git fetch origin develop` and merge `origin/develop` again.
   5. Open the branch as the promotion pull request in place of the one headed by `develop`. Carry the superseded pull request's whole body, its closing set included.
   6. Carry its labels too, `comments` among them. Without that label, a local strict pass on the new head reports every comment line the feature pull requests landed as `comment-added`.
   7. Close the superseded pull request with a comment naming the new one.
