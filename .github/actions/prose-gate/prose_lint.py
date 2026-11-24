@@ -1745,9 +1745,9 @@ def shell_char_kinds(text: str, lexer: str) -> str:
     """One letter per character of `text`, saying how the shell reading it splits it into words.
 
     `c` is code and `s` a command substitution's text, which the shell runs rather than passes
-    on, with `S` the outermost substitution's own delimiters. `w` is a line continuation, `#` a
-    comment, and `h` a heredoc. `x` is a quotation, an escape, a `${...}` expansion, or any other
-    literal.
+    on, with `S` the outermost substitution's own delimiters. `w` is a line continuation and `#` a
+    comment. `h` is a heredoc's label and `H` its body, and the rest of its opening line is code.
+    `x` is a quotation, an escape, a `${...}` expansion, or any other literal.
     """
     out: list[str] = []
     depth = subst = 0
@@ -1770,6 +1770,11 @@ def shell_char_kinds(text: str, lexer: str) -> str:
             out.append("#" * len(value))
         elif kind in String.Escape and value == "\\\n":
             out.append("ww")
+        elif kind in String.Heredoc and (m := re.match(HEREDOC, value)):
+            cut, eol = m.end(4) + len(m[2]), value.find("\n")
+            eol = len(value) if eol < 0 else eol
+            rest = shell_char_kinds(value[cut:eol], lexer)
+            out.append("h" * cut + rest + "H" * (len(value) - eol))
         elif kind in String.Heredoc:
             out.append("h" * len(value))
         elif kind in String:
@@ -1806,7 +1811,7 @@ def shell_commands(text: str, kinds: str) -> list[list[ShellWord]]:
 
     for i, (ch, kind) in enumerate(zip(text, kinds, strict=True)):
         redirects = text[i - 1 : i] in ("<", ">") or text[i + 1 : i + 2] == ">"
-        if kind == "#" or (kind == "c" and (ch in "\n;|()" or (ch == "&" and not redirects))):
+        if kind in "#H" or (kind == "c" and (ch in "\n;|()" or (ch == "&" and not redirects))):
             flush(i, True)
         elif kind == "w" or (kind == "c" and ch in " \t"):
             flush(i, False)
@@ -2008,14 +2013,16 @@ def rule_paste_safe(unit: Unit, ctx: Context) -> list[Finding]:
         dialect = COMMANDS["dialects"][line.dialect]
         for row, shape, m, shell in placeholders(line.text, dialect):
             at = line.number + row
-            where = say("paste-safe-in-shell", shell=shell) if shell else say("paste-safe-in")
+            where = say("paste-safe-where-shell", shell=shell) if shell else say("paste-safe-where")
+            fields: dict[str, str] = {"shell": shell} if shell else {}
             if shape == "bracket" and m[1].startswith("-"):
-                message, fields = "paste-safe-flag", {}
+                message = "paste-safe-flag"
             elif shape == "bracket":
-                message, fields = "paste-safe-bracket", {"name": m[1]}
+                message, fields["name"] = "paste-safe-bracket", m[1]
             else:
                 message = "paste-safe" if shape == "angle" else "paste-safe-alternation"
-                fields = {}
+            if shell and shape != "alternation" and message != "paste-safe-flag":
+                message += "-in-shell"
             out.append(finding(at, "paste-safe", message, token=m.group(), where=where, **fields))
     return out
 

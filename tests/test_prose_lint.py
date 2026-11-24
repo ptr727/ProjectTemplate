@@ -4586,6 +4586,9 @@ class TestPasteSafeRule(BaitCase):
             ("ver=$(ssh '<host>' 'cat <path>')", "<path>", "ssh"),
             ("echo \"$(bash -c 'ls <dir>')\"", "<dir>", "bash"),
             ("sudo -r sysadm_r -t sysadm_t bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("timeout 600 bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("env -u LANG bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("xargs -n 1 sh -c 'ls <dir>'", "<dir>", "sh"),
             ("su -- root -c 'id <dir>'", "<dir>", "su"),
             ("runuser app -- -c 'ls <dir>'", "<dir>", "runuser"),
             ("$ bash -c 'ls <dir>'", "<dir>", "bash"),
@@ -4630,13 +4633,23 @@ class TestPasteSafeRule(BaitCase):
         for span, advice in (
             ("bash -c 'deploy release|operational'", "write the common value"),
             ("bash -c 'ls [--all]'", "leave it out"),
-            ("bash -c 'ls [RepoName]'", 'quote it as "<RepoName>"'),
+            ("bash -c 'ls [RepoName]'", 'the second shell receives "<RepoName>"'),
+            (
+                "bash -c 'ls <dir>'",
+                'quote it inside that string, so the second shell receives "<dir>"',
+            ),
         ):
             with self.subTest(span=span):
                 found = self.hits(f"Run `{span}` here.\n")
                 self.assertEqual(1, len(found), found)
                 self.assertIn(advice, found[0][1])
                 self.assertIn("the string 'bash' hands a second shell", found[0][1])
+
+    def test_a_second_shell_after_a_heredoc_label_is_read(self) -> None:
+        text = "```sh\ncat <<'END' | sudo sh -c 'cat > <file>'\nbody\nEND\n```\n"
+        found = self.hits(text)
+        self.assertIn(2, [n for n, _ in found])
+        self.assertTrue(any("the string 'sh' hands" in message for _, message in found), found)
 
     def test_a_second_shell_after_a_reserved_word_is_read(self) -> None:
         text = "```sh\nif ssh '<host>' 'test -d <dir>'; then echo ok; fi\n```\n"
