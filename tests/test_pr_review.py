@@ -1012,6 +1012,9 @@ class TestReviewPaging(unittest.TestCase):
         self.assertEqual({"headRefOid": HEAD}, self.read(pr_review.Q_CLAIMS, answer)[0])
 
 
+RUNNING = "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n\nProcessing."
+
+
 class TestOtherReviewers(GqlCase):
     """Thread resolution, head-presence, and the rate-limit marker's own structural pattern,
     generalized past Copilot to the other review bots this repository has trialed. Free-text
@@ -1152,6 +1155,7 @@ class TestOtherReviewers(GqlCase):
         for reviews, comments, bases, field in (
             ([review()], [], "^develop$", "other_unknown=coderabbitai"),
             ([review()], [self.rabbit_summary(HEAD, clean=False)], "^develop$", ""),
+            ([review()], [comment("coderabbitai", EARLY, RUNNING)], "^develop$", ""),
             ([review()], [self.rabbit_summary(OLD)], "^develop$", ""),
             ([review()], [], "^main$", ""),
             ([review()], [self.rabbit_summary(HEAD)], "^develop$", "other_reviewed=coderabbitai"),

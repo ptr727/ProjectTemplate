@@ -10,19 +10,35 @@ from __future__ import annotations
 
 import re
 
-from pr_review_rounds import CODERABBIT_LOGIN, reading, reviewer_nodes
+from pr_review_rounds import CODERABBIT_LOGIN, head_nodes, page_flag, reading, reviewer_nodes
 
 CLEAN_PASS = re.compile(r"^No actionable comments were generated", re.MULTILINE)
 REVIEWED_UP_TO = re.compile(r"\bbetween [0-9a-f]{40,64} and ([0-9a-f]{40,64})\b")
+SUMMARY_MARKER = re.compile(
+    r"<!--\s*This is an auto-generated comment: summarize by coderabbit\.ai"
+)
 
 
 def summaries(pr: dict) -> list[dict]:
-    """CodeRabbit's comments in view that print a reviewed commit range, oldest first.
+    """CodeRabbit's comments in view carrying its summary marker or a reviewed range, oldest first.
 
-    Its summary prints one, so an empty list means no summary is in view.
+    The marker stands from the summary's first state, a pass still running or skipped included, and
+    a finished pass prints its range. So an empty list means no summary is in view.
     """
     nodes = reviewer_nodes(pr, "comments", CODERABBIT_LOGIN)
-    return [n for n in nodes if REVIEWED_UP_TO.search(n.get("body") or "")]
+    return [
+        n
+        for n in nodes
+        if SUMMARY_MARKER.search(b := n.get("body") or "") or REVIEWED_UP_TO.search(b)
+    ]
+
+
+def summary_blind(pr: dict) -> bool:
+    """True where CodeRabbit's summary can sit behind the comments window unseen.
+
+    One summary edited in place is all CodeRabbit keeps, so one in view decides.
+    """
+    return page_flag(pr, "comments", "hasPreviousPage") and not summaries(pr)
 
 
 def clean_pass(pr: dict) -> str:
@@ -37,3 +53,9 @@ def clean_pass(pr: dict) -> str:
         if CLEAN_PASS.search(text) and len(ends) == 1 and not limited:
             return ends.pop()
     return ""
+
+
+def rabbit_on_head(pr: dict) -> bool:
+    """Whether CodeRabbit reviewed the current head, by a review on its commit or a clean pass on it."""
+    reviewed = head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN))
+    return bool(reviewed) or clean_pass(pr) == pr["headRefOid"]

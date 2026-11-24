@@ -329,9 +329,12 @@ EXPLICIT_RABBIT = {
 }
 
 
+RABBIT_MARKER = "<!-- This is an auto-generated comment: summarize by coderabbit.ai -->"
+
+
 def rabbit_summary(*ends: str, clean: bool = True, limited: bool = False) -> dict:
     """CodeRabbit's summary comment, printing one reviewed commit range per entry of `ends`."""
-    parts = ["<!-- This is an auto-generated comment: summarize by coderabbit.ai -->"]
+    parts = [RABBIT_MARKER]
     if limited:
         parts.append(fixtures.RATE_LIMITED_COMMENT)
     if clean:
@@ -407,14 +410,17 @@ class TestSideReaders(unittest.TestCase):
         self.assertEqual(2, side.side_rounds(pr, "coderabbit", body))
 
     def test_a_summary_is_in_view_clean_or_not_and_a_plain_reply_is_not_one(self) -> None:
-        """Its printed range marks the summary, so one recording findings or a rate limit counts too.
+        """Its marker or its printed range marks the summary, so findings or a rate limit count too.
 
-        A reply prints no range, and a range quoted by anyone but CodeRabbit is not its summary.
+        So does a pass still running, which prints no range yet. A reply carries neither, and a
+        range quoted by anyone but CodeRabbit is not its summary.
         """
+        running = f"{RABBIT_MARKER}\n\nCurrently processing new changes in this PR."
         for comment, seen in (
             (rabbit_summary(MOVED), True),
             (rabbit_summary(MOVED, clean=False), True),
             (rabbit_summary(MOVED, limited=True), True),
+            (fixtures.comment(login=rounds.CODERABBIT_LOGIN, body=running), True),
             (fixtures.comment(login=rounds.CODERABBIT_LOGIN, body="Review triggered."), False),
             ({**rabbit_summary(MOVED), "author": {"login": "maintainer"}}, False),
         ):

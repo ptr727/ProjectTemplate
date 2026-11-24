@@ -31,13 +31,12 @@ from pr_review_rounds import (
     CODERABBIT_LOGIN,
     QODO_LOGIN,
     commit_oid,
-    head_nodes,
     page_flag,
     qodo_comment,
     reviewed_heads,
     reviewer_nodes,
 )
-from pr_review_summary import clean_pass
+from pr_review_summary import clean_pass, rabbit_on_head
 
 COMMENT_PATH = ("addComment", "commentEdge", "node")
 SIDE_LOGINS = {"coderabbit": CODERABBIT_LOGIN, "qodo": QODO_LOGIN}
@@ -143,8 +142,7 @@ def side_answered(pr: dict, name: str) -> bool:
     CodeRabbit answers with a formal review on the head's commit or a clean pass `clean_pass` reads
     on it. Qodo's one standing comment names no head, so a request is its only per-head record.
     """
-    reviewed = head_nodes(pr, reviewer_nodes(pr, "reviews", CODERABBIT_LOGIN))
-    return name == "coderabbit" and (bool(reviewed) or clean_pass(pr) == pr["headRefOid"])
+    return name == "coderabbit" and rabbit_on_head(pr)
 
 
 def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:

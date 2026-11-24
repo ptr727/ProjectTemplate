@@ -33,7 +33,6 @@ from pr_review_rounds import (
     newest_of,
     open_threads,
     opened_by,
-    page_flag,
     possible_quota,
     qodo_comment,
     qodo_comments_blind,
@@ -51,7 +50,7 @@ from pr_review_rounds import (
     uncounted_verdict,
     window_blind,
 )
-from pr_review_summary import clean_pass, summaries
+from pr_review_summary import rabbit_on_head, summary_blind
 
 NO_THREAD, NOTED = answers.NO_THREAD, answers.NOTED
 BEHIND_THE_WINDOW = (
@@ -154,16 +153,18 @@ def render(
     answered = "yes" if answer else ("unknown" if blind else "no")
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
-    cleaned, rabbit = clean_pass(pr), bot_entry(pr, "coderabbit")
+    rabbit = bot_entry(pr, "coderabbit")
     other_on_head = [
         login
         for login in OTHER_REVIEWERS
-        if head_nodes(pr, reviewer_nodes(pr, "reviews", login))
-        or (login == CODERABBIT_LOGIN and cleaned == head)
+        if (
+            rabbit_on_head(pr)
+            if login == CODERABBIT_LOGIN
+            else head_nodes(pr, reviewer_nodes(pr, "reviews", login))
+        )
     ]
     covered = rabbit is not None and rabbit.covers(pr.get("baseRefName") or "", default_branch(pr))
-    unread = covered and not summaries(pr) and CODERABBIT_LOGIN not in other_on_head
-    unread = unread and page_flag(pr, "comments", "hasPreviousPage")
+    unread = covered and summary_blind(pr) and CODERABBIT_LOGIN not in other_on_head
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
     }
