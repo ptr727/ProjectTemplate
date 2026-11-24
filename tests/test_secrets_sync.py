@@ -788,11 +788,22 @@ class TestPush(Case):
 
     def test_every_way_a_create_can_stop_before_its_fields_names_its_recovery(self) -> None:
         recovery = "push it again by name with --mode"
-        for case in ("relist-fails", "field-write-fails", "interrupt"):
+        for case in (
+            "create-unconfirmed",
+            "create-interrupted",
+            "relist-fails",
+            "field-write-fails",
+            "interrupt",
+        ):
             with self.subTest(case=case):
                 fake = FakeOp()
                 path = self.write(".secrets/alpha")
-                if case == "relist-fails":
+                if case == "create-unconfirmed":
+                    fake.fail_after.add(("document", "create"))
+                    fake.fail_before.add(("item", "list"))
+                elif case == "create-interrupted":
+                    fake.raise_on[("document", "create")] = KeyboardInterrupt()
+                elif case == "relist-fails":
                     plain = fake.dispatch
 
                     def failing(
@@ -824,7 +835,9 @@ class TestPush(Case):
                         code = ss.main(["push", "--bucket", "alpha", str(path)])
                     except KeyboardInterrupt:
                         code = None
-                self.assertEqual(code, None if case == "interrupt" else 2)
+                self.assertEqual(
+                    code, None if case.endswith("interrupted") or case == "interrupt" else 2
+                )
                 self.assertIn(recovery, err.getvalue())
 
     def test_an_item_carrying_only_tags_is_refused_until_its_fields_exist(self) -> None:

@@ -1097,14 +1097,14 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
-            op.call(args, write=True, detail=plan.title)
-        except Execution:
-            if not landed(lambda: plan.title in members(op, vault)):
-                raise
-            sys.stderr.write(
-                f"op document create reported a failure, yet {plan.title} is listed, so it is verified\n"
-            )
-        try:
+            try:
+                op.call(args, write=True, detail=plan.title)
+            except Execution:
+                if not landed(lambda: plan.title in members(op, vault)):
+                    raise
+                sys.stderr.write(
+                    f"op document create reported a failure, yet {plan.title} is listed, so it is verified\n"
+                )
             created = "<new item>" if op.dry_run else listed(op, vault, plan.title, "the write").id
             write_fields(op, vault, created, plan)
         except BaseException:
