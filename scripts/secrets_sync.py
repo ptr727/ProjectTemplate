@@ -3,8 +3,9 @@
 
 A bucket is a named set of secret files owned by one project or host. Each bucket is one vault
 named exactly `Secrets <bucket>`, and each file is one Document item in it. An item's title is the
-file's POSIX path relative to the home directory, and its mode rides as a `mode:<octal>` tag. Its
-content time rides as an `mtime:<UTC ISO>` tag, normally the file's mtime when it was pushed.
+file's POSIX path relative to the home directory. Its mode and its content time ride as the `mode`
+and `mtime` text fields of a `sync` section on the item. They are never tags, since 1Password
+lists every distinct tag account-wide. The content time is normally the file's mtime when pushed.
 Staleness is judged by that time. A mode-only push keeps it, unless it names the file with
 `--overwrite-newer`, which makes that content the newest.
 
@@ -17,8 +18,9 @@ environment and never through its argument list. Output never carries a secret, 
 any of `op`'s JSON. A digest is shown as eight hex characters of an HMAC keyed per run.
 
 No official page states the `op` behaviors this relies on, so `selftest` measures them in a
-scratch vault. On `op` 2.42.0 it measured the byte-exact document round-trip, the item list's
-`updated_at` and `tags` fields, and `--tags` replacing rather than adding. Sign-in is outside
+scratch vault. On `op` 2.42.0 it measured the byte-exact document round-trip and the item list's
+`updated_at` field. The `sync` fields' shape in `op item get` and an `op item edit` assignment
+replacing a field rather than adding one are unmeasured against a live `op`. Sign-in is outside
 `selftest`. The PowerShell signin form, a desktop-app sign-in, several accounts, and Windows stay
 unmeasured. Each shape is read strictly, so a different one fails loudly rather than being guessed.
 """
@@ -50,10 +52,10 @@ from types import FrameType
 VAULT_PREFIX = "Secrets "
 HOST_PREFIX = "host-"
 BUCKET = re.compile(r"[a-z0-9-]+")
-MODE_PREFIX = "mode:"
-MODE_TAG = re.compile(re.escape(MODE_PREFIX) + r"([0-7]{3,4})")
-MODE_ARG = re.compile(r"[0-7]{3,4}")
-CONTENT_PREFIX = "mtime:"
+SYNC_SECTION = "sync"
+MODE_FIELD = "mode"
+CONTENT_FIELD = "mtime"
+MODE_TEXT = re.compile(r"[0-7]{3,4}")
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
 MICROSECOND = datetime.timedelta(microseconds=1)
 SESSION_LINE = re.compile(
@@ -429,10 +431,16 @@ class Vault:
 
 @dataclasses.dataclass(frozen=True)
 class Item:
+    """One Document item, as its vault's listing shows it.
+
+    `sync` holds the label and value of each field in its `sync` section, in order. It is None
+    until `detailed` reads them, since the listing carries no fields.
+    """
+
     id: str
     title: str
-    tags: tuple[str, ...]
     updated: datetime.datetime
+    sync: tuple[tuple[str, str], ...] | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -489,13 +497,7 @@ def find_vault(vaults: Sequence[Vault], bucket: str) -> Vault | None:
 
 
 def parse_item(row: dict[str, object]) -> Item:
-    """One item list row, its `tags` and `updated_at` fields as `selftest` measured them on 2.42.0.
-
-    An absent `tags` field reads as no tags, the shape a listing gives an untagged item.
-    """
-    tags = row.get("tags", [])
-    if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
-        raise Execution("op item list returned a 'tags' field that is not a list of strings")
+    """One item list row, its `updated_at` field as `selftest` measured it on 2.42.0."""
     updated = row.get("updated_at")
     if not isinstance(updated, str):
         raise Execution("op item list returned a row with no 'updated_at' string, so run selftest")
@@ -505,7 +507,7 @@ def parse_item(row: dict[str, object]) -> Item:
         raise Execution("op item list returned an 'updated_at' that is not ISO 8601") from exc
     if moment.tzinfo is None:
         raise Execution("op item list returned an 'updated_at' with no time zone")
-    return Item(str(row["id"]), str(row["title"]), tuple(tags), moment)
+    return Item(str(row["id"]), str(row["title"]), moment)
 
 
 def list_items(op: Op, vault: Vault) -> list[dict[str, object]]:
@@ -531,29 +533,86 @@ def members(op: Op, vault: Vault) -> dict[str, Item]:
             raise Refusal(
                 f"{vault.name} holds {other!r} and {item.title!r}, which collide case-insensitively"
             )
-        if malformed_content_tag(item) and (vault.id, item.title) not in op.warned:
-            op.warned.add((vault.id, item.title))
-            sys.stderr.write(
-                f"warning: {item.title} carries a malformed or repeated content-time tag,"
-                " so its update time stands in until its next update or retag\n"
-            )
         items[item.title] = item
     return items
 
 
-def tags_with(item: Item, prefix: str) -> list[str]:
-    return [t for t in item.tags if t.startswith(prefix)]
+def sync_fields(data: object) -> tuple[tuple[str, str], ...]:
+    """The label and value of each field in the `sync` section of one item's `op item get` JSON.
+
+    A field is matched by its section's label, since `op` generates the section's id. The label is
+    read from the field's own `section` object, or else through the item's `sections` array by
+    that object's id. A field outside any section, such as a Document's notes, is passed over.
+    This shape is unmeasured against a live `op`, so it is read strictly and a different one fails
+    loudly.
+    """
+    if not isinstance(data, dict):
+        raise Execution("op item get returned JSON that is not an object")
+    fields = data.get("fields", [])
+    if not isinstance(fields, list):
+        raise Execution("op item get returned a 'fields' value that is not an array")
+    sections = data.get("sections", [])
+    if not isinstance(sections, list) or not all(isinstance(s, dict) for s in sections):
+        raise Execution("op item get returned a 'sections' value that is not an array of objects")
+    named = {s.get("id"): s.get("label") for s in sections}
+    found: list[tuple[str, str]] = []
+    for field in fields:
+        if not isinstance(field, dict):
+            raise Execution("op item get returned a field that is not an object")
+        section = field.get("section")
+        if section is None:
+            continue
+        if not isinstance(section, dict):
+            raise Execution("op item get returned a field whose 'section' is not an object")
+        if section.get("label", named.get(section.get("id"))) != SYNC_SECTION:
+            continue
+        label, value = field.get("label"), field.get("value", "")
+        if not isinstance(label, str) or not isinstance(value, str):
+            raise Execution("op item get returned a sync field without a string label and value")
+        found.append((label, value))
+    return tuple(found)
+
+
+def item_get_args(vault: Vault, item: Item) -> list[str]:
+    """The `op item get` call that reads one item's fields, shared with `selftest`."""
+    return ["item", "get", item.id, "--vault", vault.id, "--format", "json"]
+
+
+def detailed(op: Op, vault: Vault, item: Item) -> Item:
+    """`item` with its `sync` fields read by `op item get`, which the listing does not carry.
+
+    A malformed or repeated content-time field warns once per item per run.
+    """
+    data = op.json(item_get_args(vault, item), detail=item.title)
+    found = dataclasses.replace(item, sync=sync_fields(data))
+    if malformed_content_field(found) and (vault.id, item.title) not in op.warned:
+        op.warned.add((vault.id, item.title))
+        sys.stderr.write(
+            f"warning: {item.title} carries a malformed or repeated {SYNC_SECTION}.{CONTENT_FIELD}"
+            " field, so its update time stands in until its next push rewrites the field\n"
+        )
+    return found
+
+
+def sync_values(item: Item, label: str) -> list[str]:
+    """The values of the item's `sync` fields labeled `label`, which `detailed` must have read."""
+    assert item.sync is not None, f"{item.title} was not read with op item get"
+    return [value for name, value in item.sync if name == label]
 
 
 def mode_of(item: Item) -> int:
-    """The mode an item's one `mode:<octal>` tag carries, refusing a missing or malformed tag."""
-    tags = tags_with(item, MODE_PREFIX)
-    if len(tags) != 1:
-        raise Refusal(f"{item.title} carries {len(tags)} mode tag(s) where exactly one is required")
-    match = MODE_TAG.fullmatch(tags[0])
-    value = int(match.group(1), 8) if match else -1
+    """The mode the item's one `sync.mode` field carries, refusing a missing or malformed field."""
+    values = sync_values(item, MODE_FIELD)
+    if len(values) != 1:
+        raise Refusal(
+            f"{item.title} carries {len(values)} {SYNC_SECTION}.{MODE_FIELD} field(s)"
+            " where exactly one is required"
+        )
+    value = int(values[0], 8) if MODE_TEXT.fullmatch(values[0]) else -1
     if not 0 <= value <= 0o777:
-        raise Refusal(f"{item.title} carries the malformed mode tag {tags[0]!r}")
+        raise Refusal(
+            f"{item.title} carries the malformed {SYNC_SECTION}.{MODE_FIELD} field {values[0]!r}"
+        )
     return value
 
 
@@ -564,42 +623,42 @@ def mode_or_none(item: Item) -> int | None:
         return None
 
 
-def mode_tag(mode: int) -> str:
-    return f"{MODE_PREFIX}{mode:04o}"
+def mode_text(mode: int) -> str:
+    return f"{mode:04o}"
 
 
-def content_tag(moment: datetime.datetime) -> str:
-    return CONTENT_PREFIX + moment.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+def content_text(moment: datetime.datetime) -> str:
+    return moment.astimezone(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
-def tagged_content_time(item: Item) -> datetime.datetime | None:
-    """The moment the item's one well-formed `mtime:<iso>` tag carries, or None."""
-    tags = tags_with(item, CONTENT_PREFIX)
-    if len(tags) != 1:
+def field_content_time(item: Item) -> datetime.datetime | None:
+    """The moment the item's one well-formed `sync.mtime` field carries, or None."""
+    values = sync_values(item, CONTENT_FIELD)
+    if len(values) != 1:
         return None
     try:
-        moment = datetime.datetime.fromisoformat(tags[0][len(CONTENT_PREFIX) :])
+        moment = datetime.datetime.fromisoformat(values[0])
     except ValueError:
         return None
     return moment if moment.tzinfo is not None else None
 
 
-def malformed_content_tag(item: Item) -> bool:
-    return bool(tags_with(item, CONTENT_PREFIX)) and tagged_content_time(item) is None
+def malformed_content_field(item: Item) -> bool:
+    return bool(sync_values(item, CONTENT_FIELD)) and field_content_time(item) is None
 
 
 def content_time(item: Item) -> datetime.datetime:
-    """The time the item's content counts as written, from its one `mtime:<iso>` tag.
+    """The time the item's content counts as written, from its one `sync.mtime` field.
 
-    A create sets the tag from the file's mtime. An update does too where that mtime is strictly
-    newer than the content time it replaces, and takes `forced_time` otherwise. A retag keeps the
-    tag, so a mode-only write moves only `updated_at`. The exception is a retag of a file named
-    with `--overwrite-newer`, which takes `forced_time` too. An item carrying no such tag, pushed
-    before the tag existed, reads as its `updated_at`, and its next update or retag writes the
-    tag. One whose tag is malformed or repeated reads the same way, which `members` warns about,
-    and a push retags it even where nothing else differs.
+    A create sets the field from the file's mtime. An update does too where that mtime is strictly
+    newer than the content time it replaces, and takes `forced_time` otherwise. A fields-only
+    write keeps the field, so a mode-only write moves only `updated_at`. The exception is such a
+    write for a file named with `--overwrite-newer`, which takes `forced_time` too. An item
+    carrying no such field reads as its `updated_at`, and its next update or fields-only write
+    sets the field. One whose field is malformed or repeated reads the same way, with a warning
+    from `detailed`. A push rewrites its fields even where nothing else differs.
     """
-    return tagged_content_time(item) or item.updated
+    return field_content_time(item) or item.updated
 
 
 def forced_time(replaced: datetime.datetime) -> datetime.datetime:
@@ -607,12 +666,27 @@ def forced_time(replaced: datetime.datetime) -> datetime.datetime:
     return max(datetime.datetime.now(datetime.UTC), replaced + MICROSECOND)
 
 
-def tags_for(item: Item | None, mode: int, content: datetime.datetime) -> str:
-    """The item's other tags plus one mode tag and one content-time tag, the full list `--tags` replaces."""
-    kept = [
-        t for t in (item.tags if item else ()) if not t.startswith((MODE_PREFIX, CONTENT_PREFIX))
+def sync_assignments(mode: int, content: datetime.datetime) -> list[str]:
+    """The `op item edit` assignments that set the item's two `sync` text fields."""
+    return [
+        f"{SYNC_SECTION}.{MODE_FIELD}[text]={mode_text(mode)}",
+        f"{SYNC_SECTION}.{CONTENT_FIELD}[text]={content_text(content)}",
     ]
-    return ",".join([*kept, mode_tag(mode), content_tag(content)])
+
+
+def item_edit_args(vault: Vault, item_id: str, mode: int, content: datetime.datetime) -> list[str]:
+    """The `op item edit` call that sets one item's `sync` fields, shared with `selftest`."""
+    return ["item", "edit", item_id, "--vault", vault.id, *sync_assignments(mode, content)]
+
+
+def carries(item: Item, mode: int, content: datetime.datetime) -> list[str]:
+    """Each way the item's `sync` fields differ from exactly one of each written value."""
+    wrong: list[str] = []
+    for label, want in ((MODE_FIELD, mode_text(mode)), (CONTENT_FIELD, content_text(content))):
+        values = sync_values(item, label)
+        if values != [want]:
+            wrong.append(f"{SYNC_SECTION}.{label} reads {values}, not [{want!r}]")
+    return wrong
 
 
 def running_uid() -> int | None:
@@ -723,7 +797,10 @@ def compare(local: Local, remote: bytes, mode: int | None) -> str:
 def inspect(
     op: Op, home: Path, vault: Vault, title: str, item: Item
 ) -> tuple[Local, bytes, int | None, str]:
-    """One item's local and remote copies and their state, as `status` and `pull` both judge it."""
+    """One item's local and remote copies and their state, as `status` and `pull` both judge it.
+
+    `item` comes from `detailed`, since off Windows its mode field decides the state.
+    """
     mode = None if IS_WINDOWS else mode_of(item)
     refuse_symlinks(home, title)
     local = read_local(local_path(home, title))
@@ -738,7 +815,7 @@ def cmd_status(a: argparse.Namespace, op: Op) -> int:
         for vault, items in selected(op, vaults, a.bucket):
             print(f"{vault.name}:")
             for title, item in sorted(items.items()):
-                local, remote, _, state = inspect(op, home, vault, title, item)
+                local, remote, _, state = inspect(op, home, vault, title, detailed(op, vault, item))
                 print(f"  {state:<12} {title}  remote {short(remote)}  local {short(local.data)}")
         return 0
     held: set[str] = set()
@@ -778,10 +855,11 @@ class Plan:
 
 
 def push_mode(local: Local, item: Item | None, override: int | None) -> int:
-    """The mode a pushed item's tag carries.
+    """The mode a pushed item's `sync.mode` field carries.
 
-    An existing item's tag is read first, so a missing or malformed one refuses unless --mode
-    replaces it. On Windows `st_mode` carries no POSIX permission, so the tag is never derived there.
+    An existing item's field is read first, so a missing or malformed one refuses unless --mode
+    replaces it. On Windows `st_mode` carries no POSIX permission, so the field is never derived
+    there.
     """
     if override is not None:
         return override
@@ -828,7 +906,9 @@ def push_plans(
 ) -> list[Plan]:
     override = int(a.mode, 8) if a.mode is not None else None
     if override is not None and not a.paths:
-        raise Refusal("--mode sets the tag of each file named, so name the files it applies to")
+        raise Refusal(
+            "--mode sets the mode field of each file named, so name the files it applies to"
+        )
     if a.paths:
         titles = [title_for(home, p) for p in a.paths]
         if len({t.casefold() for t in titles}) != len(titles):
@@ -855,6 +935,8 @@ def push_plans(
             raise Refusal(f"{title} is empty, so pass --allow-empty to push it")
         warn_carriage_return(title, local.data)
         item = items.get(title)
+        if item is not None and vault is not None:
+            item = detailed(op, vault, item)
         mode = push_mode(local, item, override)
         assert local.mtime is not None
         if item is None or vault is None:
@@ -863,11 +945,11 @@ def push_plans(
         remote = download(op, vault, item)
         if remote == local.data:
             forced = bool(a.paths) and a.overwrite_newer
-            if mode_or_none(item) == mode and not malformed_content_tag(item) and not forced:
+            if mode_or_none(item) == mode and not malformed_content_field(item) and not forced:
                 print(f"  same      {title}")
             else:
                 kept = forced_time(content_time(item)) if forced else content_time(item)
-                plans.append(Plan("retag", title, path, local, item, mode, remote, kept))
+                plans.append(Plan("fields", title, path, local, item, mode, remote, kept))
             continue
         written = content_time(item)
         content = local.mtime if local.mtime > written else forced_time(written)
@@ -941,18 +1023,14 @@ def create_vault(op: Op, bucket: str) -> Vault:
 
 
 def verify(op: Op, vault: Vault, plan: Plan, expected_id: str | None) -> None:
-    """Read the item back and compare its id, its mode tag, and its bytes with what the plan read."""
+    """Read the item back and compare its id, its `sync` fields, and its bytes with the plan."""
     item = listed(op, vault, plan.title, "the write")
     if expected_id is not None and item.id != expected_id:
         raise Execution(f"{plan.title} is listed as a different item after an in-place edit")
     assert plan.mode is not None and plan.content is not None
-    for prefix, want in (
-        (MODE_PREFIX, mode_tag(plan.mode)),
-        (CONTENT_PREFIX, content_tag(plan.content)),
-    ):
-        tags = tags_with(item, prefix)
-        if tags != [want]:
-            raise Execution(f"{plan.title} carries tags {tags} after the write, not [{want!r}]")
+    wrong = carries(detailed(op, vault, item), plan.mode, plan.content)
+    if wrong:
+        raise Execution(f"{plan.title} after the write: {'; '.join(wrong)}")
     data = download(op, vault, item)
     if data != plan.local.data:
         raise Execution(
@@ -990,17 +1068,34 @@ def landed(check: typing.Callable[[], bool]) -> bool:
         return False
 
 
-def tags_landed(op: Op, vault: Vault, title: str, tags: str) -> bool:
-    def carries() -> bool:
-        item = members(op, vault).get(title)
-        return item is not None and sorted(item.tags) == sorted(tags.split(","))
+def write_fields(op: Op, vault: Vault, item_id: str, plan: Plan) -> None:
+    """Set the item's `sync` fields, reading them back where `op item edit` reports a failure.
 
-    return landed(carries)
+    No `--tags` is sent, so a push never writes the item's tags.
+    """
+    assert plan.mode is not None and plan.content is not None
+    mode, content = plan.mode, plan.content
+
+    def written() -> bool:
+        item = members(op, vault).get(plan.title)
+        return item is not None and not carries(detailed(op, vault, item), mode, content)
+
+    try:
+        op.call(item_edit_args(vault, item_id, mode, content), write=True, detail=plan.title)
+    except Execution:
+        if not landed(written):
+            raise
+        sys.stderr.write(
+            f"op item edit reported a failure, yet {plan.title} carries its {SYNC_SECTION} fields,"
+            " so it is verified\n"
+        )
 
 
 def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
-    """Write one plan, re-checking its target first unless this push just created the vault."""
-    assert plan.mode is not None and plan.content is not None
+    """Write one plan, re-checking its target first unless this push just created the vault.
+
+    `op document create` sets no field, so a create writes the document and then its fields.
+    """
     if not fresh:
         refuse_changed(op, vault, plan.title, plan.item)
     if not op.dry_run:
@@ -1008,22 +1103,26 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
     if plan.action == "create":
         args = ["document", "create", str(plan.path), "--vault", vault.id, "--title", plan.title]
         try:
-            op.call(
-                [*args, "--tags", tags_for(None, plan.mode, plan.content)],
-                write=True,
-                detail=plan.title,
-            )
-        except Execution:
-            if not landed(lambda: plan.title in members(op, vault)):
-                raise
+            try:
+                op.call(args, write=True, detail=plan.title)
+            except Execution:
+                if not landed(lambda: plan.title in members(op, vault)):
+                    raise
+                sys.stderr.write(
+                    f"op document create reported a failure, yet {plan.title} is listed, so it is verified\n"
+                )
+            created = "<new item>" if op.dry_run else listed(op, vault, plan.title, "the write").id
+            write_fields(op, vault, created, plan)
+        except BaseException:
             sys.stderr.write(
-                f"op document create reported a failure, yet {plan.title} is listed, so it is verified\n"
+                f"warning: {plan.title} may hold its content without its {SYNC_SECTION} fields,"
+                " so once op answers, push it again by name with --mode\n"
             )
+            raise
         if not op.dry_run:
             verify(op, vault, plan, None)
         return
     assert plan.item is not None
-    tags = tags_for(plan.item, plan.mode, plan.content)
     try:
         if plan.action == "update":
             op.call(
@@ -1031,23 +1130,12 @@ def push_one(op: Op, vault: Vault, plan: Plan, fresh: bool) -> None:
                 write=True,
                 detail=plan.title,
             )
-        try:
-            op.call(
-                ["item", "edit", plan.item.id, "--vault", vault.id, "--tags", tags],
-                write=True,
-                detail=plan.title,
-            )
-        except Execution:
-            if not tags_landed(op, vault, plan.title, tags):
-                raise
-            sys.stderr.write(
-                f"op item edit reported a failure, yet {plan.title} carries its tags, so it is verified\n"
-            )
+        write_fields(op, vault, plan.item.id, plan)
     except BaseException:
         if plan.action == "update":
             sys.stderr.write(
-                f"warning: {plan.title} may hold its new content without its new tags, so once op"
-                " answers, push it again by name with --overwrite-newer\n"
+                f"warning: {plan.title} may hold its new content without its new {SYNC_SECTION}"
+                " fields, so once op answers, push it again by name with --overwrite-newer\n"
             )
         raise
     if not op.dry_run:
@@ -1181,8 +1269,9 @@ def cmd_pull(a: argparse.Namespace, op: Op) -> int:
     plans: list[Plan] = []
     sources: dict[str, Vault] = {}
     for vault, items in selected(op, list_vaults(op), a.bucket):
-        for title, item in sorted(items.items()):
+        for title, listed_item in sorted(items.items()):
             sources[title] = vault
+            item = detailed(op, vault, listed_item)
             local, remote, mode, state = inspect(op, home, vault, title, item)
             path = local_path(home, title)
             written = content_time(item)
@@ -1290,8 +1379,11 @@ SELFTEST_CONTENT = {
 }
 SELFTEST_STAMP = datetime.datetime(2000, 1, 2, 3, 4, 5, 678901, datetime.UTC)
 SELFTEST_RESTAMP = datetime.datetime(2000, 1, 3, 4, 5, 6, 789012, datetime.UTC)
-SELFTEST_TAGS = tags_for(None, 0o600, SELFTEST_STAMP)
-SELFTEST_RETAGS = tags_for(None, 0o640, SELFTEST_RESTAMP)
+SELFTEST_FIELDS = ((MODE_FIELD, mode_text(0o600)), (CONTENT_FIELD, content_text(SELFTEST_STAMP)))
+SELFTEST_REFIELDS = (
+    (MODE_FIELD, mode_text(0o640)),
+    (CONTENT_FIELD, content_text(SELFTEST_RESTAMP)),
+)
 
 
 def listed(op: Op, vault: Vault, title: str, after: str) -> Item:
@@ -1310,7 +1402,24 @@ def measure_fields(op: Op, vault: Vault, results: list[Measured]) -> None:
     results.append(
         Measured("item list carries 'updated_at'", "updated_at" in keys, f"row keys {keys}")
     )
-    results.append(Measured("item list carries 'tags'", "tags" in keys, f"row keys {keys}"))
+
+
+def measure_item_get(op: Op, vault: Vault, item: Item, results: list[Measured]) -> Item:
+    """`item` with its `sync` fields, its raw key names measured first so a missing one is reported."""
+    raw = op.json(item_get_args(vault, item), detail=item.title)
+    keys = sorted(raw) if isinstance(raw, dict) else []
+    results.append(Measured("item get carries 'fields'", "fields" in keys, f"keys {keys}"))
+    return dataclasses.replace(item, sync=sync_fields(raw))
+
+
+def set_fields(op: Op, vault: Vault, item: Item, mode: int, content: datetime.datetime) -> None:
+    op.call(item_edit_args(vault, item.id, mode, content), write=True, detail=item.title)
+
+
+def fields_measured(name: str, item: Item, want: tuple[tuple[str, str], ...]) -> Measured:
+    """Whether the item's `sync` fields are exactly `want`, in any order."""
+    got = sorted(item.sync or ())
+    return Measured(name, got == sorted(want), f"{SYNC_SECTION} fields read back as {got}")
 
 
 def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured]) -> None:
@@ -1321,17 +1430,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         path.write_bytes(content)
         title = f"{SECRETS_DIR}/selftest_{label}"
         op.call(
-            [
-                "document",
-                "create",
-                str(path),
-                "--vault",
-                vault.id,
-                "--title",
-                title,
-                "--tags",
-                SELFTEST_TAGS,
-            ],
+            ["document", "create", str(path), "--vault", vault.id, "--title", title],
             write=True,
             detail=title,
         )
@@ -1343,33 +1442,13 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         detail = "byte-exact" if back == content else f"{len(content)} bytes became {len(back)}"
         results.append(Measured(f"document round-trip, {label}", back == content, detail))
     first = created["trailing-newline"]
+    set_fields(op, vault, first, 0o600, SELFTEST_STAMP)
+    fielded = measure_item_get(op, vault, listed(op, vault, first.title, "op item edit"), results)
+    results.append(fields_measured("item edit sets the sync fields", fielded, SELFTEST_FIELDS))
+    set_fields(op, vault, first, 0o640, SELFTEST_RESTAMP)
+    refielded = detailed(op, vault, listed(op, vault, first.title, "op item edit"))
     results.append(
-        Measured(
-            "create sets --tags",
-            sorted(first.tags) == sorted(SELFTEST_TAGS.split(",")),
-            f"tags read back as {list(first.tags)}",
-        )
-    )
-    op.call(
-        [
-            "item",
-            "edit",
-            first.id,
-            "--vault",
-            vault.id,
-            "--tags",
-            SELFTEST_RETAGS,
-        ],
-        write=True,
-        detail=first.title,
-    )
-    retagged = listed(op, vault, first.title, "op item edit")
-    results.append(
-        Measured(
-            "item edit --tags replaces",
-            sorted(retagged.tags) == sorted(SELFTEST_RETAGS.split(",")),
-            f"tags read back as {list(retagged.tags)}",
-        )
+        fields_measured("item edit replaces the sync fields", refielded, SELFTEST_REFIELDS)
     )
     time.sleep(2)
     edited = scratch / "edited"
@@ -1379,7 +1458,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
         write=True,
         detail=first.title,
     )
-    after = listed(op, vault, first.title, "op document edit")
+    after = detailed(op, vault, listed(op, vault, first.title, "op document edit"))
     results.append(
         Measured(
             "document edit keeps the item id",
@@ -1390,8 +1469,8 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
     results.append(
         Measured(
             "updated_at advances on document edit",
-            after.updated > retagged.updated,
-            f"{stamp(retagged.updated)} then {stamp(after.updated)}",
+            after.updated > refielded.updated,
+            f"{stamp(refielded.updated)} then {stamp(after.updated)}",
         )
     )
     back = download(op, vault, after)
@@ -1400,13 +1479,7 @@ def selftest_cases(op: Op, vault: Vault, scratch: Path, results: list[Measured])
             "document edit round-trip", back == b"alpha-selftest-value-2\n", f"sha {short(back)}"
         )
     )
-    results.append(
-        Measured(
-            "document edit keeps the tags",
-            sorted(after.tags) == sorted(SELFTEST_RETAGS.split(",")),
-            f"tags read back as {list(after.tags)}",
-        )
-    )
+    results.append(fields_measured("document edit keeps the sync fields", after, SELFTEST_REFIELDS))
     gone = created["crlf"]
     op.call(
         ["item", "delete", gone.id, "--vault", vault.id, "--archive"], write=True, detail=gone.title
@@ -1511,7 +1584,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--allow-empty", action="store_true", help="push an empty file")
     p.add_argument(
-        "--mode", metavar="OCTAL", help="the mode tag to set, required on Windows for a new item"
+        "--mode", metavar="OCTAL", help="the mode field to set, required on Windows for a new item"
     )
 
     p = sub.add_parser("pull", help="write a bucket's items under the home directory")
@@ -1559,7 +1632,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if getattr(a, "home", None) == "":
         ap.error("--home takes a directory, not an empty string")
     if getattr(a, "mode", None) is not None and (
-        not MODE_ARG.fullmatch(a.mode) or int(a.mode, 8) > 0o777
+        not MODE_TEXT.fullmatch(a.mode) or int(a.mode, 8) > 0o777
     ):
         ap.error(f"--mode takes an octal permission such as 0600, not {a.mode!r}")
     dry_run = bool(getattr(a, "dry_run", False))
