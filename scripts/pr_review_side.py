@@ -26,7 +26,7 @@ from pr_review_checks import (
     utc_instant,
 )
 from pr_review_hold import PUSHED_KEY, head_arrived, hosted_check, side_asks, side_command
-from pr_review_payload import bot_entry, default_branch
+from pr_review_payload import bot_entry, covering_bot
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
     QODO_LOGIN,
@@ -150,11 +150,10 @@ def side_reviewers(pr: dict) -> list[tuple[str, review_policy.BotPolicy, str]]:
 
     Empty where no policy rides the payload, since a reviewer the gate never named stays unnamed.
     """
-    default, base = default_branch(pr), pr.get("baseRefName") or ""
     found = []
     for name in SIDE_LOGINS:
-        bot = bot_entry(pr, name)
-        if bot is not None and bot.covers(base, default):
+        bot = covering_bot(pr, name)
+        if bot is not None:
             found.append((name, bot, side_command(name, bot.command)))
     return found
 

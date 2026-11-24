@@ -15,7 +15,7 @@ import pr_review_answers as answers
 import pr_review_copilot as adapter
 from pr_review_check_lines import check_lines
 from pr_review_checks import checks_stuck, checks_tally
-from pr_review_payload import bot_entry, default_branch
+from pr_review_payload import covering_bot
 from pr_review_promotion import coverage
 from pr_review_rounds import (
     CODERABBIT_LOGIN,
@@ -153,7 +153,6 @@ def render(
     answered = "yes" if answer else ("unknown" if blind else "no")
     ok, total = checks_tally(checks)
     stuck = checks_stuck(checks, now, grace, stall)
-    rabbit = bot_entry(pr, "coderabbit")
     other_on_head = [
         login
         for login in OTHER_REVIEWERS
@@ -163,7 +162,7 @@ def render(
             else head_nodes(pr, reviewer_nodes(pr, "reviews", login))
         )
     ]
-    covered = rabbit is not None and rabbit.covers(pr.get("baseRefName") or "", default_branch(pr))
+    covered = covering_bot(pr, "coderabbit") is not None
     unread = covered and summary_blind(pr) and CODERABBIT_LOGIN not in other_on_head
     other_limited = {
         login: name for login in OTHER_REVIEWERS if (name := rate_limited_by(pr, login)) is not None
