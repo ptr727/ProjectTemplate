@@ -93,6 +93,8 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    check that did not conclude `SKIPPED` begins at or after that ask.
    Until then `merge` refuses as `CHECKS_PENDING`, on a line naming when the grace ends. `wait`
    holds an attested head then too.
+   A CodeRabbit or Qodo check can read `success` over a rate limit, and a rate limit is not
+   coverage of the head.
    `pr_review.py`'s `review_on_head` names Copilot's own coverage specifically, not "no review of
    any kind covers this head". An advisory reviewer carrying the exact head under
    `other_reviewed`, with an empty review body and no new threads, is not a missing review. It is
