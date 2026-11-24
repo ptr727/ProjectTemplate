@@ -47,7 +47,7 @@ All builds must complete without warnings, enforced as follows:
   the `dotnet format style` step fails on their warnings instead. Such a diagnostic must be fixed or deliberately suppressed at the
   narrowest scope that fits (see Analyzer suppressions below), never left to accumulate. IDE0079 is
   the exception, since neither that step nor the build reports it. Remove a suppression the IDE
-  flags under IDE0079 all the same.
+  flags under IDE0079 only once every configuration and target framework CI builds passes without it.
 - **CI lint backstop.** CI runs the clean-compile checks on every PR as the authoritative gate.
   Husky.Net is wired from the canonical `catalog/snippets/husky/` config in the hub, hub-local
   and not carried into every fleet repo. Its hook needs a .NET tool manifest declaring
@@ -267,9 +267,10 @@ owns formatting and IDE0055 stays `none`.
 ## Code patterns
 
 1. **Guard clauses**: prefer early returns for validation and error handling. A parameter null
-   guard calls `ArgumentNullException.ThrowIfNull`, as CA1510 requires. A `netstandard` project
+   guard calls `ArgumentNullException.ThrowIfNull`, as CA1510 requires, even where IDE0046 offers a
+   conditional `return` for it. A `netstandard` project
    lacks that method, so its guard uses a throw expression instead. A local assigned and then
-   null-checked takes `?? throw` on the assignment, per IDE0270. IDE0046 makes one other
+   null-checked takes `?? throw` on the assignment, per IDE0270. IDE0046 makes any other such
    shape a single conditional `return`, a throw expression included. That shape is an `if` and
    the `return`, `throw`, or `else` right after it, each branch only returning or throwing. Both
    branches throwing is not that shape. Write that shape as the conditional `return` from the start.
