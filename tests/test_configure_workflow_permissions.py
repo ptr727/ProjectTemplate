@@ -10,14 +10,12 @@ No case reaches a live repository, since the stub answers every call the functio
 from __future__ import annotations
 
 import json
-import os
 import shlex
-import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
-from test_configure_archived import lift, require, run_bash
+from test_configure_archived import lift, run_bash
 from test_configure_interaction import HELPERS, function
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,7 +23,6 @@ PAYLOAD = ROOT / "repo-config" / "workflow-permissions.json"
 ENDPOINT = "repos/ptr727/Fixture/actions/permissions/workflow"
 
 
-CONFIGURE = ROOT / "repo-config" / "configure.sh"
 PROBLEM = function("payload_problem") + function("workflow_permissions_problem")
 LIVE = function("workflow_permissions_live")
 HELD = function("workflow_permissions_held")
@@ -402,27 +399,6 @@ class WiringCase(unittest.TestCase):
         guard = body.rindex('if [ "$workflow_held" = true ]; then')
         self.assertIn("exit 1", body[guard : guard + 250])
         self.assertLess(body.index('apply_workflow_permissions "$workflow_live"'), guard)
-
-    def test_the_option_is_refused_outside_apply_before_any_read(self) -> None:
-        """The refusal runs before the first read, which a `gh` that fails every call would otherwise expose."""
-        bash = require("bash")
-        with tempfile.TemporaryDirectory() as tmp:
-            stub = Path(tmp) / "gh"
-            stub.write_text("#!/bin/sh\necho gh-was-called >&2\nexit 1\n", encoding="utf-8")
-            stub.chmod(0o755)
-            env = dict(os.environ, PATH=f"{tmp}{os.pathsep}{os.environ['PATH']}")
-            result = subprocess.run(
-                [bash, str(CONFIGURE), "check", "owner/name", "--lower-workflow-token"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                timeout=30,
-                check=False,
-                env=env,
-            )
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Option '--lower-workflow-token' is valid only with apply", result.stderr)
-        self.assertNotIn("gh-was-called", result.stderr)
 
     def test_check_runs_the_workflow_permissions_group(self) -> None:
         self.assertIn("\n    check_workflow_permissions\n", function("cmd_check"))

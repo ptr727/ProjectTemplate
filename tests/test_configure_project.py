@@ -570,7 +570,7 @@ class WiringCase(unittest.TestCase):
                 "interaction_origin() { :; }\napply_interaction() { :; }\n"
                 'apply_project() { echo "the link write ran with $1"; }\n'
                 "workflow_permissions_problem() { :; }\nworkflow_permissions_live() { :; }\n"
-                "apply_workflow_permissions() { :; }\n"
+                "workflow_permissions_held() { return 1; }\napply_workflow_permissions() { :; }\n"
                 'gh() { printf "false\\n"; }\njq() { printf "{}\\n"; }\n'
                 'jqr() { printf "1\\n"; }\n'
             )
