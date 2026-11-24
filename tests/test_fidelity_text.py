@@ -89,6 +89,20 @@ class SectionCase(unittest.TestCase):
         self.assertEqual(fidelity_text.extract_anchored(text, "b"), "## B\n")
         self.assertIsNone(fidelity_text.extract_anchored(text, "gone"))
 
+    def test_heading_regions_returns_every_match_under_the_given_key(self) -> None:
+        text = "## Dup\n\n### Sub\n\n# Title\n\n### dup\n\nx\n\n## Tail\n"
+        found = fidelity_text.heading_regions(text, fidelity_text.section_key, "dup")
+        self.assertEqual([(h.line, h.level, end) for h, end in found], [(0, 2, 4), (6, 3, 10)])
+        self.assertEqual(
+            [(h.line, end) for h, end in fidelity_text.heading_regions(text, str, "Tail")],
+            [(10, None)],
+        )
+        self.assertEqual(fidelity_text.heading_regions(text, fidelity_text.heading_slug, "x"), [])
+
+    def test_extract_anchored_takes_the_first_of_two_matches(self) -> None:
+        text = "## Same\n\none\n\n## Same\n\ntwo\n"
+        self.assertEqual(fidelity_text.extract_anchored(text, "same"), "## Same\n\none\n")
+
     def test_strip_sections_keeps_an_identical_passage_elsewhere(self) -> None:
         text = "## Keep\n\nsame\n\n## Drop\n\nsame\n"
         self.assertEqual(fidelity_text.strip_sections(text, ["drop"]), "## Keep\n\nsame\n")
