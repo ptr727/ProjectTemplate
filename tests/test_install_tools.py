@@ -24,7 +24,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from sdk_baseline import baseline_line
 
@@ -588,54 +588,61 @@ printf '%s\\n' "${{NOTES[@]}}" """
                 self.assertIn("1Password's", notes[0])
                 self.assertIn(f"{path} {expected}", notes[1])
 
-    def test_gh_and_node_notes_say_what_the_sources_directory_holds(self) -> None:
-        """A one-line vendor source is a configured repository, which the script does not manage."""
-        cases = {
-            "gh": (
-                "github-cli",
-                "the upstream repository is configured by the one-line github-cli.list",
-            ),
-            "node": (
-                "nodesource",
-                "the upstream repository is configured by the one-line nodesource.list",
-            ),
-        }
-        for tool, (stem, configured) in cases.items():
-            for files, expected in (
-                ([], "upstream repository not configured"),
-                ([f"{stem}.list"], configured),
-                ([f"{stem}.sources"], None),
-                ([f"{stem}.sources", f"{stem}.list"], None),
-            ):
-                with self.subTest(tool=tool, files=files):
-                    sources = self.dir / f"sources-{tool}-{len(files)}-{'-'.join(files)}"
-                    sources.mkdir()
-                    for name in files:
-                        (sources / name).write_text("", encoding="utf-8")
-                    text = linux_functions().replace(
-                        'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
-                        f'readonly SOURCES_DIR="{sources}"',
-                    )
-                    self.assertIn(str(sources), text)
-                    self.functions.write_text(text, encoding="utf-8")
-                    body = f"""tool_note {tool}
-printf '%s\\n' "${{NOTES[@]}}"
-tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
-                    result = self.run_bash(body)
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    lines = result.stdout.splitlines()
-                    self.assertEqual(
-                        lines[-1], "CONFIGURED" if expected is None else "UNCONFIGURED"
-                    )
-                    if expected is None:
-                        self.assertNotIn("repository", result.stdout.replace("CONFIGURED", ""))
-                    else:
-                        self.assertIn(expected, lines[0])
-
     def test_the_configured_repository_is_the_one_install_writes(self) -> None:
         text = LINUX_INSTALLER.read_text(encoding="utf-8")
         self.assertRegex(text, r'(?m)^    op\) \[\[ -f "\$SOURCES_DIR/1password\.sources" \]\] ;;$')
         self.assertRegex(text, r'register_apt_source "1password" ')
+
+
+class TestLinuxSourceNotes(LinuxFunctionsCase):
+    """The gh and node note and `tool_configured` read one test of the sources directory."""
+
+    NOT_CONFIGURED = "upstream repository not configured, the available version is the distro's"
+    ONE_LINE: ClassVar[dict[str, str]] = {
+        "gh": "the upstream repository is configured by the one-line github-cli.list, a file this script does not manage, and an install or upgrade replaces it",
+        "node": "the upstream repository is configured by the one-line nodesource.list, a file this script does not manage, and an install or upgrade writes nodesource.sources beside it and leaves it",
+    }
+    STEMS: ClassVar[dict[str, str]] = {"gh": "github-cli", "node": "nodesource"}
+
+    def probe(self, tool: str, files: list[str]) -> tuple[list[str], str]:
+        sources = self.dir / f"sources-{tool}-{'-'.join(files) or 'empty'}"
+        sources.mkdir()
+        for name in files:
+            (sources / name).write_text("", encoding="utf-8")
+        text = linux_functions().replace(
+            'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
+            f'readonly SOURCES_DIR="{sources}"',
+        )
+        self.assertIn(str(sources), text)
+        self.functions.write_text(text, encoding="utf-8")
+        body = f"""tool_note {tool}
+for n in "${{NOTES[@]}}"; do printf 'NOTE %s\\n' "$n"; done
+tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.splitlines()
+        notes = [line.removeprefix("NOTE ") for line in lines if line.startswith("NOTE ")]
+        return notes, lines[-1]
+
+    def test_each_sources_directory_state_gets_the_note_that_is_true_of_it(self) -> None:
+        for tool, stem in self.STEMS.items():
+            cases: tuple[tuple[list[str], list[str], str], ...] = (
+                ([], [self.NOT_CONFIGURED], "UNCONFIGURED"),
+                ([f"{stem}.list"], [self.ONE_LINE[tool]], "UNCONFIGURED"),
+                ([f"{stem}.sources"], [], "CONFIGURED"),
+                ([f"{stem}.sources", f"{stem}.list"], [], "CONFIGURED"),
+            )
+            for files, notes, configured in cases:
+                with self.subTest(tool=tool, files=files):
+                    self.assertEqual(
+                        self.probe(tool, files), ([f"{tool}: {n}" for n in notes], configured)
+                    )
+
+    def test_the_stem_is_the_name_install_registers(self) -> None:
+        text = LINUX_INSTALLER.read_text(encoding="utf-8")
+        for tool, stem in self.STEMS.items():
+            self.assertRegex(text, rf"(?m)^    {tool}\) printf '{stem}' ;;$")
+            self.assertRegex(text, rf'register_apt_source "{stem}" ')
 
 
 class TestInstallersNameTheBaselineLine(unittest.TestCase):

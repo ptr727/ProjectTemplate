@@ -1369,7 +1369,11 @@ tool_note() {
         if tool_configured "$tool"; then
             :
         elif [[ -f "$SOURCES_DIR/$name.list" ]]; then
-            note "$tool" "the upstream repository is configured by the one-line $name.list, a file this script does not manage"
+            if [[ $tool == "gh" ]]; then
+                note "$tool" "the upstream repository is configured by the one-line $name.list, a file this script does not manage, and an install or upgrade replaces it"
+            else
+                note "$tool" "the upstream repository is configured by the one-line $name.list, a file this script does not manage, and an install or upgrade writes $name.sources beside it and leaves it"
+            fi
         else
             note "$tool" "upstream repository not configured, the available version is the distro's"
         fi
