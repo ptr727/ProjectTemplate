@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types as types_module
 import unittest
 from collections.abc import Callable
 from typing import Any
@@ -2227,6 +2228,8 @@ README_CASES = [
 
 DOCKER_SHIELD = "[![Docker Latest][e]][x]\n"
 DOCKER_DEFINITION = "[e]: https://img.shields.io/docker/v/o/r/latest\n"
+COVERAGE_SHIELD = "[![Coverage][f]][x]\n"
+COVERAGE_DEFINITION = "[f]: https://img.shields.io/codecov/c/github/o/r/main\n"
 
 INLINE_ALL = re.sub(
     r"!\[([^\]]*)\]\[([a-z-]+)\]",
@@ -2970,11 +2973,37 @@ class ReadmeCase(unittest.TestCase):
             label, text, ent, wantn = case[:4]
             want_text = case[4] if len(case) > 4 else None
             with self.subTest(label):
-                got = audit_markdown.readme_shield_findings(text, self.rm, ent)
+                got = audit_markdown.readme_shield_findings(text, self.rm, ent, ())
                 good = len(got) == wantn and (
                     want_text is None or any(want_text in t for _, t in got)
                 )
                 self.assertTrue(good, f"readme shields: {label} want={wantn} {want_text} -> {got}")
+
+    def test_coverage_class_follows_the_coverage_predicate(self) -> None:
+        covered = CONFORMANT.replace(
+            "[![Last Commit][b]][x]\n", "[![Last Commit][b]][x]\\\n" + COVERAGE_SHIELD
+        ).replace("[license-shield]:", COVERAGE_DEFINITION + "[license-shield]:")
+        cases = [
+            ("a repo owing coverage and carrying the badge", covered, ["python"], 0),
+            ("the same repo without the badge", CONFORMANT, ["python"], 1),
+            ("a repo owing no coverage owes no badge", CONFORMANT, [], 0),
+        ]
+        for label, text, types, wantn in cases:
+            with self.subTest(label):
+                got = audit_markdown.readme_shield_findings(text, self.rm, {}, types)
+                self.assertEqual(len(got), wantn, f"coverage shield: {label} -> {got}")
+                self.assertTrue(all("`coverage` shield class" in t for _, t in got), got)
+
+    def test_the_audit_hands_its_coverage_types_to_the_shield_check(self) -> None:
+        for types, wantn in ((["csharp"], 1), ([], 0)):
+            with self.subTest(types=types):
+                run = types_module.SimpleNamespace(
+                    docs={"README.md": CONFORMANT},
+                    spec={"readme": self.rm},
+                    entry={},
+                    coverage_types=types,
+                )
+                self.assertEqual(len(audit.check_readme_shields(run)), wantn)
 
     def test_link_cases(self) -> None:
         for label, text, want_letter, want_drift in LINK_CASES:

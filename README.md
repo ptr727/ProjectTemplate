@@ -10,7 +10,8 @@ Agent enablement for a fleet of repositories: autonomy and repeatable quality in
 ### Build Status <!-- omit from toc -->
 
 [![Releases Build][releases-build-shield]][actions-link]\
-[![Last Commit][last-commit-shield]][commits-link]
+[![Last Commit][last-commit-shield]][commits-link]\
+[![Coverage][coverage-shield]][coverage-link]
 
 ### Releases <!-- omit from toc -->
 
@@ -337,6 +338,7 @@ Licensed under the [MIT License][license]\
 
 <!-- Shields -->
 
+[coverage-shield]: https://img.shields.io/codecov/c/github/ptr727/ProjectTemplate/main?logo=codecov&label=Coverage
 [github-pre-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?include_prereleases&filter=*-g*&label=GitHub%20Pre-Release&logo=github
 [github-release-shield]: https://img.shields.io/github/v/release/ptr727/ProjectTemplate?logo=github&label=GitHub%20Release
 [last-commit-shield]: https://img.shields.io/github/last-commit/ptr727/ProjectTemplate?logo=github&label=Last%20Commit
@@ -404,6 +406,7 @@ Licensed under the [MIT License][license]\
 
 <!-- External -->
 
+[coverage-link]: https://app.codecov.io/gh/ptr727/ProjectTemplate/tree/main
 [cspell-link]: https://cspell.org
 [dependabot-link]: https://github.com/dependabot
 [editorconfig-checker-link]: https://github.com/editorconfig-checker/editorconfig-checker
