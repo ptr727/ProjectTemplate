@@ -37,9 +37,9 @@ by that signal.
 Exit codes
   0  the report was written.
   1  a `gh` call for issues, pull requests, or runs failed, so no number is guessed and no report
-     is written. A failed review query still writes the backlog report, with billing where asked for.
-     It adds one line saying the review figures were unavailable and names the error on stderr,
-     then exits 1.
+     is written. A failed review query still writes the backlog report, with billing where asked
+     for. It adds one line saying the review figures were unavailable and names the error on
+     stderr, then exits 1.
      Four reads fail more softly: the default branch, whether `develop` exists, the policy file,
      and its history. A failed one still writes the report, names that read on stderr, and
      exits 1. Where the policy itself went unread, the report shows `error` in its place. A failed
@@ -65,7 +65,7 @@ from typing import Any
 import pr_review_rounds as rounds
 import pr_review_side as side
 from gh_graphql import GraphQLError, request, run_subprocess, said_absent, walk
-from pr_review_checks import check_nodes, checks_truncated, utc_instant
+from pr_review_checks import CHECKS_WINDOW, check_nodes, checks_truncated, utc_instant
 from pr_review_copilot import VOCABULARIES
 from pr_review_policy import BOTS, COMMANDS, POLICY_PATH, PolicyError, fetch
 
@@ -98,7 +98,6 @@ FAILING_RUNS = frozenset({"failure", "timed_out", "startup_failure"})
 UNDECIDED_RUNS = frozenset({"cancelled", "skipped", "neutral"})
 PR_EVENTS = frozenset({"pull_request", "pull_request_target"})
 ATTENTION_RUN_LIMIT = 200
-CHECK_CAP = 100
 LABELS = ("pre-existing", "prose", "documentation", "bug", "script", "enhancement", "decision")
 
 Items = Sequence[Mapping[str, Any]]
@@ -1014,22 +1013,27 @@ query($owner: String!, $name: String!, $after: String) {
         baseRefName
         headRefOid
         author { login }
-        commits(last: 1) { nodes { commit { oid statusCheckRollup { contexts(first: @CHECK@) {
-          pageInfo { hasNextPage }
-          nodes {
-            __typename
-            ... on CheckRun { name status conclusion startedAt completedAt
-              checkSuite { databaseId status app { slug databaseId }
-                workflowRun { databaseId workflow { databaseId } } } }
-            ... on StatusContext { context state createdAt creator { login } }
-          }
-        } } } } }
+        commits(last: 1) { nodes { commit {
+          oid
+          statusCheckRollup { contexts(first: @CHECK@) {
+            pageInfo { hasNextPage }
+            nodes {
+              __typename
+              ... on CheckRun { name status conclusion startedAt completedAt
+                checkSuite { databaseId status app { slug databaseId }
+                  workflowRun { databaseId workflow { databaseId } } } }
+              ... on StatusContext { context state createdAt creator { login } }
+            }
+          } }
+          checkSuites(last: 50) { nodes { databaseId status createdAt app { slug }
+            workflowRun { databaseId workflow { databaseId } } } }
+        } } }
       }
     }
   }
 }
 """.replace("@PAGE@", str(PAGE_SIZE))
-    .replace("@CHECK@", str(CHECK_CAP))
+    .replace("@CHECK@", str(CHECKS_WINDOW))
     .replace("@INTEGRATION@", INTEGRATION_BRANCH)
 )
 
@@ -1061,7 +1065,8 @@ def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[li
 
     `runs` is newest first, as `gh run list` prints it. A cancelled, skipped, or neutral run
     decided nothing, so it is never a workflow's latest. A pull request's run is left out, since a
-    fork's branch can share the name. So is a Copilot review run, which carries the reviewed pull
+    fork's branch can share the name. A workflow is keyed by its database id, since two workflow
+    files can share a display name. So is a Copilot review run, which carries the reviewed pull
     request's head branch. A workflow recovered where a run failed in the window and its latest
     completed run did not.
     """
@@ -1069,16 +1074,18 @@ def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[li
     failed: dict[str, list[Mapping[str, Any]]] = {}
     for run in runs:
         workflow = str(run.get("workflowName") or "")
+        key = str(run.get("workflowDatabaseId") or workflow)
         if not run.get("conclusion") or run["conclusion"] in UNDECIDED_RUNS:
             continue
         if run.get("event") in PR_EVENTS or workflow == REVIEW_WORKFLOW:
             continue
-        latest.setdefault(workflow, run)
+        latest.setdefault(key, run)
         if run["conclusion"] in FAILING_RUNS and str(run.get("createdAt") or "")[:10] >= str(since):
-            failed.setdefault(workflow, []).append(run)
+            failed.setdefault(key, []).append(run)
     still, recovered = [], []
-    for workflow, run in latest.items():
-        in_window = failed.get(workflow, [])
+    for key, run in latest.items():
+        workflow = str(run.get("workflowName") or "")
+        in_window = failed.get(key, [])
         if run["conclusion"] in FAILING_RUNS:
             still.append(
                 {
@@ -1108,8 +1115,8 @@ def collect_attention(
 
     Open pull requests are read, up to `PR_CAP`, drafts counting toward it and in no list. A stale
     one has had no update for `stale_days`, to the instant, and has no failing check. The default
-    branch and `develop`, where it exists, are read for two kinds of workflow. One kind's latest completed run failed. The other kind failed
-    in the window and recovered.
+    branch and `develop`, where it exists, are read for two kinds of workflow. One kind's latest
+    completed run failed. The other kind failed in the window and recovered.
     """
 
     def fetch(after: str | None) -> dict:
@@ -1141,7 +1148,7 @@ def collect_attention(
                 continue
             names = failing_checks(pr)
             if checks_truncated(dict(pr)):
-                result["truncated"].append(f"checks of #{pr.get('number')} cut at {CHECK_CAP}")
+                result["truncated"].append(f"checks of #{pr.get('number')} cut at {CHECKS_WINDOW}")
             if names:
                 result["failing_pull_requests"].append(
                     {**pr_attention(pr), "failing_checks": names}
@@ -1160,7 +1167,7 @@ def collect_attention(
         runs = run_gh(
             ["run", "list", "--repo", f"{owner}/{name}", "--branch", branch]
             + ["--limit", str(ATTENTION_RUN_LIMIT)]
-            + ["--json", "workflowName,url,conclusion,createdAt,event"]
+            + ["--json", "workflowName,workflowDatabaseId,url,conclusion,createdAt,event"]
         )
         still, recovered = branch_attention(branch, runs, since)
         result["failing_branches"] += still

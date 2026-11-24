@@ -1356,6 +1356,17 @@ class AttentionTests(unittest.TestCase):
         )
         self.assertEqual(self.attention([superseded])["failing_pull_requests"], [])
 
+    def test_two_workflows_sharing_a_name_are_told_apart_by_id(self) -> None:
+        failing = {**run_record("CI", "failure", "2026-11-22", "a"), "workflowDatabaseId": 1}
+        passing = {**run_record("CI", "success", "2026-11-23", "b"), "workflowDatabaseId": 2}
+        result = self.attention([], {"main": [passing, failing]})
+        self.assertEqual([e["html_url"] for e in result["failing_branches"]], ["a"])  # type: ignore[attr-defined]
+        self.assertEqual(result["recovered_branches"], [])
+
+    def test_the_query_reads_the_head_check_suites_the_gate_reads(self) -> None:
+        self.assertIn("checkSuites(last: 50)", bm.ATTENTION_QUERY)
+        self.assertIn(f"contexts(first: {bm.CHECKS_WINDOW})", bm.ATTENTION_QUERY)
+
     def test_a_copilot_review_run_is_not_a_branch_failure(self) -> None:
         runs = {
             "develop": [run_record(bm.REVIEW_WORKFLOW, "failure", "2026-11-23", "c", "dynamic")]
@@ -1409,7 +1420,9 @@ class AttentionTests(unittest.TestCase):
         pr["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"]["pageInfo"] = {  # type: ignore[index]
             "hasNextPage": True
         }
-        self.assertEqual(self.attention([pr])["truncated"], [f"checks of #5 cut at {bm.CHECK_CAP}"])
+        self.assertEqual(
+            self.attention([pr])["truncated"], [f"checks of #5 cut at {bm.CHECKS_WINDOW}"]
+        )
 
     def test_a_failing_latest_run_names_the_workflow_and_a_recovered_one_is_apart(self) -> None:
         runs = {
