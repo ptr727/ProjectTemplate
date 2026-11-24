@@ -3,7 +3,6 @@
 
 The registry read and write, the directory probe, the session-user check, and the broadcast are stubbed.
 So no test reads or changes the host's real `Path`, and the same cases run wherever `pwsh` does.
-The last case runs `upgrade-host.sh` itself, holding each argument refusal to exit status 64.
 
 Run as `python3 tests/test_upgrade_host.py`, or under `python3 -m unittest discover -s tests`.
 """
@@ -13,7 +12,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,7 +19,6 @@ from typing import Any, ClassVar
 
 ROOT = Path(__file__).resolve().parent.parent
 UPGRADER = ROOT / "host-setup" / "windows" / "upgrade-host.ps1"
-LINUX_UPGRADER = ROOT / "host-setup" / "linux" / "upgrade-host.sh"
 
 FUNCTIONS = (
     "Get-PathEntryTarget",
@@ -450,31 +447,6 @@ class TestPathCleanupWrite(unittest.TestCase):
         self.assertIn("Path      : 3 entries that -CleanPath removes", text)
         self.assertIn("remove  C:\\gone-machine", text)
         self.assertIn("remove  C:\\gone-user", text)
-
-
-@unittest.skipUnless(sys.platform == "linux", "runs the Linux script")
-class TestLinuxRefusalStatus(unittest.TestCase):
-    """Every argument refusal of upgrade-host.sh exits 64, the status CODESTYLE.md "Command-Line Arguments" reserves for one."""
-
-    def test_each_refusal_exits_the_reserved_status(self) -> None:
-        for arguments, message in [
-            (("--bogus-flag",), 'Unknown option "--bogus-flag"'),
-            (("--dryrun",), 'Unknown option "--dryrun"'),
-            (("--status", "--packages"), "More than one action"),
-        ]:
-            with self.subTest(arguments=arguments):
-                result = subprocess.run(
-                    ["bash", str(LINUX_UPGRADER), *arguments],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    stdin=subprocess.DEVNULL,
-                    check=False,
-                    timeout=30,
-                )
-                self.assertEqual(result.returncode, 64, result.stderr)
-                self.assertIn(message, result.stderr)
-                self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

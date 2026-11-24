@@ -765,32 +765,5 @@ class TestCallSites(unittest.TestCase):
         )
 
 
-@unittest.skipUnless(sys.platform == "linux", "runs the Linux script")
-class TestLinuxRefusalStatus(unittest.TestCase):
-    """Every argument refusal of setup-github.sh exits 64, the status CODESTYLE.md "Command-Line Arguments" reserves for one."""
-
-    def test_each_refusal_exits_the_reserved_status(self) -> None:
-        for arguments, message in [
-            (("--bogus-flag",), 'Unknown option "--bogus-flag"'),
-            (("--name",), "--name takes a value"),
-            (("--email",), "--email takes a value"),
-            (("--shared-checkout",), "--shared-checkout takes the path"),
-            (("--status", "--configure"), "More than one action"),
-        ]:
-            with self.subTest(arguments=arguments):
-                result = subprocess.run(
-                    ["bash", str(LINUX_SCRIPT), *arguments],
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    stdin=subprocess.DEVNULL,
-                    check=False,
-                    timeout=30,
-                )
-                self.assertEqual(result.returncode, 64, result.stderr)
-                self.assertIn(message, result.stderr)
-                self.assertEqual(result.stdout, "")
-
-
 if __name__ == "__main__":
     unittest.main()

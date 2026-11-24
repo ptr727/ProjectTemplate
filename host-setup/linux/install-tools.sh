@@ -67,7 +67,6 @@ FAILED=()
 CHANGED=()
 
 USAGE_REFUSED=false
-pids=()
 
 TMP_DIR=$(mktemp -d)
 readonly TMP_DIR
@@ -83,13 +82,11 @@ on_exit() {
     fi
 }
 
-# An interrupt stops the running command and re-raises the signal, per CODESTYLE.md "Interrupts in Shell".
+# An interrupt names the signal and re-raises it, per CODESTYLE.md "Interrupts in Shell".
+# Every command runs in the foreground, since apt-get, dpkg, and the installers do not stop cleanly on SIGTERM.
+# So Ctrl-C reaches the command itself, and the trap runs once the command returns.
 # shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
 interrupted() {
-    if [[ ${#pids[@]} -ne 0 ]]; then
-        kill "${pids[@]}" 2>/dev/null || :
-        wait "${pids[@]}" || :
-    fi
     printf 'install-tools.sh: interrupted by SIG%s.\n' "$1" >&2
     trap - "$1"
     kill -s "$1" "$$"
@@ -299,18 +296,7 @@ run() {
         printf '  [dry run] %s\n' "$*"
         return 0
     fi
-    run_child "$@"
-}
-
-# A command run here goes to the background and is waited for, since bash runs a trap only once a foreground command returns.
-# It keeps the script's standard input, which bash would otherwise replace with /dev/null for a background command.
-run_child() {
-    "$@" <&0 &
-    pids=("$!")
-    local status=0
-    wait "${pids[0]}" || status=$?
-    pids=()
-    return "$status"
+    "$@"
 }
 
 run_root() { run "${SUDO[@]}" "$@"; }
@@ -1694,7 +1680,7 @@ list_tools() {
 load_repo_tools() {
     [[ -n $REPO ]] || return 0
     local declaration="$REPO/host-tools.json"
-    [[ -f $declaration ]] || die "$REPO carries no host-tools.json"
+    [[ -f $declaration ]] || die_usage "--repo $REPO carries no host-tools.json"
     command -v jq >/dev/null || die "--repo needs jq to read constrained package metadata. Install the fleet tools first, then run this command again."
 
     local name package manager rows key

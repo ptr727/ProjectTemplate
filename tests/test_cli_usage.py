@@ -791,7 +791,7 @@ class HostSetupExitStatusCase(unittest.TestCase):
                     timeout=30,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("Exit status 64 means an argument was refused", result.stdout)
+                self.assertIn("No other failure exits 64.", " ".join(result.stdout.split()))
 
     def test_an_unknown_option_exits_the_reserved_status(self) -> None:
         for script in HOST_SCRIPTS:
@@ -799,6 +799,39 @@ class HostSetupExitStatusCase(unittest.TestCase):
                 result, effects = run_sandboxed([bash_or_skip(), str(script), "--bogus-flag"])
                 self.assertEqual(result.returncode, 64, result.stderr)
                 self.assertIn('Unknown option "--bogus-flag"', result.stderr)
+                self.assertEqual(effects, "")
+
+    def test_each_refusal_exits_the_reserved_status(self) -> None:
+        empty = str(self.dir)
+        for name, arguments, message in [
+            ("upgrade-host.sh", ("--dryrun",), 'Unknown option "--dryrun"'),
+            ("upgrade-host.sh", ("--status", "--packages"), "More than one action"),
+            ("install-tools.sh", ("--repo",), "--repo needs a path"),
+            ("install-tools.sh", ("--list", "--repo", empty), "carries no host-tools.json"),
+            ("install-tools.sh", ("--report", "--install"), "More than one action"),
+            ("install-tools.sh", ("--install", "--json"), "applies only to --report"),
+            ("install-tools.sh", ("--sudo-timestamp", "jq"), "takes no tool"),
+            ("install-tools.sh", ("--list", "nosuch"), 'Unknown tool "nosuch"'),
+            ("install-agents.sh", ("--report", "--upgrade"), "More than one action"),
+            ("install-agents.sh", ("--upgrade", "--json"), "applies only to --report"),
+            ("install-agents.sh", ("--upgrade", "--all"), "--all names every tool"),
+            ("install-agents.sh", ("--install", "--all", "claude"), "--all and a tool name"),
+            ("install-agents.sh", ("--list", "nosuch"), 'Unknown tool "nosuch"'),
+            ("install-agents.sh", ("--install",), "nothing is installed by default"),
+            ("setup-github.sh", ("--name",), "--name takes a value"),
+            ("setup-github.sh", ("--email",), "--email takes a value"),
+            ("setup-github.sh", ("--shared-checkout",), "--shared-checkout takes the path"),
+            ("setup-github.sh", ("--status", "--configure"), "More than one action"),
+            ("restore-secrets.sh", (), "Name at least one bucket"),
+            ("restore-secrets.sh", ("--bucket",), "--bucket takes a bucket name"),
+            ("restore-secrets.sh", ("--bucket", "Bad_Name"), "--bucket takes lowercase letters"),
+        ]:
+            with self.subTest(script=name, arguments=arguments):
+                script = ROOT / "host-setup" / "linux" / name
+                result, effects = run_sandboxed([bash_or_skip(), str(script), *arguments])
+                self.assertEqual(result.returncode, 64, result.stderr)
+                self.assertIn(message, result.stderr)
+                self.assertEqual(result.stdout, "")
                 self.assertEqual(effects, "")
 
     def test_a_refusal_through_die_usage_exits_the_reserved_status(self) -> None:
@@ -829,7 +862,7 @@ class HostSetupExitStatusCase(unittest.TestCase):
 class HostSetupInterruptCase(unittest.TestCase):
     """A host-setup/linux script holding a temporary directory dies by the signal and leaves nothing.
 
-    The signal arrives while the script's `run` waits on a child, the path a host-changing command takes.
+    The signal goes to the process group while a foreground command runs, as Ctrl-C does.
     """
 
     HOLDERS = ("install-agents.sh", "install-tools.sh", "setup-github.sh", "upgrade-host.sh")
@@ -853,7 +886,7 @@ class HostSetupInterruptCase(unittest.TestCase):
         child.chmod(0o755)
         # One file per run, since a file left by an earlier run would read as this child having started.
         pid_file = self.dir / f"{name}-{signum.name}.pid"
-        body = f'source "{copy}"\nDRY_RUN=false\nprintf "%s\\n" "$TMP_DIR"\nrun "{child}" "{pid_file}"\n'
+        body = f'source "{copy}"\nprintf "%s\\n" "$TMP_DIR"\n"{child}" "{pid_file}"\n'
         with subprocess.Popen(
             [bash_or_skip(), "-c", body],
             stdin=subprocess.DEVNULL,
@@ -870,11 +903,11 @@ class HostSetupInterruptCase(unittest.TestCase):
                     _, err = proc.communicate(timeout=20)
                     self.fail(f"{name} never started its child: {err}")
                 time.sleep(0.05)
-            proc.send_signal(signum)
+            os.killpg(proc.pid, signum)
             out, err = proc.communicate(timeout=20)
         return proc.returncode, err, Path(out.strip()), int(pid_file.read_text(encoding="utf-8"))
 
-    def test_a_signal_mid_run_stops_the_child_and_removes_the_directory(self) -> None:
+    def test_a_signal_mid_run_ends_the_script_by_it_and_removes_the_directory(self) -> None:
         for name in self.HOLDERS:
             for signum in (signal.SIGINT, signal.SIGTERM):
                 with self.subTest(script=name, signal=signum.name):

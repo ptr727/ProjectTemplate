@@ -44,7 +44,6 @@ CHANGED=()
 NOW_VERSION=""
 
 USAGE_REFUSED=false
-pids=()
 
 TMP_DIR=$(mktemp -d)
 readonly TMP_DIR
@@ -60,13 +59,11 @@ on_exit() {
     fi
 }
 
-# An interrupt stops the running command and re-raises the signal, per CODESTYLE.md "Interrupts in Shell".
+# An interrupt names the signal and re-raises it, per CODESTYLE.md "Interrupts in Shell".
+# Every command runs in the foreground, since apt-get, dpkg, and the installers do not stop cleanly on SIGTERM.
+# So Ctrl-C reaches the command itself, and the trap runs once the command returns.
 # shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
 interrupted() {
-    if [[ ${#pids[@]} -ne 0 ]]; then
-        kill "${pids[@]}" 2>/dev/null || :
-        wait "${pids[@]}" || :
-    fi
     printf 'install-agents.sh: interrupted by SIG%s.\n' "$1" >&2
     trap - "$1"
     kill -s "$1" "$$"
@@ -225,7 +222,9 @@ fails that tool where the updater, package manager, or installer it runs leaves 
 "tool", "installed", "path", "manager", "status" ("present" or "absent"), "restart_pending" (true,
 false, or null where the tool cannot say) and that tool's own "notes", and a top-level "notes".
 
-It exits 0 on success, 3 where a tool failed or was refused while the others still ran, and 1 where the run itself refused or stopped.
+It exits 0 on success, 3 where a tool failed or was refused while the others still ran, 64 where an
+argument was refused, so nothing was changed, and 1 where the run itself refused or stopped. No
+other failure exits 64.
 
 Examples:
   install-agents.sh                        Report on every tool
@@ -233,8 +232,6 @@ Examples:
   install-agents.sh --upgrade herdr        Upgrade herdr, if it is installed
   install-agents.sh --install herdr cswap  Install two tools
   install-agents.sh --install --all        Install every tool that is missing
-
-Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF
 }
 
@@ -248,18 +245,7 @@ run() {
         printf '  [dry run] %s\n' "$*"
         return 0
     fi
-    run_child timeout "$STEP_TIMEOUT" "$@" </dev/null
-}
-
-# A command run here goes to the background and is waited for, since bash runs a trap only once a foreground command returns.
-# It keeps the script's standard input, which bash would otherwise replace with /dev/null for a background command.
-run_child() {
-    "$@" <&0 &
-    pids=("$!")
-    local status=0
-    wait "${pids[0]}" || status=$?
-    pids=()
-    return "$status"
+    timeout "$STEP_TIMEOUT" "$@" </dev/null
 }
 
 confirm() {
@@ -284,7 +270,7 @@ run_installer() {
         return 1
     }
     curl -fsSL --proto '=https' --tlsv1.2 --retry 2 --connect-timeout 15 --max-time "$STEP_TIMEOUT" --retry-max-time "$STEP_TIMEOUT" "$url" -o "$file" || return 1
-    run_child timeout "$STEP_TIMEOUT" "$shell" "$file" </dev/null
+    timeout "$STEP_TIMEOUT" "$shell" "$file" </dev/null
 }
 
 # A nightly run reaches this through runuser or a systemd unit, whose PATH carries none of the per-user directories these installers write to.
