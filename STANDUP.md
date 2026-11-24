@@ -85,7 +85,7 @@ After the first commit, confirm it took with `git log -1 --format='%G? author=%a
 
 ## 0B. Create the Branches, Before the First Standup Commit
 
-**Create both long-lived branches empty and do the whole standup on a feature branch off `develop`.** An agent that starts committing onto whichever branch `git init` produced is writing the repo's permanent history. Every step below is exploratory work that has no business being permanent. Doing this first means nothing ever has to be cleaned off `main` or `develop`. That is because the only commit either carries is the empty one it starts from and every change after it arrives by pull request.
+**Create both long-lived branches empty and do the target repository's whole standup on a feature branch off `develop`.** An agent that starts committing onto whichever branch `git init` produced is writing the repo's permanent history. Every step below is exploratory work that has no business being permanent. Doing this first means nothing ever has to be cleaned off `main` or `develop`. That is because the only commit either carries is the empty one it starts from and every change after it arrives by pull request.
 
 1. **Create `main` carrying nothing.** A git branch cannot exist without a commit, so carrying nothing means exactly one signed empty root commit. Section 0's signing window applies to it like any other.
 2. **Create `develop` from `main`**, also carrying nothing, so the two start level.
@@ -130,7 +130,7 @@ git worktree add -b "<feature-branch>" "<path>" develop   # Target-repository ed
 
 A repo lacking any entry is exactly what [`AUDIT.md`][audit] section 0's fleet membership check surfaces on a full sweep. The finding is a `DEFECT` naming the repo by its GitHub `full_name`. That finding is what should send an agent here in the first place for a repo nobody has stood up yet. The omission would otherwise sit unnoticed.
 
-Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules. Then write or repair its [`registry/repos.json`][repos] entry: `shortName`, `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, and `workflowModel` (omit to take the `release` default). Also write `environments` (only where the repo uses a deployment environment), and `driftNotes` that describe what the repo **actually is**. Take the `shortName` from the maintainer where he has named one, and otherwise make it short, lowercase, and obvious from the repo's name. A repo with no pin yet gets one for its `shortName` in `SHORT_NAME_PINS` in [`spec/validate.py`][validate]. An existing pin changes only with the maintainer's go-ahead, since a short name is permanent once a host secret uses it. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
+Resolve the repo's type(s) with the [`AUDIT.md`][audit] section 2 detection rules. Then write or repair its [`registry/repos.json`][repos] entry: `shortName`, `status`, `types[]`, `groundTruthBranch`, `hasDevelop`, `publish[]`, `requiredSecrets[]`, `consumerModel`, `releaseTrigger`, and `workflowModel` (omit to take the `release` default). Also write `environments` (only where the repo uses a deployment environment), and `driftNotes` that describe what the repo **actually is**. Take the `shortName` from the maintainer where he has named one, and otherwise make it short, lowercase, and obvious from the repo's name. A repo with no pin yet gets one for its `shortName` in `SHORT_NAME_PINS` in [`spec/validate.py`][validate]. An existing pin changes only with the maintainer's go-ahead, since a short name is permanent once a host secret uses it. Run [`spec/validate.py`][validate] to confirm it classifies cleanly. The entry and its pin are hub edits, so they land through a hub pull request into `develop`. Section 2 waits for it to merge, since `scripts/carry.py` refuses a repository the fetched hub's registry does not hold. The registry is ground truth about reality, not intent, and a `validate.py`-clean entry is still false if it disagrees with the live repo.
 
 ## 1A. Carry the Instruction Set, Before Authoring Anything
 
@@ -206,6 +206,12 @@ Implement the Actions that satisfy [`WORKFLOW.md`][workflow] for the repo's type
 
 A caller stub copied from a snippet carries that snippet's minimum known-good hub pin. Resolve each hub `uses:` pin to the latest hub release before committing it, per [`docs/reusable-workflows.md`][reusable-workflows] "Pinning". Dependabot bumps it from there.
 
+**A `homeassistant` repository's validate step runs `hacs/action`, and the checks below fail its first run unless the standup prepares for them.**
+
+- **License.** HACS reads the license GitHub detects on the default branch, `main`, which holds only section 0B's empty root commit until the first promotion. So pass `ignore: license` to `hacs/action`, with a comment naming when it goes. Remove it in the first pull request after the first promotion.
+- **Topics.** Set the repository's topics before the first pull request, each one matching the repository's content.
+- **Brand assets.** Ship them under `custom_components/<domain>/brand/` before the first pull request.
+
 ## 4. Apply Settings, Rulesets, and Secrets
 
 **Read the remote and the repository before running anything else here**. That is because this is the first step reading the repository itself, where section 2 reads only `origin` and its `develop` branch. The commands follow:
@@ -231,7 +237,7 @@ For a **private** repo, confirm the owner-level toggle named `Dependabot on self
 
 ## 5. Verify: Run the Audit
 
-Run [`AUDIT.md`][audit] end to end. The repo is stood up only when it is **operational** (every applicable check passes) or a hub-committed `reports/<repo>/audit.md` plus an issue tracks its residual deltas. Converge any drift through a Copilot-reviewed target PR ([`AUDIT.md`][audit] section 10), and the maintainer merges. A repo left partially set up and unrecorded is the exact failure this procedure exists to prevent.
+Run [`AUDIT.md`][audit] end to end. Its report is a hub edit like the registry entry, so it lands through a hub pull request of its own into `develop`. The repo is stood up only when it is **operational** (every applicable check passes) or a hub-committed `reports/<repo>/audit.md` plus an issue tracks its residual deltas. Converge any drift through a Copilot-reviewed target PR ([`AUDIT.md`][audit] section 10), and the maintainer merges. A repo left partially set up and unrecorded is the exact failure this procedure exists to prevent.
 
 ## Onboarding a New Repo Type
 

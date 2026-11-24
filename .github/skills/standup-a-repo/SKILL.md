@@ -43,7 +43,7 @@ maintainer can supply what section 0A lists.
    under the wrong identity or unsigned cannot be cleanly repaired afterward.
 
 2. **Branches, before the first standup commit.** STANDUP.md section 0B: create `main` and
-   `develop` empty, off one signed empty root commit. Then run each later repository step on a feature
+   `develop` empty, off one signed empty root commit. Then run each later target-repository step on a feature
    branch off `develop`. Never commit standup work directly onto `develop`. `non_fast_forward` on
    both branch payloads, or the missing blocking rule on an operational repo's `develop` ruleset,
    makes that mistake either unrecoverable or silently unprotected. Point `origin` at the
@@ -59,7 +59,9 @@ maintainer can supply what section 0A lists.
 
 3. **Classify and catalog.** STANDUP.md section 1: resolve the repo's type(s) against `AUDIT.md`
    section 2, then write or repair its `registry/repos.json` entry and confirm it with
-   `spec/validate.py`.
+   `spec/validate.py`. The entry and its `SHORT_NAME_PINS` pin are hub edits, so they land
+   through a hub pull request into `develop`. Step 6 waits for it to merge, since `scripts/carry.py`
+   refuses a repository the fetched hub's registry does not hold.
 
 4. **The instruction set, before authoring anything.** STANDUP.md section 1A. An existing
    repository that `docs/eol-lf-rollout.md` "Per-Repo Conversion" says needs a line-ending
@@ -107,6 +109,7 @@ maintainer can supply what section 0A lists.
 9. **Verify with the audit.** STANDUP.md section 5: run `AUDIT.md` end to end. The repo is stood
    up only when it passes for its type, or a hub-committed `reports/<repo>/audit.md`
    plus an issue tracks its residual deltas. `<repo>` there is the repository name in lowercase.
+   The report lands through a hub pull request of its own into `develop`.
 
 ## Onboarding a new repo type
 
@@ -119,8 +122,9 @@ context-free agent, not just by the one that wrote it.
 
 ## Ship it
 
-One pull request per standup, branched from `develop` per step 2 above, into `develop`, never a
-direct push to a protected branch. While its instruction set is partial, a partly
+One target-repository pull request per standup, beside the hub pull requests steps 3 and 9 name.
+It is branched from `develop` per step 2 above, into `develop`, never a direct push to a
+protected branch. While its instruction set is partial, a partly
 stood-up repository takes this same shape. That is any re-level and conversion pull requests,
 then one standup pull request.
 `RESYNC.md` section 6 applies once the set is whole. Close the review loop, per the `pr-review-conduct` skill,
