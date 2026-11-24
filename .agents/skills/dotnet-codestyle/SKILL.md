@@ -266,10 +266,10 @@ owns formatting and IDE0055 stays `none`.
 
 ## Code patterns
 
-1. **Guard clauses**: prefer early returns for validation and error handling. A parameter null
-   guard calls `ArgumentNullException.ThrowIfNull`, as CA1510 requires, even where IDE0046 offers a
-   conditional `return` for it. A `netstandard` project
-   lacks that method, so its guard uses a throw expression instead. A local assigned and then
+1. **Guard clauses**: prefer early returns for validation and error handling. A guard that CA1510
+   to CA1513 match calls the throw helper its rule names, such as `ArgumentNullException.ThrowIfNull`.
+   That holds even where IDE0046 offers a conditional `return` for it. A `netstandard` project
+   lacks those helpers, so its guard uses a throw expression instead. A local assigned and then
    null-checked takes `?? throw` on the assignment, per IDE0270. IDE0046 makes any other such
    shape a single conditional `return`, a throw expression included. That shape is an `if` and
    the `return`, `throw`, or `else` right after it, each branch only returning or throwing. Both
