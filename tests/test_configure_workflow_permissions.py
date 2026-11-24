@@ -28,6 +28,7 @@ ENDPOINT = "repos/ptr727/Fixture/actions/permissions/workflow"
 CONFIGURE = ROOT / "repo-config" / "configure.sh"
 PROBLEM = function("payload_problem") + function("workflow_permissions_problem")
 LIVE = function("workflow_permissions_live")
+HELD = function("workflow_permissions_held")
 
 
 def compact(document: dict[str, object]) -> str:
@@ -173,11 +174,10 @@ class ApplyCase(unittest.TestCase):
             log.touch()
             result = run_bash(
                 f"repo=ptr727/Fixture\nworkflow_permissions_file={shlex.quote(str(payload))}\n"
-                f"lower_workflow_token={str(lower).lower()}\nworkflow_held=false\n"
-                f"{HELPERS}{gh_stub(log, reads, put_status=put_status)}{LIVE}"
+                f"lower_workflow_token={str(lower).lower()}\n"
+                f"{HELPERS}{gh_stub(log, reads, put_status=put_status)}{LIVE}{HELD}"
                 f"{function('apply_workflow_permissions')}"
-                f"apply_workflow_permissions {shlex.quote(compact(before))}\n"
-                'echo "workflow_held=$workflow_held"\n',
+                f"apply_workflow_permissions {shlex.quote(compact(before))}\n",
                 "jq",
                 "sed",
             )
@@ -205,7 +205,6 @@ class ApplyCase(unittest.TestCase):
         self.assertEqual(status, 0, err)
         self.assertIn("Held back the workflow token defaults", out)
         self.assertIn("--lower-workflow-token", out)
-        self.assertIn("workflow_held=true", out)
         self.assertEqual(calls.strip(), "")
 
     def test_a_read_default_is_written_without_the_option(self) -> None:
@@ -213,7 +212,6 @@ class ApplyCase(unittest.TestCase):
         before = {**DECLARED, "can_approve_pull_request_reviews": True}
         out, err, status, calls = self.apply(before, [json.dumps(DECLARED)], lower=False)
         self.assertEqual(status, 0, err)
-        self.assertIn("workflow_held=false", out)
         self.assertIn(f"--method PUT {ENDPOINT}", calls)
         self.assertIn(f"to {compact(DECLARED)}", out)
 
@@ -230,6 +228,35 @@ class ApplyCase(unittest.TestCase):
         self.assertNotEqual(status, 0)
         self.assertIn("unconfirmed", err)
         self.assertNotIn("Set the workflow token defaults", out)
+
+
+class HeldCase(unittest.TestCase):
+    """The one test of whether applying would lower a write default unconfirmed, which the pre-flight and the write share."""
+
+    def held(self, live: dict[str, object], declared: dict[str, object], lower: bool) -> bool:
+        with tempfile.TemporaryDirectory() as tmp:
+            payload = Path(tmp) / "workflow-permissions.json"
+            payload.write_text(json.dumps(declared), encoding="utf-8")
+            result = run_bash(
+                f"workflow_permissions_file={shlex.quote(str(payload))}\n"
+                f"lower_workflow_token={str(lower).lower()}\n{HELPERS}{HELD}"
+                f"if workflow_permissions_held {shlex.quote(compact(live))}; then echo yes; else echo no; fi\n",
+                "jq",
+                "sed",
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return result.stdout.strip() == "yes"
+
+    def test_only_an_unconfirmed_lowering_of_write_is_held(self) -> None:
+        on_read = {**LOOSE, "default_workflow_permissions": "read"}
+        for label, live, declared, lower, expected in (
+            ("write lowered unconfirmed", LOOSE, DECLARED, False, True),
+            ("write lowered and confirmed", LOOSE, DECLARED, True, False),
+            ("already read", on_read, DECLARED, False, False),
+            ("declared write", LOOSE, LOOSE, False, False),
+        ):
+            with self.subTest(label=label):
+                self.assertEqual(self.held(live, declared, lower), expected)
 
 
 class CheckCase(unittest.TestCase):
@@ -295,11 +322,15 @@ class WiringCase(unittest.TestCase):
         r"    # The visibility"
     )
 
-    def preflight(self, stubs: str) -> tuple[str, str, int]:
+    def preflight(self, stubs: str, dry_run: bool = False) -> tuple[str, str, int]:
+        if "workflow_permissions_held" not in stubs:
+            stubs += "workflow_permissions_held() { return 1; }\n"
         script = (
+            f"repo=ptr727/Fixture\ndry_run={str(dry_run).lower()}\n"
             f"workflow_permissions_file=/fixture/workflow-permissions.json\n{stubs}"
-            f"cmd_apply() {{\n    local why workflow_live\n{self.PREFLIGHT}"
-            '    echo "reached-the-writes with $workflow_live"\n}\ncmd_apply\n'
+            "cmd_apply() {\n    local why workflow_live workflow_held=false held_status=0\n"
+            f"{self.PREFLIGHT}"
+            '    echo "reached-the-writes with $workflow_live held=$workflow_held status=$held_status"\n}\ncmd_apply\n'
         )
         result = run_bash(script)
         return result.stdout, result.stderr, result.returncode
@@ -326,7 +357,29 @@ class WiringCase(unittest.TestCase):
             "workflow_permissions_problem() { :; }\nworkflow_permissions_live() { echo live; }\n"
         )
         self.assertEqual(status, 0, err)
-        self.assertIn("reached-the-writes with live", out)
+        self.assertIn("reached-the-writes with live held=false status=0", out)
+
+    def test_a_held_group_is_decided_before_any_write_and_named_in_a_dry_run(self) -> None:
+        stubs = (
+            "workflow_permissions_problem() { :; }\nworkflow_permissions_live() { echo live; }\n"
+            "workflow_permissions_held() { return 0; }\n"
+        )
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run):
+                out, err, status = self.preflight(stubs, dry_run=dry_run)
+                self.assertEqual(status, 0, err)
+                self.assertIn("reached-the-writes with live held=true status=1", out)
+                self.assertEqual("would be held back" in out, dry_run)
+
+    def test_every_dry_run_exit_and_the_secrets_group_account_for_a_held_group(self) -> None:
+        """Each of these exits before the last line of cmd_apply, so each has to carry the held status itself."""
+        body = function("cmd_apply")
+        self.assertIn(
+            '(dry_run_secrets "$HOME/.secrets") || exit\n                exit "$held_status"', body
+        )
+        self.assertIn('so there is nothing to preview."\n        exit "$held_status"', body)
+        note = body.index("the workflow token defaults were held back as noted above")
+        self.assertLess(note, body.index("apply_secrets "))
 
     def test_apply_reads_before_its_first_write_and_writes_after_dependabot(self) -> None:
         body = function("cmd_apply")
@@ -346,7 +399,7 @@ class WiringCase(unittest.TestCase):
         """A run that left a write default in place has not applied the configuration, so it never ends clean."""
         body = function("cmd_apply")
         self.assertIn("workflow_held=false", body)
-        guard = body.index('if [ "$workflow_held" = true ]; then')
+        guard = body.rindex('if [ "$workflow_held" = true ]; then')
         self.assertIn("exit 1", body[guard : guard + 250])
         self.assertLess(body.index('apply_workflow_permissions "$workflow_live"'), guard)
 

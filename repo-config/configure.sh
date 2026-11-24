@@ -775,10 +775,17 @@ apply_project() { # project-node-id
     echo "Linked $repo to project '$title' ($owner, number $number)"
 }
 
+# Test with `workflow_permissions_held LIVE`, true where applying would lower a write default with no --lower-workflow-token to confirm it.
+# Lowering write to read fails any job that relied on the implicit write.
+# The operator passes the option once a read of the repository's workflows finds no such job.
+workflow_permissions_held() { # live-defaults-json
+    [ "$lower_workflow_token" != true ] &&
+        [ "$(jqr '.default_workflow_permissions' <<<"$1")" = write ] &&
+        [ "$(jqr '.default_workflow_permissions' "$workflow_permissions_file")" = read ]
+}
+
 # Write the defaults workflow-permissions.json declares, only where the live ones cmd_apply's pre-flight read differ.
-# Lowering write to read fails any job that relied on the implicit write, so it waits for --lower-workflow-token.
-# The operator passes that once a read of the repository's workflows finds no such job.
-# Without it the group writes nothing and sets workflow_held, which cmd_apply turns into a non-zero end once the other groups are applied.
+# A held group writes nothing, and cmd_apply's pre-flight has already decided the run ends non-zero for it.
 # The endpoint answers a write with no body, so the values are read back to confirm it rather than trusted from the status alone.
 apply_workflow_permissions() { # live-defaults-json
     local want got=""
@@ -787,9 +794,8 @@ apply_workflow_permissions() { # live-defaults-json
         echo "Workflow token defaults already match $want"
         return
     fi
-    if [ "$lower_workflow_token" != true ] && [ "$(jqr '.default_workflow_permissions' <<<"$1")" = write ] && [ "$(jqr '.default_workflow_permissions' <<<"$want")" = read ]; then
+    if workflow_permissions_held "$1"; then
         echo "Held back the workflow token defaults ($1, declared $want), since lowering the write default fails any job relying on the implicit write. Confirm that every job writing through GITHUB_TOKEN declares its scope, then apply again with --lower-workflow-token."
-        workflow_held=true
         return
     fi
     if ! gh api --method PUT "repos/$repo/actions/permissions/workflow" --input "$workflow_permissions_file"; then
@@ -877,7 +883,7 @@ apply_interaction() { # private
 }
 
 cmd_apply() {
-    local f private disc payload project_id why origin workflow_live workflow_held=false
+    local f private disc payload project_id why origin workflow_live workflow_held=false held_status=0
     # Pre-flight every required payload before any write, so a partial carry aborts before it half-applies.
     for f in "$settings_file" "$labels_file" "$project_file" "$develop_ruleset" "$main_ruleset"; do
         if [ ! -e "$f" ]; then
@@ -921,6 +927,14 @@ cmd_apply() {
         echo "Aborting before any write." >&2
         exit 1
     fi
+    # A held group is decided here, so every dry-run exit below and every end of the run accounts for it.
+    if workflow_permissions_held "$workflow_live"; then
+        workflow_held=true
+        held_status=1
+        if [ "$dry_run" = true ]; then
+            echo "Dry run for $repo. The workflow token defaults would be held back without --lower-workflow-token, so apply would end non-zero."
+        fi
+    fi
     # The visibility and any live interaction limit are read here too.
     # GitHub refuses a repository limit while the owning account or organization has one in force.
     # Found in apply_interaction, that refusal would follow the settings write.
@@ -951,12 +965,15 @@ cmd_apply() {
         else
             plan_secrets "${HOME:?}/.secrets"
             if [ "$dry_run" = true ]; then
-                dry_run_secrets "$HOME/.secrets"
+                # The function exits with the status the secrets alone predict.
+                # So it runs in a subshell, and a held group still ends the dry run non-zero.
+                (dry_run_secrets "$HOME/.secrets") || exit
+                exit "$held_status"
             fi
         fi
     elif [ "$dry_run" = true ]; then
         echo "Dry run for $repo. Secrets are provisioned only for a cataloged registry entry, and $secrets_skip_reason, so there is nothing to preview."
-        exit 0
+        exit "$held_status"
     fi
     echo "Applying configuration to $repo (model: $model)"
     # The writes below silence stdout only, because the success-response JSON is noise.
@@ -1004,6 +1021,10 @@ cmd_apply() {
         echo "Note: the agent policy files were not written. Run '$0 apply${repo_arg:+ $repo} --checkout <path>' to write them into a checkout, then commit them through a pull request."
     fi
     # ----- Secrets, read from the host's ~/.secrets/ and written last -----
+    # A failing secrets group ends the run with its own summary, so a held group is reported before it rather than after.
+    if [ "$workflow_held" = true ]; then
+        echo "Note: the workflow token defaults were held back as noted above, so this run ends non-zero." >&2
+    fi
     if [ "$secrets_registered" = true ] && [ -n "$secret_names_skip" ]; then
         echo "Note: no secret was set, since $secret_names_skip."
     elif [ "$secrets_registered" = true ]; then
