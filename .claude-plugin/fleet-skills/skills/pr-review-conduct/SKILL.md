@@ -85,7 +85,7 @@ visible comments, routinely still carries a finding nobody has answered. Treatin
    or Qodo check on the head has neither passed nor failed, `merge` refuses as `CHECKS_PENDING`,
    whatever the merge state reads. `wait` holds an attested head then too. A reviewer whose newest
    output is a rate limit posted since the check began posts no review, so its check holds
-   nothing. That check can still read `success` over a quota skip, and a skip is not coverage of
+   nothing. That check can still read `success` over a rate limit, and a rate limit is not coverage of
    the head. The registration grace is not an absence either. A CodeRabbit or Qodo reviewer asked
    by comment registers its check only after the ask. The grace runs 90 seconds from the latest
    of the head's push, its last check settling, and its newest trusted review ask. A hosted
