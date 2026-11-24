@@ -1077,7 +1077,7 @@ def branch_attention(branch: str, runs: Items, since: datetime.date) -> tuple[li
         key = str(run.get("workflowDatabaseId"))
         if not run.get("conclusion") or run["conclusion"] in UNDECIDED_RUNS:
             continue
-        if run.get("event") in PR_EVENTS or workflow == REVIEW_WORKFLOW:
+        if run.get("event") in PR_EVENTS or REVIEW_WORKFLOW in (workflow, run.get("name")):
             continue
         latest.setdefault(key, run)
         if run["conclusion"] in FAILING_RUNS and str(run.get("createdAt") or "")[:10] >= str(since):
@@ -1167,7 +1167,7 @@ def collect_attention(
         runs = run_gh(
             ["run", "list", "--repo", f"{owner}/{name}", "--branch", branch]
             + ["--limit", str(ATTENTION_RUN_LIMIT)]
-            + ["--json", "workflowName,workflowDatabaseId,url,conclusion,createdAt,event"]
+            + ["--json", "name,workflowName,workflowDatabaseId,url,conclusion,createdAt,event"]
         )
         still, recovered = branch_attention(branch, runs, since)
         result["failing_branches"] += still

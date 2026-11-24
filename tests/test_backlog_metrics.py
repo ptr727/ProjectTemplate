@@ -1374,6 +1374,11 @@ class AttentionTests(unittest.TestCase):
         }
         self.assertEqual(self.attention([], runs)["failing_branches"], [])
 
+    def test_a_review_run_named_by_its_run_name_is_not_a_branch_failure(self) -> None:
+        review = {**run_record("dynamic/copilot", "failure", "2026-11-23", "c", "dynamic")}
+        review["name"] = bm.REVIEW_WORKFLOW
+        self.assertEqual(self.attention([], {"develop": [review]})["failing_branches"], [])
+
     def test_a_cancelled_run_after_a_failure_is_neither_recovery_nor_latest(self) -> None:
         runs = {
             "main": [
