@@ -258,7 +258,9 @@ The .NET mechanics, narrowest first:
 
 ## Code patterns
 
-1. **Guard clauses**: prefer early returns for validation and error handling.
+1. **Guard clauses**: prefer early returns for validation and error handling. An `if` that only
+   chooses between two return values, directly before the final return, is one conditional
+   `return` instead, per IDE0046.
 2. **Async all the way**: avoid blocking calls (`.Result`, `.Wait()`), use `async`/`await`.
 3. **Cancellation tokens**: accept `CancellationToken` as the last parameter and pass it through.
 4. **ConfigureAwait**: in library code, use `ConfigureAwait(false)` unless context is required. Do
