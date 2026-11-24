@@ -136,14 +136,20 @@ class AuditAgreementCase(unittest.TestCase):
     def audit_missing(
         self, e: dict[str, Any], tree: set[str], projects: dict[str, str] | None = None
     ) -> dict[str, set[str]]:
-        run = SimpleNamespace(
-            spec={"secrets": SECRETS},
-            entry=e,
-            tree=tree,
-            slug="owner/ExampleRepo",
-            read_project=(projects or {}).get,
-        )
-        with unittest.mock.patch.object(audit, "gh", return_value={"secrets": []}):
+        """The names the audit reports missing, its tree listed and its projects read through the audit's own readers."""
+
+        def answer(path: str, ok404: bool = False) -> Any:
+            if "/git/trees/" in path:
+                listing = [{"type": "blob", "path": p, "sha": f"sha-{p}"} for p in tree]
+                return {"tree": listing, "truncated": False}
+            if "/git/blobs/sha-" in path:
+                text = (projects or {})[path.partition("/git/blobs/sha-")[2]]
+                return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
+            return {"secrets": []}
+
+        head = {"commit": {"sha": "c1", "commit": {"tree": {"sha": TREE_SHA}}}}
+        run = audit.Run(e, {"secrets": SECRETS}, "owner/ExampleRepo", "main", {}, None, None, head)
+        with unittest.mock.patch.object(audit, "gh", answer):
             findings = audit.check_secrets_names(run)
         missing: dict[str, set[str]] = {"actions": set(), "dependabot": set()}
         for severity, text in findings:

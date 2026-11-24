@@ -57,6 +57,7 @@ from fidelity_text import (
 )
 from secret_names import (  # noqa: F401  # re-exported, since the tests and helpers name them on audit
     EMPTY_TREE_SHA,
+    blob_reader,
     compare_stores,
     contents_text,
     coverage_candidate_types,
@@ -2087,10 +2088,14 @@ class Run:
     def coverage_types(self):
         return coverage_types(self.spec["secrets"], self.entry, self.tree, self.read_project)
 
+    @functools.cached_property
+    def blob_text(self):
+        return blob_reader(self.blobs or {}, lambda sha: gh(f"repos/{self.slug}/git/blobs/{sha}"))
+
     def read_project(self, path):
-        """A C# project's text at the audited commit, read once per run, for the coverage detection."""
+        """A C# project's text at the blob the tree listing named, read once per run, for the coverage detection."""
         if path not in self.projects:
-            self.projects[path] = self.read_text(path)
+            self.projects[path] = self.blob_text(path)
         return self.projects[path]
 
     @functools.cached_property

@@ -3637,6 +3637,16 @@ class CoverageTypesCase(unittest.TestCase):
             ),
             (
                 ["csharp"],
+                {
+                    "src/A.csproj": project(
+                        REFERENCE % "xunit.v3.core.mtp-v2", REFERENCE % "AwesomeAssertions"
+                    )
+                },
+                ["csharp"],
+                "csharp, a framework core without its assertions",
+            ),
+            (
+                ["csharp"],
                 {"src/A.csproj": project(FLAG % " True ")},
                 ["csharp"],
                 "csharp, the property compared as MSBuild does, ignoring case and space",
@@ -3768,7 +3778,7 @@ class CoverageTypesCase(unittest.TestCase):
         audit.coverage_claiming_types(["python"], {"python": "codecov"}, set(texts), read)
         self.assertEqual(reads, [], "a type that reads no project reads none")
 
-    def test_the_audit_reads_each_project_once_at_the_audited_commit(self) -> None:
+    def test_the_audit_reads_each_project_once_at_its_listed_blob(self) -> None:
         head = {"commit": {"sha": "c1", "commit": {"tree": {"sha": "t1"}}}}
         text = project(FLAG % "true")
         calls: list[str] = []
@@ -3778,7 +3788,7 @@ class CoverageTypesCase(unittest.TestCase):
             if "/git/trees/" in path:
                 blob = {"type": "blob", "path": "src/A.csproj", "sha": "b1", "mode": "100644"}
                 return {"tree": [blob], "truncated": False}
-            if path == "repos/owner/R/contents/src/A.csproj?ref=c1":
+            if path == "repos/owner/R/git/blobs/b1":
                 return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
             return None
 
@@ -3787,9 +3797,7 @@ class CoverageTypesCase(unittest.TestCase):
         with mock.patch.object(audit, "gh", fake_gh):
             self.assertEqual(run.coverage_types, ["csharp"])
             self.assertEqual(run.read_project("src/A.csproj"), text)
-        self.assertEqual(
-            [c for c in calls if "/contents/" in c], ["repos/owner/R/contents/src/A.csproj?ref=c1"]
-        )
+        self.assertEqual([c for c in calls if "/git/blobs/" in c], ["repos/owner/R/git/blobs/b1"])
 
 
 class PythonTypeFindingsCase(unittest.TestCase):

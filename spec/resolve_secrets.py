@@ -167,24 +167,12 @@ def read_tree(slug: str, branch: str) -> ListedTree:
     )
     if blobs is None:
         raise ResolveError(f"{slug}: the {branch} tree is unreadable or truncated")
-    return ListedTree(set(blobs), blob_reader(slug, blobs))
-
-
-def blob_reader(slug: str, blobs: dict[str, tuple[Any, Any]]) -> secret_names.ProjectReader:
-    """A reader of one of BLOBS by path through the object SHA the listing named, so a later push cannot move it.
-
-    It answers None for a path with no SHA or a response holding no inline content, and raises on a failed read.
-    """
-
-    def read(path: str) -> str | None:
-        sha = blobs.get(path, (None, None))[0]
-        if not sha:
-            return None
-        return secret_names.contents_text(
-            gh_json(["gh", "api", f"repos/{slug}/git/blobs/{sha}"], slug)
-        )
-
-    return read
+    return ListedTree(
+        set(blobs),
+        secret_names.blob_reader(
+            blobs, lambda s: gh_json(["gh", "api", f"repos/{slug}/git/blobs/{s}"], slug)
+        ),
+    )
 
 
 def gh_run(command: list[str], slug: str) -> str:

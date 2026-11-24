@@ -34,8 +34,14 @@ TEST_FRAMEWORK_PACKAGES = frozenset(
         "mstest.testadapter",
         "nunit3testadapter",
         "tunit",
+        "tunit.engine",
         "xunit",
+        "xunit.core",
         "xunit.v3",
+        "xunit.v3.core",
+        "xunit.v3.core.mtp-off",
+        "xunit.v3.core.mtp-v1",
+        "xunit.v3.core.mtp-v2",
         "xunit.v3.mtp-off",
         "xunit.v3.mtp-v1",
         "xunit.v3.mtp-v2",
@@ -108,6 +114,20 @@ def contents_text(content: Any) -> str | None:
     return base64.b64decode(content["content"]).decode("utf-8", "replace")
 
 
+def blob_reader(blobs: dict[str, tuple[Any, Any]], read: Callable[[str], Any]) -> ProjectReader:
+    """A reader of one of BLOBS by path through the object SHA its listing named, so a later push cannot move it.
+
+    `read` is each caller's own gh read of a git blobs API response for a SHA.
+    It answers None for a path with no SHA or a response holding no inline content.
+    """
+
+    def read_path(path: str) -> str | None:
+        sha = blobs.get(path, (None, None))[0]
+        return contents_text(read(sha)) if sha else None
+
+    return read_path
+
+
 def in_test_directory(path: str) -> bool:
     """Whether any directory segment of path names a test directory, compared case-insensitively."""
     return any(segment.lower() in ("test", "tests") for segment in path.split("/")[:-1])
@@ -125,6 +145,7 @@ def is_csharp_test_project(text: str | None) -> bool:
     Its IsTestProject property decides where the project sets one, and only a literal false says no.
     Otherwise a reference to a TEST_FRAMEWORK_PACKAGES package or SDK decides, its id compared case-insensitively as NuGet does.
     A PackageReference names it, as does an Sdk element or a `;` list of Sdk attribute names, each with an optional `/<version>`.
+    A framework's core without assertions is in it, such as xunit.v3.core beside AwesomeAssertions.
     An assertion or extensibility package such as NUnit or MSTest.TestFramework is not in that set.
     A test-helper library references those without being a test project.
     So `appunittest.csproj` is a test project when it says so, and `Testament.csproj` is not unless it does.
