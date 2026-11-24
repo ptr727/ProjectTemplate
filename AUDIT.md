@@ -234,7 +234,7 @@ flowchart LR
 
 Sections 0-9 (the audit and its report) never edit the target's content. **Converging** is the separate follow-on phase: the drift the report found is **resolved by applying fixes to the target repo**, not left as a report. The fixes apply in the order [`RESYNC.md`][resync] section 3 sets. That order lands the rules before the files they govern, and a deletion before the re-vendor that would refresh it. The convergence loop:
 
-- **Apply a file fix via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`.
+- **Apply a file fix via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`. An operational target may instead commit the fix to `develop` directly, per [GOVERNANCE.md "Operational Repositories"][governance-operational-repositories].
 - **Drive the PR's review to green** - the same loop the hub runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette]). The [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md` covers that one reviewer's mechanics.
 - **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
 - **Re-audit once the fixes land.** Section 1 reads `main` as ground truth, so a file fix lands when it reaches `main`. Section 8's `--branch` run checks it on `develop` before the promotion. A convergence is done once a re-run of the audit measures it. The hub commits the report under its own `reports/`, per section 8.
@@ -243,7 +243,7 @@ Sections 0-9 (the audit and its report) never edit the target's content. **Conve
 - **Any deletion sweeps the inbound references to the path, and the sweep is part of the deletion rather than follow-up.** This governs every removal and not only a `hub-only:` one. Grep the path tree-wide and read every hit. Then read the files whose job is to say what the repo holds because a path search cannot find a description that names no path. Point a link at the hub's copy when that is the equivalent. Rewrite a runnable command to the invocation that works. Remove a mention with no equivalent and remove its reference definition in the same edit, per [GOVERNANCE.md "Documentation Style Conventions"][governance-documentation-style].
 - **Fix systemic drift in the hub, not per repo.** When many repos share a drift, fix the spec/rule (or add a machine check) in the hub and let a re-audit re-flag it. This is instead of hand-patching each repo for the shared cause.
 
-The convergence model: the hub audits and the agent **applies** the fixes, a file fix via a target PR, and the maintainer gates every merge.
+The convergence model: the hub audits and the agent **applies** the fixes, and the maintainer gates every merge.
 
 <!-- Workflow -->
 [workflows]: https://github.com/ptr727/ProjectTemplate/tree/main/catalog/snippets/workflows
@@ -259,6 +259,7 @@ The convergence model: the hub audits and the agent **applies** the fixes, a fil
 [governance-branching-model]: ./GOVERNANCE.md#branching-model
 [governance-documentation-style]: ./GOVERNANCE.md#documentation-style-conventions
 [governance-hub-hosted-tooling]: ./GOVERNANCE.md#hub-hosted-tooling
+[governance-operational-repositories]: ./GOVERNANCE.md#operational-repositories
 [governance-pr-review-etiquette]: ./GOVERNANCE.md#pr-review-etiquette
 [governance-repo-scoped-secrets]: ./GOVERNANCE.md#repo-scoped-secrets
 [host-setup]: https://github.com/ptr727/ProjectTemplate/blob/main/docs/host-setup.md
