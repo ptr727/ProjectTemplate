@@ -2973,7 +2973,7 @@ class ReadmeCase(unittest.TestCase):
             label, text, ent, wantn = case[:4]
             want_text = case[4] if len(case) > 4 else None
             with self.subTest(label):
-                got = audit_markdown.readme_shield_findings(text, self.rm, ent)
+                got = audit_markdown.readme_shield_findings(text, self.rm, ent, ())
                 good = len(got) == wantn and (
                     want_text is None or any(want_text in t for _, t in got)
                 )

@@ -499,7 +499,7 @@ def third_party_tool_findings(text, catalog):
     return findings
 
 
-def readme_shield_findings(text, model, entry, coverage_types=()):
+def readme_shield_findings(text, model, entry, coverage_types):
     """Shield presence, by the additive classes in spec/readme-sections.json.
 
     `coverage_types` is the audit's coverage_types() for this repo, which the `coverage` trigger reads.
