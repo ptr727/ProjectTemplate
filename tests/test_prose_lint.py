@@ -4590,6 +4590,9 @@ class TestPasteSafeRule(BaitCase):
             ("env -u LANG bash -c 'ls <dir>'", "<dir>", "bash"),
             ("xargs -n 1 sh -c 'ls <dir>'", "<dir>", "sh"),
             ("sudo -upostgres bash -c 'ls <dir>'", "<dir>", "bash"),
+            ("find . | xargs --replace sh -c 'cp {} <dest>'", "<dest>", "sh"),
+            ("xargs --max-lines sh -c 'ls <dir>'", "<dir>", "sh"),
+            ("runuser -lc 'ls <dir>' app", "<dir>", "runuser"),
             ("ssh '<host>' sudo sh -c \"'ls <dir>'\"", "<dir>", "sh"),
             ("bash -oc pipefail 'ls <dir>'", "<dir>", "bash"),
             ("su -- root -c 'id <dir>'", "<dir>", "su"),
@@ -4623,6 +4626,8 @@ class TestPasteSafeRule(BaitCase):
             "runuser -u postgres -- psql -c 'CREATE DATABASE <name>'",
             "command -v sh -c 'ls <dir>'",
             "sudo -l sh -c 'ls <dir>'",
+            "ssh '<host>' tail $(cat '<file>')",
+            'ssh \'<host>\' tail "$(cat "<file>")"',
         ):
             with self.subTest(span=span):
                 self.assertEqual([], self.hits(f"Run `{span}` here.\n"))
@@ -4670,6 +4675,10 @@ class TestPasteSafeRule(BaitCase):
         fence = "```sh\nssh '<host>' sudo sh -c \\\n  \"'ls <dir>'\"\n```\n"
         self.assertEqual([3], self.lines(fence))
         self.assertEqual([], self.lines("Run `ssh '<host>' echo\nsh -c \"'ls <dir>'\"` here.\n"))
+
+    def test_a_span_break_inside_a_quoted_ssh_word_renders_as_a_space(self) -> None:
+        self.assertEqual([1], self.lines("Run `ssh '<host>' 'sudo sh -c\n\"ls <file>\"'` here.\n"))
+        self.assertEqual([], self.lines("Run `ssh '<host>' 'echo # note\n<file>'` here.\n"))
 
     def test_each_second_shell_and_launcher_opens_a_command_span(self) -> None:
         tables = prose_lint.COMMANDS["second_shells"]

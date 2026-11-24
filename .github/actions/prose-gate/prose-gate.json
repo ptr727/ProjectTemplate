@@ -196,7 +196,7 @@
         "timeout": { "operands": 1, "values": ["k", "s", "--kill-after", "--signal"] },
         "xargs": {
           "operands": 0,
-          "values": ["a", "d", "E", "I", "L", "n", "P", "s", "--arg-file", "--delimiter", "--max-args", "--max-chars", "--max-lines", "--max-procs", "--replace"]
+          "values": ["a", "d", "E", "I", "L", "n", "P", "s", "--arg-file", "--delimiter", "--max-args", "--max-chars", "--max-procs"]
         }
       },
       "reserved": ["!", "{", "do", "elif", "else", "if", "then", "until", "while"]

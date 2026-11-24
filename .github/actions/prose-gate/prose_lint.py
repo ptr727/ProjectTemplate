@@ -1920,15 +1920,14 @@ def handed_strings(
             marked |= any(letter in flags for letter in v[1:])
             skip = sum(letter in values for letter in v[1:])
         elif options and len(v) > 1 and v[0] in "-+":
-            for letter_at, letter in enumerate(v[1:], 2):
-                if letter in flags and mode == "value":
-                    out += [word] if letter_at < len(v) else []
-                    string_next = letter_at == len(v)
-                    break
-                runs |= letter in commands
-                if letter in values:
-                    skip = int(letter_at == len(v))
-                    break
+            letters = cluster(v, values | flags if mode == "value" else values)
+            runs |= bool(commands & set(letters))
+            if mode == "value" and letters[-1:] in flags:
+                attached = len(letters) < len(v) - 1
+                out += [word] if attached else []
+                string_next = not attached
+            else:
+                skip = int(takes_value(v, values))
         elif v != "-" or not options:
             operands += 1
             if mode == "operand":
@@ -1975,20 +1974,26 @@ def handed_words(words: list[ShellWord]) -> list[tuple[list[ShellWord], str, str
     return out
 
 
-def joined_command(text: str, words: list[ShellWord], found: list[range]) -> str | None:
+def joined_command(text: str, kinds: str, words: list[ShellWord], found: list[range]) -> str | None:
     """The one command `ssh` builds from `words`, joined by spaces, or None where a quote is open.
 
-    A line break between two words becomes a line continuation. So the command stays one line to
-    the shell reading it, and each placeholder keeps its line.
+    A line break of `text` between two words becomes a line continuation. So the command stays
+    one line to the shell reading it, and each placeholder keeps its line. Each word is read as
+    `kinds` marks it, a wrapped span's line breaks being spaces there.
 
-    Each placeholder the first shell already reported is blanked from its word first. The word's
-    quoting is then removed, so the second reading does not report it again.
+    Each placeholder the first shell already reported is blanked from its word first, and so is
+    each command substitution, which the first shell runs itself. The word's quoting is then
+    removed, so the second reading reports neither.
     """
     parts: list[str] = []
     end = 0
     for word in words:
         spans = range(word.start, word.start + len(word.raw))
-        piece = dequoted("".join(" " if any(i in r for r in found) else text[i] for i in spans))
+        kept = (
+            " " if kinds[i] in "sS" or any(i in r for r in found) else c
+            for i, c in zip(spans, word.raw, strict=True)
+        )
+        piece = dequoted("".join(kept))
         if piece is None:
             return None
         gap = text[end : word.start].count("\n")
@@ -2015,7 +2020,7 @@ def second_shell_texts(
     for words in shell_commands(split, kinds):
         for strings, name, mode in handed_words(words):
             if mode == "rest":
-                handed = joined_command(text, strings, found)
+                handed = joined_command(text, kinds, strings, found)
             elif (handed := strings[0].handed) is not None:
                 handed = "\n" * text[: strings[0].start].count("\n") + handed
             if handed is not None:
