@@ -264,6 +264,23 @@ class PromotionHistoryCase(unittest.TestCase):
         self.assertEqual(0, code, log)
         self.assertIn("confirm its tree matches develop's", log)
 
+    def test_the_recovery_cut_removes_a_file_develop_deleted(self) -> None:
+        """A file the squash carried and develop then deleted survives the cut's merge, so it is removed."""
+        self.git("checkout", "-q", "develop")
+        self.commit("gone.txt", "gone\n")
+        self.squash()
+        self.git("checkout", "-q", "develop")
+        self.git("rm", "-q", "gone.txt")
+        self.git("commit", "-qm", "delete gone.txt")
+        self.git("checkout", "-q", "-b", "promote/develop-to-main", "main")
+        self.git("merge", "-q", "--no-ff", "-m", "merge develop", "develop")
+        self.assertEqual("gone.txt", self.git("diff", "--name-only", "develop", "HEAD"))
+        self.git("rm", "-q", "gone.txt")
+        self.git("commit", "-qm", "remove what develop deleted")
+        self.assertEqual("", self.git("diff", "--name-only", "develop", "HEAD"))
+        code, log = self.check("promote/develop-to-main")
+        self.assertEqual(0, code, log)
+
     def test_the_floor_excludes_itself_and_older_history(self) -> None:
         self.feature()
         older = self.squash()
