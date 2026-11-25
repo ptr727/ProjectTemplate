@@ -78,7 +78,9 @@ issue for one undecided item is the failure this rule exists to prevent.
 
 These are not reasons an issue needs the maintainer, and a report never counts them as such. An
 issue that is `blocked` on another issue waits on that issue. One that needs a platform, by the
-test `session-handoff` "The Chain" states, waits on that platform's lane. One that another group
+test `session-handoff` "The Chain" states, waits on that platform's lane. One whose remaining work
+lies wholly in another repository waits on work there, unless the write there needs the
+maintainer's permission. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
 condition its answer comment states. A handoff link carrying the `handoff` label is not an issue
