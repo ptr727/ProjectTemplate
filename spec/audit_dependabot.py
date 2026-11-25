@@ -8,6 +8,7 @@ whose root `uv.lock` is tracked, since that root's own entry covers it. A config
 `pyproject.toml` implies nothing.
 """
 
+import glob
 import posixpath
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
@@ -27,38 +28,45 @@ def ecosystems(doc: Any) -> set[str]:
     return {str(u["package-ecosystem"]) for u in _updates(doc) if u.get("package-ecosystem")}
 
 
+def _directory(value: str) -> str:
+    return value.strip("/") or "."
+
+
 def declared_directories(doc: Any) -> dict[str, list[str]]:
-    """Each ecosystem's `directory` and `directories` values as tree directory patterns, '.' for the root."""
+    """Each ecosystem's directories as tree directory patterns, '.' for the root.
+
+    Dependabot reads a glob in `directories` alone, so a `directory` value is escaped to match only itself.
+    """
     out: dict[str, list[str]] = {}
     for update in _updates(doc):
         if not update.get("package-ecosystem"):
             continue
-        listed = update.get("directories")
-        values = [update.get("directory"), *(listed if isinstance(listed, list) else [])]
-        out.setdefault(str(update["package-ecosystem"]), []).extend(
-            v.strip("/") or "." for v in values if isinstance(v, str)
-        )
+        patterns = out.setdefault(str(update["package-ecosystem"]), [])
+        if update.get("directory"):
+            patterns.append(glob.escape(_directory(update["directory"])))
+        patterns.extend(_directory(v) for v in update.get("directories", []))
     return out
 
 
-def _table(doc: Any, *keys: str) -> dict[str, Any]:
-    """The nested TOML table `keys` name, or {} where any level is absent or not a table."""
+def manifest_ecosystem(path: str) -> str | None:
+    """The ecosystem a `uv.lock` or `requirements*.txt` at `path` implies for its own directory, else None."""
+    name = posixpath.basename(path)
+    if name == "uv.lock":
+        return "uv"
+    return "pip" if name.startswith("requirements") and name.endswith(".txt") else None
+
+
+def _table(doc: dict[str, Any], *keys: str) -> dict[str, Any]:
+    """The nested TOML table `keys` name, or {} where any level is absent."""
     for key in keys:
-        doc = doc.get(key) if isinstance(doc, dict) else None
-    return doc if isinstance(doc, dict) else {}
+        doc = doc.get(key, {})
+    return doc
 
 
 def _declares_dependencies(doc: dict[str, Any]) -> bool:
     project = _table(doc, "project")
-    optional = project.get("optional-dependencies")
-    return bool(project.get("dependencies")) or (
-        isinstance(optional, dict) and any(optional.values())
-    )
-
-
-def _globs(table: dict[str, Any], key: str) -> list[str]:
-    values = table.get(key)
-    return [v for v in values if isinstance(v, str)] if isinstance(values, list) else []
+    optional = project.get("optional-dependencies", {})
+    return bool(project.get("dependencies")) or any(optional.values())
 
 
 def _workspace_member(directory: str, root: str, workspace: dict[str, Any]) -> bool:
@@ -66,8 +74,8 @@ def _workspace_member(directory: str, root: str, workspace: dict[str, Any]) -> b
     if root == directory or not (root == "." or directory.startswith(root + "/")):
         return False
     relative = PurePosixPath(posixpath.relpath(directory, root))
-    return any(relative.full_match(g) for g in _globs(workspace, "members")) and not any(
-        relative.full_match(g) for g in _globs(workspace, "exclude")
+    return any(relative.full_match(g) for g in workspace.get("members", [])) and not any(
+        relative.full_match(g) for g in workspace.get("exclude", [])
     )
 
 
@@ -82,11 +90,9 @@ def python_needs(
     paths = sorted(tree)
     needs: dict[tuple[str, tuple[str, ...]], str] = {}
     for path in paths:
-        directory, name = posixpath.split(path)
-        if name == "uv.lock":
-            needs.setdefault((directory or ".", ("uv",)), f"{path} is present")
-        elif name.startswith("requirements") and name.endswith(".txt"):
-            needs.setdefault((directory or ".", ("pip",)), f"{path} is present")
+        ecosystem = manifest_ecosystem(path)
+        if ecosystem:
+            needs.setdefault((posixpath.dirname(path) or ".", (ecosystem,)), f"{path} is present")
     findings: list[Finding] = []
     projects: dict[str, dict[str, Any]] = {}
     for path in (p for p in paths if posixpath.basename(p) == "pyproject.toml"):

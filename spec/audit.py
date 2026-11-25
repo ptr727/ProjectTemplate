@@ -331,9 +331,7 @@ def python_undeclared_root_findings(entry, tree):
         return []
     if not any(p.startswith("tests/") and p.endswith(".py") for p in tree):
         return []
-    if "uv.lock" in tree or any(
-        p.startswith("requirements") and p.endswith(".txt") and "/" not in p for p in tree
-    ):
+    if any("/" not in p and audit_dependabot.manifest_ecosystem(p) for p in tree):
         return []
     return [
         (

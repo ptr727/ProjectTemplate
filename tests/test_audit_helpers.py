@@ -6279,6 +6279,12 @@ class DependabotPythonCase(unittest.TestCase):
         self.assertEqual(len(got), 1)
         self.assertIn("directory /a/b though a/b/requirements.txt", got[0])
 
+    def test_a_directory_value_matches_only_itself(self) -> None:
+        files = {"apps/web/requirements.txt": ""}
+        got = self.findings(self.declared(("pip", "/apps/*")), files)
+        self.assertEqual(len(got), 1)
+        self.assertIn("directory /apps/web", got[0])
+
     def test_an_unreadable_pyproject_is_reported_rather_than_guessed(self) -> None:
         for files in ({"pyproject.toml": "[project\n"}, {"pyproject.toml": None}):
             with self.subTest(files):
