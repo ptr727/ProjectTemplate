@@ -667,7 +667,8 @@ is_managed_copy() {
     managed=$(tool_managed "$tool")
     [[ -n $managed && -e $managed ]] || return 1
     real=$(tool_real_path "$path") || return 1
-    [[ $real -ef $managed ]]
+    [[ $real -ef $managed ]] || return 1
+    [[ $(tool_manager "$path") == "self" ]]
 }
 
 # Whether a copy of the tool PATH resolves to is another copy than its managed one.

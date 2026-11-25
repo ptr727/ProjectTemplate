@@ -303,6 +303,18 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("then run: install-agents.sh --install claude", notes)
         self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
 
+    def test_an_npm_copy_linked_into_the_managed_directory_is_still_a_stray(self) -> None:
+        root = self.dir / "lib" / "node_modules"
+        real = self.stub("claude", "2.1.300", where=root / "@anthropic-ai" / "claude-code" / "bin")
+        (self.bin / "claude").unlink()
+        link = self.home / ".local" / "bin" / "claude"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+        (self.bin / "claude").symlink_to(link)
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
+
     def test_install_leaves_a_stray_codex_and_names_its_fix(self) -> None:
         self.codex_in_npm()
         self.stub("npm", "npm 10.0.0")
@@ -1240,6 +1252,17 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assert_stray(
             "claude", "npm uninstall -g @anthropic-ai/claude-code", extra_path=npm_bin
         )
+
+    def test_an_npm_copy_in_the_managed_directory_is_still_a_stray(self) -> None:
+        npm_bin = self.home / ".local" / "bin"
+        (self.dir / "npm_prefix").write_text(str(npm_bin), encoding="utf-8")
+        self.own_npm(
+            self.stub("claude", "2.1.300 (Claude Code)", npm_bin),
+            npm_bin,
+            "@anthropic-ai/claude-code",
+        )
+        self.stub("npm", "npm 10.0.0")
+        self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
 
     def test_install_leaves_a_stray_codex_and_names_its_fix(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"

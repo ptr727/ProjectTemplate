@@ -879,23 +879,21 @@ function Get-ManagedLabel {
 # Whether two directories are the same one, with every link followed.
 function Test-SameDirectory {
     param([string]$Directory, [string]$Other)
-    $left = (Resolve-FinalPath -Path $Directory) -replace '/', '\'
-    $right = (Resolve-FinalPath -Path $Other) -replace '/', '\'
-    return ($left.TrimEnd('\') -ieq $right.TrimEnd('\'))
+    $left = Resolve-FinalPath -Path $Directory
+    $right = Resolve-FinalPath -Path $Other
+    return ((Test-PathUnder -Path $left -Root $right) -and (Test-PathUnder -Path $right -Root $left))
 }
 
 # Whether a copy PATH resolves to is another copy than the tool's managed one.
 function Test-StrayCopy {
     param([string]$ToolName, [string]$Path)
     if (-not (Test-ManagedTool $ToolName)) { return $false }
-    # A copy is the managed one where it, or what a link of it leads to, sits in that directory.
+    # A copy is the managed one where it sits in that directory and no package manager owns it.
     $directory = Get-ManagedDirectory -ToolName $ToolName
     if ($directory) {
-        foreach ($candidate in @($Path, (Resolve-FinalPath -Path $Path))) {
-            $parent = Split-Path -Parent $candidate
-            if ($parent -and (Test-SameDirectory -Directory $parent -Other $directory)) { return $false }
-        }
-        return $true
+        $parent = Split-Path -Parent $Path
+        $here = $parent -and (Test-SameDirectory -Directory $parent -Other $directory)
+        return -not ($here -and (Get-ToolManager $Path) -eq 'self')
     }
     if ((Get-ToolManager $Path) -ne 'npm') { return $true }
     # Where npm cannot say where it installs, only a shim naming another of the tool's packages is told from the managed one.
