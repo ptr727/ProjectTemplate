@@ -83,8 +83,8 @@ test `session-handoff` "The Chain" states, waits on that platform's lane. One wh
 lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. One whose body opens with `**Owed action:**` waits on the step
-it names, which no diff takes, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. One whose body opens with `**Owed action:**` for a step that is
+not the maintainer's waits on that step, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 ## The Procedure

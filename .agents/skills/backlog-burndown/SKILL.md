@@ -116,7 +116,7 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    can rank high once a sibling fix lands.
    **Measure the run's net flow before that ranking**, read fresh each round rather than carried.
    Count the issues created since the run began, leaving out what "Ranking" leaves out of every
-   count and any `decision`. Count the issues fixed since then, with the same exclusions. Those
+   count, any `decision`, and any `**Owed action:**` issue. Count the issues fixed since then, with the same exclusions. Those
    are the issues closed since then as completed, and those awaiting promotion as "Ranking" reads
    that set. Leave out every issue that awaited promotion when the run began. The run records that
    set in its working notes at its start, and the away planner's brief carries it. Report both counts beside the backlog
@@ -184,8 +184,7 @@ another owner, since a write there needs the maintainer's permission.
 
 An issue whose body opens with `**Owed action:**`, per "The Round" step 5, is counted and is not
 ranked, since no diff takes the step. The round's report names each one and whose step it is.
-Where the step is the maintainer's, an attended run offers the walk-through once per run, step 5's
-offer included. An away run reports a maintainer's one as needing the maintainer.
+An away run reports a maintainer's one as needing the maintainer.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
@@ -336,11 +335,9 @@ for, and it binds harder than any throughput target.
 - **A file a parked group claims can pass to a live group**, which then need not wait for it. It
   passes only where the parked branch, read live, holds no commit touching that file. After the prune
   fetch above, run `git log --format=%H "origin/<base>..<ref>" -- "<file>"`, with `<base>` as the
-  bullet above gives it. Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it for `<branch>` in a
-  standalone clone the claim comment names, too. Each exiting 0 and printing nothing is that read.
-  A non-zero exit, or no ref to read, is a read that cannot be made. Where the parked
-  worktree or clone stands, `git -C "<checkout>" status --porcelain --untracked-files=all` must
-  not list the file either, since only the maintainer disposes of another task's uncommitted work. A read
+  bullet above gives it. Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it with `git -C "<clone>"`
+  for `<branch>` in a standalone clone the claim comment names, too. Each exiting 0 and printing nothing is that read.
+  A non-zero exit, or no ref to read, is a read that cannot be made. A read
   that cannot be made keeps the file with the parked group. Record the pass on the parked group's claim
   comment, keeping its `**Backlog burndown claim` opening. Add a line opening with
   `**Passed (<date>):**` that names the file and the receiving group's issues and branch. A file
@@ -921,8 +918,8 @@ test `session-handoff` "The Chain" states, waits on that platform's lane. One wh
 lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. One whose body opens with `**Owed action:**` waits on the step
-it names, which no diff takes, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. One whose body opens with `**Owed action:**` for a step that is
+not the maintainer's waits on that step, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 <!-- /include -->
@@ -967,8 +964,8 @@ subagents and holds only what they return.
    from the group's line. Each brief also states the park duty below and the comment rule above.
    A group worker drives to develop and ends there, whatever the scope.
 4. **Collect each worker's one-line outcome**, bounding the wait per "Bounding the Wait on a
-   Worker". Collect its owed actions too. Hold each per "The Round" step 5. Since this
-   orchestrator reads no issue body, it files an issue for each one. A worker that hands back for review is continued per "The Round" step 5. Dispatch the
+   Worker". Collect a merged worker's owed actions too. Hold each per "The Round" step 5.
+   Since this orchestrator reads no issue body, it files an issue for each one. A worker that hands back for review is continued per "The Round" step 5. Dispatch the
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
