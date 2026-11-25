@@ -94,9 +94,11 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    ends**, per "Dispatching a Worker". An open issue holds it only where it names the action and
    no `Closes on promotion:` line will close it. So neither an issue awaiting promotion, as
    "Ranking" reads that set, nor an issue of a group in flight holds one. The orchestrator files
-   one where none holds it, saying whether the step is the maintainer's. Attended, it first offers
+   one where none holds it. Its body opens with `**Owed action:**`, or with
+   `**Owed action (maintainer):**` where the step is the maintainer's. Attended, it first offers
    the maintainer a walk-through instead, one step at a time, each confirmed done before the next.
-   An action walked through to done needs no issue.
+   An action walked through to done needs no issue. The orchestrator closes an open issue holding
+   it, citing the maintainer's confirmation.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    Clean up the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then run steps 1 to 3 afresh for the free slots and dispatch the
@@ -181,9 +183,9 @@ Authorizes". So this run gives it no group, no worker, and no claim. The round's
 such issue, its repository, and what would move it, such as a tracking issue or a session there. It names the issue as needing the maintainer only where that repository is under
 another owner, since a write there needs the maintainer's permission.
 
-An issue filed for an owed action that is the maintainer's, per "The Round" step 5, is counted
-and is not ranked. An attended run offers the maintainer its walk-through again. An away run
-reports it as needing the maintainer.
+An issue whose body opens with `**Owed action (maintainer):**`, per "The Round" step 5, is
+counted and is not ranked. An attended run offers the maintainer its walk-through once per run.
+An away run reports it as needing the maintainer.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
@@ -333,9 +335,10 @@ for, and it binds harder than any throughput target.
   every group. So ask the maintainer what that branch holds, per "Raising a Blocked Question".
 - **A file a parked group claims can pass to a live group**, which then need not wait for it. It
   passes only where the parked branch, read live, holds no commit touching that file. After the prune
-  fetch above, run `git log --format=%H "origin/develop..<ref>" -- "<file>"` for `<branch>` and
-  for `origin/<branch>`, whichever exist. Each printing nothing is that read. Where neither ref
-  exists, as for a standalone clone not yet pushed, the read cannot be made. Where the parked
+  fetch above, run the bullet above's read, `git diff --name-only "origin/<base>...<ref>" -- "<file>"`.
+  Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it for `<branch>` in a
+  standalone clone the claim comment names, too. Each exiting 0 and printing nothing is that read.
+  A non-zero exit, or no ref to read, is a read that cannot be made. Where the parked
   worktree stands, `git -C "<worktree>" status --porcelain --untracked-files=all` must not list
   the file either, since only the maintainer disposes of another task's uncommitted work. A read
   that cannot be made keeps the file with the parked group. Record the pass on the parked group's claim
@@ -470,7 +473,9 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   review findings. An owed action is a step outside the diff, usually the maintainer's, without
   which a machine or the fleet stays inconsistent once the change merges. Examples are a migration
   script, a live `configure.sh apply`, a first live run, and a fleet resync. The worker names,
-  for each, whose step it is and any open issue already holding it. An action recorded only in a pull request body is
+  for each, whose step it is and any open issue already holding it. It names an issue only where
+  that issue names the action and carries no claim comment. No `Closes on promotion:` line may
+  name it either, merged or in an open pull request. An action recorded only in a pull request body is
   lost once a `Closes on promotion:` line closes its source issue. "The Round" step 5 says how
   each one is held. Review findings stay `pr-review-conduct` outcome 4's, and this changes
   nothing about them.
@@ -890,7 +895,8 @@ and a guess costs a revert and a review round.
 - **It waits on the maintainer already.** It carries the `decision` label, or a comment asks the
   maintainer something still unanswered.
 - **The fix reaches past the repository's tree.** It changes a repository setting, a ruleset,
-  visibility, a secret, or a release condition. Or it needs a credential, an account, or a host
+  visibility, a secret, or a release condition. Or its remaining work lies in a repository under
+  another owner, whose writes need the maintainer's permission. Or it needs a credential, an account, or a host
   the session lacks.
 - **The fix edits anything under the hub's `host-setup/agent-safety/`.** That tree is the agent's
   own guard, so a human approves every change to it. An approval on the issue lets an attended
@@ -912,8 +918,7 @@ issue for one undecided item is the failure this rule exists to prevent.
 These are not reasons an issue needs the maintainer, and a report never counts them as such. An
 issue that is `blocked` on another issue waits on that issue. One that needs a platform, by the
 test `session-handoff` "The Chain" states, waits on that platform's lane. One whose remaining work
-lies wholly in another repository waits on work there. It needs the maintainer only where that
-repository is under another owner, whose writes need the maintainer's permission. One that another group
+lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
 condition its answer comment states. A handoff link carrying the `handoff` label is not an issue
@@ -962,9 +967,8 @@ subagents and holds only what they return.
    A group worker drives to develop and ends there, whatever the scope.
 4. **Collect each worker's one-line outcome**, bounding the wait per "Bounding the Wait on a
    Worker". Collect its owed actions too, and hold each per "The Round" step 5. The worker's
-   naming an issue as holding one stands for reading that issue's body. A live read then confirms
-   it open. The set awaiting promotion at the run's start, and every issue a group of this run
-   fixes, stand for the sets step 5 excludes. A worker that hands back for review is continued per "The Round" step 5. Dispatch the
+   naming an issue as holding one stands for the reads step 5 names. A live read then confirms it
+   open. An issue a group of this run fixes never holds one. A worker that hands back for review is continued per "The Round" step 5. Dispatch the
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a

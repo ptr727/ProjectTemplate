@@ -57,7 +57,8 @@ and a guess costs a revert and a review round.
 - **It waits on the maintainer already.** It carries the `decision` label, or a comment asks the
   maintainer something still unanswered.
 - **The fix reaches past the repository's tree.** It changes a repository setting, a ruleset,
-  visibility, a secret, or a release condition. Or it needs a credential, an account, or a host
+  visibility, a secret, or a release condition. Or its remaining work lies in a repository under
+  another owner, whose writes need the maintainer's permission. Or it needs a credential, an account, or a host
   the session lacks.
 - **The fix edits anything under the hub's `host-setup/agent-safety/`.** That tree is the agent's
   own guard, so a human approves every change to it. An approval on the issue lets an attended
@@ -79,8 +80,7 @@ issue for one undecided item is the failure this rule exists to prevent.
 These are not reasons an issue needs the maintainer, and a report never counts them as such. An
 issue that is `blocked` on another issue waits on that issue. One that needs a platform, by the
 test `session-handoff` "The Chain" states, waits on that platform's lane. One whose remaining work
-lies wholly in another repository waits on work there. It needs the maintainer only where that
-repository is under another owner, whose writes need the maintainer's permission. One that another group
+lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
 condition its answer comment states. A handoff link carrying the `handoff` label is not an issue
