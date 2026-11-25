@@ -451,7 +451,7 @@ function Test-NpmOwnership {
     $where = ($resolved -replace '/', '\')
     $cut = $where.LastIndexOf('\')
     $directory = if ($cut -gt 0) { $where.Substring(0, $cut).TrimEnd('\') } else { '' }
-    return ($directory -ieq $prefix -or (Test-PathUnder -Path $where -Root "$prefix\node_modules" -Below))
+    return (($directory -and (Test-SameDirectory -Directory $directory -Other $prefix)) -or (Test-PathUnder -Path $where -Root "$prefix\node_modules" -Below))
 }
 
 # The scoop roots this script knows, the user's and the global one.

@@ -183,7 +183,7 @@ class TestInstallAgents(unittest.TestCase):
         return path
 
     def assert_stray(self, tool: str, removal: str | None = None) -> None:
-        """An upgrade runs nothing for the tool and names its hand fix, and the report notes it."""
+        """An upgrade runs nothing for the tool and names its hand fix."""
         result = self.run_script("--upgrade", "--yes", tool)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), [])
