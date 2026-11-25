@@ -1,0 +1,44 @@
+name: Docker lint pins
+description: Read the Docker lint image references, each a version tag with its digest, from the Dockerfile beside this action.
+
+outputs:
+  editorconfig-checker:
+    description: The editorconfig-checker image reference the Dockerfile pins.
+    value: ${{ steps.read.outputs.editorconfig-checker }}
+  actionlint:
+    description: The actionlint image reference the Dockerfile pins.
+    value: ${{ steps.read.outputs.actionlint }}
+  markdownlint:
+    description: The markdownlint-cli2 image reference the Dockerfile pins.
+    value: ${{ steps.read.outputs.markdownlint }}
+  cspell:
+    description: The cspell image reference the Dockerfile pins.
+    value: ${{ steps.read.outputs.cspell }}
+  shellcheck:
+    description: The shellcheck image reference the Dockerfile pins.
+    value: ${{ steps.read.outputs.shellcheck }}
+  shfmt:
+    description: The shfmt image reference the Dockerfile pins.
+    value: ${{ steps.read.outputs.shfmt }}
+  powershell:
+    description: The PowerShell image reference the Dockerfile pins.
+    value: ${{ steps.read.outputs.powershell }}
+
+runs:
+  using: composite
+  steps:
+    # The manifest is read from the action's own path, so a caller reaching this action at a hub pin runs that pin's images.
+    - name: Read Docker lint pins step
+      id: read
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        manifest="$GITHUB_ACTION_PATH/Dockerfile"
+        for stage in editorconfig-checker actionlint markdownlint cspell shellcheck shfmt powershell; do
+          ref=$(sed -n "s/^FROM \([^[:space:]@]*:[^[:space:]@/]*@sha256:[0-9a-f]\{64\}\) AS ${stage}[[:space:]]*\$/\1/p" "$manifest")
+          if [ -z "$ref" ] || [ "$ref" != "${ref%%$'\n'*}" ]; then
+            echo "::error::$manifest must pin $stage on exactly one 'FROM <image>:<tag>@sha256:<digest> AS $stage' line."
+            exit 1
+          fi
+          echo "$stage=$ref" >> "$GITHUB_OUTPUT"
+        done

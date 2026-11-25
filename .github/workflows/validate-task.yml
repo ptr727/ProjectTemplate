@@ -189,15 +189,47 @@ jobs:
       - name: Lint workflows step
         uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
 
+      # Each image is a version tag with its digest, from the Dockerfile beside the action, which Dependabot's docker ecosystem bumps.
+      # A fresh runner still pulls a pinned image, so each step retries a failed pull before it runs a container.
+      - name: Read Docker lint pins step
+        id: docker-pins
+        uses: $/.github/actions/docker-lint-pins
+
       - name: Check EditorConfig step
-        run: docker run --rm --pull=always -v "$PWD":/check --workdir /check ghcr.io/editorconfig-checker/editorconfig-checker:latest
+        env:
+          EDITORCONFIG_IMAGE: ${{ steps.docker-pins.outputs.editorconfig-checker }}
+        run: |
+          set -Eeuo pipefail
+          pull() {
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout 300 docker pull --quiet "$1"; then return 0; fi
+              echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
+              [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
+            done
+            return 1
+          }
+          pull "$EDITORCONFIG_IMAGE"
+          docker run --rm -v "$PWD":/check --workdir /check "$EDITORCONFIG_IMAGE"
 
       # The file list comes from git rather than a glob, and the docker run is skipped rather than invoked on an empty argument list.
       # That is how a repo with no shell scripts stays clean instead of failing on a linter's own no-file usage error.
       # A `*.sh` glob alone misses a bare-command script with no extension, so a shebang-matched file joins the list too.
       - name: Check shell scripts step
+        env:
+          SHELLCHECK_IMAGE: ${{ steps.docker-pins.outputs.shellcheck }}
+          SHFMT_IMAGE: ${{ steps.docker-pins.outputs.shfmt }}
         run: |
           set -Eeuo pipefail
+          pull() {
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout 300 docker pull --quiet "$1"; then return 0; fi
+              echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
+              [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
+            done
+            return 1
+          }
           # Tokenizes rather than substring-matches, so `#!/usr/bin/python bash` is not mistaken for a shell script.
           # `docker_lint.py`'s shell_shebang_interpreter is the same logic; keep both in sync on a change here.
           is_shell_shebang() {
@@ -258,8 +290,10 @@ jobs:
             fi
           done
           if [ "${#scripts[@]}" -gt 0 ]; then
-            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt mirror.gcr.io/koalaman/shellcheck:stable -- "${scripts[@]}"
-            docker run --rm --pull=always -v "$PWD":/mnt --workdir /mnt mirror.gcr.io/mvdan/shfmt:latest -d -- "${scripts[@]}"
+            pull "$SHELLCHECK_IMAGE"
+            pull "$SHFMT_IMAGE"
+            docker run --rm -v "$PWD":/mnt --workdir /mnt "$SHELLCHECK_IMAGE" -- "${scripts[@]}"
+            docker run --rm -v "$PWD":/mnt --workdir /mnt "$SHFMT_IMAGE" -d -- "${scripts[@]}"
           else
             echo "no shell scripts are tracked"
           fi
@@ -268,11 +302,23 @@ jobs:
       # A repo with no .ps1 files pays nothing for the pull.
       # 1.23.0 rather than the newest, since 1.24.0 needs a newer System.Management.Automation than this image carries, which installs and then fails to import.
       - name: Check PowerShell scripts step
+        env:
+          POWERSHELL_IMAGE: ${{ steps.docker-pins.outputs.powershell }}
         run: |
           set -Eeuo pipefail
+          pull() {
+            local attempt
+            for attempt in 1 2 3; do
+              if timeout 300 docker pull --quiet "$1"; then return 0; fi
+              echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
+              [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
+            done
+            return 1
+          }
           mapfile -t ps_scripts < <(git ls-files '*.ps1')
           if [ "${#ps_scripts[@]}" -gt 0 ]; then
-            docker run --rm --pull=always -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt mcr.microsoft.com/powershell:latest \
+            pull "$POWERSHELL_IMAGE"
+            docker run --rm -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt "$POWERSHELL_IMAGE" \
               pwsh -NoProfile -Command '
                 Set-PSRepository PSGallery -InstallationPolicy Trusted
                 Install-Module PSScriptAnalyzer -RequiredVersion 1.23.0 -Force -Scope AllUsers

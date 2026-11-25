@@ -1332,7 +1332,10 @@ class TestCompositeActions(TreeCase):
             self.assertEqual("docker info exited 1", repo_gate.docker_unreachable())
         ok = subprocess.CompletedProcess([], 0, b"", b"")
         bad = subprocess.CompletedProcess([], 1, b"", b"no route")
-        with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad, bad]):
+        with (
+            mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad, bad, bad, bad]),
+            mock.patch.object(repo_gate.time, "sleep"),
+        ):
             self.assertIn("exited 1: no route", repo_gate.docker_unreachable() or "")
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, ok]) as run:
             self.assertIsNone(repo_gate.docker_unreachable())
@@ -1344,6 +1347,57 @@ class TestCompositeActions(TreeCase):
         timeout = subprocess.TimeoutExpired("docker", 1)
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=timeout):
             self.assertIn("did not answer", repo_gate.docker_unreachable() or "")
+
+    def test_a_failed_pull_is_retried_within_the_bound(self) -> None:
+        ok = subprocess.CompletedProcess([], 0, b"", b"")
+        bad = subprocess.CompletedProcess([], 1, b"", b"connection reset by peer")
+        sleeps: list[float] = []
+        with (
+            mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad, bad, ok]) as run,
+            mock.patch.object(repo_gate.time, "sleep", sleeps.append),
+        ):
+            self.assertIsNone(repo_gate.docker_unreachable())
+        image = repo_gate.shellcheck_image()
+        pulls = [c.args[0] for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
+        self.assertEqual([["docker", "pull", "--quiet", image]] * 2, pulls)
+        self.assertEqual([5], sleeps)
+        bad_every_time = [ok, bad] + [bad] * repo_gate.PULL_ATTEMPTS
+        with (
+            mock.patch.object(repo_gate.subprocess, "run", side_effect=bad_every_time) as run,
+            mock.patch.object(repo_gate.time, "sleep", sleeps.append),
+        ):
+            reason = repo_gate.docker_unreachable() or ""
+        self.assertIn("connection reset by peer (attempt 3 of 3)", reason)
+        self.assertEqual(2 + repo_gate.PULL_ATTEMPTS, run.call_count)
+
+    def test_the_shellcheck_image_is_the_manifest_s_digest_pin(self) -> None:
+        """The pin is the one the docker-lint-pins action and docker_lint.py read, never a moving tag."""
+        image = repo_gate.shellcheck_image()
+        self.assertRegex(image, r"^\S+/koalaman/shellcheck:v\d[^@]*@sha256:[0-9a-f]{64}$")
+        self.assertEqual(
+            REPO / ".github/actions/docker-lint-pins/Dockerfile", repo_gate.PIN_MANIFEST
+        )
+
+    def test_an_unreadable_pin_is_one_finding_and_no_docker_call(self) -> None:
+        cases = {
+            "missing": None,
+            "named twice": "FROM r/s:v1@sha256:" + "a" * 64 + " AS shellcheck\n",
+        }
+        for label, text in cases.items():
+            with self.subTest(label):
+                manifest = self.tmp / f"{label}.Dockerfile"
+                if text is not None:
+                    manifest.write_text(text * 2, encoding="utf-8")
+                with (
+                    mock.patch.object(repo_gate, "PIN_MANIFEST", manifest),
+                    mock.patch.object(repo_gate.subprocess, "run") as run,
+                ):
+                    reason = repo_gate.docker_unreachable() or ""
+                    hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "echo ok")
+                self.assertIn("the shellcheck pin could not be read", reason)
+                self.assertEqual(1, len(hits))
+                self.assertIn("could not read the shellcheck pin", hits[0])
+                run.assert_not_called()
 
     def test_an_empty_action_file_is_a_finding_naming_the_file(self) -> None:
         hits = self.shell_hits(self.raw(""))
