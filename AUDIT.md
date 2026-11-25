@@ -225,8 +225,9 @@ flowchart LR
   finding["a finding from 7: Verdict Model"] -->|"the same miss, many repos"| s9["9: Escalate, fix the spec instead"]
   finding -->|"one repo"| s10["10: Converge, branch + fix + PR"]
   s10 --> review["review loop to green"]
-  review --> merge["maintainer merges"]
-  merge --> reaudit["re-audit, the hub commits the report"]
+  review --> merge["maintainer merges into develop"]
+  merge --> promote["promotion to main, driven to green, maintainer merges"]
+  promote --> reaudit["re-audit, the hub commits the report"]
   s9 --> reaudit
 ```
 
@@ -236,7 +237,7 @@ Sections 0-9 (the audit and its report) never edit the target's content. **Conve
 
 - **Apply a file fix via a pull request on the target repo.** Branch from the target's `develop`, make the fix, and open a PR against `develop`.
 - **Drive the PR's review to green** - the same loop the hub runs (see [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette]). The [Copilot review runbook][copilot-runbook] in `.github/copilot-instructions.md` covers that one reviewer's mechanics.
-- **Merge only with explicit maintainer approval.** The agent drives to green and stops. The maintainer merges.
+- **Merge only with explicit maintainer approval.** The agent drives the fix pull request into the target's `develop` to green. Once the maintainer merges it, the agent opens that target's `develop` -> `main` promotion, or finds the open one, and drives it to green. The maintainer merges that too. On an operational repository, the agent confirms that a promotion is wanted before opening one, per `drive-pr`.
 - **Re-audit once the fix reaches `main`.** Section 1 reads `main` as ground truth, so a convergence is done once a re-run of the audit measures it there. Section 8's `--branch` run checks it on `develop` first. The hub commits the report under its own `reports/`, per section 8.
 - **One focused PR per drift class of file fixes**, apart from the grouping [`RESYNC.md`][resync] section 6 states, cross-referencing the audit finding. A sprawling all-drifts PR draws many review rounds and never feels done.
 - **A `hub-only:` finding converges by deleting the file, not by updating it.** That prefix is how `spec/audit.py` reports the **carried-scope** dimension section 4 names. Such a finding is easy to convert into a re-vendor by reflex and end up refreshing a copy that should not exist. Delete the repo's copy. Where the hub still hosts the file, reach the hub's per [GOVERNANCE.md "Hub-Hosted Tooling"][governance-hub-hosted-tooling]. The finding says which of the two it is. Confirm the path's [`spec/divergences.json`][divergences] `gaps` disposition is `retire` before deleting anything. A file the fleet retired outright is deleted only where the finding says the copy matches a past hub version. Any other copy is reported to the maintainer, per [`RESYNC.md`][resync] section 3 step 2. An untriaged hit may be the repo's own content at a shared path, and deleting that destroys work the hub never owned.
