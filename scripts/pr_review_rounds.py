@@ -635,10 +635,14 @@ def promotion(pr: dict) -> bool:
     return reviewed_head(pr) or bot.rounds_left(reviewed_heads(pr), reviews_truncated(pr))
 
 
+def reviewed_oids(nodes: list[dict]) -> set[str]:
+    """The distinct commits these reviews cover, a refusal or a review naming no commit excluded."""
+    return {oid for n in nodes if not refusal_of(n) and (oid := commit_oid(n))}
+
+
 def reviewed_heads(pr: dict, login: str = REVIEWER) -> int:
     """The distinct heads reviewer `login`'s own reviews cover on this pull request, refusals excluded."""
-    nodes = reviewer_nodes(pr, "reviews", login)
-    return len({commit_oid(n) for n in nodes if not refusal_of(n) and commit_oid(n)})
+    return len(reviewed_oids(reviewer_nodes(pr, "reviews", login)))
 
 
 def copilot_settled(pr: dict) -> bool:
