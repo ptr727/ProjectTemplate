@@ -90,13 +90,12 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    parked behind another group's file claim, handed back for review, or abandoned.
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
-   **Each owed action a worker reports is held by an open issue before the round promotes or
-   ends**, per "Dispatching a Worker". An open issue holds it only where it names the action and
-   no `Closes on promotion:` line will close it. So neither an issue awaiting promotion, as
-   "Ranking" reads that set, nor an issue of a group in flight holds one. The orchestrator files
-   one where none holds it. Its body opens with `**Owed action:**` and says whose step it is.
-   Attended, it first offers the maintainer a walk-through instead, one step at a time, each
-   confirmed done before the next. An action that needs a promotion or a release first is filed
+   **Each owed action a merged group reports is held by an open issue before the round promotes
+   or ends**, per "Dispatching a Worker". Only an open issue whose body opens with
+   `**Owed action:**` and names the action holds it, since "Ranking" never ranks one. So no
+   `Closes on promotion:` line closes it. The orchestrator files one where none holds it, saying
+   whose step it is. Attended, where the step is the maintainer's, it first offers the maintainer a
+   walk-through instead. It gives one step at a time, each confirmed done before the next. An action that needs a promotion or a release first is filed
    rather than offered. An action walked through to done needs no issue. The orchestrator closes
    an `**Owed action:**` issue walked through to done, citing the maintainer's confirmation.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
@@ -186,7 +185,7 @@ another owner, since a write there needs the maintainer's permission.
 An issue whose body opens with `**Owed action:**`, per "The Round" step 5, is counted and is not
 ranked, since no diff takes the step. The round's report names each one and whose step it is.
 Where the step is the maintainer's, an attended run offers the walk-through once per run, step 5's
-offer included. An away run reports such an issue as needing the maintainer.
+offer included. An away run reports a maintainer's one as needing the maintainer.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
@@ -345,8 +344,9 @@ for, and it binds harder than any throughput target.
   that cannot be made keeps the file with the parked group. Record the pass on the parked group's claim
   comment, keeping its `**Backlog burndown claim` opening. Add a line opening with
   `**Passed (<date>):**` that names the file and the receiving group's issues and branch. A file
-  such a line names is no longer that claim's. When the parked group resumes, its planner predicts
-  its file set again and verifies it as any prediction is. Once it verifies, the planner rewrites
+  such a line names is no longer that claim's. When the parked group resumes, the seat running "The
+  Round" steps 1 to 3 predicts its file set again. It verifies that set as any prediction is verified.
+  Once it verifies, that seat rewrites
   the claim comment with that set and drops each `**Passed` line. A promotion fix takes a
   parked holder's file whatever its branch holds, per "The Promotion Boundary" step 5.
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
@@ -475,9 +475,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   review findings. An owed action is a step outside the diff, usually the maintainer's, without
   which a machine or the fleet stays inconsistent once the change merges. Examples are a migration
   script, a live `configure.sh apply`, a first live run, and a fleet resync. The worker names,
-  for each, whose step it is and any open issue already holding it. It names an issue only where
-  that issue names the action and carries no claim comment. No `Closes on promotion:` line may
-  name it either, in a pull request merged or open, or in a commit on develop. An action recorded only in a pull request body is
+  for each, whose step it is. An action recorded only in a pull request body is
   lost once a `Closes on promotion:` line closes its source issue. "The Round" step 5 says how
   each one is held. Review findings stay `pr-review-conduct` outcome 4's, and this changes
   nothing about them.
@@ -968,9 +966,8 @@ subagents and holds only what they return.
    from the group's line. Each brief also states the park duty below and the comment rule above.
    A group worker drives to develop and ends there, whatever the scope.
 4. **Collect each worker's one-line outcome**, bounding the wait per "Bounding the Wait on a
-   Worker". Collect its owed actions too. Hold each per "The Round" step 5. The worker's
-   naming an issue as holding one stands for the reads step 5 names. A live read then confirms it
-   open. An issue a group of this run fixes never holds one. A worker that hands back for review is continued per "The Round" step 5. Dispatch the
+   Worker". Collect its owed actions too. Hold each per "The Round" step 5. Since this
+   orchestrator reads no issue body, it files an issue for each one. A worker that hands back for review is continued per "The Round" step 5. Dispatch the
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
    The orchestrator reads only the reviewer's findings and the record's exit. **The slot a worker
    frees is refilled** per "The Round" step 6, once step 5 below has run for its group. Dispatch a
