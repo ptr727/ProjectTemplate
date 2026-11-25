@@ -94,11 +94,11 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    ends**, per "Dispatching a Worker". An open issue holds it only where it names the action and
    no `Closes on promotion:` line will close it. So neither an issue awaiting promotion, as
    "Ranking" reads that set, nor an issue of a group in flight holds one. The orchestrator files
-   one where none holds it. Its body opens with `**Owed action:**`, or with
-   `**Owed action (maintainer):**` where the step is the maintainer's. Attended, it first offers
-   the maintainer a walk-through instead, one step at a time, each confirmed done before the next.
-   An action walked through to done needs no issue. The orchestrator closes an open issue holding
-   it, citing the maintainer's confirmation.
+   one where none holds it. Its body opens with `**Owed action:**` and says whose step it is.
+   Attended, it first offers the maintainer a walk-through instead, one step at a time, each
+   confirmed done before the next. An action that needs a promotion or a release first is filed
+   rather than offered. An action walked through to done needs no issue. The orchestrator closes
+   an `**Owed action:**` issue walked through to done, citing the maintainer's confirmation.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    Clean up the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then run steps 1 to 3 afresh for the free slots and dispatch the
@@ -183,9 +183,10 @@ Authorizes". So this run gives it no group, no worker, and no claim. The round's
 such issue, its repository, and what would move it, such as a tracking issue or a session there. It names the issue as needing the maintainer only where that repository is under
 another owner, since a write there needs the maintainer's permission.
 
-An issue whose body opens with `**Owed action (maintainer):**`, per "The Round" step 5, is
-counted and is not ranked. An attended run offers the maintainer its walk-through once per run.
-An away run reports it as needing the maintainer.
+An issue whose body opens with `**Owed action:**`, per "The Round" step 5, is counted and is not
+ranked, since no diff takes the step. The round's report names each one and whose step it is.
+Where the step is the maintainer's, an attended run offers the walk-through once per run, step 5's
+offer included. An away run reports such an issue as needing the maintainer.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
@@ -335,17 +336,18 @@ for, and it binds harder than any throughput target.
   every group. So ask the maintainer what that branch holds, per "Raising a Blocked Question".
 - **A file a parked group claims can pass to a live group**, which then need not wait for it. It
   passes only where the parked branch, read live, holds no commit touching that file. After the prune
-  fetch above, run the bullet above's read, `git diff --name-only "origin/<base>...<ref>" -- "<file>"`.
-  Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it for `<branch>` in a
+  fetch above, run `git log --format=%H "origin/<base>..<ref>" -- "<file>"`, with `<base>` as the
+  bullet above gives it. Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it for `<branch>` in a
   standalone clone the claim comment names, too. Each exiting 0 and printing nothing is that read.
   A non-zero exit, or no ref to read, is a read that cannot be made. Where the parked
-  worktree stands, `git -C "<worktree>" status --porcelain --untracked-files=all` must not list
-  the file either, since only the maintainer disposes of another task's uncommitted work. A read
+  worktree or clone stands, `git -C "<checkout>" status --porcelain --untracked-files=all` must
+  not list the file either, since only the maintainer disposes of another task's uncommitted work. A read
   that cannot be made keeps the file with the parked group. Record the pass on the parked group's claim
   comment, keeping its `**Backlog burndown claim` opening. Add a line opening with
   `**Passed (<date>):**` that names the file and the receiving group's issues and branch. A file
   such a line names is no longer that claim's. When the parked group resumes, its planner predicts
-  its file set again and re-claims it, verified as any prediction is. A promotion fix takes a
+  its file set again and verifies it as any prediction is. Once it verifies, the planner rewrites
+  the claim comment with that set and drops each `**Passed` line. A promotion fix takes a
   parked holder's file whatever its branch holds, per "The Promotion Boundary" step 5.
 - **Re-verify when a worker reports that its real file set grew** beyond its claim. A worker
   needing a file outside its claim stops and reports rather than editing it. A file may sit on a
@@ -475,7 +477,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   script, a live `configure.sh apply`, a first live run, and a fleet resync. The worker names,
   for each, whose step it is and any open issue already holding it. It names an issue only where
   that issue names the action and carries no claim comment. No `Closes on promotion:` line may
-  name it either, merged or in an open pull request. An action recorded only in a pull request body is
+  name it either, in a pull request merged or open, or in a commit on develop. An action recorded only in a pull request body is
   lost once a `Closes on promotion:` line closes its source issue. "The Round" step 5 says how
   each one is held. Review findings stay `pr-review-conduct` outcome 4's, and this changes
   nothing about them.
@@ -966,7 +968,7 @@ subagents and holds only what they return.
    from the group's line. Each brief also states the park duty below and the comment rule above.
    A group worker drives to develop and ends there, whatever the scope.
 4. **Collect each worker's one-line outcome**, bounding the wait per "Bounding the Wait on a
-   Worker". Collect its owed actions too, and hold each per "The Round" step 5. The worker's
+   Worker". Collect its owed actions too. Hold each per "The Round" step 5. The worker's
    naming an issue as holding one stands for the reads step 5 names. A live read then confirms it
    open. An issue a group of this run fixes never holds one. A worker that hands back for review is continued per "The Round" step 5. Dispatch the
    reviewer, record the pass per `local-strict-review` "Running It", and continue the same worker.
@@ -1139,8 +1141,8 @@ reported as needing the maintainer present. An outsider's issue awaiting accepta
 as needing the maintainer to accept it. Work in a repository under another owner is reported as
 needing the maintainer's permission for the write there. An owed action that is the maintainer's
 is reported as needing the maintainer to take it. Each other reason is named as itself, never as a
-decision. Those are `blocked` on another issue, needs a platform, and any other work in
-another repository. They are also held by an open group or pull request, awaiting promotion, and
+decision. Those are `blocked` on another issue, needs a platform, any other work in another
+repository, and any other owed action. They are also held by an open group or pull request, awaiting promotion, and
 `deferred`, given by count. A held promotion is named too, with each `decision` issue holding
 it. An ending that cannot dispatch a promotion worker the run owes is named too. A run ended by a dispatch failure does not attempt one, since the same harness error would meet it. A session ending on a context limit has no room to run one. The final message says that worker did not run, and names any open promotion pull request. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
