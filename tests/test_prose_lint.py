@@ -9121,7 +9121,8 @@ READY = pathlib.Path(sys.argv[2])
 
 def held(*args, **kwargs):
     READY.touch()
-    time.sleep(60)
+    for _ in range(1200):
+        time.sleep(0.05)
 
 subprocess.run = held
 sys.argv = [sys.argv[1], *sys.argv[3:]]
@@ -9135,6 +9136,7 @@ class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
 
     The gate runs under this interpreter directly, since `uv run` would exit with a status rather
     than die by the signal. Its git call is a stub that marks itself started and sleeps.
+    It sleeps in short steps, since a signal landing just before a long sleep waits it out.
     """
 
     def test_a_signal_mid_run_ends_the_gate_by_it(self) -> None:
