@@ -32,6 +32,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import audit_contract
+import audit_dependabot
 import audit_pins
 import validate  # sibling, import-safe (its main is guarded)
 import yaml
@@ -1541,21 +1542,6 @@ def concurrency_caller_findings(path, text):
     return findings
 
 
-def dependabot_ecosystems(text):
-    """The package-ecosystem values a dependabot.yml declares, or None where it does not parse."""
-    doc, parsed = _yaml(text)
-    if not parsed:
-        return None
-    updates = doc.get("updates") if isinstance(doc, dict) else None
-    if not isinstance(updates, list):
-        return set()
-    return {
-        str(u["package-ecosystem"])
-        for u in updates
-        if isinstance(u, dict) and u.get("package-ecosystem")
-    }
-
-
 @functools.lru_cache(
     maxsize=1024
 )  # bounded; the keys that recur across repos are the canonical and its history
@@ -2334,14 +2320,14 @@ def check_secrets_names(run):
 
 
 def check_dependabot_ecosystems(run):
-    """An ecosystem the tree implies, github-actions for workflows and devcontainers for .devcontainer/ or .devcontainer.json, is declared."""
+    """An ecosystem the tree implies is declared: github-actions for workflows, devcontainers for .devcontainer/ or .devcontainer.json, and pip or uv per Python directory."""
     text = contents_text(
         gh(f"repos/{run.slug}/contents/.github/dependabot.yml?ref={run.ref}", ok404=True)
     )
     if not text:
         return []
-    declared = dependabot_ecosystems(text)
-    if declared is None:
+    doc, parsed = _yaml(text)
+    if not parsed:
         return [
             (
                 "DRIFT",
@@ -2358,7 +2344,8 @@ def check_dependabot_ecosystems(run):
         if gh(f"repos/{run.slug}/contents/{path}?ref={run.ref}", ok404=True) is not None:
             implied["devcontainers"] = f"{path} is present"
             break
-    return [
+    declared = audit_dependabot.ecosystems(doc)
+    findings = [
         (
             "DRIFT",
             f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm",
@@ -2366,6 +2353,10 @@ def check_dependabot_ecosystems(run):
         for eco, why in sorted(implied.items())
         if eco not in declared
     ]
+    if run.tree is not None:
+        directories = audit_dependabot.declared_directories(doc)
+        findings += audit_dependabot.python_findings(directories, run.tree, run.read_text)
+    return findings
 
 
 def check_pins_age(run):

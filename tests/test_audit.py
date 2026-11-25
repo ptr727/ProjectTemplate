@@ -115,7 +115,7 @@ def run_audit(
         "divergences": audit.load("spec/divergences.json"),
     }
     spec["divergences"]["gaps"] = [*spec["divergences"]["gaps"], *gaps]
-    fake = FakeGh(tree, modes, unread, texts, moved)
+    fake = FakeGh(tree, modes, unread, {"pyproject.toml": "[tool.ruff]\n", **(texts or {})}, moved)
     with (
         mock.patch.object(audit, "gh", fake),
         mock.patch.object(audit, "hub_tracked", lambda rev=None: hub),

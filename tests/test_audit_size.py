@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hold the audit engine and its Markdown, pin, and contract modules under their size ceilings."""
+"""Hold the audit engine and its Markdown, pin, contract, and Dependabot modules under their size ceilings."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ CEILINGS = {
     "audit_markdown.py": 1000,
     "audit_pins.py": 500,
     "audit_contract.py": 200,
+    "audit_dependabot.py": 200,
 }
 
 
