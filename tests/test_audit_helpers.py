@@ -25,6 +25,7 @@ from unittest import mock
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "spec"))
 import audit
+import audit_dependabot
 import audit_markdown
 import validate
 import workflow_reuse
@@ -6178,17 +6179,139 @@ class RegistryCase(unittest.TestCase):
         registry_only = audit.driftnote_findings(typed, {"types": {"types": {}}}, 1)
         self.assertIn("this audit evaluates (spec/checks.json)", registry_only[0][1])
 
-    def test_an_unparsed_dependabot_file_reads_as_unparsed(self) -> None:
-        self.assertIsNone(audit.dependabot_ecosystems("updates:\n  - [\n"))
-        self.assertEqual(audit.dependabot_ecosystems("updates: []\n"), set())
+    def test_a_dependabot_file_declares_its_ecosystems(self) -> None:
+        self.assertEqual(audit_dependabot.ecosystems(audit.yaml.safe_load("updates: []\n")), set())
         declared = "updates:\n  - package-ecosystem: github-actions\n  - package-ecosystem: 'uv'\n"
-        self.assertEqual(audit.dependabot_ecosystems(declared), {"github-actions", "uv"})
+        doc = audit.yaml.safe_load(declared)
+        self.assertEqual(audit_dependabot.ecosystems(doc), {"github-actions", "uv"})
 
     def test_a_registry_id_is_a_known_check_id(self) -> None:
         spec: dict[str, Any] = {"types": {"types": {}, "crossCutting": {}}}
         self.assertEqual(audit.catalog_owner(spec, "settings.general"), (None, False))
         self.assertEqual(audit.registered_check("settings.general")["id"], "settings.general")
         self.assertEqual(audit.registered_check("no.such-check"), {})
+
+
+class DependabotPythonCase(unittest.TestCase):
+    """A Python manifest is tracked only where an entry for an ecosystem it implies names its directory."""
+
+    DEPS = '[project]\nname = "x"\ndependencies = ["requests>=2"]\n'
+
+    @staticmethod
+    def declared(*entries: tuple[str, str]) -> dict[str, list[str]]:
+        updates = "".join(f"  - package-ecosystem: {e}\n    directory: '{d}'\n" for e, d in entries)
+        return audit_dependabot.declared_directories(audit.yaml.safe_load(f"updates:\n{updates}"))
+
+    @staticmethod
+    def findings(declared: dict[str, list[str]], files: dict[str, str]) -> list[str]:
+        return [text for _, text in audit_dependabot.python_findings(declared, files, files.get)]
+
+    def test_a_requirements_file_implies_pip_for_its_directory(self) -> None:
+        files = {"requirements-dev.txt": "pytest>=8\n", "README.md": ""}
+        got = self.findings(self.declared(("github-actions", "/")), files)
+        self.assertEqual(len(got), 1)
+        self.assertIn(
+            "pip ecosystem not declared for directory / though requirements-dev.txt", got[0]
+        )
+        self.assertEqual(self.findings(self.declared(("pip", "/")), files), [])
+
+    def test_a_lock_implies_uv_for_its_own_directory_only(self) -> None:
+        files = {"tool/pyproject.toml": self.DEPS, "tool/uv.lock": ""}
+        got = self.findings(self.declared(("uv", "/")), files)
+        self.assertEqual(len(got), 1)
+        self.assertIn("uv ecosystem not declared for directory /tool though tool/uv.lock", got[0])
+        self.assertEqual(self.findings(self.declared(("uv", "/tool/")), files), [])
+
+    def test_unlocked_dependencies_accept_either_ecosystem(self) -> None:
+        files = {"pyproject.toml": self.DEPS}
+        got = self.findings({}, files)
+        self.assertEqual(len(got), 1)
+        self.assertIn("pip or uv ecosystem not declared for directory /", got[0])
+        self.assertIn("pyproject.toml declares [project] dependencies", got[0])
+        for ecosystem in ("pip", "uv"):
+            with self.subTest(ecosystem):
+                self.assertEqual(self.findings(self.declared((ecosystem, "/")), files), [])
+
+    def test_optional_dependencies_count_as_dependencies(self) -> None:
+        text = '[project]\nname = "x"\n[project.optional-dependencies]\ndev = ["pytest"]\n'
+        self.assertEqual(len(self.findings({}, {"pyproject.toml": text})), 1)
+
+    def test_a_config_only_pyproject_implies_nothing(self) -> None:
+        for text in (
+            "[tool.ruff]\nline-length = 100\n",
+            '[project]\nname = "x"\ndependencies = []\n',
+        ):
+            with self.subTest(text):
+                self.assertEqual(self.findings({}, {"pyproject.toml": text}), [])
+
+    def test_a_member_of_a_locked_uv_workspace_rides_on_the_root_entry(self) -> None:
+        root = '[tool.uv.workspace]\nmembers = ["apps/*"]\nexclude = ["apps/legacy"]\n'
+        files = {
+            "pyproject.toml": root,
+            "uv.lock": "",
+            "apps/python/pyproject.toml": self.DEPS,
+            "apps/legacy/pyproject.toml": self.DEPS,
+        }
+        got = self.findings(self.declared(("uv", "/")), files)
+        self.assertEqual(len(got), 1)
+        self.assertIn("directory /apps/legacy though apps/legacy/pyproject.toml", got[0])
+
+    def test_a_workspace_with_no_tracked_lock_covers_no_member(self) -> None:
+        files = {
+            "pyproject.toml": '[tool.uv.workspace]\nmembers = ["apps/*"]\n',
+            "apps/python/pyproject.toml": self.DEPS,
+        }
+        got = self.findings(self.declared(("uv", "/")), files)
+        self.assertEqual(len(got), 1)
+        self.assertIn("directory /apps/python", got[0])
+
+    def test_a_directories_glob_covers_a_matching_directory(self) -> None:
+        doc = audit.yaml.safe_load(
+            "updates:\n  - package-ecosystem: pip\n    directories: ['/', '/actions/*']\n"
+        )
+        declared = audit_dependabot.declared_directories(doc)
+        files = {
+            "actions/pins/requirements.txt": "",
+            "requirements.txt": "",
+            "a/b/requirements.txt": "",
+        }
+        got = self.findings(declared, files)
+        self.assertEqual(len(got), 1)
+        self.assertIn("directory /a/b though a/b/requirements.txt", got[0])
+
+    def test_a_directory_value_matches_only_itself(self) -> None:
+        files = {"apps/web/requirements.txt": ""}
+        got = self.findings(self.declared(("pip", "/apps/*")), files)
+        self.assertEqual(len(got), 1)
+        self.assertIn("directory /apps/web", got[0])
+
+    def test_an_unreadable_pyproject_is_reported_rather_than_guessed(self) -> None:
+        for files in ({"pyproject.toml": "[project\n"}, {"pyproject.toml": None}):
+            with self.subTest(files):
+                got = audit_dependabot.python_findings({}, files, files.get)
+                self.assertEqual(len(got), 1)
+                self.assertIn("pyproject.toml could not be read as TOML", got[0][1])
+
+    def test_the_check_reads_python_manifests_from_the_listed_tree_at_its_head(self) -> None:
+        run = audit.Run({"name": "Widget"}, {}, "o/r", "main", {}, None, None)
+        run.head = {"commit": {"sha": "c0ffee"}}
+        run.blobs = {"requirements.txt": ("b1", "100644"), "pyproject.toml": ("b2", "100644")}
+        texts = {
+            ".github/dependabot.yml": b"updates:\n  - package-ecosystem: uv\n    directory: /\n",
+            "pyproject.toml": b"[tool.ruff]\n",
+        }
+
+        def gh(path: str, ok404: bool = False) -> Any:
+            name, _, ref = path.removeprefix("repos/o/r/contents/").partition("?ref=")
+            raw = texts.get(name) if ref == "c0ffee" else None
+            return raw and {"encoding": "base64", "content": base64.b64encode(raw).decode()}
+
+        with mock.patch.object(audit, "gh", gh):
+            got = audit.check_dependabot_ecosystems(run)
+        self.assertEqual(len(got), 1)
+        self.assertIn(
+            "pip ecosystem not declared for directory / though requirements.txt", got[0][1]
+        )
 
 
 class ExpectedRulesetsCase(unittest.TestCase):
