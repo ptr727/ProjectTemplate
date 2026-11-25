@@ -1395,6 +1395,8 @@ class TestCompositeActions(TreeCase):
                     reason = repo_gate.docker_unreachable() or ""
                     hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "echo ok")
                 self.assertIn("the shellcheck pin could not be read", reason)
+                if text is None:
+                    self.assertIn("from a hub checkout or through the repo-gate action", reason)
                 self.assertEqual(1, len(hits))
                 self.assertIn("could not read the shellcheck pin", hits[0])
                 run.assert_not_called()

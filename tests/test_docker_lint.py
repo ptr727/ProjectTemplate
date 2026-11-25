@@ -207,7 +207,6 @@ class DockerLintCase(unittest.TestCase):
             "a moving tag with no digest": "FROM r/a:latest AS markdownlint",
             "a digest with no tag": "FROM r/a@sha256:" + "a" * 64 + " AS markdownlint",
             "a stage named twice": good.format(stage="cspell") + "\n" + good.format(stage="cspell"),
-            "an instruction other than FROM": "RUN true",
         }
         for label, text in cases.items():
             with self.subTest(label):
@@ -215,6 +214,14 @@ class DockerLintCase(unittest.TestCase):
                 path.write_text(f"# A comment.\n\n{text}\n", encoding="utf-8")
                 with self.assertRaisesRegex(docker_lint.CommandFailed, "unexpected line"):
                     docker_lint.read_pins(path)
+
+    def test_a_line_that_is_no_from_instruction_is_skipped_as_the_other_readers_skip_it(
+        self,
+    ) -> None:
+        path = self.outside / "Dockerfile"
+        image = "r/a:1.0@sha256:" + "a" * 64
+        path.write_text(f"ARG unused=1\nFROM {image} AS cspell\n", encoding="utf-8")
+        self.assertEqual({"cspell": image}, docker_lint.read_pins(path))
 
     def test_a_manifest_missing_a_stage_is_refused(self) -> None:
         pins = docker_lint.read_pins(MANIFEST)

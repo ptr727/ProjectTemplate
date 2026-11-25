@@ -142,7 +142,7 @@ def read_pins(path: Path) -> dict[str, str]:
         raise CommandFailed(f"could not read the pin manifest {path}: {error}") from error
     pins: dict[str, str] = {}
     for line in text.splitlines():
-        if not line.strip() or line.startswith("#"):
+        if not line.startswith("FROM "):
             continue
         match = PIN_LINE.fullmatch(line.rstrip())
         if match is None or match.group(2) in pins:

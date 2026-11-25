@@ -201,9 +201,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           pull() {
-            local attempt
+            local attempt status
             for attempt in 1 2 3; do
-              if timeout 300 docker pull --quiet "$1"; then return 0; fi
+              status=0
+              timeout 300 docker pull --quiet "$1" || status=$?
+              [ "$status" -ne 0 ] || return 0
+              [ "$status" -ne 124 ] || { echo "::error::docker pull of $1 timed out after 300s."; return 1; }
               echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
               [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
             done
@@ -222,9 +225,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           pull() {
-            local attempt
+            local attempt status
             for attempt in 1 2 3; do
-              if timeout 300 docker pull --quiet "$1"; then return 0; fi
+              status=0
+              timeout 300 docker pull --quiet "$1" || status=$?
+              [ "$status" -ne 0 ] || return 0
+              [ "$status" -ne 124 ] || { echo "::error::docker pull of $1 timed out after 300s."; return 1; }
               echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
               [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
             done
@@ -307,9 +313,12 @@ jobs:
         run: |
           set -Eeuo pipefail
           pull() {
-            local attempt
+            local attempt status
             for attempt in 1 2 3; do
-              if timeout 300 docker pull --quiet "$1"; then return 0; fi
+              status=0
+              timeout 300 docker pull --quiet "$1" || status=$?
+              [ "$status" -ne 0 ] || return 0
+              [ "$status" -ne 124 ] || { echo "::error::docker pull of $1 timed out after 300s."; return 1; }
               echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
               [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
             done

@@ -1732,21 +1732,24 @@ gh() {
         """A registry blip fails a pull a later attempt completes, and a lasting failure still fails the step."""
         workflow = REPO / ".github/workflows/validate-task.yml"
         script = step_script(workflow, "Check EditorConfig step")
-        for failures, code, pulls, sleeps, ran in (
-            (2, 0, 3, "15\n30\n", True),
-            (3, 1, 3, "15\n30\n", False),
-        ):
-            with self.subTest(failures=failures):
+        cases = (
+            (2, 1, 0, 3, "15\n30\n", True),
+            (3, 1, 1, 3, "15\n30\n", False),
+            (1, 124, 1, 1, "", False),
+        )
+        for failures, exit_code, code, pulls, sleeps, ran in cases:
+            with self.subTest(failures=failures, exit_code=exit_code):
                 root = Path(self.enterContext(tempfile.TemporaryDirectory()))
                 tools = root / "bin"
                 tools.mkdir()
                 (root / "failures").write_text(str(failures), encoding="utf-8")
+                (root / "sleep.log").write_text("", encoding="utf-8")
                 stubs = {
                     "docker": (
                         'echo "$*" >> "$STUB_ROOT/docker.log"\n'
                         'if [ "$1" = pull ]; then\n'
                         '  left=$(cat "$STUB_ROOT/failures")\n'
-                        '  if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$STUB_ROOT/failures"; exit 1; fi\n'
+                        '  if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$STUB_ROOT/failures"; exit "$STUB_EXIT"; fi\n'
                         "fi\n"
                     ),
                     "sleep": 'echo "$1" >> "$STUB_ROOT/sleep.log"\n',
@@ -1762,6 +1765,7 @@ gh() {
                         **os.environ,
                         "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
                         "STUB_ROOT": str(root),
+                        "STUB_EXIT": str(exit_code),
                         "EDITORCONFIG_IMAGE": "r.io/ec:1.0@sha256:" + "a" * 64,
                     },
                     capture_output=True,

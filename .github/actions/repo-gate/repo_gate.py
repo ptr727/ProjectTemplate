@@ -664,7 +664,13 @@ def shellcheck_image() -> str:
     """The shellcheck image reference the pin manifest names, a tag with its digest.
 
     Raises ValueError where the manifest names it on no line or on more than one.
+    A copy fetched alone has no manifest beside it, so that error names where the check can run.
     """
+    if not PIN_MANIFEST.is_file():
+        raise ValueError(
+            f"{PIN_MANIFEST} is not beside this script, so run this check from a hub checkout "
+            "or through the repo-gate action"
+        )
     pins = SHELLCHECK_PIN.findall(PIN_MANIFEST.read_text(encoding="utf-8"))
     if len(pins) != 1:
         raise ValueError(f"{PIN_MANIFEST} names the shellcheck image on {len(pins)} lines, not 1")

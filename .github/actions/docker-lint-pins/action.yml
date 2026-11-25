@@ -5,15 +5,6 @@ outputs:
   editorconfig-checker:
     description: The editorconfig-checker image reference the Dockerfile pins.
     value: ${{ steps.read.outputs.editorconfig-checker }}
-  actionlint:
-    description: The actionlint image reference the Dockerfile pins.
-    value: ${{ steps.read.outputs.actionlint }}
-  markdownlint:
-    description: The markdownlint-cli2 image reference the Dockerfile pins.
-    value: ${{ steps.read.outputs.markdownlint }}
-  cspell:
-    description: The cspell image reference the Dockerfile pins.
-    value: ${{ steps.read.outputs.cspell }}
   shellcheck:
     description: The shellcheck image reference the Dockerfile pins.
     value: ${{ steps.read.outputs.shellcheck }}

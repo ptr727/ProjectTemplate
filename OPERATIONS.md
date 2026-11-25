@@ -116,7 +116,7 @@ A local gate reproduces a CI failure exactly, because CI runs the same commands 
 
 ## Tool Usage
 
-The Docker linters pull the digests `.github/actions/docker-lint-pins/Dockerfile` pins, so a local run matches CI:
+The Docker linters pull the digests `.github/actions/docker-lint-pins/Dockerfile` pins, the images CI also runs for the EditorConfig, shell, and PowerShell checks:
 
 ```sh
 python3 scripts/docker_lint.py
