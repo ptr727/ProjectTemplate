@@ -658,6 +658,26 @@ class ReviewTests(unittest.TestCase):
             (rabbit.explicit_rounds, rabbit.automatic_rounds, rabbit.unclassified_rounds), (0, 1, 0)
         )
 
+    def test_reviewed_heads_are_the_gates_one_definition(self) -> None:
+        """The report's rounds and the gate's round count read one filter, so neither drifts alone.
+
+        The case holds a counted review, a refusal, and a review naming no commit. Replacing the
+        shared reader then moves both readings together, which a local copy of the filter would not.
+        """
+        reviews = [
+            {"author": {"login": RABBIT}, "commit": {"oid": SHA_A}, "body": "Looks fine."},
+            {"author": {"login": RABBIT}, "commit": {"oid": SHA_B}, "body": REFUSED},
+            {"author": {"login": RABBIT}, "commit": None, "body": "Looks fine."},
+        ]
+        parts = {"commits": [commit(SHA_A), commit(SHA_B)], "reviews": reviews}
+        gate = pr_review_rounds.reviewed_heads(pr_payload(**parts), RABBIT)
+        self.assertEqual(gate, 1)
+        self.assertEqual(self.tally(**parts).bots["coderabbit"].rounds, [gate])
+        stub = {SHA_A, SHA_B, SHA_C}
+        with unittest.mock.patch.object(pr_review_rounds, "reviewed_oids", return_value=stub):
+            self.assertEqual(pr_review_rounds.reviewed_heads(pr_payload(**parts), RABBIT), 3)
+            self.assertEqual(self.tally(**parts).bots["coderabbit"].rounds, [3])
+
     def test_a_review_request_event_times_a_round_as_explicit(self) -> None:
         review = {
             "author": {"login": RABBIT},

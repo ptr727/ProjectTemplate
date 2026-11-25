@@ -411,11 +411,7 @@ def review_pr(pr: Mapping[str, Any], result: ReviewMetrics, default_branch: str 
                 result.failing_after_clean_local += 1
     for name, login in BOT_LOGINS.items():
         stats = result.bots.setdefault(name, BotStats())
-        heads = {
-            str(rounds.commit_oid(n))
-            for n in rounds.reviewer_nodes(dict(pr), "reviews", login)
-            if not rounds.refusal_of(n) and rounds.commit_oid(n)
-        }
+        heads = rounds.reviewed_oids(rounds.reviewer_nodes(dict(pr), "reviews", login))
         events = [
             e
             for e in nodes_of(pr.get("timelineItems"))
