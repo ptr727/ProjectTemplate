@@ -149,6 +149,8 @@ PowerShell is the native shell on Windows, so a Windows bootstrap and a Windows 
 - **`PSAvoidUsingWriteHost`.** A script whose purpose is a console report writes it with `Write-Host`. Its functions return exit codes through the pipeline, so text sent with `Write-Output` would reach the caller as a return value.
 - **`PSUseShouldProcessForStateChangingFunctions`.** A script that already carries its own preview and consent step, such as a dry-run switch and a confirm prompt, keeps them. Supporting `ShouldProcess` would add `-WhatIf` and `-Confirm` beside them, a second spelling of each.
 
+PowerShell's in-code suppression, the narrowest scope "Analyzer Diagnostics and Suppressions" above prefers, is `[Diagnostics.CodeAnalysis.SuppressMessageAttribute('<RuleName>', '<target>', Justification = '<reason>')]` on the function or parameter.
+
 The check is clean when `Invoke-ScriptAnalyzer -Path "<file>" -Settings ./PSScriptAnalyzerSettings.psd1` reports no finding for any tracked `.ps1` file, as CI requires. Run the check per `GOVERNANCE.md` "Running the Linters Locally (Known-Working Invocations)", not by probing `command -v pwsh`. That section is hub-only, read in a hub checkout rather than carried into every fleet repo. Windows batch (`.cmd` and `.bat`) appears only as a shim that puts a command on `PATH`, by decision, so it has no section here.
 
 <!-- Repo -->

@@ -118,8 +118,8 @@ The flags keep ruff from reporting or rewriting the helper, which stays byte-ide
 
 The **build**-profile Python clean-compile, in its uv form, is `uv run ruff format` +
 `uv run ruff check` + the repo's type checker. That checker is `uv run pyright`, or `uv run mypy`
-where mypy is the CI checker, or both where the repo runs both (see Toolchain above). Where the
-config sits in the project directory, CI passes the checker no path, so the config's own target
+where mypy is the CI checker, or both where the repo enforces pyright beside mypy (see Toolchain
+above). Where the config sits in the project directory, CI passes the checker no path, so the config's own target
 settings decide what is checked. mypy left with no target that way exits with an error. A declared
 subdirectory with no config of its own uses the repository root's instead. CI then runs the checker
 from the root with the directory as its path, `uv run --project "<dir>" "<checker>" "<dir>"`, so run it
@@ -167,8 +167,9 @@ form that the fleet baseline expects. Its header names the pip-form and lint-onl
 `dependsOn`-only. Neither chains with `&&`, so the mirror runs the same on any task shell.
 
 CI runs these same commands as the authoritative backstop in every directory the hub validator's
-`python-directories` input declares. Its `uvx` ruff runs at the version the hub's `python-tool-pins`
-action pins rather than at `@latest`. So a ruff release can make a local run and CI disagree until
+`python-directories` input declares. It runs one type checker there, mypy where both are configured.
+A repo enforcing pyright beside mypy backstops pyright from its own validate hook, per Toolchain above.
+Its `uvx` ruff runs at the version the hub's `python-tool-pins` action pins rather than at `@latest`. So a ruff release can make a local run and CI disagree until
 the caller's hub pin moves to a release carrying the new version. A repo declaring none has its root gated only where it tracks
 a root `pyproject.toml`, per `WORKFLOW.md` D1.2. That undeclared root is gated more loosely. CI
 reads its type-checker configuration only from the `[tool.mypy]` or `[tool.pyright]` section of its
