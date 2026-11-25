@@ -169,7 +169,7 @@ form that the fleet baseline expects. Its header names the pip-form and lint-onl
 CI runs these same commands as the authoritative backstop in every directory the hub validator's
 `python-directories` input declares. It runs one type checker there, mypy where both are configured.
 A repo enforcing pyright beside mypy backstops pyright from its own validate hook, per Toolchain above.
-Its `uvx` ruff runs at the version the hub's `python-tool-pins` action pins rather than at `@latest`. So a ruff release can make a local run and CI disagree until
+CI's `uvx` ruff runs at the version the hub's `python-tool-pins` action pins rather than at `@latest`. So a ruff release can make a local run and CI disagree until
 the caller's hub pin moves to a release carrying the new version. A repo declaring none has its root gated only where it tracks
 a root `pyproject.toml`, per `WORKFLOW.md` D1.2. That undeclared root is gated more loosely. CI
 reads its type-checker configuration only from the `[tool.mypy]` or `[tool.pyright]` section of its
