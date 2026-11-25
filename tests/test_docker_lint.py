@@ -201,19 +201,22 @@ class DockerLintCase(unittest.TestCase):
         self.assertIn("Resync hub_fetch_run.py from ptr727/ProjectTemplate", output)
         self.assertEqual([], runner.commands)
 
-    def test_a_malformed_manifest_is_refused(self) -> None:
+    def test_a_malformed_pin_is_no_pin_and_a_stage_named_twice_is_refused(self) -> None:
         good = "FROM r/a:1.0@sha256:" + "a" * 64 + " AS {stage}"
-        cases = {
+        path = self.outside / "Dockerfile"
+        for label, text in {
             "a moving tag with no digest": "FROM r/a:latest AS markdownlint",
             "a digest with no tag": "FROM r/a@sha256:" + "a" * 64 + " AS markdownlint",
-            "a stage named twice": good.format(stage="cspell") + "\n" + good.format(stage="cspell"),
-        }
-        for label, text in cases.items():
+        }.items():
             with self.subTest(label):
-                path = self.outside / "Dockerfile"
                 path.write_text(f"# A comment.\n\n{text}\n", encoding="utf-8")
-                with self.assertRaisesRegex(docker_lint.CommandFailed, "unexpected line"):
-                    docker_lint.read_pins(path)
+                self.assertEqual({}, docker_lint.read_pins(path))
+        path.write_text(
+            good.format(stage="cspell") + "\n" + good.format(stage="cspell") + "\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(docker_lint.CommandFailed, "names the cspell stage twice"):
+            docker_lint.read_pins(path)
 
     def test_a_line_that_is_no_from_instruction_is_skipped_as_the_other_readers_skip_it(
         self,
@@ -791,7 +794,7 @@ class DockerLintCase(unittest.TestCase):
 
 
 class StandaloneTests(unittest.TestCase):
-    """The Lint tasks fetch the wrapper alone, so it runs with no hub file beside it."""
+    """The Lint tasks fetch the wrapper with only its pin manifest beside it, and no other hub file."""
 
     def setUp(self) -> None:
         self.enterContext(git_env.git_location_cleared())

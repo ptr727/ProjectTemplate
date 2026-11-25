@@ -1374,9 +1374,8 @@ class TestCompositeActions(TreeCase):
         """The pin is the one the docker-lint-pins action and docker_lint.py read, never a moving tag."""
         image = repo_gate.shellcheck_image()
         self.assertRegex(image, r"^\S+/koalaman/shellcheck:v\d[^@]*@sha256:[0-9a-f]{64}$")
-        self.assertEqual(
-            REPO / ".github/actions/docker-lint-pins/Dockerfile", repo_gate.PIN_MANIFEST
-        )
+        self.assertEqual(REPO, repo_gate.gate_hub_root())
+        self.assertTrue((REPO / repo_gate.PIN_MANIFEST).is_file())
 
     def test_an_unreadable_pin_is_one_finding_and_no_docker_call(self) -> None:
         cases = {
@@ -1385,20 +1384,22 @@ class TestCompositeActions(TreeCase):
         }
         for label, text in cases.items():
             with self.subTest(label):
-                manifest = self.tmp / f"{label}.Dockerfile"
+                hub = None
                 if text is not None:
+                    hub = self.tmp / label
+                    manifest = hub / repo_gate.PIN_MANIFEST
+                    manifest.parent.mkdir(parents=True)
                     manifest.write_text(text * 2, encoding="utf-8")
                 with (
-                    mock.patch.object(repo_gate, "PIN_MANIFEST", manifest),
+                    mock.patch.object(repo_gate, "gate_hub_root", return_value=hub),
                     mock.patch.object(repo_gate.subprocess, "run") as run,
                 ):
                     reason = repo_gate.docker_unreachable() or ""
-                    hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "echo ok")
                 self.assertIn("the shellcheck pin could not be read", reason)
                 if text is None:
                     self.assertIn("from a hub checkout or through the repo-gate action", reason)
-                self.assertEqual(1, len(hits))
-                self.assertIn("could not read the shellcheck pin", hits[0])
+                else:
+                    self.assertIn("names the shellcheck image on 2 lines", reason)
                 run.assert_not_called()
 
     def test_an_empty_action_file_is_a_finding_naming_the_file(self) -> None:

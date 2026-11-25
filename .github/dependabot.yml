@@ -50,9 +50,17 @@ updates:
     directory: "/.github/actions/docker-lint-pins"
     schedule:
       interval: "daily"
+    groups:
+      docker-lint:
+        patterns:
+          - "*"
 
   - package-ecosystem: "docker"
     target-branch: "develop"
     directory: "/.github/actions/docker-lint-pins"
     schedule:
       interval: "daily"
+    groups:
+      docker-lint:
+        patterns:
+          - "*"

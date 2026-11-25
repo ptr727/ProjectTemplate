@@ -127,6 +127,8 @@ class CommandExited(CommandFailed):
 def read_pins(path: Path) -> dict[str, str]:
     """Return each image reference the pin manifest names, keyed by its stage.
 
+    A line that pins no tag and digest is skipped, as the action and the repo gate skip it.
+
     A carrier's `hub_fetch_run.py` older than the manifest fetches this script alone.
     A missing manifest therefore names the resync rather than falling back to a moving tag.
     """
@@ -142,11 +144,11 @@ def read_pins(path: Path) -> dict[str, str]:
         raise CommandFailed(f"could not read the pin manifest {path}: {error}") from error
     pins: dict[str, str] = {}
     for line in text.splitlines():
-        if not line.startswith("FROM "):
-            continue
         match = PIN_LINE.fullmatch(line.rstrip())
-        if match is None or match.group(2) in pins:
-            raise CommandFailed(f"the pin manifest {path} has an unexpected line: {line}")
+        if match is None:
+            continue
+        if match.group(2) in pins:
+            raise CommandFailed(f"the pin manifest {path} names the {match.group(2)} stage twice")
         pins[match.group(2)] = match.group(1)
     return pins
 

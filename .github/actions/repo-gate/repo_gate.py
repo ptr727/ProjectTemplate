@@ -433,8 +433,7 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
 # A GitHub expression is not shell, so shellcheck would read its braces as syntax.
 EXPRESSION_START = "${{"
-# The docker-lint-pins action beside this one holds the image, at the hub commit this file was read from.
-PIN_MANIFEST = Path(__file__).resolve().parent.parent / "docker-lint-pins" / "Dockerfile"
+PIN_MANIFEST = ".github/actions/docker-lint-pins/Dockerfile"
 SHELLCHECK_PIN = re.compile(r"(?m)^FROM (\S+:[^\s@/]+@sha256:[0-9a-f]{64}) AS shellcheck[ \t]*$")
 SHELLCHECK_TIMEOUT = 300
 PULL_ATTEMPTS = 3
@@ -663,25 +662,25 @@ def substitute_expressions(body: str) -> str:
 def shellcheck_image() -> str:
     """The shellcheck image reference the pin manifest names, a tag with its digest.
 
+    It is read from the hub tree this gate sits in, at the commit that tree holds.
     Raises ValueError where the manifest names it on no line or on more than one.
-    A copy fetched alone has no manifest beside it, so that error names where the check can run.
+    A copy fetched alone has no hub tree, so that error names where the check can run.
     """
-    if not PIN_MANIFEST.is_file():
+    hub = gate_hub_root()
+    if hub is None:
         raise ValueError(
             f"{PIN_MANIFEST} is not beside this script, so run this check from a hub checkout "
             "or through the repo-gate action"
         )
-    pins = SHELLCHECK_PIN.findall(PIN_MANIFEST.read_text(encoding="utf-8"))
+    manifest = hub / PIN_MANIFEST
+    pins = SHELLCHECK_PIN.findall(manifest.read_text(encoding="utf-8"))
     if len(pins) != 1:
-        raise ValueError(f"{PIN_MANIFEST} names the shellcheck image on {len(pins)} lines, not 1")
+        raise ValueError(f"{manifest} names the shellcheck image on {len(pins)} lines, not 1")
     return pins[0]
 
 
 def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
-    try:
-        image = shellcheck_image()
-    except (OSError, ValueError) as error:
-        return [f"{label}: could not read the shellcheck pin: {error}"]
+    image = shellcheck_image()
     # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
     command = ["docker", "run", "--rm", "-i", "--network=none", image]
     command += ["-s", dialect, "-S", "warning", "-e", "SC2154", "-f", "gcc", "-"]
