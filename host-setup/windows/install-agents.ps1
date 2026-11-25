@@ -15,7 +15,7 @@
 # The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
 # The scoop app is read from under the scoop root's own apps directory, and the choco name from the choco lib directory.
-# A tool recording a Managed copy (opencode) is managed through that copy, and another copy ahead of it is reported for a fix by hand.
+# A tool recording a Managed copy is managed through that copy, and another copy ahead of it is reported for a fix by hand.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 # CmdletBinding with an explicit position on the tool list is what keeps every other parameter named only.
@@ -129,13 +129,16 @@ agent integrations are reinstalled after an upgrade wherever herdr reports one o
 herdr server still running the previous binary is left running and reported as needing a
 restart, since stopping it would end every pane inside it.
 
-opencode is the one tool with a managed copy, the npm package @opencode/cli, since it ships from
-several sources, opencode 2 replaced opencode 1's npm package, and its installer script is bash
-only. Another copy PATH reaches first, an npm opencode-ai among them, is reported with the command
-that removes it and is never removed here. -Upgrade and -Install leave opencode alone while one
-is first on PATH, and act on the managed package once none is. Where npm cannot report its
-prefix, only an npm copy whose shim names opencode-ai is told from the managed package, and any
-other npm copy is handled as any npm copy is.
+claude, codex, and opencode each have a managed copy, since each ships from several sources. claude
+and codex keep the copy their own installer writes, claude in ~\.local\bin and codex in
+CODEX_INSTALL_DIR or else %LOCALAPPDATA%\Programs\OpenAI\Codex\bin. opencode keeps the npm package
+@opencode/cli, since opencode 2 replaced opencode 1's npm package and its installer script is bash
+only. A copy from any other source that PATH reaches first, an npm opencode-ai or an npm codex
+among them, is reported with the command that removes it and then -Install, and is never removed
+here, nor upgraded, even where no managed copy exists. -Upgrade and -Install leave the tool alone
+while one is first on PATH, and act on the managed copy once none is. Where npm cannot report its
+prefix, only an npm copy whose shim names opencode-ai is told from the managed opencode package, and
+any other npm opencode copy is handled as any npm copy is.
 
 claude carries a fleet floor, recorded once in this script. -Report notes a copy below it, and -Upgrade or -Install
 fails that tool where the updater, package manager, or installer it runs leaves it below.
@@ -448,7 +451,7 @@ function Test-NpmOwnership {
     $where = ($resolved -replace '/', '\')
     $cut = $where.LastIndexOf('\')
     $directory = if ($cut -gt 0) { $where.Substring(0, $cut).TrimEnd('\') } else { '' }
-    return ($directory -ieq $prefix -or (Test-PathUnder -Path $where -Root "$prefix\node_modules" -Below))
+    return (($directory -and (Test-SameDirectory -Directory $directory -Other $prefix)) -or (Test-PathUnder -Path $where -Root "$prefix\node_modules" -Below))
 }
 
 # The scoop roots this script knows, the user's and the global one.
@@ -787,12 +790,20 @@ $TOOLS = @(
         # The fleet's rules load from AGENTS.md, which every Claude Code session reads natively from 2.1.281.
         # Below it, a session on Amazon Bedrock or with telemetry off reads CLAUDE.md alone.
         Minimum = '2.1.281'
+        # The native installer links the binary into ~\.local\bin.
+        ManagedDirectory = { Join-Path (Join-Path $HOME '.local') 'bin' }
         Upgrade = { Invoke-Step -Command 'claude' -Arguments @('update') }
         Install = { Invoke-Installer -Url 'https://claude.ai/install.ps1' }
     }
     @{
         Name    = 'codex'
         Source  = 'https://chatgpt.com/codex/install.ps1'
+        # The native installer writes to CODEX_INSTALL_DIR, else under the local app data.
+        ManagedDirectory = {
+            if ($env:CODEX_INSTALL_DIR) { return $env:CODEX_INSTALL_DIR }
+            $base = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path (Join-Path $HOME 'AppData') 'Local' }
+            return (Join-Path (Join-Path (Join-Path (Join-Path $base 'Programs') 'OpenAI') 'Codex') 'bin')
+        }
         Upgrade = { Invoke-Step -Command 'codex' -Arguments @('update') }
         Install = { Invoke-Installer -Url 'https://chatgpt.com/codex/install.ps1' }
     }
@@ -846,19 +857,44 @@ function Get-Tool {
 function Test-ManagedTool {
     param([string]$ToolName)
     $tool = Get-Tool $ToolName
-    return [bool]($tool -and $tool.ContainsKey('Managed') -and $tool.Managed)
+    return [bool]($tool -and (($tool.ContainsKey('Managed') -and $tool.Managed) -or $tool.ContainsKey('ManagedDirectory')))
+}
+
+# The directory its installer writes the managed copy to, or nothing for an npm package.
+function Get-ManagedDirectory {
+    param([string]$ToolName)
+    $tool = Get-Tool $ToolName
+    if ($tool -and $tool.ContainsKey('ManagedDirectory')) { return (& $tool.ManagedDirectory) }
+    return ''
 }
 
 # How the managed copy reads in a message.
 function Get-ManagedLabel {
     param([string]$ToolName)
+    $directory = Get-ManagedDirectory -ToolName $ToolName
+    if ($directory) { return "the managed copy in $(Hide-Home -Path $directory)" }
     return "the npm package $(Get-NpmPackage -Tool $ToolName)"
+}
+
+# Whether two directories are the same one, with every link followed.
+function Test-SameDirectory {
+    param([string]$Directory, [string]$Other)
+    $left = Resolve-FinalPath -Path $Directory
+    $right = Resolve-FinalPath -Path $Other
+    return ((Test-PathUnder -Path $left -Root $right) -and (Test-PathUnder -Path $right -Root $left))
 }
 
 # Whether a copy PATH resolves to is another copy than the tool's managed one.
 function Test-StrayCopy {
     param([string]$ToolName, [string]$Path)
     if (-not (Test-ManagedTool $ToolName)) { return $false }
+    # A copy is the managed one where it sits in that directory and no package manager owns it.
+    $directory = Get-ManagedDirectory -ToolName $ToolName
+    if ($directory) {
+        $parent = Split-Path -Parent $Path
+        $here = $parent -and (Test-SameDirectory -Directory $parent -Other $directory)
+        return -not ($here -and (Get-ToolManager $Path) -eq 'self')
+    }
     if ((Get-ToolManager $Path) -ne 'npm') { return $true }
     # Where npm cannot say where it installs, only a shim naming another of the tool's packages is told from the managed one.
     if (-not (Get-NpmPrefix)) {

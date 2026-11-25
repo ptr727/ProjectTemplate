@@ -14,7 +14,7 @@
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
-# A tool recording a managed copy (opencode) is managed through that copy, and another copy ahead of it is reported for a fix by hand.
+# A tool recording a managed copy is managed through that copy, and another copy ahead of it is reported for a fix by hand.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
 # The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
@@ -206,12 +206,13 @@ command rather than run, and nothing here ever uses sudo. herdr's agent integrat
 one outdated, and a herdr server still running the previous binary is left running and reported
 as needing a restart, since stopping it would end every pane inside it.
 
-opencode is the one tool with a managed copy, ~/.opencode/bin/opencode from its own installer,
-since it ships from several sources and opencode 2 replaced opencode 1's npm package. Running the
-installer again is how --upgrade keeps it current. Another copy PATH reaches first, an npm
-opencode-ai among them, is reported with the command that removes it and is never removed here.
---upgrade and --install leave opencode alone while one is first on PATH, and act on the managed
-copy once none is.
+claude, codex, and opencode each have a managed copy from their own installer, since each ships from
+several sources: ~/.local/bin/claude, codex in CODEX_INSTALL_DIR or else ~/.local/bin, and
+~/.opencode/bin/opencode. Running the tool's updater, or for opencode its installer again, is how
+--upgrade keeps it current. A copy from any other source that PATH reaches first, an npm package or
+a Homebrew formula among them, is reported with the command that removes it and then --install, and
+is never removed here, nor upgraded, even where no managed copy exists. --upgrade and --install
+leave the tool alone while one is first on PATH, and act on the managed copy once none is.
 
 claude carries a fleet floor, recorded once in this script. --report notes a copy below it, and --upgrade or --install
 fails that tool where the updater, package manager, or installer it runs leaves it below.
@@ -666,7 +667,8 @@ is_managed_copy() {
     managed=$(tool_managed "$tool")
     [[ -n $managed && -e $managed ]] || return 1
     real=$(tool_real_path "$path") || return 1
-    [[ $real -ef $managed ]]
+    [[ $real -ef $managed ]] || return 1
+    [[ $(tool_manager "$path") == "self" ]]
 }
 
 # Whether a copy of the tool PATH resolves to is another copy than its managed one.
@@ -722,6 +724,9 @@ stray_fixup() {
 
 claude_source() { printf 'https://claude.ai/install.sh'; }
 
+# The native installer links the binary into ~/.local/bin.
+claude_managed() { printf '%s' "$HOME/.local/bin/claude"; }
+
 # The fleet's rules load from AGENTS.md, which every Claude Code session reads natively from 2.1.281.
 # Below it, a session on Amazon Bedrock or with telemetry off reads CLAUDE.md alone.
 claude_minimum() { printf '2.1.281'; }
@@ -732,6 +737,9 @@ claude_install() { run_installer "$(claude_source)" bash; }
 # --- codex ---
 
 codex_source() { printf 'https://chatgpt.com/codex/install.sh'; }
+
+# The native installer writes to CODEX_INSTALL_DIR, else ~/.local/bin.
+codex_managed() { printf '%s' "${CODEX_INSTALL_DIR:-$HOME/.local/bin}/codex"; }
 codex_upgrade() { run codex update; }
 codex_install() { run_installer "$(codex_source)" sh; }
 
