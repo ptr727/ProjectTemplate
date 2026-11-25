@@ -30,6 +30,7 @@ import time
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
+from types import FrameType
 from typing import Any, ClassVar
 from unittest import mock
 
@@ -9171,6 +9172,28 @@ class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
                 self.assertEqual(-sig, gate.returncode, stderr)
                 self.assertIn(f"prose_lint.py: interrupted by {sig.name}.", stderr)
                 self.assertNotIn("Traceback", stderr)
+
+    def test_a_signal_handled_as_the_first_handler_starts_is_passed_over(self) -> None:
+        """A SIGTERM handled as the SIGINT's handler starts leaves the SIGINT first.
+
+        Python checks for signals as a function starts, so the pair above can be handled there.
+        A profile hook makes that nested call at that point, so the order is fixed, not raced.
+        """
+        self.addCleanup(prose_lint.received.clear)
+        prose_lint.received.clear()
+
+        def nest(frame: FrameType, event: str, _arg: object) -> None:
+            if event == "call" and frame.f_code is prose_lint.on_signal.__code__:
+                sys.setprofile(None)
+                prose_lint.on_signal(signal.SIGTERM, frame)
+
+        sys.setprofile(nest)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                prose_lint.on_signal(signal.SIGINT, None)
+        finally:
+            sys.setprofile(None)
+        self.assertEqual([signal.SIGINT], prose_lint.received)
 
 
 VOCABULARY_CAP = 5
