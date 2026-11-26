@@ -41,6 +41,10 @@ DRY_RUN=false
 ASSUME_YES=false
 GITHUB_USER=""
 MANAGED_KEY_AUTHENTICATES=false
+MANAGED_PROBED=false
+MANAGED_USER=""
+MANAGED_DENIED=false
+SIGNING_REGISTERED_HERE=false
 SHARED_CHECKOUT=""
 GH_SSH_PROTOCOL=false
 SUDO=()
@@ -302,12 +306,22 @@ github_auth_user() {
 # That isolation is also why this is a second probe rather than a replacement.
 # A host reaching GitHub through a proxy or over port 443 needs the config this probe discards.
 # So a failure here means the managed key did not answer, rather than that the host cannot reach GitHub.
-github_auth_user_managed() {
-    [[ -f $KEY ]] || return 1
+#
+# It runs once and keeps its answer, since a passphrase-protected key outside an agent prompts on every probe.
+# MANAGED_DENIED is GitHub answering that it does not know the key, which is the one empty answer that says the key is registered nowhere.
+# Any other empty answer is a probe that did not reach GitHub, and says nothing about the key.
+probe_managed_key() {
+    MANAGED_PROBED=true
+    MANAGED_USER=""
+    MANAGED_DENIED=false
+    [[ -f $KEY ]] || return 0
 
     local greeting
     greeting=$(ssh_probe -F /dev/null -o IdentitiesOnly=yes -i "$KEY" -T git@github.com 2>&1 || true)
-    printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p'
+    MANAGED_USER=$(printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p')
+    if [[ $greeting == *"Permission denied"* ]]; then
+        MANAGED_DENIED=true
+    fi
 }
 
 # Prefer the account the managed key belongs to, since that is the one the registration checks are about.
@@ -315,7 +329,8 @@ github_auth_user_managed() {
 resolve_github_user() {
     local general managed
     general=$(github_auth_user)
-    managed=$(github_auth_user_managed || true)
+    [[ $MANAGED_PROBED == true ]] || probe_managed_key
+    managed="$MANAGED_USER"
 
     MANAGED_KEY_AUTHENTICATES=false
     if [[ -n $managed ]]; then
@@ -415,7 +430,12 @@ register_through_gh() {
 
     title=$(hostname)
     if run gh ssh-key add "$KEY.pub" --title "$title" --type "$kind"; then
-        [[ $DRY_RUN == true ]] || info "Registered as the $kind key through gh, titled $title"
+        if [[ $DRY_RUN == false ]]; then
+            info "Registered as the $kind key through gh, titled $title"
+            # The managed key authenticates now, so the probe is asked again afterwards.
+            MANAGED_PROBED=false
+            [[ $kind == "signing" ]] && SIGNING_REGISTERED_HERE=true
+        fi
         return 0
     fi
     warn "gh could not register the $kind key. A missing scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs. The key being in use on another account is the other."
@@ -432,16 +452,35 @@ register_keys_through_gh() {
     [[ -n $account ]] || return 0
 
     # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
-    local managed
-    managed=$(github_auth_user_managed || true)
-    if [[ -n $managed && $managed != "$account" ]]; then
-        warn "gh is logged in as $account, while the managed key belongs to $managed, so the key was not registered through gh"
-        return 0
+    # A probe that could not tell is not a pass, since a proxy or a port 443 host drops the config the isolated probe needs.
+    # Only GitHub answering that it does not know the key says the key is registered nowhere, which is when registering it is safe.
+    if [[ -f $KEY ]]; then
+        probe_managed_key
+        if [[ -n $MANAGED_USER && $MANAGED_USER != "$account" ]]; then
+            warn "gh is logged in as $account, while the managed key belongs to $MANAGED_USER, so the key was not registered through gh. Register it with the paste below."
+            return 0
+        fi
+        if [[ -z $MANAGED_USER && $MANAGED_DENIED == false ]]; then
+            warn "Could not tell which account the managed key belongs to, because GitHub did not answer the key probe, so the key was not registered through gh. Register it with the paste below."
+            return 0
+        fi
     fi
 
     step "Registering the key through gh, logged in as $account"
     register_through_gh authentication "$account"
     register_through_gh signing "$account"
+}
+
+# GitHub's published lists can lag a registration just made, since they are served unauthenticated and may be cached.
+# A signing key gh registered in this run and not yet listed is therefore a note.
+# A paste would send the reader to register it twice.
+report_signing_missing() {
+    if [[ $SIGNING_REGISTERED_HERE == true ]]; then
+        info "The signing key was registered through gh in this run, and GitHub's public list does not show it yet. A re-run confirms it."
+        return 0
+    fi
+    registration_needed "signing" "Signing"
+    warn "Commits sign locally but show as unverified on GitHub until the key is registered"
 }
 
 # --- git configuration ---
@@ -812,10 +851,7 @@ configure() {
     case "$signing_rc" in
     0) info "Registered as a signing key" ;;
     2) warn "GitHub could not be reached, so whether the signing key is registered is unknown" ;;
-    *)
-        registration_needed "signing" "Signing"
-        warn "Commits sign locally but show as unverified on GitHub until the key is registered"
-        ;;
+    *) report_signing_missing ;;
     esac
 
     step "Done"

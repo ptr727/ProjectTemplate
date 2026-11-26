@@ -69,6 +69,8 @@ $SHARED = $SharedCheckout
 $GH_SSH_PROTOCOL = [bool]$GhSshProtocol
 $GITHUB_USER = ''
 $MANAGED_KEY_AUTHENTICATES = $false
+$MANAGED_GREETING = $null
+$SIGNING_REGISTERED_HERE = $false
 
 # --- Output ---
 
@@ -294,6 +296,13 @@ function Get-SshGreeting {
     return (& ssh @options -T 'git@github.com' 2>&1 | Out-String)
 }
 
+# The managed-key probe runs once and keeps its answer, since a passphrase-protected key outside an agent prompts on every probe.
+# Only a registration changes the answer, so that forgets it.
+function Get-ManagedGreeting {
+    if ($null -eq $script:MANAGED_GREETING) { $script:MANAGED_GREETING = Get-SshGreeting -ManagedKeyOnly }
+    return $script:MANAGED_GREETING
+}
+
 function Get-GreetingUser {
     param([string]$Greeting)
     if ($Greeting -match '(?m)^Hi ([^!]+)!') { return $Matches[1] }
@@ -304,7 +313,7 @@ function Get-GreetingUser {
 # Say so when the host answers as somebody else.
 function Resolve-GitHubUser {
     $general = Get-GreetingUser (Get-SshGreeting)
-    $managed = Get-GreetingUser (Get-SshGreeting -ManagedKeyOnly)
+    $managed = Get-GreetingUser (Get-ManagedGreeting)
 
     $script:MANAGED_KEY_AUTHENTICATES = [bool]$managed
     if ($managed) {
@@ -606,6 +615,9 @@ function Register-KeyThroughGh {
         warn "gh could not register the $Kind key. A missing scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs. The key being in use on another account is the other."
     } elseif (-not $script:DRY_RUN) {
         info "Registered as the $Kind key through gh, titled $title"
+        # The managed key authenticates now, so the probe is asked again afterwards.
+        $script:MANAGED_GREETING = $null
+        if ($Kind -eq 'signing') { $script:SIGNING_REGISTERED_HERE = $true }
     }
 }
 
@@ -618,15 +630,36 @@ function Register-KeysThroughGh {
     if (-not $account) { return }
 
     # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
-    $managed = Get-GreetingUser (Get-SshGreeting -ManagedKeyOnly)
-    if ($managed -and $managed -ne $account) {
-        warn "gh is logged in as $account, while the managed key belongs to $managed, so the key was not registered through gh"
-        return
+    # A probe that could not tell is not a pass, since a proxy or a port 443 host drops the config the isolated probe needs.
+    # Only GitHub answering that it does not know the key says the key is registered nowhere, which is when registering it is safe.
+    if (Test-Path $script:KEY) {
+        $greeting = Get-ManagedGreeting
+        $managed = Get-GreetingUser $greeting
+        if ($managed -and $managed -ne $account) {
+            warn "gh is logged in as $account, while the managed key belongs to $managed, so the key was not registered through gh. Register it with the paste below."
+            return
+        }
+        if (-not $managed -and $greeting -notmatch 'Permission denied') {
+            warn 'Could not tell which account the managed key belongs to, because GitHub did not answer the key probe, so the key was not registered through gh. Register it with the paste below.'
+            return
+        }
     }
 
     step "Registering the key through gh, logged in as $account"
     Register-KeyThroughGh -Kind 'authentication' -Account $account
     Register-KeyThroughGh -Kind 'signing' -Account $account
+}
+
+# GitHub's published lists can lag a registration just made, since they are served unauthenticated and may be cached.
+# A signing key gh registered in this run and not yet listed is therefore a note.
+# A paste would send the reader to register it twice.
+function Show-SigningMissing {
+    if ($script:SIGNING_REGISTERED_HERE) {
+        info "The signing key was registered through gh in this run, and GitHub's public list does not show it yet. A re-run confirms it."
+        return
+    }
+    Show-RegistrationNeeded -Kind 'signing' -Type 'Signing'
+    warn 'Commits sign and verify locally, and show as unverified on GitHub until the key above is registered as a signing key'
 }
 
 # --- Actions ---
@@ -737,8 +770,7 @@ function Invoke-Configure {
     info "Authenticated as $($script:GITHUB_USER)"
 
     if ((Test-KeyRegistered -Kind 'signing') -eq 'missing') {
-        Show-RegistrationNeeded -Kind 'signing' -Type 'Signing'
-        warn 'Commits sign and verify locally, and show as unverified on GitHub until the key above is registered as a signing key'
+        Show-SigningMissing
     } else {
         info 'The signing key is registered'
     }
