@@ -45,7 +45,6 @@ DRY_RUN=false
 ASSUME_YES=false
 GITHUB_USER=""
 MANAGED_KEY_AUTHENTICATES=false
-MANAGED_PROBED=false
 MANAGED_USER=""
 MANAGED_DENIED=false
 GH_REGISTERING=false
@@ -314,14 +313,24 @@ github_auth_user() {
 # A host reaching GitHub through a proxy or over port 443 needs the config this probe discards.
 # So a failure here means the managed key did not answer, rather than that the host cannot reach GitHub.
 #
-# It runs once and keeps its answer, since a passphrase-protected key outside an agent prompts on every probe.
+github_auth_user_managed() {
+    [[ -f $KEY ]] || return 1
+
+    local greeting
+    greeting=$(ssh_probe -F /dev/null -o IdentitiesOnly=yes -i "$KEY" -T git@github.com 2>&1 || true)
+    printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p'
+}
+
+# The same probe as evidence for the gh registration gate, which never prompts and shows what ssh did.
 # MANAGED_DENIED is positive evidence that the key is registered as an authentication key nowhere.
-# It needs ssh to say it offered this key's own fingerprint and GitHub to refuse it.
-# A denial without that offer is also what a key ssh could not load prints.
-# An unprotected key file and a passphrase it could not ask for are two such keys.
-# So the probe runs in batch mode, and any other empty answer says nothing about the key.
+# It needs three things in ssh's verbose output.
+#   - The offer of this key's own fingerprint.
+#   - No "Server accepts key" after it, since ssh sends the public half first and loads the private half only after that line.
+#   - GitHub's refusal.
+# A registered key whose private half then fails to load prints the same offer and refusal, so the accept line is what tells them apart.
+# Any other empty answer says nothing about the key.
+# This is a separate run from the one resolve_github_user makes, which may prompt for a passphrase and so answers where this one cannot.
 probe_managed_key() {
-    MANAGED_PROBED=true
     MANAGED_USER=""
     MANAGED_DENIED=false
     [[ -f $KEY ]] || return 0
@@ -332,6 +341,7 @@ probe_managed_key() {
     [[ -f $KEY.pub ]] || return 0
     fingerprint=$(ssh-keygen -lf "$KEY.pub" | awk '{ print $2 }') || return 0
     [[ -n $fingerprint ]] || return 0
+    [[ $greeting == *"Server accepts key"* ]] && return 0
     if [[ $greeting == *"Permission denied (publickey)"* ]] &&
         awk -v fp="$fingerprint" '/Offering public key:/ && index($0, fp) { found = 1 } END { exit !found }' <<<"$greeting"; then
         MANAGED_DENIED=true
@@ -343,8 +353,7 @@ probe_managed_key() {
 resolve_github_user() {
     local general managed
     general=$(github_auth_user)
-    [[ $MANAGED_PROBED == true ]] || probe_managed_key
-    managed="$MANAGED_USER"
+    managed=$(github_auth_user_managed || true)
 
     MANAGED_KEY_AUTHENTICATES=false
     if [[ -n $managed ]]; then
@@ -468,8 +477,6 @@ register_through_gh() {
     if run gh ssh-key add "$KEY.pub" --title "$title" --type "$kind"; then
         if [[ $DRY_RUN == false ]]; then
             info "Registered as the $kind key through gh, titled $title"
-            # The managed key authenticates now, so the probe is asked again afterwards.
-            MANAGED_PROBED=false
         fi
         # shellcheck disable=SC2034  # The signing call is the last, and no caller reads its answer.
         KEY_REGISTERED=true

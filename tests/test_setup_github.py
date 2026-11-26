@@ -701,16 +701,19 @@ PUBLIC_KEY = "ssh-ed25519 AAAAexampleconstructedkeybody"
 FINGERPRINT = "SHA256:exampleconstructedfingerprint"
 ADD_REFRESH = "gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key"
 
-# What the isolated managed-key probe prints for each state it can meet, as `ssh -v` would.
-# Only "offered" shows ssh offering this key's own fingerprint and GitHub refusing it, which is positive evidence of a key registered nowhere.
-# Every other denial is a key ssh never offered, or an offer of some other key, and says nothing about this one.
+# What the isolated, non-prompting managed-key probe prints for each state it can meet, as `ssh -v` would.
+# The ssh client sends the public half first, as an offer, and loads the private half only after the server says it accepts the key.
+# So only "offered" is positive evidence of a key registered nowhere: the offer, then the refusal, and no accept line.
+# A registered key whose private half then fails to load prints the offer, the accept line, the load failure and the same refusal.
 DENIAL = "git@github.com: Permission denied (publickey)."
+OFFER = f"debug1: Offering public key: KEYPATH ED25519 {FINGERPRINT} explicit"
+ACCEPT = f"debug1: Server accepts key: KEYPATH ED25519 {FINGERPRINT} explicit"
 SSH_STATES: dict[str, str] = {
-    "offered": f"debug1: Offering public key: KEYPATH ED25519 {FINGERPRINT} explicit\n{DENIAL}",
+    "offered": f"{OFFER}\n{DENIAL}",
     "wrong-offer": f"debug1: Offering public key: KEYPATH ED25519 SHA256:other explicit\n{DENIAL}",
-    "passphrase": f"debug1: read_passphrase: can't open /dev/tty\n{DENIAL}",
-    "no-tty": f'Load key "KEYPATH": incorrect passphrase supplied to decrypt private key\n{DENIAL}',
-    "unprotected": f'@ WARNING: UNPROTECTED PRIVATE KEY FILE! @\nLoad key "KEYPATH": bad permissions\n{DENIAL}',
+    "passphrase": f"{OFFER}\n{ACCEPT}\ndebug1: read_passphrase: can't open /dev/tty\n{DENIAL}",
+    "no-tty": f'{OFFER}\n{ACCEPT}\nLoad key "KEYPATH": incorrect passphrase supplied\n{DENIAL}',
+    "unprotected": f'{OFFER}\n{ACCEPT}\nLoad key "KEYPATH": bad permissions\n{DENIAL}',
     "silent": "",
 }
 CANNOT_TELL = ("wrong-offer", "passphrase", "no-tty", "unprotected", "silent")
@@ -743,11 +746,17 @@ gh() {
 }
 ssh() {
     printf 'ssh %s\n' "$*" >>"$CALLS"
-    if [[ -n $MANAGED ]]; then
-        printf 'Hi %s! You have successfully authenticated.\n' "$MANAGED"
-    else
-        printf '%s' "$SSH_OUTPUT"
-    fi
+    case "$*" in
+    *BatchMode=yes*)
+        if [[ -n $BATCH_USER ]]; then
+            printf 'Hi %s! You have successfully authenticated.\n' "$BATCH_USER"
+        else
+            printf '%s' "$SSH_OUTPUT"
+        fi
+        ;;
+    *"-i "*) [[ -z $MANAGED ]] || printf 'Hi %s! You have successfully authenticated.\n' "$MANAGED" ;;
+    *) [[ -z $GENERAL ]] || printf 'Hi %s! You have successfully authenticated.\n' "$GENERAL" ;;
+    esac
 }
 fetch() { printf '[]'; }
 """
@@ -767,6 +776,8 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         managed: str = "",
         key: bool = True,
         ssh_state: str = "offered",
+        batch_user: str | None = None,
+        general: str = "",
         then: str = "",
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -793,14 +804,14 @@ class TestLinuxKeyRegistration(unittest.TestCase):
             "PUB": PUBLIC_KEY,
             "FINGERPRINT": FINGERPRINT,
             "MANAGED": managed,
+            "BATCH_USER": managed if batch_user is None else batch_user,
+            "GENERAL": general,
             "SSH_OUTPUT": SSH_STATES[ssh_state].replace(
                 "KEYPATH", str(home / ".ssh" / "id_ed25519")
             ),
         }
         dry = "DRY_RUN=true\n" if dry_run else ""
-        script = (
-            f'source "{functions}"\n{LINUX_REGISTER_BODY}\n{dry}register_keys_through_gh\n{then}\n'
-        )
+        script = f'source "{functions}"\nMODE=configure\n{LINUX_REGISTER_BODY}\n{dry}register_keys_through_gh\n{then}\n'
         result = subprocess.run(
             ["bash", "-c", script],
             capture_output=True,
@@ -887,16 +898,32 @@ class TestLinuxKeyRegistration(unittest.TestCase):
                     "Could not tell which account the managed key belongs to", result.stderr
                 )
 
-    def test_the_managed_key_is_probed_once_in_batch_mode_for_registration_and_check(self) -> None:
+    def test_only_the_evidence_probe_is_verbose_and_non_prompting(self) -> None:
         result, _ = self.register(
             managed=ACCOUNT, registered="auth signing", then="resolve_github_user"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = (self.tmp / "calls").read_text().splitlines()
         probes = [c for c in calls if "IdentitiesOnly" in c]
-        self.assertEqual(len(probes), 1, calls)
-        self.assertIn("BatchMode=yes", probes[0])
-        self.assertIn(" -v ", probes[0])
+        self.assertEqual(len(probes), 2, calls)
+        evidence = [c for c in probes if " -v " in c]
+        self.assertEqual(len(evidence), 1, probes)
+        self.assertIn("BatchMode=yes", evidence[0])
+        resolving = [c for c in probes if " -v " not in c]
+        self.assertNotIn("BatchMode=yes", resolving[0])
+
+    def test_a_passphrase_key_still_resolves_as_the_managed_key_through_the_prompting_probe(
+        self,
+    ) -> None:
+        result, adds = self.register(
+            managed=ACCOUNT,
+            batch_user="",
+            ssh_state="passphrase",
+            general=SECOND,
+            then='resolve_github_user\necho "user=$GITHUB_USER managed=$MANAGED_KEY_AUTHENTICATES"',
+        )
+        self.assertEqual(adds, [])
+        self.assertIn(f"user={ACCOUNT} managed=true", result.stdout)
 
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
         result, adds = self.register(then='signing_registration_state && echo "state=registered"')
@@ -923,7 +950,6 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "Get-KeyBody",
     "Get-GhAccount",
     "Get-SshGreeting",
-    "Get-ManagedGreeting",
     "Get-GreetingUser",
     "Resolve-GitHubUser",
     "Test-ManagedKeyDenied",
@@ -943,9 +969,17 @@ function Invoke-RestMethod {
 }
 function ssh-keygen { $global:LASTEXITCODE = 0; return "256 $($script:Case.fingerprint) comment (ED25519)" }
 function ssh {
-    $script:SshCalls += ($args -join ' ')
-    if ($script:Case.managed) { return "Hi $($script:Case.managed)! You have successfully authenticated." }
-    return $script:Case.sshOutput
+    $line = ($args -join ' ')
+    $script:SshCalls += $line
+    if ($line -like '*BatchMode=yes*') {
+        if ($script:Case.batchUser) { return "Hi $($script:Case.batchUser)! You have successfully authenticated." }
+        return $script:Case.sshOutput
+    }
+    if ($line -like '*-i *') {
+        if ($script:Case.managed) { return "Hi $($script:Case.managed)! You have successfully authenticated." }
+        return
+    }
+    if ($script:Case.general) { return "Hi $($script:Case.general)! You have successfully authenticated." }
 }
 $GhStub = {
     $script:Calls += ($args -join ' ')
@@ -981,7 +1015,6 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $script:Reg = @($case.registered | ForEach-Object { $_ })
     $script:DRY_RUN = [bool]$case.dryRun
     $script:GITHUB_USER = ''
-    $script:MANAGED_GREETING = $null
     $script:GH_REGISTERING = $false
     $script:SshCalls = @()
     Remove-Item "$($script:KEY)*" -ErrorAction SilentlyContinue
@@ -991,7 +1024,10 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     }
     $output = & {
         Register-KeysThroughGh
-        if ($case.resolve) { Resolve-GitHubUser }
+        if ($case.resolve) {
+            Resolve-GitHubUser
+            "user=$($script:GITHUB_USER) managed=$($script:MANAGED_KEY_AUTHENTICATES)"
+        }
         if ($case.check) { "state=$(Get-SigningRegistrationState)" }
     } 6>&1 | ForEach-Object { "$_" }
     $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }) }
@@ -1011,6 +1047,8 @@ def windows_register_case(
     managed: str = "",
     no_key: bool = False,
     ssh_state: str = "offered",
+    batch_user: str | None = None,
+    general: str = "",
     resolve: bool = False,
     check: bool = False,
 ) -> dict[str, object]:
@@ -1021,6 +1059,8 @@ def windows_register_case(
         "addRc": add_rc,
         "dryRun": dry_run,
         "managed": managed,
+        "batchUser": managed if batch_user is None else batch_user,
+        "general": general,
         "noKey": no_key,
         "sshOutput": SSH_STATES[ssh_state].replace("KEYPATH", "id_ed25519"),
         "fingerprint": FINGERPRINT,
@@ -1052,6 +1092,14 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                 "probe-once",
                 managed=ACCOUNT,
                 registered=["authentication", "signing"],
+                resolve=True,
+            ),
+            windows_register_case(
+                "passphrase-resolve",
+                managed=ACCOUNT,
+                batch_user="",
+                ssh_state="passphrase",
+                general=SECOND,
                 resolve=True,
             ),
             windows_register_case("lag", check=True),
@@ -1136,11 +1184,20 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                     self.output(f"tell-{state}"),
                 )
 
-    def test_the_managed_key_is_probed_once_in_batch_mode_for_registration_and_check(self) -> None:
+    def test_only_the_evidence_probe_is_verbose_and_non_prompting(self) -> None:
         probes = self.listed("probe-once", "probes")
-        self.assertEqual(len(probes), 1, probes)
-        self.assertIn("BatchMode=yes", probes[0])
-        self.assertIn("-v", probes[0].split())
+        self.assertEqual(len(probes), 2, probes)
+        evidence = [p for p in probes if "-v" in p.split()]
+        self.assertEqual(len(evidence), 1, probes)
+        self.assertIn("BatchMode=yes", evidence[0])
+        resolving = [p for p in probes if "-v" not in p.split()]
+        self.assertNotIn("BatchMode=yes", resolving[0])
+
+    def test_a_passphrase_key_still_resolves_as_the_managed_key_through_the_prompting_probe(
+        self,
+    ) -> None:
+        self.assertEqual(self.adds("passphrase-resolve"), [])
+        self.assertIn(f"user={ACCOUNT} managed=True", self.output("passphrase-resolve"))
 
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
         self.assertEqual(len(self.adds("lag")), 2)

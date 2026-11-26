@@ -73,7 +73,6 @@ $SHARED = $SharedCheckout
 $GH_SSH_PROTOCOL = [bool]$GhSshProtocol
 $GITHUB_USER = ''
 $MANAGED_KEY_AUTHENTICATES = $false
-$MANAGED_GREETING = $null
 $GH_REGISTERING = $false
 
 # --- Output ---
@@ -290,26 +289,19 @@ function Add-KnownHost {
 # So asking whether authentication works cannot enroll github.com behind the reader's back, and a status run stays a read-only action.
 # A status run also refuses to prompt, since it may be run unattended and a passphrase prompt would hang it.
 function Get-SshGreeting {
-    param([switch]$ManagedKeyOnly)
+    param([switch]$ManagedKeyOnly, [switch]$Evidence)
     $options = @('-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10')
     if ($script:MODE -eq 'status') { $options += @('-o', 'BatchMode=yes') }
     if ($ManagedKeyOnly) {
         if (-not (Test-Path $script:KEY)) { return '' }
-        # Verbose output shows whether ssh offered this key, and batch mode keeps a passphrase prompt from hanging a run with no terminal.
-        $options += @('-v', '-o', 'BatchMode=yes')
+        # The evidence probe never prompts and shows what ssh did, where the one that resolves the account may prompt for a passphrase.
+        if ($Evidence) { $options += @('-v', '-o', 'BatchMode=yes') }
         # The ssh client offers the default identity files and an agent's keys besides whatever is named.
         # So a host carrying another account's key authenticates as that account.
         # An empty config file is what isolates the managed key, since the default identity files count as configured identities on their own.
         $options += @('-F', 'NUL', '-o', 'IdentitiesOnly=yes', '-i', $script:KEY)
     }
     return (& ssh @options -T 'git@github.com' 2>&1 | Out-String)
-}
-
-# The managed-key probe runs once and keeps its answer, so a registration is the only reason to ask again.
-# A registration changes the answer, so that forgets it.
-function Get-ManagedGreeting {
-    if ($null -eq $script:MANAGED_GREETING) { $script:MANAGED_GREETING = Get-SshGreeting -ManagedKeyOnly }
-    return $script:MANAGED_GREETING
 }
 
 function Get-GreetingUser {
@@ -322,7 +314,7 @@ function Get-GreetingUser {
 # Say so when the host answers as somebody else.
 function Resolve-GitHubUser {
     $general = Get-GreetingUser (Get-SshGreeting)
-    $managed = Get-GreetingUser (Get-ManagedGreeting)
+    $managed = Get-GreetingUser (Get-SshGreeting -ManagedKeyOnly)
 
     $script:MANAGED_KEY_AUTHENTICATES = [bool]$managed
     if ($managed) {
@@ -598,10 +590,14 @@ function Set-GhProtocol {
 }
 
 # Positive evidence that the key is registered as an authentication key nowhere.
-# It needs ssh to say it offered this key's own fingerprint and GitHub to refuse it.
-# A denial without that offer is also what a key ssh could not load prints, such as a key file with bad permissions.
+# It needs three things in ssh's verbose output.
+#   - The offer of this key's own fingerprint.
+#   - No "Server accepts key" after it, since ssh sends the public half first and loads the private half only after that line.
+#   - GitHub's refusal.
+# A registered key whose private half then fails to load prints the same offer and refusal, so the accept line is what tells them apart.
 function Test-ManagedKeyDenied {
     param([string]$Greeting)
+    if ($Greeting -match 'Server accepts key') { return $false }
     if ($Greeting -notmatch 'Permission denied \(publickey\)') { return $false }
     if (-not (Test-Path "$($script:KEY).pub")) { return $false }
     $listing = (& ssh-keygen -lf "$($script:KEY).pub" | Out-String).Trim()
@@ -664,8 +660,6 @@ function Register-KeyThroughGh {
     }
     if (-not $script:DRY_RUN) {
         info "Registered as the $Kind key through gh, titled $title"
-        # The managed key authenticates now, so the probe is asked again afterwards.
-        $script:MANAGED_GREETING = $null
     }
     return $true
 }
@@ -683,7 +677,7 @@ function Register-KeysThroughGh {
     # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
     # Only the key's own account naming gh's, or ssh offering the key and GitHub refusing it, lets the registration run.
     if (Test-Path $script:KEY) {
-        $greeting = Get-ManagedGreeting
+        $greeting = Get-SshGreeting -ManagedKeyOnly -Evidence
         $managed = Get-GreetingUser $greeting
         if ($managed -and $managed -ne $account) {
             warn "gh is logged in as $account, while the managed key belongs to $managed, so the key was not registered through gh. Register it with the paste below."
