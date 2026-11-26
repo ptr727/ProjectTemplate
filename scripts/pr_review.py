@@ -1207,9 +1207,9 @@ def receipt_reading(checkout: str, base: str) -> tuple[bool, str, str]:
 
 
 def _run(argv: list[str], timeout: float, unrun: str, **options) -> subprocess.CompletedProcess:
-    """Run one command captured, returning a failure to start or finish as exit 1 with `unrun`."""
+    """Run one command captured in `shared.pinned_env` unless `env` is passed, an unrun one exiting 1 with `unrun`."""
     try:
-        return run_with_deadline(argv, timeout, **options)
+        return run_with_deadline(argv, timeout, **{"env": shared.pinned_env(), **options})
     except (OSError, subprocess.SubprocessError):
         return subprocess.CompletedProcess(argv, 1, "", unrun)
 

@@ -22,6 +22,7 @@ import copy
 import io
 import itertools
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -2194,6 +2195,16 @@ class GhBoundaryCase(unittest.TestCase):
         ):
             handoff.run_gh(["issue", "list"])
         self.assertEqual(err.getvalue().count("x"), handoff.STDERR_CAP)
+
+    def test_gh_runs_on_github_com_whatever_host_was_exported(self) -> None:
+        """GH_HOST would move a read or a write to a host the registry never named."""
+        with (
+            unittest.mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            unittest.mock.patch("subprocess.run") as ran,
+        ):
+            ran.return_value = self.completed(0, "ok")
+            handoff.run_gh(["issue", "list", "--repo", "o/r"])
+        self.assertEqual(ran.call_args.kwargs["env"]["GH_HOST"], "github.com")
 
     def test_gh_output_is_decoded_as_utf8_rather_than_the_platform_locale(self) -> None:
         """A Windows console locale is cp1252, and `gh` emits UTF-8 on every platform."""

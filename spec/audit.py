@@ -906,18 +906,17 @@ HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 
 
 def gh(path, ok404=False) -> Any:
-    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body."""
-    r = subprocess.run(
-        ["gh", "api", path], capture_output=True, text=True, encoding="utf-8", check=False
-    )
-    if r.returncode != 0:
-        status = HTTP_STATUS.search(r.stderr)
+    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body.
+
+    The run is scripts/gh_graphql.py's, which pins the host to github.com, where the registry names every repository.
+    """
+    code, out, err = validate.scripts_module("gh_graphql").run_subprocess(["gh", "api", path])
+    if code != 0:
+        status = HTTP_STATUS.search(err)
         if ok404 and status is not None and status.group(1) == "404":
             return None
-        raise RuntimeError(
-            f"gh api {path}: {r.stderr.strip().splitlines()[-1] if r.stderr else 'failed'}"
-        )
-    return json.loads(r.stdout) if r.stdout.strip() else None
+        raise RuntimeError(f"gh api {path}: {err.strip().splitlines()[-1] if err else 'failed'}")
+    return json.loads(out) if out.strip() else None
 
 
 def owner_repos(owner):

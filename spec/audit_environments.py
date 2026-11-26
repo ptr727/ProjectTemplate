@@ -5,7 +5,7 @@ A registry `environments[]` entry declares the names its environment's two store
 declared ones, so an environment the registry never names must hold nothing. That is what catches a
 credential copied into an environment that must not have it.
 
-Only names leave `gh`. The variables endpoint returns each value beside its name, so the projection to
+Only names leave `gh`, through spec/resolve_secrets.py's read_names. The variables endpoint returns each value beside its name, so the projection to
 `.name` runs inside `gh` and no value ever reaches this process. A failed read raises rather than
 answering empty, since an empty answer would read as a store holding nothing and therefore as a pass.
 """
@@ -22,26 +22,6 @@ Reader = Callable[[str, str], list[str]]
 KINDS = {"secrets": "secret", "variables": "variable"}
 # GitHub caps the variables endpoint at 30 a page and the other two at 100, so --paginate walks the rest.
 PAGE = {"environments": 100, "secrets": 100, "variables": 30}
-
-
-def names(path: str, key: str) -> list[str]:
-    """The `name` of each element of `key` across every page of one REST path, or raise when gh fails.
-
-    The read runs through spec/resolve_secrets.py's gh_run, as its repository-store read does.
-    The host is pinned because the registry names every repository on github.com, which GH_HOST would move.
-    The repository is already explicit in `path`, so GH_REPO resolves nothing here.
-    """
-    command = [
-        "gh",
-        "api",
-        "--paginate",
-        "--hostname",
-        "github.com",
-        path,
-        "--jq",
-        f".{key}[].name",
-    ]
-    return resolve_secrets.gh_run(command, "/".join(path.split("/")[1:3])).splitlines()
 
 
 def held(slug: str, read: Reader) -> dict[str, dict[str, set[str]]]:
@@ -126,6 +106,9 @@ def environment_findings(
     """Every finding for one repository's environment stores, read by name only.
 
     `forbidden` is the set spec/secret_names.py's resolve_secret_stores gives the repository stores.
-    `names` is looked up at call time rather than bound as a default, so a test replacing it is the one read.
+    The reader is spec/resolve_secrets.py's read_names, the repository stores' own, on the host it pins.
+    It is looked up at call time rather than bound as a default, so a test replacing it is the one read.
     """
-    return compare(declared_stores(entry), held(slug, read or names), forbidden)
+    return compare(
+        declared_stores(entry), held(slug, read or resolve_secrets.read_names), forbidden
+    )

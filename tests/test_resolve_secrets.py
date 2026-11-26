@@ -14,6 +14,7 @@ import io
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -299,6 +300,21 @@ def gh_failure(status: str) -> tuple[int, str, str]:
     if status == "none":
         return 1, "", "gh: boom\n"
     return 1, "", f"gh: error (HTTP {status})\n"
+
+
+class HostPinCase(unittest.TestCase):
+    """The store reads run through gh_graphql.run_subprocess, which pins the host."""
+
+    def test_every_store_read_runs_on_github_com_whatever_host_was_exported(self) -> None:
+        answered = subprocess.CompletedProcess(["gh"], 0, "ALPHA\n", "")
+        with (
+            unittest.mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            unittest.mock.patch("subprocess.run", return_value=answered) as run,
+        ):
+            live = resolve_secrets.read_live_names("owner/ExampleRepo")
+        self.assertEqual(live, {store: {"ALPHA"} for store in secret_names.STORES})
+        hosts = [call.kwargs["env"]["GH_HOST"] for call in run.call_args_list]
+        self.assertEqual(hosts, ["github.com"] * len(secret_names.STORES))
 
 
 class FakeGh:

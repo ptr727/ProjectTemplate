@@ -123,7 +123,6 @@ import argparse
 import contextlib
 import json
 import re
-import subprocess
 import sys
 import tempfile
 import typing
@@ -245,26 +244,24 @@ class Execution(Exception):
 def run_gh(argv: list[str]) -> str:
     """Run one `gh` command and return its stdout, raising rather than reporting a blank.
 
-    Every read decodes as UTF-8 rather than as the platform's locale, since `gh` emits UTF-8
-    everywhere and a Windows console locale is cp1252.
+    The run is `graphql.run_subprocess`, which decodes UTF-8 whatever the platform's locale is and
+    pins the host to github.com, where every repository a handoff names lives.
 
     Nothing here suppresses a write's output or converts a failure into success, per GOVERNANCE.md
     "Repository Boundaries and Write Safety". A `gh` failure raises, and the caller reports it.
     """
     try:
-        r = subprocess.run(
-            ["gh", *argv], capture_output=True, text=True, encoding="utf-8", check=False
-        )
-    except OSError as exc:
-        raise Execution(f"could not run gh: {exc}") from exc
-    if r.returncode != 0:
-        detail = r.stderr.strip()
+        code, out, err = graphql.run_subprocess(["gh", *argv])
+    except graphql.GraphQLError as exc:
+        raise Execution(str(exc)) from exc
+    if code != 0:
+        detail = err.strip()
         sys.stderr.write(detail[:STDERR_CAP])
         if len(detail) > STDERR_CAP:
             sys.stderr.write(f" ... {len(detail) - STDERR_CAP} more character(s) not shown")
         sys.stderr.write("\n")
-        raise Execution(f"gh {argv[0]} {argv[1] if len(argv) > 1 else ''} failed rc={r.returncode}")
-    return r.stdout
+        raise Execution(f"gh {argv[0]} {argv[1] if len(argv) > 1 else ''} failed rc={code}")
+    return out
 
 
 def gh(argv: list[str], *, dry_run: bool = False) -> str:
