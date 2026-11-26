@@ -872,11 +872,7 @@ def hub_script(hub: Path | None, name: str) -> ModuleType:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[qualified] = module
-    try:
-        spec.loader.exec_module(module)
-    except BaseException:
-        del sys.modules[qualified]
-        raise
+    spec.loader.exec_module(module)
     return module
 
 

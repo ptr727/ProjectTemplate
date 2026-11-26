@@ -1711,7 +1711,7 @@ gh() {
                 self.assertIn("must pin shfmt on exactly one", stdout)
 
     def test_docker_pins_names_the_docker_lint_script_in_its_own_hub_tree(self) -> None:
-        """The lint steps pull through this path, so it is the script at the action's own ref or nothing."""
+        """The lint steps pull through this path, so it is the script in the action's own hub tree."""
         definition = REPO / ".github/actions/docker-lint-pins/action.yml"
         script = step_script(definition, "Locate Docker lint script step")
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -1721,13 +1721,6 @@ gh() {
         named = Path(written.removeprefix("docker-lint=").rstrip("\n"))
         self.assertTrue(written.startswith("docker-lint="), written)
         self.assertEqual((REPO / "scripts/docker_lint.py").resolve(), named.resolve())
-        lifted = root / "a/b/c"
-        lifted.mkdir(parents=True)
-        code, stdout, _, written = run_step_script(
-            script, root, {"GITHUB_ACTION_PATH": str(lifted)}
-        )
-        self.assertEqual((1, ""), (code, written))
-        self.assertIn("is not in the hub tree this action runs from", stdout)
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",

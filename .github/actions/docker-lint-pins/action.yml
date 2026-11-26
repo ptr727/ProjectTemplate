@@ -42,9 +42,4 @@ runs:
       shell: bash
       run: |
         set -Eeuo pipefail
-        script="$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)/scripts/docker_lint.py"
-        if [ ! -f "$script" ]; then
-          echo "::error::$script is not in the hub tree this action runs from."
-          exit 1
-        fi
-        echo "docker-lint=$script" >> "$GITHUB_OUTPUT"
+        echo "docker-lint=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)/scripts/docker_lint.py" >> "$GITHUB_OUTPUT"

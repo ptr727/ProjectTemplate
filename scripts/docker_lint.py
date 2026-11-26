@@ -653,12 +653,26 @@ def pull_image(
             )
         except CommandExited:
             if attempt == PULL_ATTEMPTS:
+                annotate("error", f"docker pull of {image} failed on all {PULL_ATTEMPTS} attempts.")
                 raise
+            annotate("warning", f"docker pull of {image} failed on attempt {attempt}.")
             delay = PULL_BACKOFF * attempt
             print(f"RETRY pull {name} in {delay}s", flush=True)
             time.sleep(delay)
+        except CommandFailed:
+            annotate("error", f"docker pull of {image} timed out or could not start.")
+            raise
         else:
             return
+
+
+def annotate(level: str, message: str) -> None:
+    """Under GitHub Actions, show `message` on the run's summary, which a plain log line never reaches.
+
+    The message is built from the image reference alone, never from Docker's own output.
+    """
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::{level}::{message}", flush=True)
 
 
 def pull(

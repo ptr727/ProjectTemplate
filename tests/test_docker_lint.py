@@ -204,6 +204,32 @@ class DockerLintCase(unittest.TestCase):
             "RESULT failed: container failure (exit 1): connection reset by peer", failed.getvalue()
         )
 
+    def test_a_retried_or_failed_pull_is_annotated_only_under_actions(self) -> None:
+        """A plain log line never reaches the run summary, so a rescued pull would leave no trace there."""
+        image = "r.io/a:1.0@sha256:" + "a" * 64
+        for actions, expected in (
+            ("true", ["::warning::", "::warning::", "::error::"]),
+            ("", []),
+        ):
+            with self.subTest(actions=actions):
+                runner = FakeRunner(pull_failures=docker_lint.PULL_ATTEMPTS)
+                with (
+                    mock.patch.dict(os.environ, {"GITHUB_ACTIONS": actions}),
+                    contextlib.redirect_stdout(io.StringIO()) as output,
+                ):
+                    self.assertEqual(1, docker_lint.pull([image], 17, runner))
+                lines = [line for line in output.getvalue().splitlines() if line.startswith("::")]
+                self.assertEqual(expected, [line[: line.index("::", 2) + 2] for line in lines])
+                self.assertTrue(all(image in line for line in lines), lines)
+                self.assertFalse(any("connection reset" in line for line in lines), lines)
+        runner = FakeRunner(pull_timeout=True)
+        with (
+            mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(1, docker_lint.pull([image], 17, runner))
+        self.assertIn(f"::error::docker pull of {image} timed out", output.getvalue())
+
     def test_main_routes_pull_to_the_pull_mode_and_refuses_it_beside_linter(self) -> None:
         self.restore_handlers()
         with (
