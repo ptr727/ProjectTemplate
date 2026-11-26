@@ -262,7 +262,7 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual((expected, ""), (out.getvalue(), err.getvalue()))
         twice = path.read_text(encoding="utf-8") + lines[1] + "\n"
         for label, text, stages, reason in (
-            ("a stage missing", None, ["cspell", "markdownlint"], "names no markdownlint stage"),
+            ("a stage missing", None, ["cspell", "markdownlint"], "pins markdownlint on no"),
             ("a stage named twice", twice, ["cspell"], "names the shfmt stage twice"),
         ):
             with self.subTest(label):
@@ -377,7 +377,7 @@ class DockerLintCase(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             result = docker_lint.lint(self.root, 17, {"markdownlint"}, runner, pins)
         self.assertEqual(1, result)
-        self.assertIn("RESULT failed: the pin manifest names no shfmt stage", output.getvalue())
+        self.assertIn("RESULT failed: the pin manifest pins shfmt on no", output.getvalue())
         self.assertEqual([], runner.commands)
 
     def test_zero_targets_skips_pull_and_execution(self) -> None:

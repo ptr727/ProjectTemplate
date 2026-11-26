@@ -731,19 +731,13 @@ def shellcheck_body(label: str, dialect: str, text: str, image: str) -> list[str
     return [f"{label}: shellcheck exited {result.returncode}: {stderr}"]
 
 
-def docker_unreachable() -> str | None:
+def docker_unreachable(docker_lint: ModuleType, image: str) -> str | None:
     """The reason no docker daemon answers or the image cannot be pulled, or None where both work.
 
     The explicit pull makes a fetch failure one finding with its reason, rather than one per body.
     The image is pinned by digest, so a locally cached copy is the one CI pulls.
-    The pin is read, and the pull runs, through the hub's `docker_lint.py`.
-    Its bounded retry is the one every Docker lint pull shares.
+    The pull runs through the hub's `docker_lint.py`, whose bounded retry every Docker lint pull shares.
     """
-    try:
-        docker_lint = hub_docker_lint()
-        image = shellcheck_image(docker_lint)
-    except ValueError as error:
-        return f"the shellcheck pin could not be read: {error}"
     try:
         result = subprocess.run(
             ["docker", "info"], capture_output=True, check=False, timeout=DOCKER_TIMEOUT
@@ -848,14 +842,21 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
         NOTES.append("no composite action file is tracked, so nothing was checked.")
         return []
     hits: list[str] = []
-    unreachable = (
-        "docker is not installed" if shutil.which("docker") is None else docker_unreachable()
-    )
+    image = ""
+    if shutil.which("docker") is None:
+        unreachable: str | None = "docker is not installed"
+    else:
+        try:
+            docker_lint = hub_docker_lint()
+            image = shellcheck_image(docker_lint)
+        except ValueError as error:
+            unreachable = f"the shellcheck pin could not be read: {error}"
+        else:
+            unreachable = docker_unreachable(docker_lint, image)
     if unreachable is not None:
         hits.append(f"{unreachable}, so no run body was shellchecked")
     else:
         PYYAML_PYTHON.clear()
-        image = shellcheck_image(hub_docker_lint())
         for path in actions:
             try:
                 hits.extend(check_composite_shell(root, path, image))
@@ -884,8 +885,8 @@ def gate_hub_root() -> Path | None:
 def hub_script(hub: Path | None, name: str) -> ModuleType:
     """The hub's own `scripts/<name>.py`, whose code a check here reuses rather than copies.
 
-    `carry.py`, `docker_lint.py`, and `gh_graphql.py` each import only the standard library at
-    load, so plain `python3` loads them. Raises ValueError where no hub tree is beside this gate.
+    `carry.py` and `docker_lint.py` each import only the standard library at load, so plain
+    `python3` loads them. Raises ValueError where no hub tree is beside this gate.
     A dataclass resolves its module through `sys.modules`, so the module is registered there.
     It takes a name of its own, which leaves another import of the same script as it was.
     """

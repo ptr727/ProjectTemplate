@@ -24,6 +24,7 @@ import tempfile
 import unittest
 from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / ".github/actions/repo-gate"))
@@ -734,6 +735,13 @@ class TestCoverageFloors(unittest.TestCase):
 
 
 @functools.cache
+def hub_pin() -> tuple[ModuleType, str]:
+    """The hub's docker_lint.py and the shellcheck image it reads, as check_composite_actions resolves them."""
+    docker_lint = repo_gate.hub_docker_lint()
+    return docker_lint, repo_gate.shellcheck_image(docker_lint)
+
+
+@functools.cache
 def docker_ready() -> bool:
     """Whether the daemon answers and the image is present or pullable, as the check itself reads it.
 
@@ -742,7 +750,7 @@ def docker_ready() -> bool:
     if shutil.which("docker") is None:
         return False
     with contextlib.redirect_stdout(io.StringIO()):
-        return repo_gate.docker_unreachable() is None
+        return repo_gate.docker_unreachable(*hub_pin()) is None
 
 
 def schema_ready() -> bool:
@@ -1251,11 +1259,13 @@ class TestCompositeActions(TreeCase):
         timeout = subprocess.TimeoutExpired("docker", 1)
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, timeout]):
             self.assertIn(
-                "image inspect did not finish within 30s", repo_gate.docker_unreachable() or ""
+                "image inspect did not finish within 30s",
+                repo_gate.docker_unreachable(*hub_pin()) or "",
             )
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, OSError("gone")]):
             self.assertIn(
-                "image inspect could not start: gone", repo_gate.docker_unreachable() or ""
+                "image inspect could not start: gone",
+                repo_gate.docker_unreachable(*hub_pin()) or "",
             )
 
     def test_an_expression_with_no_following_newline_keeps_its_count(self) -> None:
@@ -1350,7 +1360,7 @@ class TestCompositeActions(TreeCase):
     def test_the_daemon_probe_reports_a_failure_and_a_timeout(self) -> None:
         proc = subprocess.CompletedProcess([], 1, b"", b"")
         with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
-            self.assertEqual("docker info exited 1", repo_gate.docker_unreachable())
+            self.assertEqual("docker info exited 1", repo_gate.docker_unreachable(*hub_pin()))
         ok = subprocess.CompletedProcess([], 0, b"", b"")
         bad = subprocess.CompletedProcess([], 1, "", "no route")
         with (
@@ -1358,17 +1368,17 @@ class TestCompositeActions(TreeCase):
             mock.patch("time.sleep"),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            self.assertIn("(exit 1): no route", repo_gate.docker_unreachable() or "")
+            self.assertIn("(exit 1): no route", repo_gate.docker_unreachable(*hub_pin()) or "")
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, ok]) as run:
-            self.assertIsNone(repo_gate.docker_unreachable())
+            self.assertIsNone(repo_gate.docker_unreachable(*hub_pin()))
         self.assertEqual(2, run.call_count)
         with mock.patch.object(
             repo_gate.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)
         ):
-            self.assertIsNone(repo_gate.docker_unreachable())
+            self.assertIsNone(repo_gate.docker_unreachable(*hub_pin()))
         timeout = subprocess.TimeoutExpired("docker", 1)
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=timeout):
-            self.assertIn("did not answer", repo_gate.docker_unreachable() or "")
+            self.assertIn("did not answer", repo_gate.docker_unreachable(*hub_pin()) or "")
 
     def test_a_failed_pull_is_retried_on_docker_lint_s_one_schedule(self) -> None:
         """The gate pulls through the hub's docker_lint.py, so its retry is the lint steps' retry."""
@@ -1384,7 +1394,7 @@ class TestCompositeActions(TreeCase):
             mock.patch("time.sleep", sleeps.append),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            self.assertIsNone(repo_gate.docker_unreachable())
+            self.assertIsNone(repo_gate.docker_unreachable(*hub_pin()))
         image = repo_gate.shellcheck_image(docker_lint)
         pulls = [c.args[0] for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
         self.assertEqual([["docker", "pull", "--quiet", image]] * 2, pulls)
@@ -1395,7 +1405,7 @@ class TestCompositeActions(TreeCase):
             mock.patch("time.sleep"),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            reason = repo_gate.docker_unreachable() or ""
+            reason = repo_gate.docker_unreachable(*hub_pin()) or ""
         self.assertEqual(
             f"docker pull of {image} failed: container failure (exit 1): connection reset by peer",
             reason,
@@ -1408,23 +1418,34 @@ class TestCompositeActions(TreeCase):
             ) as run,
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            reason = repo_gate.docker_unreachable() or ""
+            reason = repo_gate.docker_unreachable(*hub_pin()) or ""
         self.assertIn("timed out after 300s", reason)
         self.assertEqual(3, run.call_count)
 
+    def pin_hits(self) -> tuple[list[str], mock.MagicMock]:
+        """The shell half's hits for one action, with docker present and the schema half stubbed."""
+        files = self.action("    - shell: bash\n      run: echo a\n")
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"docker": "/d"}.get),
+            mock.patch.object(repo_gate, "docker_unreachable") as unreachable,
+            mock.patch.object(repo_gate, "check_composite_schema", return_value=[]),
+            mock.patch.object(repo_gate, "shellcheck_body") as body,
+        ):
+            hits = repo_gate.check_composite_actions(self.tmp, files)
+        body.assert_not_called()
+        return hits, unreachable
+
     def test_a_docker_lint_that_will_not_load_is_the_reason_and_no_docker_call(self) -> None:
         """The script parses the pin, so a load failure is found before docker is asked anything."""
-        with (
-            mock.patch.object(repo_gate.subprocess, "run") as run,
-            mock.patch.object(repo_gate, "hub_script", side_effect=SyntaxError("newer syntax")),
-        ):
-            reason = repo_gate.docker_unreachable() or ""
-        self.assertIn(
-            "scripts/docker_lint.py, which parses the pin manifest and holds the pull retry, "
-            "failed to load: newer syntax",
-            reason,
+        with mock.patch.object(repo_gate, "hub_script", side_effect=SyntaxError("newer syntax")):
+            hits, unreachable = self.pin_hits()
+        expected = (
+            "the shellcheck pin could not be read: the hub's scripts/docker_lint.py, which "
+            "parses the pin manifest and holds the pull retry, failed to load: newer syntax, "
+            "so no run body was shellchecked"
         )
-        run.assert_not_called()
+        self.assertEqual([expected], hits)
+        unreachable.assert_not_called()
 
     def test_the_shellcheck_image_is_the_manifest_s_digest_pin(self) -> None:
         """The pin is the one the docker-lint-pins action and docker_lint.py read, never a moving tag."""
@@ -1439,7 +1460,7 @@ class TestCompositeActions(TreeCase):
         cases = {
             "missing": (None, "from a hub checkout or through the repo-gate action"),
             "named twice": (pin * 2, "names the shellcheck stage twice"),
-            "an empty tag": (pin.replace(":v1@", ":@"), "names no shellcheck stage"),
+            "an empty tag": (pin.replace(":v1@", ":@"), "pins shellcheck on no"),
         }
         for label, (text, expected) in cases.items():
             with self.subTest(label):
@@ -1451,14 +1472,12 @@ class TestCompositeActions(TreeCase):
                     manifest.write_text(text, encoding="utf-8")
                     (hub / "scripts").mkdir()
                     shutil.copyfile(REPO / "scripts/docker_lint.py", hub / "scripts/docker_lint.py")
-                with (
-                    mock.patch.object(repo_gate, "gate_hub_root", return_value=hub),
-                    mock.patch.object(repo_gate.subprocess, "run") as run,
-                ):
-                    reason = repo_gate.docker_unreachable() or ""
-                self.assertIn("the shellcheck pin could not be read", reason)
-                self.assertIn(expected, reason)
-                run.assert_not_called()
+                with mock.patch.object(repo_gate, "gate_hub_root", return_value=hub):
+                    hits, unreachable = self.pin_hits()
+                self.assertEqual(1, len(hits), hits)
+                self.assertTrue(hits[0].startswith("the shellcheck pin could not be read: "))
+                self.assertIn(expected, hits[0])
+                unreachable.assert_not_called()
 
     def test_the_gate_carries_no_pin_manifest_parser_of_its_own(self) -> None:
         source = Path(repo_gate.__file__).read_text(encoding="utf-8")
@@ -1487,20 +1506,22 @@ class TestCompositeActions(TreeCase):
         )
 
     def test_the_pin_is_read_once_for_every_body_of_every_action(self) -> None:
-        """Each read executes the hub's docker_lint.py afresh, so a run reads it once."""
+        """Each read executes the hub's docker_lint.py afresh, so a run reads it once and hands it on."""
         steps = "    - shell: bash\n      run: echo a\n    - shell: bash\n      run: echo b\n"
         files = self.action(steps) + self.action(steps, name="other")
         loads = mock.Mock(wraps=repo_gate.hub_script)
         with (
             mock.patch.object(repo_gate.shutil, "which", side_effect={"docker": "/d"}.get),
-            mock.patch.object(repo_gate, "docker_unreachable", return_value=None),
+            mock.patch.object(repo_gate, "docker_unreachable", return_value=None) as unreachable,
             mock.patch.object(repo_gate, "hub_script", loads),
             mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
         ):
             repo_gate.check_composite_actions(self.tmp, files)
-        image = repo_gate.shellcheck_image(repo_gate.hub_docker_lint())
-        self.assertEqual([image] * 4, [call.args[3] for call in body.call_args_list])
         self.assertEqual(1, loads.call_count)
+        unreachable.assert_called_once()
+        module, image = unreachable.call_args.args
+        self.assertEqual(("repo_gate_hub_docker_lint", hub_pin()[1]), (module.__name__, image))
+        self.assertEqual([hub_pin()[1]] * 4, [call.args[3] for call in body.call_args_list])
 
     def test_uvx_runs_the_latest_schema_checker(self) -> None:
         with (

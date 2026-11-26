@@ -158,7 +158,10 @@ def require_stages(pins: Mapping[str, str], stages: Iterable[str]) -> None:
     """Raise CommandFailed naming each of `stages` that `pins` lacks."""
     missing = sorted(set(stages) - set(pins))
     if missing:
-        raise CommandFailed(f"the pin manifest names no {', '.join(missing)} stage")
+        raise CommandFailed(
+            f"the pin manifest pins {', '.join(missing)} on no "
+            "'FROM <image>:<tag>@sha256:<digest> AS <stage>' line"
+        )
 
 
 def manifest_path() -> Path:

@@ -1712,7 +1712,7 @@ gh() {
         expected = "".join(f"{s}=r.io/{s}:1.0{digest}\n" for s in stages)
         self.assertEqual((0, expected), (code, written))
         for label, text, reason in (
-            ("a stage missing", manifest(skip="shfmt"), "names no shfmt stage"),
+            ("a stage missing", manifest(skip="shfmt"), "pins shfmt on no"),
             (
                 "a stage named twice",
                 manifest(extra=f"FROM r.io/x:2.0{digest} AS shfmt\n"),
@@ -1721,17 +1721,17 @@ gh() {
             (
                 "a moving tag",
                 manifest(skip="shfmt", extra="FROM r.io/shfmt:latest AS shfmt\n"),
-                "names no shfmt stage",
+                "pins shfmt on no",
             ),
             (
                 "no tag",
                 manifest(skip="shfmt", extra=f"FROM r.io/shfmt{digest} AS shfmt\n"),
-                "names no shfmt stage",
+                "pins shfmt on no",
             ),
             (
                 "an empty tag",
                 manifest(skip="shfmt", extra=f"FROM r.io/shfmt:{digest} AS shfmt\n"),
-                "names no shfmt stage",
+                "pins shfmt on no",
             ),
         ):
             with self.subTest(label):
