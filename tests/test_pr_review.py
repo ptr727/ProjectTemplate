@@ -2791,15 +2791,35 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertEqual(code == 50, "status=VERDICT_NAMES_UNCOUNTED_FINDINGS" in out)
                 self.assertEqual(code == 0, "acknowledged as declined" in out)
 
-    def test_a_qodo_finding_s_remedy_asks_qodo_to_dismiss_it_by_its_number(self) -> None:
-        """Only Qodo's badge closes its finding, and a resolved thread or a reply adds none."""
+    def test_a_qodo_finding_s_remedy_asks_qodo_to_dismiss_it_by_title_and_location(self) -> None:
+        """Only Qodo's badge closes its finding, and Qodo cannot map a finding's number."""
         qodo = comment(login=pr_review_rounds.QODO_LOGIN, body=qodo_review_body())
         pr = payload([review()], files=["a.py"], comments=[qodo])
         self.status(pr)
         out = self.out.getvalue()
         self.assertIn("QODO OPEN FINDING key=", out)
-        self.assertIn(f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss finding 1", out)
+        self.assertIn(
+            f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss the finding by its title "
+            "and file location",
+            out,
+        )
+        self.assertNotIn("by that number", out)
         self.assertNotIn("answer it in the PR conversation quoting", out)
+
+    def test_a_qodo_finding_keeps_its_key_across_an_edit_that_moves_only_its_commit(self) -> None:
+        """An in-place edit can rewrite a permalink's commit, so a key leaves links and hashes out."""
+
+        def keys(sha: str, heading: str = "Bad naming") -> list[str]:
+            link = f'<a href="https://github.com/o/r/blob/{sha}/a.py#L12">a.py[12]</a> at {sha[:7]}'
+            body = qodo_review_body(heading=heading).replace("a.py[12]", link)
+            pr = payload(
+                [review()], comments=[comment(login=pr_review_rounds.QODO_LOGIN, body=body)]
+            )
+            return [i.key for i in pr_review_answers.items(pr) if i.kind == "qodo_open"]
+
+        self.assertEqual(1, len(keys(HEAD)))
+        self.assertEqual(keys(HEAD), keys(OLD))
+        self.assertNotEqual(keys(HEAD), keys(HEAD, heading="Wrong bound"))
 
     def test_each_finding_no_thread_carries_prints_the_key_that_answers_it(self) -> None:
         missed = (
