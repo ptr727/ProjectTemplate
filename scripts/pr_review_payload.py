@@ -5,6 +5,10 @@ it reads, under `POLICY_KEY`. A reader may not import `pr_review_policy`, which 
 `gh`. So the key and the two reads every consumer of it repeats live here instead. The writer
 and the readers name this one constant, so they cannot disagree on it. The two pagers take the
 walk as a callable for the same reason, so nothing here makes a call.
+
+The one test for a conversation comment the gate trusts lives here too, as a read off the payload
+that needs nothing else. `pr_review_rounds` and `pr_review_hold` both build their comment readers
+on it, so the two cannot disagree on whose comment counts.
 """
 
 from __future__ import annotations
@@ -15,6 +19,17 @@ from typing import Any
 POLICY_KEY = "_reviewPolicy"
 FILES_UNREAD = "unread"
 FILES_CAP = 3000
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
+
+def trusted_comment_nodes(pr: dict) -> list[dict]:
+    """Each conversation comment an owner, member, or collaborator wrote and nobody hid, as read."""
+    return [
+        node
+        for node in (pr.get("comments") or {}).get("nodes") or []
+        if (node.get("authorAssociation") or "") in TRUSTED_ASSOCIATIONS
+        and not node.get("isMinimized")
+    ]
 
 
 def default_branch(pr: dict) -> str:
