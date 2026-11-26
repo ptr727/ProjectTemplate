@@ -1753,6 +1753,7 @@ gh() {
                         "fi\n"
                     ),
                     "sleep": 'echo "$1" >> "$STUB_ROOT/sleep.log"\n',
+                    "timeout": 'shift\nexec "$@"\n',
                 }
                 for name, body in stubs.items():
                     stub = tools / name
@@ -1787,18 +1788,27 @@ gh() {
     def test_every_docker_step_carries_the_tested_pull_retry(self) -> None:
         """The steps share no shell function, so each copy is held to the one the retry test runs."""
         workflow = REPO / ".github/workflows/validate-task.yml"
-        steps = (
-            "Check EditorConfig step",
-            "Check shell scripts step",
-            "Check PowerShell scripts step",
-        )
+        scripts = {}
+        for job in job_texts(workflow.read_text(encoding="utf-8")).values():
+            for name in re.findall(r"(?m)^ *- name: (.+)$", job):
+                if re.search(r"(?m)^ *run: \|", yaml_step(job, name)):
+                    script = step_script_text(job, name)
+                    if "docker run" in script:
+                        scripts[name] = script
+        self.assertIn("Check EditorConfig step", scripts)
+        self.assertGreaterEqual(len(scripts), 3, list(scripts))
         bodies = set()
-        for step in steps:
-            found = re.search(r"(?ms)^pull\(\) \{\n.*?^\}\n", step_script(workflow, step))
-            with self.subTest(step=step):
-                self.assertIsNotNone(found)
-            if found is not None:
+        for name, script in scripts.items():
+            with self.subTest(step=name):
+                found = re.search(r"(?ms)^pull\(\) \{\n.*?^\}\n", script)
+                assert found is not None, script
                 bodies.add(found.group(0))
+                runs = list(re.finditer(r'docker run [^\n]*?"\$(\w+_IMAGE)"', script))
+                self.assertEqual(script.count("docker run"), len(runs), script)
+                for run_match in runs:
+                    pulled = script.find(f'pull "${run_match.group(1)}"')
+                    self.assertNotEqual(-1, pulled, run_match.group(0))
+                    self.assertLess(pulled, run_match.start(), run_match.group(0))
         self.assertEqual(1, len(bodies), bodies)
 
     def test_docker_pins_manifest_is_dependabot_tracked_on_both_branches(self) -> None:
