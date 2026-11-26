@@ -107,7 +107,7 @@ PATH=$host_path
         result = self.run_bash(body, AWKWARD)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["schema"], 1)
+        self.assertEqual(report["schema"], 2)
         self.assertEqual(report["platform"], "linux")
         self.assertEqual(
             report["tools"],
@@ -678,13 +678,21 @@ node_lts_major() { printf '22'; }
 class TestMicrosoftFeedRows(LinuxFunctionsCase):
     """A host without Microsoft's feed reads unmanaged where an install would add it."""
 
-    def probe(self, tool: str, arch: str, files: list[str], sdk: str, installed: str = "") -> str:
+    def probe(
+        self,
+        tool: str,
+        arch: str,
+        files: list[str],
+        sdk: str,
+        installed: str = "",
+        target: str = "",
+    ) -> str:
         self.redirect_sources_dir(
             f"sources-{tool}-{arch}-{'-'.join(files) or 'empty'}-{'sdk' if sdk else 'nosdk'}", files
         )
         body = f"""ARCH={arch}
 dotnet_sdk_packages() {{ printf '%s' "{sdk}"; }}
-printf '%s|%s' "$(tool_effective_status {tool} '{installed}' '{installed}')" "$(dotnet_source)" """
+printf '%s|%s' "$(tool_effective_status {tool} '{installed}' '{target}')" "$(dotnet_source)" """
         result = self.run_bash(body)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
@@ -692,7 +700,7 @@ printf '%s|%s' "$(tool_effective_status {tool} '{installed}' '{installed}')" "$(
     def test_an_installed_tool_keeps_its_status_without_the_feed(self) -> None:
         for tool in ("powershell", "dotnet"):
             with self.subTest(tool=tool):
-                out = self.probe(tool, "amd64", [], "", installed="7.4.0-1")
+                out = self.probe(tool, "amd64", [], "", installed="7.4.0-1", target="7.4.0-1")
                 self.assertEqual(out.partition("|")[0], "current")
 
     def test_an_unmanaged_tool_with_nothing_installed_says_the_install_adds_the_feed(self) -> None:
@@ -716,6 +724,7 @@ apply_tool powershell
             ("amd64", [], "Microsoft's feed is not configured"),
             ("amd64", ["microsoft-prod.list"], "although Microsoft's feed is configured"),
             ("arm64", [], "carries amd64 only"),
+            ("arm64", ["microsoft-prod.list"], "carries amd64 only"),
         )
         for arch, files, expected in cases:
             with self.subTest(arch=arch, files=files):
@@ -729,18 +738,25 @@ printf '%s\\n' "${{NOTES[@]}}" """)
 
     def test_each_host_state_reads_the_status_an_install_would_act_on(self) -> None:
         feed = ["microsoft-prod.sources"]
-        cases: tuple[tuple[str, str, list[str], str, str], ...] = (
-            ("powershell", "amd64", [], "", "unmanaged"),
-            ("powershell", "amd64", feed, "", "unavailable"),
-            ("powershell", "arm64", [], "", "unavailable"),
-            ("dotnet", "amd64", [], "", "unmanaged|packages.microsoft.com"),
-            ("dotnet", "amd64", ["microsoft-prod.list"], "", "unavailable|packages.microsoft.com"),
-            ("dotnet", "amd64", [], "dotnet-sdk-8.0", "unavailable|distro"),
-            ("dotnet", "arm64", [], "", "unavailable|distro"),
+        cases: tuple[tuple[str, str, list[str], str, str, str], ...] = (
+            ("powershell", "amd64", [], "", "", "unmanaged"),
+            ("powershell", "amd64", feed, "", "", "unavailable"),
+            ("powershell", "arm64", [], "", "", "unavailable"),
+            ("dotnet", "amd64", [], "", "", "unmanaged|packages.microsoft.com"),
+            (
+                "dotnet",
+                "amd64",
+                ["microsoft-prod.list"],
+                "",
+                "",
+                "unavailable|packages.microsoft.com",
+            ),
+            ("dotnet", "amd64", [], "dotnet-sdk-8.0", "8.0.1", "missing|distro"),
+            ("dotnet", "arm64", [], "", "", "unavailable|distro"),
         )
-        for tool, arch, files, sdk, expected in cases:
+        for tool, arch, files, sdk, target, expected in cases:
             with self.subTest(tool=tool, arch=arch, files=files, sdk=sdk):
-                out = self.probe(tool, arch, files, sdk)
+                out = self.probe(tool, arch, files, sdk, target=target)
                 status, _, source = out.partition("|")
                 want_status, _, want_source = expected.partition("|")
                 self.assertEqual(status, want_status)
