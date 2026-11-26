@@ -2799,10 +2799,11 @@ class TestReadingsThroughTheAdapter(GqlCase):
         out = self.out.getvalue()
         self.assertIn("QODO OPEN FINDING key=", out)
         self.assertIn(
-            f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss the finding by its title "
-            "and file location",
+            f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss the finding by the title "
+            "and file location below",
             out,
         )
+        self.assertIn("    1. Bad naming Bug\n    a.py[12]\n", out)
         self.assertNotIn("by that number", out)
         self.assertNotIn("answer it in the PR conversation quoting", out)
 

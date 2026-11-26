@@ -58,6 +58,7 @@ NO_THREAD, NOTED, VERDICT = "FINDINGS WITH NO THREAD", "REVIEWER OUTPUT NOTED", 
 DRIFT = "login drift"
 # An in-place Qodo edit can rewrite a link or a commit hash, so a Qodo key omits both.
 VOLATILE = re.compile(r"https?://[^\s\"'<>)\]]+|\b[0-9a-f]{7,40}\b")
+QODO_WHERE = re.compile(r"^[^\s\[\]]+\[[\d ,-]+\]$", re.MULTILINE)
 # A digest count and the reviewer's sections it is read from, so an answer clears what it counts.
 SOURCES = {
     "suppressed": (REVIEWER, "suppressed", "SUPPRESSED"),
@@ -154,7 +155,7 @@ def items(pr: dict) -> list[Item]:
                 "qodo_open",
                 key("qodo_open", anchor, VOLATILE.sub("", f"{s.title}\0{s.text}")),
                 "",
-                s.title,
+                "\n".join([s.title, *QODO_WHERE.findall(s.text)]),
             )
             for s in sections
         ]
@@ -315,8 +316,9 @@ def unthreaded_lines(pr: dict, owner: str, repo: str, num: int) -> list[str]:
                 f"  {label}: only Qodo's own badge clears it on Qodo's side, and resolving a thread "
                 "or answering in the conversation adds none. A fixed finding Qodo marks Resolved "
                 f"itself. For a disproved one, answer with {hint}, its body mentioning "
-                f"@{QODO_LOGIN} and asking it to dismiss the finding by its title and file "
-                "location, with the reason"
+                f"@{QODO_LOGIN} and asking it to dismiss the finding by the title and file "
+                "location below, with the reason. Where no location prints, take it from Qodo's "
+                "comment"
             )
         else:
             lines.append(
