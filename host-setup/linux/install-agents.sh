@@ -199,7 +199,7 @@ none, so an install always names what it installs, or says --all.
 A tool reads as "self" when no package manager owns it, so this script runs the tool's own
 updater, or for the managed opencode its installer, and as the name of a package manager when one owns it. --upgrade then runs that
 manager's upgrade for that one package: Homebrew upgrades the formula or cask, and mise upgrades
-the tool. npm and bun are not run, since no managed tool is installed through them. apt is upgraded
+the tool. npm and bun are not run, since no tool's managed copy comes from them. apt is upgraded
 by upgrade-host.sh, and Nix is declarative, so neither is run. Nothing here ever uses sudo. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
 one outdated, and a herdr server still running the previous binary is left running and reported
 as needing a restart, since stopping it would end every pane inside it.
@@ -498,10 +498,6 @@ package_step() {
     PKG_CMD=()
     PKG_WHY=""
     recorded=$(npm_package "$tool")
-    if [[ -z $recorded ]]; then
-        PKG_WHY="no $manager package name is recorded for $tool, so remove it with $manager by hand"
-        return 0
-    fi
     # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
     if [[ $manager == "bun" ]]; then dir="$(bun_global_dir)/node_modules"; else dir=$(npm_root); fi
     while IFS= read -r candidate; do

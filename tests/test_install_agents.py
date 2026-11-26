@@ -416,6 +416,21 @@ class TestInstallAgents(unittest.TestCase):
         self.assertNotIn("Failed:", result.stderr)
         self.assertEqual(self.called(), ["claude update"])
 
+    def test_a_tool_bun_owns_is_reported_and_never_upgraded_through_bun(self) -> None:
+        self.stub(
+            "herdr",
+            "herdr 0.9.0",
+            where=self.home / ".bun" / "install" / "global" / "node_modules" / "herdr" / "bin",
+        )
+        self.stub("bun", "1.1.0")
+        result = self.run_script("--upgrade", "--yes", "herdr")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn(
+            "no managed tool is upgraded through bun, so upgrade herdr with bun by hand",
+            result.stdout,
+        )
+
     def test_a_bun_codex_is_a_stray_and_is_never_upgraded_through_bun(self) -> None:
         self.stub(
             "codex",
@@ -1375,6 +1390,15 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.bun_package("@openai/codex")
         self.stub("bun", "1.1.0")
         self.assert_stray("codex", "bun remove -g @openai/codex", extra_path=bun_bin)
+
+    def test_a_tool_bun_owns_is_reported_and_never_upgraded_through_bun(self) -> None:
+        bun_bin = self.home / ".bun" / "bin"
+        self.stub("herdr", "1.0.0", bun_bin)
+        self.stub("bun", "1.1.0")
+        result = self.run_script("-Upgrade", "-Yes", "herdr", extra_path=bun_bin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([c for c in self.recorded() if c.startswith("bun")], [])
+        self.assertIn("no managed tool is upgraded through bun", result.stdout)
 
     def test_scoop_updates_the_app_its_which_names(self) -> None:
         root = self.dir / "Apps" / "scoop"
