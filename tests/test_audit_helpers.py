@@ -938,16 +938,18 @@ class WorkflowPermissionsCase(unittest.TestCase):
             with self.subTest(path):
                 self.assertIn(EMPTY_PERMISSIONS, carried_contract(path)["requireTokens"])
 
-    def test_shipped_snippets_meet_the_carried_contract(self) -> None:
+    def test_the_hub_callers_and_snippets_meet_the_carried_contract(self) -> None:
         snippets = REPO_ROOT / "catalog" / "snippets" / "workflows"
         for path in (
             ".github/workflows/test-pull-request.yml",
             ".github/workflows/publish-release.yml",
             ".github/workflows/merge-bot-pull-request.yml",
         ):
-            with self.subTest(path):
-                text = (snippets / pathlib.PurePosixPath(path).name).read_text(encoding="utf-8")
-                self.assertEqual(audit.check_interface(path, carried_contract(path), text), [])
+            for source in (REPO_ROOT / path, snippets / pathlib.PurePosixPath(path).name):
+                with self.subTest(str(source)):
+                    text = source.read_text(encoding="utf-8")
+                    got = audit.check_interface(path, carried_contract(path), text)
+                    self.assertEqual(got, [])
 
 
 class SplitJobsCase(unittest.TestCase):
