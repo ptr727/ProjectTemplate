@@ -1799,9 +1799,14 @@ gh() {
         self.assertIn("Check EditorConfig step", scripts)
         self.assertGreaterEqual(len(scripts), 3, list(scripts))
         # A one-line run: step is not collected above, so every container start in the file is counted.
-        command = re.compile(r"(?m)^\s*(?:run:\s*)?docker run\b")
-        collected = sum(len(command.findall(script)) for script in scripts.values())
-        self.assertEqual(len(command.findall(text)), collected)
+        code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        collected = sum(script.count("docker run") for script in scripts.values())
+        self.assertEqual(code.count("docker run"), collected)
+        images = re.findall(r"(?m)^ *(\w+_IMAGE): (.+)$", text)
+        self.assertGreaterEqual(len(images), 4, images)
+        for variable, value in images:
+            with self.subTest(variable=variable):
+                self.assertRegex(value, r"^\$\{\{ steps\.docker-pins\.outputs\.[a-z-]+ \}\}$")
         bodies = set()
         for name, script in scripts.items():
             with self.subTest(step=name):
