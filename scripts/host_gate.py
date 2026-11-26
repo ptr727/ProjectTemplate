@@ -150,6 +150,8 @@ def field_problems(entry: dict) -> list[str]:
         problems.append("why must be a non-empty string")
     if "required" in entry and not isinstance(entry["required"], bool):
         problems.append(f"required must be true or false, not {entry['required']!r}")
+    if "platforms" in entry:
+        problems.extend(platforms_problems(entry["platforms"]))
     if (
         "minimum" in entry
         and entry["minimum"] is not None
@@ -207,6 +209,36 @@ def field_problems(entry: dict) -> list[str]:
     return problems
 
 
+def platforms_problems(platforms: object) -> list[str]:
+    """What is wrong with a `platforms` value, naming each problem, or nothing where it is usable.
+
+    Membership is read as well as type, since a misspelled key is a platform on which the entry
+    silently never applies. A required tool would then be retired there without a word.
+    """
+    if not isinstance(platforms, list) or not platforms:
+        return [f"platforms must be a non-empty array of platform names, not {platforms!r}"]
+    stray = sorted({str(p) for p in platforms if p not in PLATFORM_KEYS})
+    if stray:
+        return [
+            f"platforms names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
+        ]
+    if len(set(platforms)) != len(platforms):
+        return ["platforms names a platform more than once"]
+    return []
+
+
+def applies_here(tool: dict) -> bool:
+    """Whether the entry applies on the running host's platform.
+
+    An absent `platforms` means every platform. A malformed one is reported by contract_problems,
+    and reads here as every platform, so the tool is still checked rather than skipped unseen.
+    """
+    platforms = tool.get("platforms")
+    if platforms is None or platforms_problems(platforms):
+        return True
+    return platform_key() in platforms
+
+
 def read_declaration(path: Path, what: str) -> list[dict] | str:
     """The `tools` array from a declaration file, or a diagnostic string where it cannot be had.
 
@@ -244,9 +276,14 @@ def contract_problems(tools: list[dict]) -> list[str]:
 
     The platform keys are read here too, since a source naming a key nothing looks up is a source
     only in shape.
+
+    So is every entry's `platforms`, floor or no floor. field_problems reads only an overlay's
+    entries, so the hub declaration's value would otherwise reach the gate unchecked.
     """
-    problems = []
+    problems: list[str] = []
     for t in tools:
+        if "platforms" in t:
+            problems.extend(f"{t['name']} {p}" for p in platforms_problems(t["platforms"]))
         if t.get("minimum") is None:
             continue
         name, src = t["name"], t.get("source")
@@ -303,12 +340,15 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     - Raise a floor.
     - Add one where the hub declares none.
     - Turn an optional tool required.
+    - Widen the platforms a tool applies on.
 
     It may not:
 
     - Lower a floor.
     - Remove one.
     - Turn a required tool optional.
+    - Narrow the platforms a tool applies on. An absent hub `platforms` is every platform, and so
+      is a malformed one, as applies_here reads it.
 
     The reason is that those are the edits that quietly retire a fleet check from inside
     the repository it was written to protect. A rejected override is reported rather than dropped,
@@ -359,6 +399,16 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
                     f"local tool {name} tried to turn a required tool optional, which is a relaxation, so the hub value stands"
                 )
                 continue
+            if field == "platforms":
+                hub_platforms = merged.get("platforms")
+                current = set(PLATFORM_KEYS)
+                if hub_platforms is not None and not platforms_problems(hub_platforms):
+                    current = set(hub_platforms)
+                if not current <= set(value):
+                    rejected.append(
+                        f"local tool {name} tried to narrow the platforms it applies on to {', '.join(value)}, which is a relaxation, so the hub value stands"
+                    )
+                    continue
             if field == "minimum":
                 hub_floor = parse_version(merged["minimum"]) if merged["minimum"] else None
                 new_floor = parse_version(value) if value else None
@@ -478,10 +528,19 @@ def overlay_above(start: Path) -> Path | None:
 
 
 def check(tools: list[dict]) -> list[str]:
-    """Every declared tool against its floor, returning one line per failure."""
+    """Every declared tool against its floor, returning one line per failure.
+
+    An entry whose `platforms` leaves this platform out is noted rather than read. A reader here
+    can then see that the entry exists and why nothing was read for it.
+    """
     issues = []
     for tool in tools:
         name = tool["name"]
+        if not applies_here(tool):
+            NOTES.append(
+                f"{name} applies on {', '.join(tool['platforms'])} only, so nothing was read for it on {platform_key()}"
+            )
+            continue
         required = tool.get("required", True)
         status, version, how = read_tool(tool)
 

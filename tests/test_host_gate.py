@@ -317,6 +317,51 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(len(issues), 1)
         self.assertIn("nothing could be compared", issues[0])
 
+    def on_platform(self, name, entries):
+        """`check(entries)` as a host on `name` runs it, with the platform restored afterwards."""
+        original = host_gate.sys.platform
+        try:
+            host_gate.sys.platform = {"linux": "linux", "macos": "darwin", "windows": "win32"}[name]
+            return host_gate.check(entries)
+        finally:
+            host_gate.sys.platform = original
+
+    def test_a_scoped_tool_is_skipped_off_its_platforms_and_says_so(self):
+        """A required tool that is absent elsewhere fails nothing there, and the skip is a note rather than silence."""
+        entry = tool(
+            "bash", minimum="4.4", probes=[["definitely-not-a-real-tool-xyz"]], platforms=["macos"]
+        )
+        for name in ("linux", "windows"):
+            host_gate.NOTES.clear()
+            with self.subTest(platform=name):
+                self.assertEqual(self.on_platform(name, [entry]), [])
+                self.assertEqual(
+                    host_gate.NOTES,
+                    [f"bash applies on macos only, so nothing was read for it on {name}"],
+                )
+
+    def test_a_scoped_tool_is_checked_on_its_own_platform(self):
+        """The macOS case this key exists for: the platform's bash 3.2 against a 4.4 floor."""
+        entry = tool(
+            "bash",
+            minimum="4.4",
+            probes=self.probe_for("v3.2.57"),
+            platforms=["macos"],
+            source={"macos": "Homebrew"},
+            remedy={"macos": "brew install bash"},
+        )
+        issues = self.on_platform("macos", [entry])
+        self.assertEqual(len(issues), 1)
+        self.assertIn("bash 3.2.57 is below the 4.4 floor", issues[0])
+        self.assertIn("REMEDY: brew install bash", issues[0])
+
+    def test_a_malformed_platforms_value_still_checks_the_tool(self):
+        """A bad value is reported by contract_problems, and the tool is read rather than skipped unseen."""
+        for bad in ("macos", [], ["Darwin"], None):
+            with self.subTest(platforms=bad):
+                entry = tool("bash", minimum="4.4", probes=self.probe_for("v3.2"), platforms=bad)
+                self.assertEqual(len(self.on_platform("linux", [entry])), 1)
+
 
 class TestMerge(unittest.TestCase):
     """A repository layers its own requirements over the hub's, and may only tighten them."""
@@ -458,6 +503,44 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(len(rejected), 1)
         self.assertEqual(merged[0]["install"]["linux"]["package"], "gh")
 
+    def test_a_repo_may_widen_the_platforms_a_tool_applies_on(self):
+        merged, rejected = host_gate.merge(
+            [tool("bash", platforms=["macos"])], [{"name": "bash", "platforms": ["linux", "macos"]}]
+        )
+        self.assertEqual(rejected, [])
+        self.assertEqual(merged[0]["platforms"], ["linux", "macos"])
+
+    def test_a_repo_may_not_narrow_the_platforms_a_tool_applies_on(self):
+        """Narrowing retires the check on the dropped platforms, so it is a relaxation like lowering a floor."""
+        cases = (
+            (tool("gh"), ["linux"], None),
+            (tool("bash", platforms=["linux", "macos"]), ["macos"], ["linux", "macos"]),
+            (tool("bash", platforms=["macos"]), ["linux"], ["macos"]),
+        )
+        for hub, local, stands in cases:
+            with self.subTest(hub=hub.get("platforms"), local=local):
+                merged, rejected = host_gate.merge(
+                    [hub], [{"name": hub["name"], "platforms": local}]
+                )
+                self.assertEqual(len(rejected), 1)
+                self.assertIn("narrow", rejected[0])
+                self.assertEqual(merged[0].get("platforms"), stands)
+
+    def test_a_malformed_hub_platforms_value_reads_as_every_platform_when_merging(self):
+        """A repository can still widen past a bad hub value, and the merge does not raise on it."""
+        merged, rejected = host_gate.merge(
+            [tool("bash", platforms=7)], [{"name": "bash", "platforms": ["macos"]}]
+        )
+        self.assertEqual(len(rejected), 1)
+        self.assertEqual(merged[0]["platforms"], 7)
+
+    def test_a_malformed_local_platforms_value_is_refused(self):
+        for bad in ("macos", [], ["macOS"], ["macos", "macos"], [["macos"]]):
+            with self.subTest(platforms=bad):
+                _, rejected = host_gate.merge([tool("bash")], [{"name": "bash", "platforms": bad}])
+                self.assertEqual(len(rejected), 1)
+                self.assertIn("platforms", rejected[0])
+
     def test_the_hub_declaration_is_not_mutated(self):
         """The caller's list is reused across runs, so merging must copy rather than edit in place."""
         base = self.base()
@@ -510,6 +593,16 @@ class TestContractAfterLayering(unittest.TestCase):
 
     def test_no_floor_needs_no_source(self):
         self.assertEqual(host_gate.contract_problems([tool("docker", minimum=None)]), [])
+
+    def test_a_malformed_platforms_value_is_reported_with_or_without_a_floor(self):
+        """field_problems reads only an overlay's entries, so this is what catches a bad hub value."""
+        for minimum in (None, "4.4"):
+            with self.subTest(minimum=minimum):
+                problems = host_gate.contract_problems(
+                    [tool("bash", minimum=minimum, platforms=["Darwin"], source={"macos": "brew"})]
+                )
+                self.assertEqual(len(problems), 1)
+                self.assertIn("bash platforms names Darwin", problems[0])
 
     def test_the_shipped_declaration_meets_its_own_contract(self):
         data = json.loads(host_gate.SPEC.read_text(encoding="utf-8"))
@@ -1000,7 +1093,7 @@ class TestShippedDeclaration(unittest.TestCase):
         floors = {t["name"] for t in self.data["tools"] if t["minimum"] is not None}
         self.assertEqual(
             floors,
-            {"docker", "gh", "git-restore-mtime", "jq", "python3", "ripgrep", "uv"},
+            {"bash", "docker", "gh", "git-restore-mtime", "jq", "python3", "ripgrep", "uv"},
         )
 
     def test_the_contract_table_carries_every_declared_floor(self):
@@ -1138,6 +1231,34 @@ class TestShippedDeclaration(unittest.TestCase):
         self.assertEqual(read("2.42.0\n\nnotice: 2.43.0 is available\n"), "2.42.0")
         self.assertEqual(read("2.43.0-beta.01\n\n"), "2.43.0")
         self.assertIsNone(read("\n[ERROR] unknown flag in 2.42 syntax\n"))
+
+    def test_bash_is_floored_on_macos_alone_and_reads_both_banners(self):
+        """Stock macOS bash and a Homebrew one each read as their own version.
+
+        The floor is for the platform's 3.2, so that banner has to read as below it rather than as
+        unreadable. An unreadable result would send the reader to fix the pattern instead of
+        installing a newer bash.
+        """
+        bash = {t["name"]: t for t in self.data["tools"]}["bash"]
+        self.assertIs(bash["required"], True)
+        self.assertEqual(bash["platforms"], ["macos"])
+        self.assertEqual(bash["minimum"], "4.4")
+        self.assertEqual(set(bash["source"]), {"macos"})
+        self.assertEqual(bash["remedy"], {"macos": "brew install bash"})
+
+        def read(text):
+            m = re.search(bash["pattern"], text)
+            return m.group(1) if m else None
+
+        self.assertEqual(
+            read(
+                "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin23)\nCopyright (C) 2007\n"
+            ),
+            "3.2.57",
+        )
+        self.assertEqual(
+            read("GNU bash, version 5.2.37(1)-release (aarch64-apple-darwin24.0.0)\n"), "5.2.37"
+        )
 
 
 if __name__ == "__main__":
