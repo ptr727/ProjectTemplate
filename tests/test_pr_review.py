@@ -2809,9 +2809,10 @@ class TestReadingsThroughTheAdapter(GqlCase):
     def test_a_qodo_finding_keeps_its_key_across_an_edit_that_moves_only_its_commit(self) -> None:
         """An in-place edit can rewrite a permalink's commit, so a key leaves links and hashes out."""
 
-        def keys(sha: str, heading: str = "Bad naming") -> list[str]:
+        def keys(sha: str, heading: str = "Bad naming", says: str = "misleads") -> list[str]:
             link = f'<a href="https://github.com/o/r/blob/{sha}/a.py#L12">a.py[12]</a> at {sha[:7]}'
-            body = qodo_review_body(heading=heading).replace("a.py[12]", link)
+            body = qodo_review_body(heading=f"{heading} since {sha[:7]}")
+            body = body.replace("a.py[12]", link).replace("does not describe", says)
             pr = payload(
                 [review()], comments=[comment(login=pr_review_rounds.QODO_LOGIN, body=body)]
             )
@@ -2820,6 +2821,7 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertEqual(1, len(keys(HEAD)))
         self.assertEqual(keys(HEAD), keys(OLD))
         self.assertNotEqual(keys(HEAD), keys(HEAD, heading="Wrong bound"))
+        self.assertNotEqual(keys(HEAD), keys(HEAD, says="hides"))
 
     def test_each_finding_no_thread_carries_prints_the_key_that_answers_it(self) -> None:
         missed = (

@@ -152,7 +152,7 @@ def items(pr: dict) -> list[Item]:
         found += [
             Item(
                 "qodo_open",
-                key("qodo_open", anchor, f"{s.title}\0{VOLATILE.sub('', s.text)}"),
+                key("qodo_open", anchor, VOLATILE.sub("", f"{s.title}\0{s.text}")),
                 "",
                 s.title,
             )
