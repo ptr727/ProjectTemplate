@@ -38,9 +38,10 @@ Enable it once per clone with `python3 hub_fetch_run.py scripts/enable_hooks.py`
 The script detects the framework, enables it, and reports what it found and what it changed.
 For the Husky.Net snippet it runs `dotnet tool restore` then `dotnet husky install`, which generates `.husky/_/husky.sh`, the file the hook sources.
 The `pre-commit` framework needs `uv tool install pre-commit` once per host first.
-The script refuses a linked worktree, whose Git config and hooks directory are its base clone's.
+The script refuses a linked worktree, whose Git config is its base clone's, as is its hooks directory where no `core.hooksPath` is set.
 A conversion worked in a linked worktree therefore enables nothing there.
 The hook is enabled from the base clone instead, once that clone holds the converted files.
+A worktree's own Husky.Net runtime is prepared per `repo-worktree` "Preparing Git Hooks".
 Confirm the doc gates run clean against the repo's current tree.
 Open the PR through the repo's normal branching model.
 A repo whose corpus does not yet pass its language formatter clean ships the doc-gate half first.

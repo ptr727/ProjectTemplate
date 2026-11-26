@@ -40,7 +40,8 @@ DESCRIPTION = """\
 Enable the Git hook framework of the clone holding the current directory, once per clone.
 Run it from the clone itself: the maintainer's own checkout, an agent's standalone clone, or the
 base clone a linked worktree is created from. A linked worktree is refused, since its Git config
-and hooks directory are the base clone's.
+is the base clone's. A worktree's own hook runtime, such as Husky.Net's .husky/_/husky.sh, is
+prepared per repo-worktree "Preparing Git Hooks" instead.
 
 The framework is read from the clone's top level:
   .husky/ and a .NET tool manifest declaring Husky.Net: dotnet tool restore, dotnet husky install
@@ -103,9 +104,10 @@ def locate(git_exe: str) -> Path:
     top, git_dir, common_dir = (Path(line) for line in lines)
     if git_dir.resolve() != common_dir.resolve():
         raise Refusal(
-            f"{top} is a linked worktree. Its Git config and hooks are shared with the clone"
-            f" whose Git directory is {common_dir}, so nothing was changed. Run this from that"
-            " clone instead."
+            f"{top} is a linked worktree. Its Git config is shared with the clone whose Git"
+            f" directory is {common_dir}, so nothing was changed. Enable the hooks from that"
+            " clone. This worktree's own hook runtime, such as Husky.Net's .husky/_/husky.sh,"
+            ' is prepared per repo-worktree "Preparing Git Hooks".'
         )
     return top
 
@@ -134,8 +136,7 @@ def declares_husky_net(top: Path) -> bool:
             data = json.loads(manifest.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError) as exc:
             raise Refusal(f"could not read {relative}: {exc}") from exc
-        tools = data.get("tools") if isinstance(data, dict) else None
-        if isinstance(tools, dict) and any(str(name).lower() == "husky" for name in tools):
+        if any(name.lower() == "husky" for name in data.get("tools", {})):
             return True
     return False
 
