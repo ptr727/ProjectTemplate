@@ -53,7 +53,7 @@
                     "minItems": 1,
                     "uniqueItems": true,
                     "items": { "enum": ["linux", "macos", "windows"] },
-                    "description": "The platforms the entry applies on, where it applies on fewer than all three. On any other platform the gate reads nothing for it and notes the skip, and the installers neither manage it nor owe it a remedy there. Absent means every platform. A repository overlay may widen this list and may not narrow it."
+                    "description": "The platforms the entry applies on, where it applies on fewer than all three. On any other platform the gate reads nothing for it and notes the skip, and a hub entry owes no installer coverage or remedy there. Absent means every platform. A repository overlay may widen this list and may not narrow it."
                 },
                 "probes": {
                     "type": "array",

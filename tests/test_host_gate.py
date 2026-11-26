@@ -527,12 +527,19 @@ class TestMerge(unittest.TestCase):
                 self.assertEqual(merged[0].get("platforms"), stands)
 
     def test_a_malformed_hub_platforms_value_reads_as_every_platform_when_merging(self):
-        """A repository can still widen past a bad hub value, and the merge does not raise on it."""
+        """Only every platform widens past a bad hub value, and the merge raises on neither case."""
         merged, rejected = host_gate.merge(
             [tool("bash", platforms=7)], [{"name": "bash", "platforms": ["macos"]}]
         )
         self.assertEqual(len(rejected), 1)
         self.assertEqual(merged[0]["platforms"], 7)
+
+        every = ["linux", "macos", "windows"]
+        merged, rejected = host_gate.merge(
+            [tool("bash", platforms=7)], [{"name": "bash", "platforms": every}]
+        )
+        self.assertEqual(rejected, [])
+        self.assertEqual(merged[0]["platforms"], every)
 
     def test_a_malformed_local_platforms_value_is_refused(self):
         for bad in ("macos", [], ["macOS"], [["macos"]]):
