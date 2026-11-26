@@ -2585,6 +2585,37 @@ gh() {
                     )
 
 
+def run_selection_step(
+    action: Path, name: str, selector: str, content: bytes | None, env: dict[str, str]
+) -> tuple[int, str, list[str]]:
+    """Run an action's selection step where `selector` holds `content`, or is absent where it is None.
+
+    Returns the exit status, the step's stdout where its workflow commands go, and its outputs.
+    """
+    bash = bash_or_skip()
+    script = step_script(action, name)
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        if content is not None:
+            (workspace / selector).write_bytes(content)
+        output = workspace / "github-output"
+        output.write_text("", encoding="utf-8")
+        # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
+        step = workspace / "select.sh"
+        step.write_text(script, encoding="utf-8", newline="\n")
+        result = run(
+            [bash, str(step)],
+            cwd=workspace,
+            env={**os.environ, "GITHUB_OUTPUT": str(output), **env},
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+        )
+        return result.returncode, result.stdout, output.read_text(encoding="utf-8").splitlines()
+
+
 class DotnetSdkLineCase(unittest.TestCase):
     """The hub's .NET SDK steps install the line the caller's global.json selects, else 10.x."""
 
@@ -2604,31 +2635,13 @@ class DotnetSdkLineCase(unittest.TestCase):
             self.skipTest(
                 "the selection step reads global.json with python3, which bash here cannot run"
             )
-        script = step_script(self.ACTION, self.SELECT)
-        with tempfile.TemporaryDirectory() as directory:
-            workspace = Path(directory)
-            if isinstance(global_json, bytes):
-                (workspace / "global.json").write_bytes(global_json)
-            elif global_json is not None:
-                (workspace / "global.json").write_text(global_json, encoding="utf-8")
-            output = workspace / "github-output"
-            output.write_text("", encoding="utf-8")
-            # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
-            step = Path(directory) / "select.sh"
-            step.write_text(script, encoding="utf-8", newline="\n")
-            result = run(
-                [bash, str(step)],
-                cwd=workspace,
-                env={**os.environ, "GITHUB_OUTPUT": str(output)},
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-                timeout=30,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.last_stdout = result.stdout
-            return output.read_text(encoding="utf-8").splitlines()
+        if isinstance(global_json, str):
+            global_json = global_json.encode("utf-8")
+        code, self.last_stdout, outputs = run_selection_step(
+            self.ACTION, self.SELECT, "global.json", global_json, {}
+        )
+        self.assertEqual(code, 0, self.last_stdout)
+        return outputs
 
     def test_a_global_json_selecting_a_line_is_read(self) -> None:
         selects = json.dumps({"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}})
@@ -2717,66 +2730,53 @@ class DotnetSdkLineCase(unittest.TestCase):
 
 
 class PythonVersionLineCase(unittest.TestCase):
-    """The hub's Python steps run the line the caller's root .python-version selects, else the baseline's."""
+    """The hub's Python steps run the line the caller's root .python-version selects, else the fallback."""
 
     ACTION = REPO / ".github/actions/python-version/action.yml"
-    BASELINE = REPO / "catalog/snippets/configs/.python-version"
+    BASELINE = REPO / "catalog/snippets/devcontainer/python/devcontainer.json"
     SELECT = "Select Python version step"
     last_stdout = ""
 
-    def select(self, python_version: str | None, warn: str = "true") -> list[str]:
-        """The outputs the selection step writes in a workspace holding `python_version`, or none.
+    def select(self, python_version: str | None, warn: str = "true") -> tuple[int, list[str]]:
+        """The exit and outputs of the selection step in a workspace holding `python_version`, or none.
 
         The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
         """
-        bash = bash_or_skip()
-        script = step_script(self.ACTION, self.SELECT)
-        with tempfile.TemporaryDirectory() as directory:
-            workspace = Path(directory)
-            if python_version is not None:
-                (workspace / ".python-version").write_bytes(python_version.encode("utf-8"))
-            output = workspace / "github-output"
-            output.write_text("", encoding="utf-8")
-            step = workspace / "select.sh"
-            step.write_text(script, encoding="utf-8", newline="\n")
-            result = run(
-                [bash, str(step)],
-                cwd=workspace,
-                env={**os.environ, "GITHUB_OUTPUT": str(output), "WARN": warn},
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-                timeout=30,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.last_stdout = result.stdout
-            return output.read_text(encoding="utf-8").splitlines()
+        content = None if python_version is None else python_version.encode("utf-8")
+        code, self.last_stdout, outputs = run_selection_step(
+            self.ACTION, self.SELECT, ".python-version", content, {"WARN": warn}
+        )
+        return code, outputs
 
     def baseline(self) -> str:
-        return self.BASELINE.read_text(encoding="utf-8").strip()
+        """The Python line the devcontainer snippet's image tag names, read by pattern since the file is JSONC."""
+        text = self.BASELINE.read_text(encoding="utf-8")
+        line = re.search(
+            r'"image": "mcr\.microsoft\.com/devcontainers/python:\d+-(\d+\.\d+)-\w+"', text
+        )
+        assert line is not None, self.BASELINE
+        return line.group(1)
 
     def test_the_fallback_is_the_baseline_line(self) -> None:
-        self.assertRegex(self.baseline(), r"\A[0-9]+\.[0-9]+\Z")
-        self.assertEqual(self.select(None), [f"version={self.baseline()}"])
+        self.assertEqual(self.select(None), (0, [f"version={self.baseline()}"]))
         self.assertIn("::warning::No root .python-version selects a Python line", self.last_stdout)
 
     def test_the_first_request_line_is_read(self) -> None:
-        self.assertEqual(self.select("3.13\n"), ["version=3.13"])
-        self.assertEqual(self.select("# the line\n\n  3.15  \r\n3.13\n"), ["version=3.15"])
-        self.assertEqual(self.select("3.12"), ["version=3.12"])
+        self.assertEqual(self.select("3.13\n"), (0, ["version=3.13"]))
+        self.assertEqual(self.select("# the line\n\n  3.15  \r\n3.13\n"), (0, ["version=3.15"]))
+        self.assertEqual(self.select("3.12"), (0, ["version=3.12"]))
         self.assertEqual("", self.last_stdout)
 
-    def test_a_file_naming_no_line_falls_back_with_a_warning(self) -> None:
-        for text in ("", "# only a comment\n", "3.14.1\n", "cpython@3.14\n", "3\n"):
+    def test_a_file_naming_no_line_fails(self) -> None:
+        for text in ("", "# only a comment\n", "3.14.1\n", "3.13t\n", "cpython@3.14\n", "3\n"):
             with self.subTest(text=text):
-                self.assertEqual(self.select(text), [f"version={self.baseline()}"])
+                self.assertEqual(self.select(text), (1, []))
                 self.assertIn(
-                    "::warning::The root .python-version names no X.Y line", self.last_stdout
+                    "::error::The root .python-version names no X.Y line", self.last_stdout
                 )
 
     def test_a_caller_that_cannot_tell_is_not_warned(self) -> None:
-        self.assertEqual(self.select(None, warn="false"), [f"version={self.baseline()}"])
+        self.assertEqual(self.select(None, warn="false"), (0, [f"version={self.baseline()}"]))
         self.assertEqual("", self.last_stdout)
 
     def test_each_python_job_reaches_the_selection(self) -> None:

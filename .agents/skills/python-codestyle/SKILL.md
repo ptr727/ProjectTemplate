@@ -95,10 +95,10 @@ engine.
 **The Python line comes from the root `.python-version`.** It names `X.Y`, and uv, setup-python,
 and pyenv each read it, so uv fetches that interpreter on a developer host. The line is the
 repository's own choice, per `CODESTYLE.md` "Toolchain Versions", so a repository may lead or lag
-the hub's baseline. The hub's validator runs its legs and its lint job on that line, unless the
+the hub's fallback line. The hub's validator runs its legs and its lint job on that line, unless the
 caller's `python-versions` input names others. The hub's PyPI build runs on it too. A caller
-carrying no `.python-version` gets the hub's fallback line, which the hub's tests hold to the
-baseline, and a warning. A build-profile directory's `requires-python` floor is that line. It
+carrying no `.python-version` gets the hub's fallback line and a warning. A file naming no `X.Y`
+line fails the validator rather than fall back. A build-profile directory's `requires-python` floor is that line. It
 leaves ruff `target-version`, mypy `python_version`, and pyright `pythonVersion` unset. Then ruff
 reads its target from `requires-python`, and each checker reads its target from the interpreter
 it runs under. A lint-only directory has no `[project]` table to read, so it sets all three to

@@ -2,8 +2,9 @@ name: Python version
 description: >-
   Select the Python line the caller's root .python-version names as X.Y.
   CI then follows the repository's own line, whether or not it is the fleet default.
-  A caller carrying no such file yet gets the fallback line the selection step names,
-  which the hub's tests hold to the .python-version baseline.
+  A caller carrying no such file gets the fallback line the selection step names, with a warning,
+  which the hub's tests hold to the Python devcontainer snippet's line.
+  A file naming no X.Y line fails the step, rather than run CI on a line the file does not name.
 
 inputs:
   warn:
@@ -42,14 +43,13 @@ runs:
         fi
         if [[ "$selected" =~ ^[0-9]+\.[0-9]+$ ]]; then
           version=$selected
+        elif [[ -f .python-version ]]; then
+          echo "::error::The root .python-version names no X.Y line on its first line that is neither blank nor a comment."
+          exit 1
         else
           version=$fallback
           if [[ "$WARN" == "true" ]]; then
-            if [[ -f .python-version ]]; then
-              echo "::warning::The root .python-version names no X.Y line, so this uses the $fallback fallback."
-            else
-              echo "::warning::No root .python-version selects a Python line, so this uses the $fallback fallback."
-            fi
+            echo "::warning::No root .python-version selects a Python line, so this uses the $fallback fallback."
           fi
         fi
         echo "version=$version" >> "$GITHUB_OUTPUT"

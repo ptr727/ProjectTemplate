@@ -45,8 +45,8 @@
 - **Use modern syntax**: `list[int]` not `List[int]`, `dict[str, X]` not `Dict[str, X]`,
   `X | None` not `Optional[X]`, `from __future__ import annotations` only when needed for forward
   references.
-- **Don't hedge that syntax for an older interpreter.** `pyproject.toml` pins `target-version` /
-  `python_version` to 3.13 for every Python profile in this repo. `spec/host-tools.json`
+- **Don't hedge that syntax for an older interpreter.** In the hub, the lint-only `pyproject.toml` pins
+  `target-version` / `python_version` to 3.13, the line its root `.python-version` selects. `spec/host-tools.json`
   carries that as the host floor `scripts/host_gate.py` enforces. As a result of both, 3.10+-only syntax
   (`X | None`, `match`, etc.) needs no quoting and no `typing.Union` fallback on that account alone. It also needs no
   `from __future__ import annotations` guard on that account alone. Add that import only when a real forward reference
