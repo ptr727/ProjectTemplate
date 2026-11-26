@@ -35,7 +35,10 @@ Runs the fleet Docker lint set with one bounded and observable procedure:
 ```sh
 python3 scripts/docker_lint.py
 python3 scripts/docker_lint.py --timeout 120 --linter markdownlint --linter cspell
+python3 scripts/docker_lint.py --pull "<image>"
 ```
+
+`--pull` only pulls each named image and lints nothing, and it cannot be combined with `--linter`. A failed pull is retried twice, after 15 seconds and then 30, and a timed-out pull is not retried. This is the one Docker pull retry in the hub. `validate-task.yml`'s EditorConfig, shell, and PowerShell steps pull through `--pull` before they start a container. Each pulls only where it has targets. The `docker-lint-pins` action names the script at the workflow's own ref, so a pinned caller always runs a copy that has `--pull`. The repo gate's `composite-actions` check loads this script from its hub tree for its shellcheck pull.
 
 The runner discovers tracked and unignored targets, excluding any path under `node_modules` at any depth, before pulling applicable images. It resolves each pull to a repository digest before execution. Lint containers use disabled networking and a read-only mount of a temporary snapshot. The snapshot holds only the tracked and unignored files, so a git-ignored file never reaches a container. Long target lists run in bounded batches. PSScriptAnalyzer installs its pinned module without any repository mount.
 

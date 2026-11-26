@@ -1331,12 +1331,13 @@ class TestCompositeActions(TreeCase):
         with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
             self.assertEqual("docker info exited 1", repo_gate.docker_unreachable())
         ok = subprocess.CompletedProcess([], 0, b"", b"")
-        bad = subprocess.CompletedProcess([], 1, b"", b"no route")
+        bad = subprocess.CompletedProcess([], 1, "", "no route")
         with (
             mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad, bad, bad, bad]),
-            mock.patch.object(repo_gate.time, "sleep"),
+            mock.patch("time.sleep"),
+            contextlib.redirect_stdout(io.StringIO()),
         ):
-            self.assertIn("exited 1: no route", repo_gate.docker_unreachable() or "")
+            self.assertIn("(exit 1): no route", repo_gate.docker_unreachable() or "")
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, ok]) as run:
             self.assertIsNone(repo_gate.docker_unreachable())
         self.assertEqual(2, run.call_count)
@@ -1348,27 +1349,58 @@ class TestCompositeActions(TreeCase):
         with mock.patch.object(repo_gate.subprocess, "run", side_effect=timeout):
             self.assertIn("did not answer", repo_gate.docker_unreachable() or "")
 
-    def test_a_failed_pull_is_retried_within_the_bound(self) -> None:
+    def test_a_failed_pull_is_retried_on_docker_lint_s_one_schedule(self) -> None:
+        """The gate pulls through the hub's docker_lint.py, so its retry is the lint steps' retry."""
+        docker_lint = repo_gate.hub_script(REPO, "docker_lint")
         ok = subprocess.CompletedProcess([], 0, b"", b"")
-        bad = subprocess.CompletedProcess([], 1, b"", b"connection reset by peer")
+        missing = subprocess.CompletedProcess([], 1, b"", b"")
+        bad = subprocess.CompletedProcess([], 1, "", "connection reset by peer\n")
         sleeps: list[float] = []
         with (
-            mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, bad, bad, ok]) as run,
-            mock.patch.object(repo_gate.time, "sleep", sleeps.append),
+            mock.patch.object(
+                repo_gate.subprocess, "run", side_effect=[ok, missing, bad, ok]
+            ) as run,
+            mock.patch("time.sleep", sleeps.append),
+            contextlib.redirect_stdout(io.StringIO()),
         ):
             self.assertIsNone(repo_gate.docker_unreachable())
         image = repo_gate.shellcheck_image()
         pulls = [c.args[0] for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
         self.assertEqual([["docker", "pull", "--quiet", image]] * 2, pulls)
-        self.assertEqual([5], sleeps)
-        bad_every_time = [ok, bad] + [bad] * repo_gate.PULL_ATTEMPTS
+        self.assertEqual([docker_lint.PULL_BACKOFF], sleeps)
+        bad_every_time = [ok, missing] + [bad] * docker_lint.PULL_ATTEMPTS
         with (
             mock.patch.object(repo_gate.subprocess, "run", side_effect=bad_every_time) as run,
-            mock.patch.object(repo_gate.time, "sleep", sleeps.append),
+            mock.patch("time.sleep"),
+            contextlib.redirect_stdout(io.StringIO()),
         ):
             reason = repo_gate.docker_unreachable() or ""
-        self.assertIn("connection reset by peer (attempt 3 of 3)", reason)
-        self.assertEqual(2 + repo_gate.PULL_ATTEMPTS, run.call_count)
+        self.assertEqual(
+            f"docker pull of {image} failed: container failure (exit 1): connection reset by peer",
+            reason,
+        )
+        self.assertEqual(2 + docker_lint.PULL_ATTEMPTS, run.call_count)
+        timeout = subprocess.TimeoutExpired("docker", 1)
+        with (
+            mock.patch.object(
+                repo_gate.subprocess, "run", side_effect=[ok, missing, timeout]
+            ) as run,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            reason = repo_gate.docker_unreachable() or ""
+        self.assertIn("timed out after 300s", reason)
+        self.assertEqual(3, run.call_count)
+
+    def test_a_docker_lint_that_will_not_load_is_the_reason(self) -> None:
+        ok = subprocess.CompletedProcess([], 0, b"", b"")
+        missing = subprocess.CompletedProcess([], 1, b"", b"")
+        with (
+            mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, missing]),
+            mock.patch.object(repo_gate, "hub_script", side_effect=SyntaxError("newer syntax")),
+        ):
+            reason = repo_gate.docker_unreachable() or ""
+        self.assertIn("scripts/docker_lint.py, which holds the pull retry, failed to load", reason)
+        self.assertIn("newer syntax", reason)
 
     def test_the_shellcheck_image_is_the_manifest_s_digest_pin(self) -> None:
         """The pin is the one the docker-lint-pins action and docker_lint.py read, never a moving tag."""

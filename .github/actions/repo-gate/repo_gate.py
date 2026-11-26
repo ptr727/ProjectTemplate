@@ -45,7 +45,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 from types import ModuleType
 from urllib.parse import quote
@@ -436,8 +435,6 @@ EXPRESSION_START = "${{"
 PIN_MANIFEST = ".github/actions/docker-lint-pins/Dockerfile"
 SHELLCHECK_PIN = re.compile(r"(?m)^FROM (\S+:[^\s@/]+@sha256:[0-9a-f]{64}) AS shellcheck[ \t]*$")
 SHELLCHECK_TIMEOUT = 300
-PULL_ATTEMPTS = 3
-PULL_BACKOFF = 5
 SCHEMA_TIMEOUT = 300
 YAML_TIMEOUT = 60
 DOCKER_TIMEOUT = 30
@@ -711,7 +708,8 @@ def docker_unreachable() -> str | None:
 
     The explicit pull makes a fetch failure one finding with its reason, rather than one per body.
     The image is pinned by digest, so a locally cached copy is the one CI pulls.
-    A pull exiting non-zero is retried a bounded number of times, as a registry error is often transient.
+    The pull runs through the hub's `docker_lint.py`, whose bounded retry every Docker lint pull shares.
+    That script runs under whatever `python3` the host has, so any failure to load it is a reason.
     """
     try:
         image = shellcheck_image()
@@ -740,26 +738,17 @@ def docker_unreachable() -> str | None:
         return f"docker image inspect could not start: {error}"
     if present.returncode == 0:
         return None
-    failure = ""
-    for attempt in range(PULL_ATTEMPTS):
-        if attempt:
-            time.sleep(PULL_BACKOFF * attempt)
-        try:
-            pull = subprocess.run(
-                ["docker", "pull", "--quiet", image],
-                capture_output=True,
-                check=False,
-                timeout=SHELLCHECK_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired:
-            return f"docker pull did not finish within {SHELLCHECK_TIMEOUT}s"
-        except OSError as error:
-            return f"docker pull could not start: {error}"
-        if pull.returncode == 0:
-            return None
-        detail = pull.stderr.decode("utf-8", errors="replace").strip()
-        failure = f"docker pull of {image} exited {pull.returncode}: {detail}"
-    return f"{failure} (attempt {PULL_ATTEMPTS} of {PULL_ATTEMPTS})"
+    try:
+        docker_lint = hub_script(gate_hub_root(), "docker_lint")
+    except Exception as error:  # noqa: BLE001
+        return (
+            f"the hub's scripts/docker_lint.py, which holds the pull retry, failed to load: {error}"
+        )
+    try:
+        docker_lint.pull_image("shellcheck", image, SHELLCHECK_TIMEOUT, docker_lint.run_command)
+    except docker_lint.CommandFailed as error:
+        return f"docker pull of {image} failed: {error}"
+    return None
 
 
 def check_composite_shell(root: Path, path: str) -> list[str]:
@@ -868,15 +857,26 @@ def gate_hub_root() -> Path | None:
     return root if (root / "spec" / "files.json").is_file() else None
 
 
-def hub_carry(hub: Path) -> ModuleType:
-    """The hub's own `scripts/carry.py`, whose tree inventory and comparison this check reuses.
+def hub_script(hub: Path | None, name: str) -> ModuleType:
+    """The hub's own `scripts/<name>.py`, whose code a check here reuses rather than copies.
 
-    It imports only the standard library until a section is read, so plain `python3` loads it.
+    `carry.py` and `docker_lint.py` each import only the standard library at load, so plain
+    `python3` loads them. Raises ValueError where no hub tree is beside this gate.
+    A dataclass resolves its module through `sys.modules`, so the module is registered there.
+    It takes a name of its own, which leaves another import of the same script as it was.
     """
-    spec = importlib.util.spec_from_file_location("carry", hub / "scripts" / "carry.py")
+    if hub is None:
+        raise ValueError("no hub tree is beside this gate")
+    qualified = f"repo_gate_hub_{name}"
+    spec = importlib.util.spec_from_file_location(qualified, hub / "scripts" / f"{name}.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    sys.modules[qualified] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        del sys.modules[qualified]
+        raise
     return module
 
 
@@ -914,7 +914,7 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
     # Each failure is a note rather than a traceback, since one here would also skip every check sorted after this one.
     # The catches are broad because carry.py runs under whatever `python3` the host has, so a newer interpreter's API in it fails here as any exception.
     try:
-        carry = hub_carry(hub)
+        carry = hub_script(hub, "carry")
     except Exception as error:  # noqa: BLE001
         NOTES.append(
             f"the hub's scripts/carry.py could not be loaded, so no carried tree was compared: {error}"

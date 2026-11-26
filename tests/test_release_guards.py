@@ -1710,69 +1710,66 @@ gh() {
                 self.assertEqual(1, code)
                 self.assertIn("must pin shfmt on exactly one", stdout)
 
+    def test_docker_pins_names_the_docker_lint_script_in_its_own_hub_tree(self) -> None:
+        """The lint steps pull through this path, so it is the script at the action's own ref or nothing."""
+        definition = REPO / ".github/actions/docker-lint-pins/action.yml"
+        script = step_script(definition, "Locate Docker lint script step")
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        action = REPO / ".github/actions/docker-lint-pins"
+        code, _, _, written = run_step_script(script, root, {"GITHUB_ACTION_PATH": str(action)})
+        self.assertEqual(0, code)
+        named = Path(written.removeprefix("docker-lint=").rstrip("\n"))
+        self.assertTrue(written.startswith("docker-lint="), written)
+        self.assertEqual((REPO / "scripts/docker_lint.py").resolve(), named.resolve())
+        lifted = root / "a/b/c"
+        lifted.mkdir(parents=True)
+        code, stdout, _, written = run_step_script(
+            script, root, {"GITHUB_ACTION_PATH": str(lifted)}
+        )
+        self.assertEqual((1, ""), (code, written))
+        self.assertIn("is not in the hub tree this action runs from", stdout)
+
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
         "runs stand-in tools only a POSIX host can execute",
     )
-    def test_the_editorconfig_step_retries_a_failed_pull_within_its_bound(self) -> None:
-        """A registry blip fails a pull a later attempt completes, and a lasting failure still fails the step."""
+    def test_the_editorconfig_step_pulls_through_docker_lint_before_it_runs(self) -> None:
+        """A pull the shared retry gives up on fails the step before any container starts."""
         workflow = REPO / ".github/workflows/validate-task.yml"
         script = step_script(workflow, "Check EditorConfig step")
-        cases = (
-            (2, 1, 0, 3, "15\n30\n", True),
-            (3, 1, 1, 3, "15\n30\n", False),
-            (1, 124, 1, 1, "", False),
-        )
-        for failures, exit_code, code, pulls, sleeps, ran in cases:
-            with self.subTest(failures=failures, exit_code=exit_code):
+        image = "r.io/ec:1.0@sha256:" + "a" * 64
+        for pull_exit, code, ran in ((0, 0, True), (1, 1, False)):
+            with self.subTest(pull_exit=pull_exit):
                 root = Path(self.enterContext(tempfile.TemporaryDirectory()))
                 tools = root / "bin"
                 tools.mkdir()
-                (root / "failures").write_text(str(failures), encoding="utf-8")
-                (root / "sleep.log").write_text("", encoding="utf-8")
                 stubs = {
-                    "docker": (
-                        'echo "$*" >> "$STUB_ROOT/docker.log"\n'
-                        'if [ "$1" = pull ]; then\n'
-                        '  left=$(cat "$STUB_ROOT/failures")\n'
-                        '  if [ "$left" -gt 0 ]; then echo $((left - 1)) > "$STUB_ROOT/failures"; exit "$STUB_EXIT"; fi\n'
-                        "fi\n"
-                    ),
-                    "sleep": 'echo "$1" >> "$STUB_ROOT/sleep.log"\n',
-                    "timeout": 'shift\nexec "$@"\n',
+                    "docker": 'echo "docker $*" >> "$STUB_ROOT/calls.log"\n',
+                    "python3": 'echo "python3 $*" >> "$STUB_ROOT/calls.log"\nexit "$STUB_EXIT"\n',
                 }
                 for name, body in stubs.items():
                     stub = tools / name
                     stub.write_text("#!/usr/bin/env bash\n" + body, encoding="utf-8")
                     stub.chmod(0o755)
-                result = run(
-                    [bash_or_skip(), "-c", script],
-                    cwd=root,
-                    env={
-                        **os.environ,
+                code_seen, stdout, stderr, _ = run_step_script(
+                    script,
+                    root,
+                    {
                         "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
                         "STUB_ROOT": str(root),
-                        "STUB_EXIT": str(exit_code),
-                        "EDITORCONFIG_IMAGE": "r.io/ec:1.0@sha256:" + "a" * 64,
+                        "STUB_EXIT": str(pull_exit),
+                        "DOCKER_LINT": "/hub/scripts/docker_lint.py",
+                        "EDITORCONFIG_IMAGE": image,
                     },
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    timeout=60,
-                    check=False,
                 )
-                log = (root / "docker.log").read_text(encoding="utf-8").splitlines()
-                self.assertEqual(code, result.returncode, result.stdout + result.stderr)
-                self.assertEqual(
-                    pulls, sum(line.startswith("pull --quiet r.io/ec:1.0@") for line in log)
-                )
-                self.assertEqual(sleeps, (root / "sleep.log").read_text(encoding="utf-8"))
-                runs = [line for line in log if line.startswith("run ")]
-                self.assertEqual(ran, bool(runs), log)
-                self.assertTrue(all("--pull" not in line for line in runs), runs)
+                log = (root / "calls.log").read_text(encoding="utf-8").splitlines()
+                self.assertEqual(code, code_seen, stdout + stderr)
+                self.assertEqual(f"python3 /hub/scripts/docker_lint.py --pull {image}", log[0])
+                self.assertEqual(ran, any(line.startswith("docker run ") for line in log), log)
+                self.assertFalse(any(line.startswith("docker pull") for line in log), log)
 
-    def test_every_docker_step_carries_the_tested_pull_retry(self) -> None:
-        """The steps share no shell function, so each copy is held to the one the retry test runs."""
+    def test_every_docker_step_pulls_through_the_shared_retry(self) -> None:
+        """No step carries a pull loop of its own, so the retry and its schedule live in docker_lint.py alone."""
         workflow = REPO / ".github/workflows/validate-task.yml"
         text = workflow.read_text(encoding="utf-8")
         scripts = {}
@@ -1784,31 +1781,32 @@ gh() {
                         line for line in script.splitlines() if not line.lstrip().startswith("#")
                     )
                     if "docker run" in script:
-                        scripts[name] = script
+                        scripts[name] = (yaml_step(job, name), script)
         self.assertIn("Check EditorConfig step", scripts)
         self.assertGreaterEqual(len(scripts), 3, list(scripts))
         # A one-line run: step is not collected above, so every container start in the file is counted.
         code = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
-        collected = sum(script.count("docker run") for script in scripts.values())
+        collected = sum(script.count("docker run") for _, script in scripts.values())
         self.assertEqual(code.count("docker run"), collected)
+        self.assertNotIn("docker pull", code)
         images = re.findall(r"(?m)^ *(\w+_IMAGE): (.+)$", text)
         self.assertGreaterEqual(len(images), 4, images)
         for variable, value in images:
             with self.subTest(variable=variable):
                 self.assertRegex(value, r"^\$\{\{ steps\.docker-pins\.outputs\.[a-z-]+ \}\}$")
-        bodies = set()
-        for name, script in scripts.items():
+        for name, (step, script) in scripts.items():
             with self.subTest(step=name):
-                found = re.search(r"(?ms)^pull\(\) \{\n.*?^\}\n", script)
-                assert found is not None, script
-                bodies.add(found.group(0))
+                self.assertIn("DOCKER_LINT: ${{ steps.docker-pins.outputs.docker-lint }}\n", step)
                 runs = list(re.finditer(r'docker run [^\n]*?"\$(\w+_IMAGE)"', script))
                 self.assertEqual(script.count("docker run"), len(runs), script)
                 for run_match in runs:
-                    pulled = script.find(f'pull "${run_match.group(1)}"')
-                    self.assertNotEqual(-1, pulled, run_match.group(0))
-                    self.assertLess(pulled, run_match.start(), run_match.group(0))
-        self.assertEqual(1, len(bodies), bodies)
+                    pulled = re.search(
+                        rf'(?m)^ *python3 "\$DOCKER_LINT"( --pull "\$\w+_IMAGE")*'
+                        rf' --pull "\${run_match.group(1)}"',
+                        script,
+                    )
+                    assert pulled is not None, run_match.group(0)
+                    self.assertLess(pulled.start(), run_match.start(), run_match.group(0))
 
     def test_docker_pins_manifest_is_dependabot_tracked_on_both_branches(self) -> None:
         """A digest nothing bumps goes stale, so each branch's docker entry watches the manifest's directory."""
