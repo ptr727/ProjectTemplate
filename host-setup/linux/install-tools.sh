@@ -1410,7 +1410,9 @@ tool_note() {
     powershell)
         # A host without the feed reads no candidate at all, since the distro never carries a powershell package.
         # So the note says why rather than reading as absent.
-        if ! microsoft_feed_configured; then
+        if ! microsoft_feed_arch; then
+            note "powershell" "Microsoft's feed carries amd64 only, so no package is available on $ARCH"
+        elif ! microsoft_feed_configured; then
             note "powershell" "Microsoft's repository is not configured, so no package is available yet"
         fi
         ;;
@@ -1422,7 +1424,7 @@ tool_note() {
         if [[ -f "$SOURCES_DIR/1password.list" ]] && ! tool_configured op; then
             note "op" "1Password's one-line 1password.list is configured instead of 1password.sources, and an install or upgrade replaces it"
         elif ! tool_configured op; then
-            note "op" "1Password's repository is not configured, so no package is available yet"
+            note "op" "1Password's repository is not configured, so apt reads no upstream version yet"
         fi
         local resolved
         resolved=$(unowned_command_path op) || exit 1
@@ -1631,6 +1633,8 @@ apply_tool() {
 
     if [[ $status == "current" ]]; then
         log "$tool: current at ${installed}, checking the package set"
+    elif [[ $status == "unmanaged" && -z $installed && $tool == "dotnet" ]]; then
+        log "$tool: no apt package is installed and Microsoft's feed is not configured, so this install refreshes apt and adds the feed only where the refreshed lists show no distro SDK"
     elif [[ $status == "unmanaged" && -z $installed ]]; then
         log "$tool: no apt package is installed and Microsoft's feed is not configured, so this install adds it where Microsoft publishes one for this release"
     elif [[ $status == "unmanaged" ]]; then
