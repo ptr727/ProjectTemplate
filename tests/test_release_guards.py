@@ -1784,6 +1784,23 @@ gh() {
                 self.assertEqual(ran, bool(runs), log)
                 self.assertTrue(all("--pull" not in line for line in runs), runs)
 
+    def test_every_docker_step_carries_the_tested_pull_retry(self) -> None:
+        """The steps share no shell function, so each copy is held to the one the retry test runs."""
+        workflow = REPO / ".github/workflows/validate-task.yml"
+        steps = (
+            "Check EditorConfig step",
+            "Check shell scripts step",
+            "Check PowerShell scripts step",
+        )
+        bodies = set()
+        for step in steps:
+            found = re.search(r"(?ms)^pull\(\) \{\n.*?^\}\n", step_script(workflow, step))
+            with self.subTest(step=step):
+                self.assertIsNotNone(found)
+            if found is not None:
+                bodies.add(found.group(0))
+        self.assertEqual(1, len(bodies), bodies)
+
     def test_docker_pins_manifest_is_dependabot_tracked_on_both_branches(self) -> None:
         """A digest nothing bumps goes stale, so each branch's docker entry watches the manifest's directory."""
         config = (REPO / ".github/dependabot.yml").read_text(encoding="utf-8")
