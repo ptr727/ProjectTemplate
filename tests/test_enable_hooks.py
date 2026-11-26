@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -20,6 +21,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import FrameType
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "enable_hooks.py"
@@ -374,6 +376,33 @@ class TestInterrupt(EnableHooksCase):
                         end_group(proc)
                         with contextlib.suppress(ProcessLookupError):
                             os.killpg(proc.pid, signal.SIGKILL)
+
+
+class TestFirstSignal(unittest.TestCase):
+    def test_a_signal_handled_as_the_first_handler_starts_is_passed_over(self) -> None:
+        """A SIGTERM handled as the SIGINT's handler starts leaves the SIGINT first.
+
+        Python checks for signals as a function starts, so the pair can be handled there.
+        A profile hook makes that nested call at that point, so the order is fixed, not raced.
+        """
+        spec = importlib.util.spec_from_file_location("enable_hooks_under_test", SCRIPT)
+        assert spec is not None
+        assert spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        def nest(frame: FrameType, event: str, _arg: object) -> None:
+            if event == "call" and frame.f_code is module.on_signal.__code__:
+                sys.setprofile(None)
+                module.on_signal(signal.SIGTERM, frame)
+
+        sys.setprofile(nest)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                module.on_signal(signal.SIGINT, None)
+        finally:
+            sys.setprofile(None)
+        self.assertEqual([signal.SIGINT], module.received)
 
 
 if __name__ == "__main__":
