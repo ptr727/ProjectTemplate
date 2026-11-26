@@ -902,22 +902,19 @@ def hub_repo_name() -> str:
     return hub_name()[0]
 
 
-HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
-
-
 def gh(path, ok404=False) -> Any:
-    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body."""
-    r = subprocess.run(
-        ["gh", "api", path], capture_output=True, text=True, encoding="utf-8", check=False
-    )
-    if r.returncode != 0:
-        status = HTTP_STATUS.search(r.stderr)
+    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body.
+
+    The run is scripts/gh_graphql.py's, which pins the host to github.com, where the registry names every repository.
+    """
+    transport = validate.scripts_module("gh_graphql")
+    code, out, err = transport.run_subprocess(["gh", "api", path])
+    if code != 0:
+        status = transport.HTTP_STATUS.search(err)
         if ok404 and status is not None and status.group(1) == "404":
             return None
-        raise RuntimeError(
-            f"gh api {path}: {r.stderr.strip().splitlines()[-1] if r.stderr else 'failed'}"
-        )
-    return json.loads(r.stdout) if r.stdout.strip() else None
+        raise RuntimeError(f"gh api {path}: {err.strip().splitlines()[-1] if err else 'failed'}")
+    return json.loads(out) if out.strip() else None
 
 
 def owner_repos(owner):
@@ -2308,13 +2305,10 @@ def check_secrets_stems(run):
 
 def check_secrets_names(run):
     """Secret names per store, never values, against what the applicable mechanisms require and forbid."""
-    secrets = run.spec["secrets"]
-    stores = {}
-    # No ok404, since an empty store returns an empty list and a 404 is a failed call.
-    for store in ("actions", "dependabot"):
-        data = gh(f"repos/{run.slug}/{store}/secrets?per_page=100")
-        stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
-    required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree, run.read_project)
+    stores = audit_environments.resolve_secrets.read_live_names(run.slug)
+    required, forbidden = resolve_secret_stores(
+        run.spec["secrets"], run.entry, run.tree, run.read_project
+    )
     return [f for f in compare_stores(required, forbidden, stores) if f[0] != "OK"]
 
 

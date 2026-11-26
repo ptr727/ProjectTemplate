@@ -186,7 +186,7 @@ class ReadCase(unittest.TestCase):
             ],
         )
 
-    def test_names_projects_to_names_inside_gh_on_a_pinned_host(self) -> None:
+    def test_the_reader_projects_to_names_inside_gh(self) -> None:
         argvs: list[list[str]] = []
 
         def gh(argv: list[str]) -> tuple[int, str, str]:
@@ -194,9 +194,9 @@ class ReadCase(unittest.TestCase):
             return 0, "ALPHA\nBETA\n", ""
 
         with mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh):
-            got = audit_environments.names(f"repos/{SLUG}/environments", "environments")
+            got = resolve_secrets.read_names(f"repos/{SLUG}/environments", "environments")
         self.assertEqual(got, ["ALPHA", "BETA"])
-        self.assertEqual(argvs[0][:5], ["gh", "api", "--paginate", "--hostname", "github.com"])
+        self.assertEqual(argvs[0][:3], ["gh", "api", "--paginate"])
         self.assertEqual(argvs[0][-2:], ["--jq", ".environments[].name"])
 
     def test_a_failed_read_raises_rather_than_answering_empty(self) -> None:
@@ -207,14 +207,14 @@ class ReadCase(unittest.TestCase):
             mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh),
             self.assertRaisesRegex(resolve_secrets.ResolveError, r"acme/Widget: .*HTTP 403"),
         ):
-            audit_environments.names(f"repos/{SLUG}/environments", "environments")
+            audit_environments.environment_findings(SLUG, entry(), frozenset())
 
     def check(self, live: Live, forbidden: set[str]) -> list[Any]:
         """audit.check_secrets_environments, its forbidden set and its reads both replaced."""
         run = audit.Run(entry(STAGING), {"secrets": {}}, SLUG, "main", {}, None, None)
         with (
             mock.patch.object(audit, "resolve_secret_stores", lambda *_: ({}, forbidden)),
-            mock.patch.object(audit_environments, "names", reader(live)),
+            mock.patch.object(resolve_secrets, "read_names", reader(live)),
         ):
             return audit.check_secrets_environments(run)
 
@@ -241,7 +241,7 @@ class ReadCase(unittest.TestCase):
         run = audit.Run(entry(STAGING), {"secrets": {}}, SLUG, "main", {}, None, None)
         with (
             mock.patch.object(audit, "resolve_secret_stores", lambda *_: ({}, set())),
-            mock.patch.object(audit_environments, "names", fail),
+            mock.patch.object(resolve_secrets, "read_names", fail),
             self.assertRaisesRegex(resolve_secrets.ResolveError, "HTTP 403"),
         ):
             audit.check_secrets_environments(run)
