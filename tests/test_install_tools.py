@@ -697,11 +697,41 @@ printf '%s|%s' "$(tool_effective_status {tool} '{installed}' '{target}')" "$(dot
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def test_an_installed_tool_keeps_its_status_without_the_feed(self) -> None:
-        for tool in ("powershell", "dotnet"):
-            with self.subTest(tool=tool):
-                out = self.probe(tool, "amd64", [], "", installed="7.4.0-1", target="7.4.0-1")
-                self.assertEqual(out.partition("|")[0], "current")
+    def test_an_installed_dotnet_keeps_its_status_without_the_feed(self) -> None:
+        out = self.probe("dotnet", "amd64", [], "", installed="8.0.1", target="8.0.1")
+        self.assertEqual(out.partition("|")[0], "current")
+
+    def test_an_installed_powershell_reads_unmanaged_only_where_the_feed_would_be_added(
+        self,
+    ) -> None:
+        cases: tuple[tuple[str, list[str], str], ...] = (
+            ("amd64", [], "unmanaged"),
+            ("amd64", ["microsoft-prod.sources"], "current"),
+            ("arm64", [], "current"),
+        )
+        for arch, files, expected in cases:
+            with self.subTest(arch=arch, files=files):
+                out = self.probe(
+                    "powershell", arch, files, "", installed="7.4.0-1", target="7.4.0-1"
+                )
+                self.assertEqual(out.partition("|")[0], expected)
+
+    def test_dotnet_with_nothing_installed_says_the_install_refreshes_before_adding_the_feed(
+        self,
+    ) -> None:
+        result = self.run_bash("""
+MODE=install
+tool_function() { printf 'stub_%s' "$2"; }
+stub_version() { :; }
+stub_target() { :; }
+stub_source() { printf 'packages.microsoft.com'; }
+stub_install() { echo "INSTALL RAN"; }
+tool_effective_status() { printf 'unmanaged'; }
+apply_tool dotnet
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("only where the refreshed lists show no distro SDK", result.stdout)
+        self.assertIn("INSTALL RAN", result.stdout)
 
     def test_an_unmanaged_tool_with_nothing_installed_says_the_install_adds_the_feed(self) -> None:
         result = self.run_bash("""

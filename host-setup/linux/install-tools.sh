@@ -1229,6 +1229,7 @@ tool_configured() {
     gh | node) [[ -f "$SOURCES_DIR/$(tool_sources_stem "$1").sources" ]] ;;
     # No distro carries 1password-cli, so the cases this guards are the vendor's one-line source and a .deb installed by hand.
     op) [[ -f "$SOURCES_DIR/1password.sources" ]] ;;
+    powershell) microsoft_feed_configured || ! microsoft_feed_arch ;;
     *) return 0 ;;
     esac
 }
@@ -1413,7 +1414,7 @@ tool_note() {
         if ! microsoft_feed_arch; then
             note "powershell" "Microsoft's feed carries amd64 only, so no package is available on $ARCH"
         elif ! microsoft_feed_configured; then
-            note "powershell" "Microsoft's repository is not configured, so no package is available yet"
+            note "powershell" "Microsoft's repository is not configured, so apt reads no upstream version yet"
         fi
         ;;
     op)
