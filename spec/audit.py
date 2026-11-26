@@ -2319,7 +2319,8 @@ def check_secrets_names(run):
 
 
 def check_secrets_environments(run):
-    return audit_environments.environment_findings(run.slug, run.entry)
+    forbidden = resolve_secret_stores(run.spec["secrets"], run.entry, run.tree, run.read_project)[1]
+    return audit_environments.environment_findings(run.slug, run.entry, forbidden)
 
 
 def check_dependabot_ecosystems(run):

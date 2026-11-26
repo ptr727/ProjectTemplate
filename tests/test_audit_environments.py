@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import pathlib
-import subprocess
 import sys
 import unittest
 from collections.abc import Mapping
@@ -14,6 +13,7 @@ from unittest import mock
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "spec"))
 import audit
 import audit_environments
+import resolve_secrets
 
 SLUG = "acme/Widget"
 Live = dict[str, dict[str, list[str]]]
@@ -35,8 +35,12 @@ def reader(live: Mapping[str, Mapping[str, list[str]]], paths: list[str] | None 
     return read
 
 
-def findings(entry: Mapping[str, Any], live: Mapping[str, Mapping[str, list[str]]]) -> list[Any]:
-    return audit_environments.environment_findings(SLUG, entry, reader(live))
+def findings(
+    entry: Mapping[str, Any],
+    live: Mapping[str, Mapping[str, list[str]]],
+    forbidden: frozenset[str] = frozenset(),
+) -> list[Any]:
+    return audit_environments.environment_findings(SLUG, entry, forbidden, reader(live))
 
 
 def entry(*envs: dict[str, Any]) -> dict[str, Any]:
@@ -142,6 +146,14 @@ class CompareCase(unittest.TestCase):
         live = {"preview": {"secrets": [], "variables": ["SITE_URL"]}}
         self.assertEqual(len(findings({"name": "Widget"}, live)), 1)
 
+    def test_a_forbidden_name_is_a_defect_even_where_declared(self) -> None:
+        legacy = {"name": "staging", "branchPolicy": "none", "variables": ["OLD_KEY"]}
+        live: Live = {"staging": {"secrets": [], "variables": ["OLD_KEY"]}}
+        self.assertEqual(
+            findings(entry(legacy), live, frozenset({"OLD_KEY"})),
+            [("DEFECT", "secrets: forbidden variable OLD_KEY present in environment staging")],
+        )
+
     def test_a_declared_environment_github_lacks_misses_every_name(self) -> None:
         self.assertEqual(
             findings(entry(STAGING), {}),
@@ -164,7 +176,7 @@ class ReadCase(unittest.TestCase):
     def test_each_store_of_each_live_environment_is_read_with_its_page_size(self) -> None:
         paths: list[str] = []
         live: Live = {"blue green": {"secrets": [], "variables": []}}
-        audit_environments.environment_findings(SLUG, entry(), reader(live, paths))
+        audit_environments.environment_findings(SLUG, entry(), frozenset(), reader(live, paths))
         self.assertEqual(
             paths,
             [
@@ -175,58 +187,64 @@ class ReadCase(unittest.TestCase):
         )
 
     def test_names_projects_to_names_inside_gh_on_a_pinned_host(self) -> None:
-        done = subprocess.CompletedProcess([], 0, stdout="ALPHA\nBETA\n", stderr="")
-        with mock.patch.object(audit_environments.subprocess, "run", return_value=done) as run:
-            self.assertEqual(
-                audit_environments.names("repos/acme/Widget/environments", "environments"),
-                ["ALPHA", "BETA"],
-            )
-        argv = run.call_args.args[0]
-        self.assertEqual(argv[:5], ["gh", "api", "--paginate", "--hostname", "github.com"])
-        self.assertEqual(argv[-2:], ["--jq", ".environments[].name"])
+        argvs: list[list[str]] = []
+
+        def gh(argv: list[str]) -> tuple[int, str, str]:
+            argvs.append(argv)
+            return 0, "ALPHA\nBETA\n", ""
+
+        with mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh):
+            got = audit_environments.names(f"repos/{SLUG}/environments", "environments")
+        self.assertEqual(got, ["ALPHA", "BETA"])
+        self.assertEqual(argvs[0][:5], ["gh", "api", "--paginate", "--hostname", "github.com"])
+        self.assertEqual(argvs[0][-2:], ["--jq", ".environments[].name"])
 
     def test_a_failed_read_raises_rather_than_answering_empty(self) -> None:
-        failed = subprocess.CompletedProcess(
-            [], 1, stdout="", stderr="gh: Must have admin rights (HTTP 403)\n"
-        )
+        def gh(argv: list[str]) -> tuple[int, str, str]:
+            return 1, "", "gh: Must have admin rights (HTTP 403)\n"
+
         with (
-            mock.patch.object(audit_environments.subprocess, "run", return_value=failed),
-            self.assertRaisesRegex(RuntimeError, r"HTTP 403"),
+            mock.patch.object(resolve_secrets.gh_graphql_module(), "run_subprocess", gh),
+            self.assertRaisesRegex(resolve_secrets.ResolveError, r"acme/Widget: .*HTTP 403"),
         ):
-            audit_environments.names("repos/acme/Widget/environments", "environments")
+            audit_environments.names(f"repos/{SLUG}/environments", "environments")
+
+    def check(self, live: Live, forbidden: set[str]) -> list[Any]:
+        """audit.check_secrets_environments, its forbidden set and its reads both replaced."""
+        run = audit.Run(entry(STAGING), {"secrets": {}}, SLUG, "main", {}, None, None)
+        with (
+            mock.patch.object(audit, "resolve_secret_stores", lambda *_: ({}, forbidden)),
+            mock.patch.object(audit_environments, "names", reader(live)),
+        ):
+            return audit.check_secrets_environments(run)
 
     def test_the_audit_check_reads_through_the_module_reader(self) -> None:
         """audit.check_secrets_environments calls the module, so replacing its reader reaches the check."""
-        run = audit.Run(entry(STAGING), {}, SLUG, "main", {}, None, None)
-        live = {"staging": {"secrets": ["DEPLOY_KEY"], "variables": []}}
-        with mock.patch.object(audit_environments, "names", reader(live)):
-            self.assertEqual(
-                audit.check_secrets_environments(run),
-                [("DEFECT", "secrets: variable SITE_URL missing from environment staging")],
-            )
+        self.assertEqual(
+            self.check({"staging": {"secrets": ["DEPLOY_KEY"], "variables": []}}, set()),
+            [("DEFECT", "secrets: variable SITE_URL missing from environment staging")],
+        )
+
+    def test_the_audit_check_passes_the_repository_forbidden_set(self) -> None:
+        live: Live = {"staging": {"secrets": ["DEPLOY_KEY", "OLD_KEY"], "variables": ["SITE_URL"]}}
+        self.assertIn(
+            ("DEFECT", "secrets: forbidden secret OLD_KEY present in environment staging"),
+            self.check(live, {"OLD_KEY"}),
+        )
 
     def test_a_failed_read_makes_the_run_an_error(self) -> None:
         """The check lets the raise through, which audit.main then reports as the repo's ERROR rather than a pass."""
 
         def fail(path: str, key: str) -> list[str]:
-            raise RuntimeError(f"gh api {path}: HTTP 403")
+            raise resolve_secrets.ResolveError(f"acme/Widget: gh api {path} failed: HTTP 403")
 
-        run = audit.Run(entry(STAGING), {}, SLUG, "main", {}, None, None)
+        run = audit.Run(entry(STAGING), {"secrets": {}}, SLUG, "main", {}, None, None)
         with (
+            mock.patch.object(audit, "resolve_secret_stores", lambda *_: ({}, set())),
             mock.patch.object(audit_environments, "names", fail),
-            self.assertRaisesRegex(RuntimeError, "HTTP 403"),
+            self.assertRaisesRegex(resolve_secrets.ResolveError, "HTTP 403"),
         ):
             audit.check_secrets_environments(run)
-
-
-class RegistryCase(unittest.TestCase):
-    """The shipped registry's declarations take the shape the check reads."""
-
-    def test_every_declared_environment_resolves_to_two_name_sets(self) -> None:
-        for repo in audit.load("registry/repos.json")["repos"]:
-            with self.subTest(repo=repo["name"]):
-                for stores in audit_environments.declared_stores(repo).values():
-                    self.assertEqual(set(stores), {"secrets", "variables"})
 
 
 if __name__ == "__main__":

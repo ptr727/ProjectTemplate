@@ -504,6 +504,17 @@ def environment_errors_for_repo(repo, name):
     return errors
 
 
+def name_list_errors(names, label, kind):
+    """Shape errors for one declared list of GitHub secret or variable names, which `label` names."""
+    if not isinstance(names, list):
+        return [f"{label} must be an array of {kind} names"]
+    return [
+        f"{label} entry {s!r} is not a GitHub {kind} name ({SECRET_NAME_SHAPE})"
+        for s in names
+        if not isinstance(s, str) or not SECRET_NAME_RE.search(s)
+    ]
+
+
 def environment_name_list_errors(env, where):
     """Shape errors for one environment entry's optional `secrets` and `variables` name lists.
 
@@ -513,18 +524,13 @@ def environment_name_list_errors(env, where):
     Presence is the test, for the reason requiredSecrets gives: absence declares that the store holds nothing.
     """
     errors = []
-    for key in ("secrets", "variables"):
+    for key, kind in (("secrets", "secret"), ("variables", "variable")):
         if key not in env:
             continue
         names = env[key]
+        errors.extend(name_list_errors(names, f"{where} {key}", kind))
         if not isinstance(names, list):
-            errors.append(f"{where} {key} must be an array of names")
             continue
-        for s in names:
-            if not isinstance(s, str) or not SECRET_NAME_RE.search(s):
-                errors.append(
-                    f"{where} {key} entry {s!r} is not a GitHub name ({SECRET_NAME_SHAPE})"
-                )
         # A name declared twice is one requirement, so a second copy only hides which one a later edit meant to change.
         strings = [s for s in names if isinstance(s, str)]
         if duplicates := sorted(
@@ -1832,14 +1838,7 @@ def main(argv=()):
         # The key is read by spec/audit.py as `entry.get("requiredSecrets", [])`, which returns the null rather than the default, so a null reaches set() there and raises.
         secrets_decl = repo.get("requiredSecrets")
         if "requiredSecrets" in repo:
-            if not isinstance(secrets_decl, list):
-                errors.append(f"{name}: requiredSecrets must be an array of secret names")
-            else:
-                for s in secrets_decl:
-                    if not isinstance(s, str) or not SECRET_NAME_RE.search(s):
-                        errors.append(
-                            f"{name}: requiredSecrets entry {s!r} is not a GitHub secret name ({SECRET_NAME_SHAPE})"
-                        )
+            errors.extend(name_list_errors(secrets_decl, f"{name}: requiredSecrets", "secret"))
         # Each note is sliced and run through a regex by spec/audit.py to resolve the check ids it names.
         # So a non-string element raises there mid-run rather than reporting.
         # An audit that raises reports nothing at all, where the malformed note it choked on would have been one line.

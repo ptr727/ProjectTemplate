@@ -10,10 +10,12 @@ Only names leave `gh`. The variables endpoint returns each value beside its name
 answering empty, since an empty answer would read as a store holding nothing and therefore as a pass.
 """
 
-import subprocess
 import urllib.parse
 from collections.abc import Callable, Mapping
+from collections.abc import Set as AbstractSet
 from typing import Any
+
+import resolve_secrets
 
 Finding = tuple[str, str]
 Reader = Callable[[str, str], list[str]]
@@ -25,20 +27,21 @@ PAGE = {"environments": 100, "secrets": 100, "variables": 30}
 def names(path: str, key: str) -> list[str]:
     """The `name` of each element of `key` across every page of one REST path, or raise when gh fails.
 
-    The host is pinned because GH_HOST would otherwise point the read at another host.
+    The read runs through spec/resolve_secrets.py's gh_run, as its repository-store read does.
+    The host is pinned because the registry names every repository on github.com, which GH_HOST would move.
     The repository is already explicit in `path`, so GH_REPO resolves nothing here.
     """
-    r = subprocess.run(
-        ["gh", "api", "--paginate", "--hostname", "github.com", path, "--jq", f".{key}[].name"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if r.returncode != 0:
-        tail = r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "failed"
-        raise RuntimeError(f"gh api {path}: {tail}")
-    return r.stdout.splitlines()
+    command = [
+        "gh",
+        "api",
+        "--paginate",
+        "--hostname",
+        "github.com",
+        path,
+        "--jq",
+        f".{key}[].name",
+    ]
+    return resolve_secrets.gh_run(command, "/".join(path.split("/")[1:3])).splitlines()
 
 
 def held(slug: str, read: Reader) -> dict[str, dict[str, set[str]]]:
@@ -51,13 +54,16 @@ def held(slug: str, read: Reader) -> dict[str, dict[str, set[str]]]:
 
 
 def compare(
-    declared: Mapping[str, Mapping[str, set[str]]], live: Mapping[str, Mapping[str, set[str]]]
+    declared: Mapping[str, Mapping[str, set[str]]],
+    live: Mapping[str, Mapping[str, set[str]]],
+    forbidden: AbstractSet[str] = frozenset(),
 ) -> list[Finding]:
     """The findings from comparing what each environment holds with what the registry declares it holds.
 
     A declared name the store lacks is DEFECT, and so is a name held as the other kind instead.
     A held name the declaration omits is DRIFT, whether or not the registry declares its environment.
     A declared environment GitHub lacks holds nothing, so each name it declares is missing.
+    A forbidden name held in either store is DEFECT however it is declared, as it is in a repository store.
     """
     findings = []
     for env in sorted(set(declared) | set(live)):
@@ -85,6 +91,13 @@ def compare(
                         f"secrets: {KINDS[key]} {name} missing from environment {env}{absent}",
                     )
                 )
+            for name in sorted(have[key] & forbidden):
+                findings.append(
+                    (
+                        "DEFECT",
+                        f"secrets: forbidden {KINDS[key]} {name} present in environment {env}",
+                    )
+                )
             # The reverse pairing, already reported above as the declared kind's wrong-kind finding.
             reported = (want[other] - have[other]) & (have[key] - want[key])
             where = (
@@ -108,10 +121,11 @@ def declared_stores(entry: Mapping[str, Any]) -> dict[str, dict[str, set[str]]]:
 
 
 def environment_findings(
-    slug: str, entry: Mapping[str, Any], read: Reader | None = None
+    slug: str, entry: Mapping[str, Any], forbidden: AbstractSet[str], read: Reader | None = None
 ) -> list[Finding]:
     """Every finding for one repository's environment stores, read by name only.
 
+    `forbidden` is the set spec/secret_names.py's resolve_secret_stores gives the repository stores.
     `names` is looked up at call time rather than bound as a default, so a test replacing it is the one read.
     """
-    return compare(declared_stores(entry), held(slug, read or names))
+    return compare(declared_stores(entry), held(slug, read or names), forbidden)

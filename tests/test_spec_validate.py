@@ -1378,7 +1378,8 @@ class RegistryEnvironmentCase(unittest.TestCase):
     def test_a_store_name_list_must_be_an_array(self) -> None:
         env = {"name": "staging", "branchPolicy": "none", "variables": "SITE_URL"}
         self.assertEqual(
-            self.errors([env]), ["Fixture: environments[0] variables must be an array of names"]
+            self.errors([env]),
+            ["Fixture: environments[0] variables must be an array of variable names"],
         )
 
     def test_a_store_name_of_the_wrong_shape_is_rejected(self) -> None:
@@ -1390,7 +1391,7 @@ class RegistryEnvironmentCase(unittest.TestCase):
                     self.errors([env]),
                     [
                         (
-                            f"Fixture: environments[0] secrets entry {bad!r} is not a GitHub name "
+                            f"Fixture: environments[0] secrets entry {bad!r} is not a GitHub secret name "
                             f"({validate.SECRET_NAME_SHAPE})"
                         )
                     ],
