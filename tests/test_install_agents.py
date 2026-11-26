@@ -652,13 +652,16 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(self.called()[0], "mise upgrade herdr")
         self.assertEqual(self.report()["herdr"]["manager"], "mise")
 
-    def test_a_tool_with_no_recorded_package_name_is_reported_not_guessed(self) -> None:
+    def test_a_tool_npm_owns_is_reported_and_never_upgraded_through_npm(self) -> None:
         self.stub("herdr", "herdr 0.9.0", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes", "herdr")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), [])
-        self.assertIn("no npm package name is recorded for herdr", result.stdout)
+        self.assertIn(
+            "no managed tool is upgraded through npm, so upgrade herdr with npm by hand",
+            result.stdout,
+        )
 
     def plan(self, tool: str, path: str, manager: str) -> str:
         """Runs the script's own manager_plan, with the final call to main cut off so it can be sourced."""

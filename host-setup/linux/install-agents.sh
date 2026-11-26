@@ -6,17 +6,17 @@
 # An upgrade touches only a tool already present, so a host where nobody installed codex never gets codex from a nightly run.
 #
 # A tool installed through a package manager is never given its own updater, which would fight the manager for the same files.
-# An upgrade runs that manager's own upgrade for that one package instead: npm, bun, Homebrew, and mise.
+# An upgrade runs that manager's own upgrade for that one package instead: Homebrew and mise.
 # Nix is declarative and apt is upgraded by upgrade-host.sh, so each is reported and nothing is run.
-# Nothing here elevates, so an npm prefix this user cannot write to is reported with its command and left.
+# Nothing here elevates, so an npm prefix this user cannot write to is reported with its removal command and left.
 # The package name is a per-tool record in this file (npm_package), because a manager's files do not always carry it.
-# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not removed.
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # A mise shim is followed through mise which to the file it stands for.
 # A Node runtime is never upgraded for an agent inside it, since the new Node would not hold the agent.
 # A tool recording a managed copy is managed through that copy, and another copy ahead of it is reported for a fix by hand.
 # The Homebrew name is read from where brew put the files, and the mise key from mise's own listing.
-# The npm on PATH must confirm it owns the files, by their sitting under the global root it reports.
+# The npm on PATH must confirm it owns the files it removes, by their sitting under the global root it reports.
 # Every step is idempotent, and a tool that fails is reported while the rest still run.
 
 set -Eeuo pipefail
@@ -198,11 +198,9 @@ none, so an install always names what it installs, or says --all.
 
 A tool reads as "self" when no package manager owns it, so this script runs the tool's own
 updater, or for the managed opencode its installer, and as the name of a package manager when one owns it. --upgrade then runs that
-manager's upgrade for that one package: npm or bun install the latest tag, Homebrew upgrades the
-formula or cask, and mise upgrades the tool. An npm install also allows that one package's
-install scripts, which npm 12 otherwise skips. apt is upgraded by upgrade-host.sh, and Nix is
-declarative, so neither is run. An npm directory this user cannot write is reported with its
-command rather than run, and nothing here ever uses sudo. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
+manager's upgrade for that one package: Homebrew upgrades the formula or cask, and mise upgrades
+the tool. npm and bun are not run, since no managed tool is installed through them. apt is upgraded
+by upgrade-host.sh, and Nix is declarative, so neither is run. Nothing here ever uses sudo. herdr's agent integrations are reinstalled after an upgrade wherever herdr reports
 one outdated, and a herdr server still running the previous binary is left running and reported
 as needing a restart, since stopping it would end every pane inside it.
 
@@ -364,7 +362,7 @@ check_floor() {
     return 0
 }
 
-# The npm registry name of a tool, which npm and bun both install from, or nothing where none is recorded.
+# The npm registry name of a tool, which the removal of a stray npm or bun copy names, or nothing where none is recorded.
 # These are the names each tool's own documentation gives, and herdr and cswap are not published there.
 npm_package() {
     case "$1" in
@@ -487,37 +485,34 @@ mise_key() {
     return 0
 }
 
-# The npm or bun command for a step, upgrade or remove, on the package owning a real path, as PKG_CMD, or PKG_WHY where none runs.
-# An upgrade and a stray's removal share it.
-# An upgrade matches only the recorded package, while a removal also matches a name the tool shipped under earlier.
-# The matched name must own the files, so a fork providing the same command is never replaced or removed.
+# The npm or bun command that removes the package owning a real path, as PKG_CMD, or PKG_WHY where none runs.
+# Only a stray copy reaches it, since no managed tool is upgraded through npm or bun.
+# A removal also matches a name the tool shipped under earlier.
+# The matched name must own the files, so a fork providing the same command is never removed.
 PKG_CMD=()
 PKG_WHY=""
 
 package_step() {
-    local step="$1" tool="$2" real="$3" manager="$4" recorded pkg="" named candidate dir action names
+    local tool="$1" real="$2" manager="$3" recorded pkg="" named candidate dir
     local -a command=()
     PKG_CMD=()
     PKG_WHY=""
-    if [[ $step == "upgrade" ]]; then action="upgrade"; else action="remove"; fi
     recorded=$(npm_package "$tool")
     if [[ -z $recorded ]]; then
-        PKG_WHY="no $manager package name is recorded for $tool, so $action it with $manager by hand"
+        PKG_WHY="no $manager package name is recorded for $tool, so remove it with $manager by hand"
         return 0
     fi
     # The path shape only suggests npm, so the npm on PATH is asked where it installs and must own the files.
     if [[ $manager == "bun" ]]; then dir="$(bun_global_dir)/node_modules"; else dir=$(npm_root); fi
-    # An upgrade under an earlier name would reinstall the version that name replaced.
-    if [[ $step == "upgrade" ]]; then names="$recorded"; else names=$(npm_packages "$tool"); fi
     while IFS= read -r candidate; do
         if [[ -n $candidate && -n $dir && $real == "$dir/$candidate"/* ]]; then
             pkg="$candidate"
             break
         fi
-    done <<<"$names"
+    done < <(npm_packages "$tool")
     # Where npm or bun cannot say which package owns the files, a removal names the one the path itself shows.
     named="$pkg"
-    if [[ -z $named && $step == "remove" ]]; then
+    if [[ -z $named ]]; then
         while IFS= read -r candidate; do
             if [[ -n $candidate && $real == */node_modules/"$candidate"/* ]]; then
                 named="$candidate"
@@ -525,12 +520,7 @@ package_step() {
             fi
         done < <(npm_packages "$tool")
     fi
-    if [[ $step == "upgrade" ]]; then
-        # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-        command=("$manager" install -g "${pkg:-$recorded}@latest")
-        # From npm 12 on, a global install skips a package's install scripts unless allow-scripts names it, so claude-code's postinstall would not run.
-        if [[ $manager == "npm" ]]; then command=(npm install -g "--allow-scripts=${pkg:-$recorded}" "${pkg:-$recorded}@latest"); fi
-    elif [[ $manager == "bun" ]]; then
+    if [[ $manager == "bun" ]]; then
         command=(bun remove -g "${named:-$recorded}")
     else
         command=(npm uninstall -g "${named:-$recorded}")
@@ -538,13 +528,13 @@ package_step() {
     if ! command -v "$manager" >/dev/null; then
         PKG_WHY="$manager is not on PATH, so run: ${command[*]}"
     elif [[ $manager == "bun" && -z $pkg ]]; then
-        PKG_WHY="its files at $(hide_home "$real") are not under bun's global package $recorded, so that package does not own it, $action it where it was installed"
-    elif [[ -z $dir && $step == "remove" ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under bun's global package $recorded, so that package does not own it, remove it where it was installed"
+    elif [[ -z $dir ]]; then
         PKG_WHY="the $manager on PATH did not report where it installs, so run: ${command[*]}"
-    elif [[ -z $dir || $real != "$dir"/* ]]; then
-        PKG_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, $action it where it was installed"
+    elif [[ $real != "$dir"/* ]]; then
+        PKG_WHY="its files at $(hide_home "$real") are not under the global root of the npm on PATH, so that npm does not own it, remove it where it was installed"
     elif [[ -z $pkg ]]; then
-        PKG_WHY="its files at $(hide_home "$real") are not under the npm package $recorded, so that package does not own it, $action it where it was installed"
+        PKG_WHY="its files at $(hide_home "$real") are not under the npm package $recorded, so that package does not own it, remove it where it was installed"
     elif [[ $manager == "npm" && ! -w $dir ]]; then
         PKG_WHY="the npm global directory $(hide_home "$dir") is not writable by this user, so run as its owner: ${command[*]}"
     else
@@ -632,9 +622,7 @@ manager_plan() {
         PLAN_WHY="Nix is declarative, so update it where it is declared, for example with nix profile upgrade or in your flake or home configuration"
         ;;
     npm | bun)
-        package_step upgrade "$tool" "$real" "$manager"
-        PLAN_CMD=("${PKG_CMD[@]}")
-        PLAN_WHY="$PKG_WHY"
+        PLAN_WHY="no managed tool is upgraded through $manager, so upgrade $tool with $manager by hand"
         ;;
     brew)
         brew_step upgrade "$tool" "$real"
@@ -687,7 +675,7 @@ stray_removal() {
     fi
     case "$manager" in
     npm | bun)
-        package_step remove "$tool" "$real" "$manager"
+        package_step "$tool" "$real" "$manager"
         if ((${#PKG_CMD[@]} > 0)); then printf '%s' "${PKG_CMD[*]}"; else printf '%s' "$PKG_WHY"; fi
         ;;
     brew)
