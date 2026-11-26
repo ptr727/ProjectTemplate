@@ -2,11 +2,11 @@
 
 Prerequisites for working with this repo locally, applied once per machine before opening the devcontainer or building outside one.
 
-Supported hosts:
+Supported hosts, weighted per [`GOVERNANCE.md` "Supported Development Platforms"][governance-platforms]:
 
-- **Linux** - both the devcontainer flow and the host-install flow.
-- **macOS** - both the devcontainer flow and the host-install flow.
-- **Windows** - the supported devcontainer route is opening the repo from inside a **WSL2** distribution. Native Windows (PowerShell + winget) is supported for the host-install flow described in `README.md`. A native launch of a `catalog/snippets/devcontainer/` definition opens the repo from Windows instead, and has its own conditions, per [Devcontainer troubleshooting][devcontainer-troubleshooting].
+- **Linux** - the primary platform. Both the devcontainer flow and the host-install flow.
+- **Windows** - fully supported. The supported devcontainer route is opening the repo from inside a **WSL2** distribution. Native Windows (PowerShell + winget) is supported for the host-install flow described in `README.md`. A native launch of a `catalog/snippets/devcontainer/` definition opens the repo from Windows instead, and has its own conditions, per [Devcontainer troubleshooting][devcontainer-troubleshooting].
+- **macOS** - best-effort, with no CI. Both the devcontainer flow and the host-install flow, where a host may need installs beyond what macOS ships.
 
 > **Shell assumptions in this doc**: every command snippet below assumes a **POSIX shell** (bash/zsh) and POSIX path conventions (`~/.ssh/...`, `mkdir -p`, `$(...)` command substitution). A block marked `powershell` is the exception. Such a block is the **Windows-native** form of the step it sits in, meant to run in PowerShell rather than translated. On Windows, run the POSIX snippets from **WSL2** or **Git Bash**, since they will not work as-is in PowerShell or `cmd.exe`. The git config and `gh` commands are portable, and only the file and path manipulation differs by shell.
 
@@ -426,6 +426,7 @@ A host that fails any row is not ready for the procedure that row names. The fix
 [devcontainer-troubleshooting]: ./devcontainer.md#troubleshooting
 [files]: ../spec/files.json
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
+[governance-platforms]: ../GOVERNANCE.md#supported-development-platforms
 [host-gate]: ../scripts/host_gate.py
 [host-setup-dir]: ../host-setup/
 [host-setup-linux-readme]: ../host-setup/linux/README.md
