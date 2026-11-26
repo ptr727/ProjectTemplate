@@ -14,6 +14,9 @@ outputs:
   powershell:
     description: The PowerShell image reference the Dockerfile pins.
     value: ${{ steps.read.outputs.powershell }}
+  docker-lint:
+    description: The absolute path of scripts/docker_lint.py in the hub tree this action runs from, so at the calling workflow's own ref, never another. Its --pull mode is the lint steps' one pull retry.
+    value: ${{ steps.locate.outputs.docker-lint }}
 
 runs:
   using: composite
@@ -33,3 +36,10 @@ runs:
           fi
           echo "$stage=$ref" >> "$GITHUB_OUTPUT"
         done
+
+    - name: Locate Docker lint script step
+      id: locate
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        echo "docker-lint=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)/scripts/docker_lint.py" >> "$GITHUB_OUTPUT"
