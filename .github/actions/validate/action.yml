@@ -6,6 +6,14 @@
 name: Validate repository (hub)
 description: Registry and spec validation, the audit helper suite and the self-tests outside the unittest suite, a strict type check of the carried hub_fetch_run.py, the fleet-skills freshness check, and the unclassified-character report.
 
+# Declared so validate-task.yml's guarded hook-input step passes actionlint here, and as the declaration a caller's own hook copies.
+# The hub's own caller passes no hook-input, so this hook ignores the value.
+inputs:
+  hook-input:
+    description: The caller's hook-input value, which the task passes only when it is non-empty.
+    required: false
+    default: ''
+
 runs:
   using: composite
   steps:

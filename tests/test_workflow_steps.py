@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove the shared step reader stays inside its step, and the promotion history step reads main right."""
+"""Prove the step reader stays inside its step, the promotion history step reads main right, and hook-input reaches a hook only when set."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import NamedTuple
 
 from host_capability import bash_or_skip
 from workflow_steps import step_script, step_script_text, yaml_step, yaml_value
@@ -18,6 +19,7 @@ sys.path.insert(0, str(REPO / "spec"))
 import git_env
 
 VALIDATE_TASK_WORKFLOW = REPO / ".github" / "workflows" / "validate-task.yml"
+UPSTREAM_TASK_WORKFLOW = REPO / ".github" / "workflows" / "check-upstream-version-task.yml"
 
 WORKFLOW = """\
 jobs:
@@ -54,6 +56,132 @@ class StepScriptCase(unittest.TestCase):
         text = "- name: A\n  with:\n    run: |\n      echo nested\n"
         with self.assertRaises(AssertionError):
             step_script_text(text, "A")
+
+
+class HookRoute(NamedTuple):
+    """One task's hook, the two steps that run it, and the hub's own copy of it."""
+
+    workflow: Path
+    hook: str
+    plain_step: str
+    input_step: str
+
+
+HOOK_ROUTES = (
+    HookRoute(
+        UPSTREAM_TASK_WORKFLOW,
+        "./.github/actions/resolve-upstream",
+        "Run resolve-upstream hook step",
+        "Run resolve-upstream hook with hook input step",
+    ),
+    HookRoute(
+        VALIDATE_TASK_WORKFLOW,
+        "./.github/actions/validate",
+        "Run repository validate hook step",
+        "Run repository validate hook with hook input step",
+    ),
+)
+
+
+def unwrap(expression: str | None) -> str:
+    """An `if:` value with any `${{ }}` wrapper removed, so both spellings read alike."""
+    text = (expression or "").strip()
+    if text.startswith("${{") and text.endswith("}}"):
+        text = text[3:-2].strip()
+    return text
+
+
+def hook_input_violations(text: str, route: HookRoute) -> list[str]:
+    """What keeps `route`'s task from handing hook-input to its hook only when the caller set it."""
+    found = []
+    inputs = ("on", "workflow_call", "inputs", "hook-input")
+    if (
+        yaml_value(text, *inputs, "type") != "string"
+        or yaml_value(text, *inputs, "default") != "''"
+    ):
+        found.append("hook-input is not an optional string input defaulting to empty")
+    present = f"hashFiles('{route.hook.removeprefix('./')}/action.yml') != ''"
+    for name, guard in ((route.plain_step, "== ''"), (route.input_step, "!= ''")):
+        step = yaml_step(text, name)
+        if yaml_value(step, "uses") != route.hook:
+            found.append(f"{name} does not run {route.hook}")
+        if unwrap(yaml_value(step, "if")) != f"{present} && inputs.hook-input {guard}":
+            found.append(f"{name} is not gated on the hook existing and hook-input {guard}")
+    if yaml_value(yaml_step(text, route.plain_step), "with") is not None:
+        found.append(f"{route.plain_step} passes the hook an input")
+    passed = yaml_step(text, route.input_step)
+    if yaml_value(passed, "with", "hook-input") != "${{ inputs.hook-input }}":
+        found.append(f"{route.input_step} does not pass hook-input through")
+    return found
+
+
+class HookInputCase(unittest.TestCase):
+    """Each task hands hook-input to its hook from a step of its own, so a hook that never declared it is never handed it."""
+
+    def test_each_task_is_clean(self) -> None:
+        for route in HOOK_ROUTES:
+            with self.subTest(workflow=route.workflow.name):
+                self.assertEqual([], hook_input_violations(route.workflow.read_text(), route))
+
+    def test_each_mutation_is_caught(self) -> None:
+        for route in HOOK_ROUTES:
+            text = route.workflow.read_text()
+            passed = "          hook-input: ${{ inputs.hook-input }}\n"
+            uses = f"        uses: {route.hook}\n"
+            start = text.index(f"- name: {route.plain_step}\n")
+            end = text.index(uses, start) + len(uses)
+            mutations = {
+                "input step always passes": (
+                    text.replace(" && inputs.hook-input != ''", "", 1),
+                    f"{route.input_step} is not gated",
+                ),
+                "plain step always runs": (
+                    text.replace(" && inputs.hook-input == ''", "", 1),
+                    f"{route.plain_step} is not gated",
+                ),
+                "value miswired": (
+                    text.replace(passed, passed.replace("inputs.", "inputs.x"), 1),
+                    f"{route.input_step} does not pass hook-input through",
+                ),
+                "input dropped": (
+                    text.replace("        with:\n" + passed, "", 1),
+                    f"{route.input_step} does not pass hook-input through",
+                ),
+                "plain step passes it": (
+                    text[:end] + "        with:\n" + passed + text[end:],
+                    f"{route.plain_step} passes the hook an input",
+                ),
+                "input required": (
+                    text.replace("        default: ''\n    secrets:", "    secrets:", 1),
+                    "hook-input is not an optional string input",
+                ),
+            }
+            for label, (mutated, expected) in mutations.items():
+                with self.subTest(workflow=route.workflow.name, mutation=label):
+                    self.assertNotEqual(text, mutated)
+                    self.assertTrue(
+                        any(v.startswith(expected) for v in hook_input_violations(mutated, route))
+                    )
+
+    def test_the_upstream_task_reads_versions_from_either_step(self) -> None:
+        script_env = yaml_value(
+            yaml_step(UPSTREAM_TASK_WORKFLOW.read_text(), "Compute upstream version diff step"),
+            "env",
+            "NEW_VERSIONS",
+        )
+        self.assertEqual(
+            "${{ steps.resolve-upstream.outputs.versions"
+            " || steps.resolve-upstream-with-input.outputs.versions }}",
+            script_env,
+        )
+
+    def test_each_hub_hook_declares_hook_input_as_optional(self) -> None:
+        for route in HOOK_ROUTES:
+            action = REPO / route.hook.removeprefix("./") / "action.yml"
+            with self.subTest(hook=route.hook):
+                self.assertEqual(
+                    "false", yaml_value(action.read_text(), "inputs", "hook-input", "required")
+                )
 
 
 class PromotionHistoryCase(unittest.TestCase):

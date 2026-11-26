@@ -44,6 +44,12 @@ on:
         required: false
         type: string
         default: release
+      # Handed to the caller's validate hook by the validate job's guarded hook step, never to the hub default.
+      hook-input:
+        description: Free-form string handed to the caller's validate hook as its hook-input input, only when non-empty, for example a change-gate result so an expensive domain check can skip a change that does not touch it. A hook receiving a non-empty value declares hook-input as an input. A caller carrying no validate hook runs the hub's no-op default, which never receives it.
+        required: false
+        type: string
+        default: ''
     secrets:
       CODECOV_TOKEN:
         required: false
@@ -1096,9 +1102,17 @@ jobs:
 
       # A local composite action resolves at step time from the workspace, which is what makes this fallback expressible at all.
       # It runs the caller's own hook when it carries one, else the hub's no-op default.
+      # The caller's hook-input reaches the hook only from a step of its own, run when the caller set it.
+      # A hook declaring no such input is then never handed one.
       - name: Run repository validate hook step
-        if: hashFiles('.github/actions/validate/action.yml') != ''
+        if: hashFiles('.github/actions/validate/action.yml') != '' && inputs.hook-input == ''
         uses: ./.github/actions/validate
+
+      - name: Run repository validate hook with hook input step
+        if: hashFiles('.github/actions/validate/action.yml') != '' && inputs.hook-input != ''
+        uses: ./.github/actions/validate
+        with:
+          hook-input: ${{ inputs.hook-input }}
 
       - name: Run default validate hook step
         if: hashFiles('.github/actions/validate/action.yml') == ''

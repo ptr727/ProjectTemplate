@@ -39,6 +39,14 @@ on:
         required: false
         type: boolean
         default: true
+      hook-input:
+        description: >-
+          Free-form string handed to the resolve-upstream hook as its hook-input input, only when non-empty.
+          A repository calling this task more than once passes each call its own value, so one hook can tell which caller runs it.
+          A hook receiving a non-empty value declares hook-input as an input.
+        required: false
+        type: string
+        default: ''
     secrets:
       CODEGEN_APP_CLIENT_ID:
         required: true
@@ -75,10 +83,19 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
 
+      # The caller's hook-input reaches the hook only from a step of its own, run when the caller set it.
+      # A hook declaring no such input, such as one written before hook-input existed, is then never handed one.
       - name: Run resolve-upstream hook step
         id: resolve-upstream
-        if: ${{ hashFiles('.github/actions/resolve-upstream/action.yml') != '' }}
+        if: ${{ hashFiles('.github/actions/resolve-upstream/action.yml') != '' && inputs.hook-input == '' }}
         uses: ./.github/actions/resolve-upstream
+
+      - name: Run resolve-upstream hook with hook input step
+        id: resolve-upstream-with-input
+        if: ${{ hashFiles('.github/actions/resolve-upstream/action.yml') != '' && inputs.hook-input != '' }}
+        uses: ./.github/actions/resolve-upstream
+        with:
+          hook-input: ${{ inputs.hook-input }}
 
       - name: Missing resolve-upstream hook step
         if: ${{ hashFiles('.github/actions/resolve-upstream/action.yml') == '' }}
@@ -93,7 +110,7 @@ jobs:
       - name: Compute upstream version diff step
         id: resolve
         env:
-          NEW_VERSIONS: ${{ steps.resolve-upstream.outputs.versions }}
+          NEW_VERSIONS: ${{ steps.resolve-upstream.outputs.versions || steps.resolve-upstream-with-input.outputs.versions }}
           STATE_FILE: ${{ inputs.state-file }}
           BUMP_BRANCH_PREFIX: ${{ inputs.bump-branch-prefix }}
           AUTO_MERGE: ${{ inputs.auto-merge }}
