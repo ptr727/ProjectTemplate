@@ -1794,6 +1794,9 @@ gh() {
             for name in re.findall(r"(?m)^ *- name: (.+)$", job):
                 if re.search(r"(?m)^ *run: \|", yaml_step(job, name)):
                     script = step_script_text(job, name)
+                    script = "\n".join(
+                        line for line in script.splitlines() if not line.lstrip().startswith("#")
+                    )
                     if "docker run" in script:
                         scripts[name] = script
         self.assertIn("Check EditorConfig step", scripts)
