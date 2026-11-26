@@ -611,7 +611,11 @@ def run_step(
     *,
     capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one visible bounded step and classify its result."""
+    """Run one visible bounded step and classify its result.
+
+    Captured error output joins the failure on one line. A registry's error text then never
+    starts a line GitHub Actions reads as a workflow command.
+    """
     print(f"START {label} (timeout {timeout}s)", flush=True)
     try:
         result = runner(command, timeout, capture_output=capture_output)
@@ -623,7 +627,7 @@ def run_step(
         raise
     if result.returncode != 0:
         print(f"FAILED {label} (exit {result.returncode})", flush=True)
-        detail = (result.stderr or "").strip() if capture_output else ""
+        detail = " ".join((result.stderr or "").split()) if capture_output else ""
         suffix = f": {detail}" if detail else ""
         raise CommandExited(f"container failure (exit {result.returncode}){suffix}")
     print(f"COMPLETE {label}", flush=True)

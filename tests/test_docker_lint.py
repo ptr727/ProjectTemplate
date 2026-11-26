@@ -73,7 +73,9 @@ class FakeRunner:
                 raise docker_lint.CommandTimedOut(f"timed out after {timeout}s")
             if self.pull_failures:
                 self.pull_failures -= 1
-                return subprocess.CompletedProcess(command, 1, "", "connection reset by peer\n")
+                return subprocess.CompletedProcess(
+                    command, 1, "", "connection reset\n::error::by peer\n"
+                )
         if command[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(command, 0, "example@sha256:123\n", "")
         returncode = (
@@ -179,7 +181,9 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(1, result, output)
         self.assertEqual(docker_lint.PULL_ATTEMPTS, len(self.pulls(runner)))
         self.assertEqual(docker_lint.PULL_ATTEMPTS - 1, len(self.sleeps))
-        self.assertIn("RESULT failed: container failure (exit 1): connection reset by peer", output)
+        self.assertIn(
+            "RESULT failed: container failure (exit 1): connection reset ::error::by peer", output
+        )
         self.assertNotIn("PHASE execution", output)
 
     def test_pull_mode_pulls_each_image_with_the_retry_and_lints_nothing(self) -> None:
@@ -201,7 +205,8 @@ class DockerLintCase(unittest.TestCase):
             self.assertEqual(1, docker_lint.pull(images, 17, runner))
         self.assertEqual(docker_lint.PULL_ATTEMPTS, len(self.pulls(runner)))
         self.assertIn(
-            "RESULT failed: container failure (exit 1): connection reset by peer", failed.getvalue()
+            "RESULT failed: container failure (exit 1): connection reset ::error::by peer",
+            failed.getvalue(),
         )
 
     def test_a_retried_or_failed_pull_is_annotated_only_under_actions(self) -> None:

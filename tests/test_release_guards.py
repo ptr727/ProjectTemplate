@@ -1710,6 +1710,10 @@ gh() {
                 self.assertEqual(1, code)
                 self.assertIn("must pin shfmt on exactly one", stdout)
 
+    @unittest.skipUnless(
+        shutil.which("bash") and os.name == "posix",
+        "the step runs on a Linux runner, and Git Bash's pwd prints an MSYS path",
+    )
     def test_docker_pins_names_the_docker_lint_script_in_its_own_hub_tree(self) -> None:
         """The lint steps pull through this path, so it is the script in the action's own hub tree."""
         definition = REPO / ".github/actions/docker-lint-pins/action.yml"

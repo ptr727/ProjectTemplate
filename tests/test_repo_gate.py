@@ -715,16 +715,20 @@ class TestCoverageFloors(unittest.TestCase):
         self.assertEqual([], repo_gate.check_sha_pin(REPO, [".github/workflows/absent.yml"]))
 
 
+@functools.cache
 def docker_ready() -> bool:
-    """Whether the daemon answers and the image is present or pullable, as the check itself reads it."""
-    return shutil.which("docker") is not None and repo_gate.docker_unreachable() is None
+    """Whether the daemon answers and the image is present or pullable, as the check itself reads it.
+
+    It is read once, and its pull's trace and annotations are a probe's, so they stay off the log.
+    """
+    if shutil.which("docker") is None:
+        return False
+    with contextlib.redirect_stdout(io.StringIO()):
+        return repo_gate.docker_unreachable() is None
 
 
 def schema_ready() -> bool:
     return bool(shutil.which("uvx") or shutil.which("pipx"))
-
-
-_DOCKER_READY: list[bool] = []
 
 
 def NEEDS_DOCKER(test: Callable[..., None]) -> Callable[..., None]:
@@ -732,9 +736,7 @@ def NEEDS_DOCKER(test: Callable[..., None]) -> Callable[..., None]:
 
     @functools.wraps(test)
     def wrapper(self: unittest.TestCase, *args: object) -> None:
-        if not _DOCKER_READY:
-            _DOCKER_READY.append(docker_ready())
-        if not _DOCKER_READY[0]:
+        if not docker_ready():
             self.skipTest("no docker daemon for shellcheck")
         test(self, *args)
 
