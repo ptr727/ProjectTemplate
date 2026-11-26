@@ -163,7 +163,7 @@ Applies to code and workflow (`#`) comments alike.
 - **Leave a human-authored comment exactly as written.** Never reword, trim, reflow, or clean
   one, even where another rule would shape it differently. Where authorship cannot be told,
   treat the comment as human-authored. The exception is a comment the agent's own change makes
-  false, which the agent corrects.
+  false, which the agent corrects under the `comments` label below rather than deletes.
 
 A continuation stays unindented, one sentence per line:
 
