@@ -877,6 +877,94 @@ class RequireTokensCase(unittest.TestCase):
                 )
 
 
+CALLER_STUB = (
+    "name: Caller\non: pull_request\n{top}jobs:\n  validate:\n{job}"
+    "    uses: acme/hub/.github/workflows/validate-task.yml@x\n"
+)
+JOB_GRANT = "    permissions:\n      contents: read\n"
+EMPTY_PERMISSIONS = "\npermissions: {}"
+EMPTY_PERMISSIONS_CONTRACT = {"requireTokens": [EMPTY_PERMISSIONS]}
+EMPTY_PERMISSIONS_DRIFT = [("DRIFT", "interface: wf missing required '\\npermissions: {}'")]
+
+
+class WorkflowPermissionsCase(unittest.TestCase):
+    """A caller owes an empty workflow-level `permissions:`, so no job takes the default token."""
+
+    def findings(self, top: str, job: str = JOB_GRANT) -> list[tuple[str, str]]:
+        text = CALLER_STUB.format(top=top, job=job)
+        return audit.check_interface("wf", EMPTY_PERMISSIONS_CONTRACT, text)
+
+    def test_an_empty_workflow_level_block_passes(self) -> None:
+        self.assertEqual(self.findings("permissions: {}\n"), [])
+
+    def test_a_block_as_the_last_key_passes(self) -> None:
+        text = "name: Caller\non: pull_request\npermissions: {}\n"
+        self.assertEqual(audit.check_interface("wf", EMPTY_PERMISSIONS_CONTRACT, text), [])
+
+    def test_a_block_as_the_first_key_passes(self) -> None:
+        text = "permissions: {}\n" + CALLER_STUB.format(top="", job=JOB_GRANT)
+        self.assertEqual(audit.check_interface("wf", EMPTY_PERMISSIONS_CONTRACT, text), [])
+
+    def test_a_missing_block_is_drift(self) -> None:
+        self.assertEqual(self.findings(""), EMPTY_PERMISSIONS_DRIFT)
+
+    def test_a_job_level_empty_block_is_not_the_workflow_level_one(self) -> None:
+        self.assertEqual(self.findings("", job="    permissions: {}\n"), EMPTY_PERMISSIONS_DRIFT)
+
+    def test_a_workflow_level_grant_is_not_an_empty_block(self) -> None:
+        for top in (
+            "permissions:\n  contents: write\n",
+            "permissions: write-all\n",
+            "permissions: read-all\n",
+        ):
+            with self.subTest(top):
+                self.assertEqual(self.findings(top), EMPTY_PERMISSIONS_DRIFT)
+
+    def test_a_comment_naming_the_block_does_not_satisfy_it(self) -> None:
+        self.assertEqual(self.findings("# permissions: {}\n"), EMPTY_PERMISSIONS_DRIFT)
+
+    def test_a_block_scalar_key_still_matches_a_bare_key_token(self) -> None:
+        """Marking an empty key leaves a token that ends at the key matching."""
+        text = "jobs:\n  check:\n    steps:\n      - run: |\n          echo\n"
+        contract = {"requireTokens": ["run:", "run: {}"]}
+        self.assertEqual(audit.check_interface("wf", contract, text), [])
+
+    def test_every_entry_point_caller_carries_the_token(self) -> None:
+        spec = json.loads((REPO_ROOT / "spec/files.json").read_text(encoding="utf-8"))
+        callers = [
+            unit["path"]
+            for unit in spec["baseline"]
+            if unit.get("fidelity") == "interface" and unit["path"].startswith(".github/workflows/")
+        ]
+        self.assertIn(".github/workflows/deploy-site.yml", callers)
+        for path in callers:
+            with self.subTest(path):
+                self.assertIn(EMPTY_PERMISSIONS, carried_contract(path)["requireTokens"])
+
+    def test_a_job_token_reads_an_empty_block_the_same_way(self) -> None:
+        text = CALLER_STUB.format(top="", job="    permissions: {}\n")
+        required = {"requireTokensInJob": {"validate": ["permissions: {}"]}}
+        forbidden = {"forbidTokensInJob": {"validate": ["permissions: {}"]}}
+        self.assertEqual(audit.check_interface("wf", required, text), [])
+        self.assertEqual(len(audit.check_interface("wf", forbidden, text)), 1)
+        granted = CALLER_STUB.format(top="", job=JOB_GRANT)
+        self.assertEqual(len(audit.check_interface("wf", required, granted)), 1)
+        self.assertEqual(audit.check_interface("wf", forbidden, granted), [])
+
+    def test_the_hub_callers_and_snippets_meet_the_carried_contract(self) -> None:
+        snippets = REPO_ROOT / "catalog" / "snippets" / "workflows"
+        for path in (
+            ".github/workflows/test-pull-request.yml",
+            ".github/workflows/publish-release.yml",
+            ".github/workflows/merge-bot-pull-request.yml",
+        ):
+            for source in (REPO_ROOT / path, snippets / pathlib.PurePosixPath(path).name):
+                with self.subTest(str(source)):
+                    text = source.read_text(encoding="utf-8")
+                    got = audit.check_interface(path, carried_contract(path), text)
+                    self.assertEqual(got, [])
+
+
 class SplitJobsCase(unittest.TestCase):
     """Holds the split_jobs edge cases."""
 
