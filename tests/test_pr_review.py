@@ -36,7 +36,7 @@ import unittest
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -1535,6 +1535,31 @@ class TestQuotaRefusal(GqlCase):
         self.assertFalse(pr_review_rounds.quota_refusal({"body": body}))
 
 
+class TestHostPin(unittest.TestCase):
+    """Every `gh` child `_run` starts runs on github.com, whatever GH_HOST the caller exported."""
+
+    def test_a_child_reads_the_pinned_host(self) -> None:
+        argv = [sys.executable, "-c", "import os; print(os.environ['GH_HOST'])"]
+        with mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}):
+            proc = pr_review._run(argv, 30, "unrun", text=True, encoding="utf-8")
+        self.assertEqual((proc.returncode, proc.stdout.strip()), (0, "github.com"), proc.stderr)
+
+    def test_the_rest_reads_and_the_archive_read_run_on_github_com(self) -> None:
+        hosts: list[str] = []
+
+        def run(argv: list[str], timeout: float, **options: Any) -> subprocess.CompletedProcess:
+            hosts.append(options["env"]["GH_HOST"])
+            return subprocess.CompletedProcess(argv, 1, "", "")
+
+        with (
+            mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            mock.patch.object(pr_review, "run_with_deadline", run),
+        ):
+            pr_review.gh_rest("repos/acme/widget/compare/a...b", ".status")
+            self.assertIsNone(pr_review.head_carries("acme", "widget", "b" * 40, ["x"]))
+        self.assertEqual(hosts, ["github.com", "github.com"])
+
+
 class TestRawLogRead(unittest.TestCase):
     """A job log read keeps working on a `gh` older than the escape-sequence flag."""
 
@@ -2791,15 +2816,60 @@ class TestReadingsThroughTheAdapter(GqlCase):
                 self.assertEqual(code == 50, "status=VERDICT_NAMES_UNCOUNTED_FINDINGS" in out)
                 self.assertEqual(code == 0, "acknowledged as declined" in out)
 
-    def test_a_qodo_finding_s_remedy_asks_qodo_to_dismiss_it_by_its_number(self) -> None:
-        """Only Qodo's badge closes its finding, and a resolved thread or a reply adds none."""
+    def test_a_qodo_finding_s_remedy_asks_qodo_to_dismiss_it_by_title_and_location(self) -> None:
+        """Only Qodo's badge closes its finding, and Qodo cannot map a finding's number."""
         qodo = comment(login=pr_review_rounds.QODO_LOGIN, body=qodo_review_body())
         pr = payload([review()], files=["a.py"], comments=[qodo])
         self.status(pr)
         out = self.out.getvalue()
         self.assertIn("QODO OPEN FINDING key=", out)
-        self.assertIn(f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss finding 1", out)
+        self.assertIn(
+            f"@{pr_review_rounds.QODO_LOGIN} and asking it to dismiss the finding by the title "
+            "and file location below",
+            out,
+        )
+        self.assertIn("    1. Bad naming Bug\n    a.py[12]\n", out)
+        self.assertNotIn("by that number", out)
         self.assertNotIn("answer it in the PR conversation quoting", out)
+
+    def test_a_qodo_finding_keeps_its_key_across_an_edit_that_moves_only_its_commit(self) -> None:
+        """An in-place edit can rewrite a permalink's commit, so a key leaves links and hashes out."""
+
+        def keys(sha: str, heading: str = "Bad naming", says: str = "misleads") -> list[str]:
+            link = (
+                f'<a href="https://github.com/o/r/blob/{sha}/a.py#L12">a.py[12]</a> at commit '
+                f'<a href="https://github.com/o/r/commit/{sha}">{sha[:7]}</a>'
+            )
+            body = qodo_review_body(heading=f"{heading} since commit `{sha[:7]}`")
+            body = body.replace("a.py[12]", link).replace("does not describe", says)
+            pr = payload(
+                [review()], comments=[comment(login=pr_review_rounds.QODO_LOGIN, body=body)]
+            )
+            return [i.key for i in pr_review_answers.items(pr) if i.kind == "qodo_open"]
+
+        self.assertEqual(1, len(keys(HEAD)))
+        self.assertEqual(keys(HEAD), keys(OLD))
+        self.assertNotEqual(keys(HEAD), keys(HEAD, heading="Wrong bound"))
+        self.assertNotEqual(keys(HEAD), keys(HEAD, says="hides"))
+
+    def test_a_qodo_finding_differing_only_in_a_hex_like_run_keeps_a_distinct_key(self) -> None:
+        """Only a link or a hash after the word commit is volatile, so one answer clears one finding."""
+
+        def key(says: str) -> str:
+            body = qodo_review_body().replace("does not describe", says)
+            pr = payload(
+                [review()], comments=[comment(login=pr_review_rounds.QODO_LOGIN, body=body)]
+            )
+            (found,) = [i.key for i in pr_review_answers.items(pr) if i.kind == "qodo_open"]
+            return found
+
+        for one, other in (
+            ("is capped at 1048576 bytes and", "is capped at 2097152 bytes and"),
+            ("reads abcdef0.py and", "reads abcdef1.py and"),
+        ):
+            with self.subTest(one=one):
+                self.assertNotEqual(key(one), key(other))
+        self.assertEqual(key("at commit 1234abc"), key("at Commit: 5678def"))
 
     def test_each_finding_no_thread_carries_prints_the_key_that_answers_it(self) -> None:
         missed = (

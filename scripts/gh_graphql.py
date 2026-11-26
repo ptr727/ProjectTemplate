@@ -4,6 +4,8 @@ This is a library module and has no command line. `pr_review.py`, `pr_cleanup.py
 `backlog_metrics.py`, and `handoff.py` import it as a sibling.
 That works from any working directory because Python puts the running script's own directory on `sys.path`.
 
+Every child `run_subprocess` starts runs with `GH_HOST` pinned to github.com, per `pinned_env`.
+
 A failure raises `GraphQLError` and never exits. Each caller maps it to its own exit contract, since the contracts differ.
 `pr_review.py` and `backlog_metrics.py` report a failed read as exit 1.
 `pr_cleanup.py` and `handoff.py` reserve 1 for a refusal and report a read that did not run as 2.
@@ -13,12 +15,14 @@ A transport that exited on its own would pick one of those for both.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from collections.abc import Callable, Iterator, Sequence
 from typing import NamedTuple
 
 DETAIL_CAP = 800
+HOST = "github.com"
 
 
 class GraphQLError(Exception):
@@ -81,15 +85,33 @@ def origin_slug(url: str) -> str | None:
     return f"{m.group(1)}/{m.group(2)}".lower() if m else None
 
 
+def pinned_env() -> dict[str, str]:
+    """This process's environment with `GH_HOST` naming `HOST`, for the child a `gh` call runs in.
+
+    The registry names every repository on github.com. `gh` reads `GH_HOST` for the host wherever a
+    command names none, `gh api` and a `--repo OWNER/REPO` alike. An exported one would move a read,
+    or a write, to a host the registry never named. Setting it in the child pins every subcommand
+    one way, where `--hostname` exists on `gh api` alone.
+    """
+    return {**os.environ, "GH_HOST": HOST}
+
+
 def run_subprocess(argv: list[str]) -> tuple[int, str, str]:
-    """Run `argv` and return its exit code, stdout and stderr.
+    """Run `argv` on the pinned host and return its exit code, stdout and stderr.
 
     Every read decodes as UTF-8 rather than as whatever the platform's locale is. `gh` emits UTF-8
     on every platform, where a Windows console locale is cp1252. One typographic quote in a
     review body crashed the decode and left the caller reading a null stdout.
     """
     try:
-        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
+        r = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            env=pinned_env(),
+        )
     except OSError as exc:
         raise GraphQLError(f"could not run {argv[0]}: {exc}") from exc
     return r.returncode, r.stdout, r.stderr

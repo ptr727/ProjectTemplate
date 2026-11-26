@@ -1,0 +1,59 @@
+name: Python version
+description: >-
+  Select the Python line the caller's root .python-version names as X.Y.
+  CI then follows the repository's own line, whether or not it is the fleet default.
+  A caller carrying no such file gets the fallback line the selection step names, with a warning,
+  which the hub's tests hold to the Python devcontainer snippet's line.
+  A file naming no X.Y line fails the step, rather than run CI on a line the file does not name.
+
+inputs:
+  warn:
+    description: Whether a fallback writes a warning annotation. A job that cannot tell whether the caller holds Python passes false, so a caller with none is not warned on every run.
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: The selected X.Y line, or the fallback line where the caller carries no .python-version.
+    value: ${{ steps.select.outputs.version }}
+  selected:
+    description: The X.Y line the caller's .python-version selects, or empty where it carries none.
+    value: ${{ steps.select.outputs.selected }}
+
+runs:
+  using: composite
+  steps:
+
+    - name: Select Python version step
+      id: select
+      shell: bash
+      env:
+        WARN: ${{ inputs.warn }}
+      run: |
+        set -Eeuo pipefail
+        fallback=3.14
+        selected=""
+        if [[ -f .python-version ]]; then
+          # The first line that is neither blank nor a comment is the request, as uv reads the file.
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [[ -n "$line" && "$line" != \#* ]]; then
+              selected=$line
+              break
+            fi
+          done < .python-version
+        fi
+        if [[ "$selected" =~ ^[0-9]+\.[0-9]+$ ]]; then
+          version=$selected
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
+        elif [[ -f .python-version ]]; then
+          echo "::error::The root .python-version names no X.Y line on its first line that is neither blank nor a comment."
+          exit 1
+        else
+          version=$fallback
+          if [[ "$WARN" == "true" ]]; then
+            echo "::warning::No root .python-version selects a Python line, so this uses the $fallback fallback."
+          fi
+        fi
+        echo "version=$version" >> "$GITHUB_OUTPUT"

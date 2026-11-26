@@ -40,7 +40,7 @@ rather than silently skipping the gate.
 The unresolved-commit fallback reads the prose gate and its data from `main` twice.
 When the two reads differ, it refuses to run a mixed pair, and a re-run is the remedy.
 
-Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.
+Install with `uv tool install pre-commit` once per host. Enable it once per clone with `python3 hub_fetch_run.py scripts/enable_hooks.py`, which runs `pre-commit install` in that clone.
 `pre-commit` itself is never added as a project dependency.
 The lint-only profile has no
 project environment to add it to, and `uv tool install` gives a persistent command independent
@@ -52,7 +52,7 @@ re-source the shell, or add the directory `uv tool dir --bin` prints directly.
 Full linting (workflow YAML, Markdown,
 spelling, EditorConfig) stays out of the hook. It runs in CI as pinned action wrappers, and on
 demand via the VS Code **Lint** tasks. A Python repo takes those from
-`catalog/snippets/configs/vscode-tasks-python.json` (Docker at `:latest`).
+`catalog/snippets/configs/vscode-tasks-python.json` (Docker at pinned digests).
 A repo with no
 Python takes the Lint group alone rather than that file's Python tasks. Either way they carry
 the prose gate in whole-repo mode, for on-demand full-tree validation beyond the diff-scoped

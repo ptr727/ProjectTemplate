@@ -32,7 +32,7 @@ PROSE_GATE_PATH = ".github/actions/prose-gate/prose_lint.py"
 # The files a script reads or imports from the hub tree, fetched before it runs.
 COMPANIONS = {
     PROSE_GATE_PATH: (".github/actions/prose-gate/prose-gate.json",),
-    "scripts/docker_lint.py": (),
+    "scripts/docker_lint.py": (".github/actions/docker-lint-pins/Dockerfile",),
 }
 LOOKUP_TIMEOUT = 5
 

@@ -60,7 +60,7 @@ Carrying the result into a settings repository is a pull request there, and it n
 
 ## Deployment Environments
 
-`check` asserts that every environment the registry entry's `environments` declares exists and carries the declared deployment-branch policy, and `apply` writes none. The asymmetry is deliberate. An environment's secrets and variables are credentials that exist nowhere in the hub. So an `apply` could create the environment and set its policy and still leave it unable to publish, while reporting success. Their names are enumerable through the API, and their values in the case of a variable. But no tool here queries those stores. That is a choice about what this script owns rather than a limit the API imposes. The policy is checkable on its own and worth checking, because it decides which refs may deploy at all. On an OIDC publish that is half the gate: a ref the policy excludes mints no token.
+`check` asserts that every environment the registry entry's `environments` declares exists and carries the declared deployment-branch policy, and `apply` writes none. The asymmetry is deliberate. An environment's secrets and variables are credentials that exist nowhere in the hub. So an `apply` could create the environment and set its policy and still leave it unable to publish, while reporting success. This script does not query those stores. That is a choice about what it owns rather than a limit the API imposes. Each entry may also declare the `secrets` and `variables` names its environment holds. The hub's `spec/audit.py` checks those names, never their values, per [`AUDIT.md` section 6][audit-validate-settings]. The policy is checkable on its own and worth checking, because it decides which refs may deploy at all. On an OIDC publish that is half the gate: a ref the policy excludes mints no token.
 
 Each entry names the environment and one of two `branchPolicy` forms. `custom` also declares `branches`, the exact set the environment allows, and the check compares the live set to it in both directions. Branches are the whole vocabulary a `custom` entry has. GitHub's custom policies admit a tag entry too, and one has no declaration here. So an environment allowing a tag under a `custom` policy reads as drift until this field grows a way to say so. `none` admits every ref and declares no branch set. So a repository whose gate lives in its deploy workflow instead records `none`. It then gets a policy appearing later read as a change rather than as the gate arriving.
 
@@ -70,7 +70,7 @@ GitHub offers a third form, protected branches only, and this field deliberately
 "environments": [{ "name": "pypi", "branchPolicy": "custom", "branches": ["develop", "main"] }]
 ```
 
-A repository declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run. An environment the registry declares nothing about is reported rather than asserted. This is because GitHub creates some without being asked (the Copilot coding agent's is the one every fleet repository has). What no tool covers either way is whether an environment's secrets and variables are present and valid. So read a clean run as a statement about each declared environment existing and carrying the policy declared for it. Never read it as a statement about whether the deploy can succeed.
+A repository declaring no environment has nothing asserted against it, though the live list is still read and an unreadable one fails the run. An environment the registry declares nothing about is reported rather than asserted. This is because GitHub creates some without being asked (the Copilot coding agent's is the one every fleet repository has). This command never checks whether an environment's secrets and variables are present, which is the audit's, and no tool checks whether they are valid. So read a clean run as a statement about each declared environment existing and carrying the policy declared for it. Never read it as a statement about whether the deploy can succeed.
 
 ## Regenerating the Payloads
 
@@ -104,6 +104,7 @@ done
 
 <!-- Repo -->
 
+[audit-validate-settings]: ../AUDIT.md#6-validate-settings-rulesets-and-secrets
 [governance-git-and-commit-rules]: ../GOVERNANCE.md#git-and-commit-rules
 [repo-config-readme-provisioning]: ../repo-config/README.md#provisioning-from-secrets
 [repo-config-readme-public-interaction]: ../repo-config/README.md#public-interaction

@@ -15,7 +15,7 @@ flowchart TD
     instr["instruction set"] --> del["deletions"] --> revendor["verbatim re-vendors"] --> iface["interface workflows"] --> settings["settings, rulesets, secrets"] --> intent["intent files, by hand (see 5: what this cannot detect)"]
   end
   measure --> apply
-  apply --> ship["6: grouped PRs, review loop, merge, then re-audit"]
+  apply --> ship["6: grouped PRs, review loop, merge, promotion to main, then re-audit"]
 ```
 
 ## 0. Route Here Only If the Repository Is Stood Up
@@ -127,10 +127,10 @@ One further gap is checked by hand, because `spec/audit.py` does not report it. 
 - **Every other class waits for that pull request to merge.** Step 2's deletions, step 3's remaining re-vendors, the interface workflows, step 5's `repo-config/` deletions, and the intent files each take their own pull request. Each branches from `develop` only after it merges, in section 3's order. A class with nothing to change opens no pull request and holds nothing up. Step 5's `apply` writes no file, so it opens no pull request and runs once step 4's has merged. Where section 4 requires a pin bump before a retirement, the bump lands in the deletions pull request. Moving the trees ahead of step 2 disturbs nothing. Section 4's detector leaves out every path a `trees` entry covers, so no deletion reaches it.
 - **Never push a fix directly to a protected branch**, and never hand-edit a target outside a pull request. An operational repository commits to `develop` directly by design, and a conformance change is still a reviewable change.
 - **Close the review loop.** Request a review at the defined moments. Confirm the head commit is covered, and answer and resolve every thread. All of that follows [GOVERNANCE.md "PR Review Etiquette"][governance-pr-review-etiquette] and the [Copilot review runbook][copilot-runbook].
-- **The maintainer merges.** The agent drives to green and stops.
+- **The maintainer merges.** The agent drives each fix pull request into the target's `develop` to green. Once the maintainer merges it, the agent opens that target's `develop` -> `main` promotion, or finds the open one, and drives it to green. The maintainer merges that too. On an operational repository, the agent confirms that a promotion is wanted before opening one, per `drive-pr`.
 - **Fix systemic drift in the hub instead.** Where many repositories share a drift, fix the rule or add a check here and let a re-audit re-flag it. This is instead of hand-patching each repository for a shared cause.
 
-**Done means measured, not applied.** Re-run the audit after the merge, because a convergence asserted without a report is a convergence nobody can check. The hub commits that report under its own `reports/` per [`AUDIT.md`][audit] section 8. So a session resyncing its own repository leaves the report to a hub-side audit.
+**Done means measured, not applied.** Re-run the audit once the fix is on `main`, because a convergence asserted without a report is a convergence nobody can check. The hub commits that report under its own `reports/` per [`AUDIT.md`][audit] section 8. So a session resyncing its own repository leaves the report to a hub-side audit.
 
 <!-- Repo -->
 

@@ -2,6 +2,14 @@
 name: Hub resolve-upstream hook
 description: Resolve the newest released upstream line of each host tool the hub pins to one line.
 
+# Declared so check-upstream-version-task.yml's guarded hook-input step passes actionlint here, and as the declaration a caller's own hook copies.
+# The hub calls the task once, so this hook ignores the value.
+inputs:
+  hook-input:
+    description: The caller's hook-input value, which the task passes only when it is non-empty.
+    required: false
+    default: ''
+
 outputs:
   versions:
     description: Compact JSON object of pinned tool name -> newest released line, such as python 3.14 and dotnet 10.

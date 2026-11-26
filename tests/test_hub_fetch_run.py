@@ -463,6 +463,7 @@ class GitLookupTests(unittest.TestCase):
 
 
 DOCKER_LINT = "scripts/docker_lint.py"
+DOCKER_LINT_PINS = ".github/actions/docker-lint-pins/Dockerfile"
 LINT_TASKS = {
     "Lint: EditorConfig": "editorconfig-checker",
     "Lint: Workflows": "actionlint",
@@ -615,7 +616,7 @@ class FetchedWrapperTests(unittest.TestCase):
         self.stdout = out + err
         return child
 
-    def run_wrapper(self) -> int:
+    def run_wrapper(self, *args: str) -> int:
         with (
             mock.patch.object(urllib.request, "urlopen", self.urlopen),
             mock.patch.object(hub.shutil, "which", return_value="uv"),
@@ -623,10 +624,26 @@ class FetchedWrapperTests(unittest.TestCase):
             mock.patch.object(hub, "resolve_main_commit", return_value=self.commit),
             contextlib.redirect_stderr(self.stderr),
         ):
-            return hub.main([DOCKER_LINT, "--help"])
+            return hub.main([DOCKER_LINT, *(args or ("--help",))])
 
-    def test_the_wrapper_runs_with_no_other_hub_file_beside_it(self) -> None:
+    def test_the_wrapper_runs_with_only_its_pin_manifest_beside_it(self) -> None:
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
+
+    def test_the_wrapper_reads_the_pin_manifest_fetched_beside_it(self) -> None:
+        """Zero targets reads the manifest and then stops short of any Docker call."""
+        repo = self.tmp / "repo"
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, timeout=TIMEOUT)
+        code = self.run_wrapper("--root", str(repo), "--linter", "shellcheck")
+        self.assertEqual(code, 0, self.stdout)
+        self.assertIn("COMPLETE lint: zero applicable linters", self.stdout)
+
+    def test_every_companion_is_a_hub_file(self) -> None:
+        """A companion path naming no file fails every caller's fetch rather than one test."""
+        for script, companions in hub.COMPANIONS.items():
+            for path in (script, *companions):
+                with self.subTest(path=path):
+                    self.assertTrue((ROOT / path).is_file())
+        self.assertIn(DOCKER_LINT_PINS, hub.COMPANIONS[DOCKER_LINT])
 
     def test_the_wrapper_offers_every_linter_a_task_names(self) -> None:
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
@@ -635,9 +652,9 @@ class FetchedWrapperTests(unittest.TestCase):
         self.assertLessEqual(set(LINT_TASKS.values()), set(choices.group(1).split(",")))
 
     def fetched(self, ref: str) -> list[str]:
-        return [f"{hub.HUB_RAW_BASE}/{ref}/{DOCKER_LINT}"]
+        return [f"{hub.HUB_RAW_BASE}/{ref}/{path}" for path in (DOCKER_LINT_PINS, DOCKER_LINT)]
 
-    def test_the_wrapper_alone_comes_from_the_resolved_commit(self) -> None:
+    def test_the_wrapper_and_its_manifest_come_from_the_resolved_commit(self) -> None:
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
         self.assertEqual(self.urls, self.fetched(SHA))
 
@@ -646,11 +663,11 @@ class FetchedWrapperTests(unittest.TestCase):
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
         self.assertIn(f"ptr727/ProjectTemplate@{SHA}", self.stderr.getvalue())
 
-    def test_an_unresolved_commit_reads_main_once_and_says_so(self) -> None:
-        """A lone file cannot form a mixed set, so no double read guards it."""
+    def test_an_unresolved_commit_reads_main_twice_and_says_so(self) -> None:
+        """The wrapper and its manifest form a pair, so a second read guards against a mixed one."""
         self.commit = None
         self.assertEqual(self.run_wrapper(), 0, self.stdout)
-        self.assertEqual(self.urls, self.fetched("main"))
+        self.assertEqual(self.urls, self.fetched("main") * 2)
         self.assertIn("ptr727/ProjectTemplate@main", self.stderr.getvalue())
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -13,7 +14,8 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Iterator, Sequence
+import time
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -24,6 +26,10 @@ MAX_FILE_ARGUMENT_BYTES = 16 * 1024
 SNAPSHOT_PREFIX = "docker-lint-snapshot-"
 OWNER_SUFFIX = ".owner"
 GIT_TIMEOUT = 300
+PIN_MANIFEST = ".github/actions/docker-lint-pins/Dockerfile"
+PIN_LINE = re.compile(r"FROM (\S+:[^\s@/]+@sha256:[0-9a-f]{64}) AS ([a-z][a-z0-9-]*)")
+PULL_ATTEMPTS = 3
+PULL_BACKOFF = 15
 GIT_LOCATION_VARS = (
     "GIT_ALTERNATE_OBJECT_DIRECTORIES",
     "GIT_CONFIG",
@@ -48,7 +54,7 @@ class Linter:
     """Describe one lint container and its tracked-file targets."""
 
     name: str
-    image: str
+    stage: str
     patterns: tuple[str, ...]
     workdir: str
     arguments: tuple[str, ...] = ()
@@ -63,46 +69,46 @@ NODE_MODULES_EXCLUDE = ":(glob,exclude)**/node_modules/**"
 LINTERS = (
     Linter(
         "editorconfig-checker",
-        "ghcr.io/editorconfig-checker/editorconfig-checker:latest",
+        "editorconfig-checker",
         (),
         "/check",
     ),
     Linter(
         "actionlint",
-        "rhysd/actionlint:latest",
+        "actionlint",
         (".github/workflows/*.yml", ".github/workflows/*.yaml"),
         "/repo",
         arguments=("-color",),
     ),
     Linter(
         "markdownlint",
-        "davidanson/markdownlint-cli2:latest",
+        "markdownlint",
         ("*.md",),
         "/workdir",
     ),
     Linter(
         "cspell",
-        "ghcr.io/streetsidesoftware/cspell:latest",
+        "cspell",
         ("README.md", "HISTORY.md"),
         "/workdir",
         arguments=("--no-progress",),
     ),
     Linter(
         "shellcheck",
-        "mirror.gcr.io/koalaman/shellcheck:stable",
+        "shellcheck",
         ("*.sh",),
         "/mnt",
         discover_shebang=True,
     ),
     Linter(
         "shfmt",
-        "mirror.gcr.io/mvdan/shfmt:latest",
+        "shfmt",
         ("*.sh",),
         "/mnt",
         arguments=("-d",),
         discover_shebang=True,
     ),
-    Linter("PSScriptAnalyzer", "mcr.microsoft.com/powershell:latest", ("*.ps1",), "/mnt"),
+    Linter("PSScriptAnalyzer", "powershell", ("*.ps1",), "/mnt"),
 )
 
 
@@ -112,6 +118,71 @@ class CommandFailed(RuntimeError):
 
 class CommandTimedOut(CommandFailed):
     """Report a Docker command that exceeded its bound."""
+
+
+class CommandExited(CommandFailed):
+    """Report a Docker command that ran and exited non-zero."""
+
+
+def read_pins(path: Path) -> dict[str, str]:
+    """Return each image reference the pin manifest names, keyed by its stage.
+
+    This is the manifest's one parser: the docker-lint-pins action and the repo gate read through it.
+    A line that pins no tag and digest is skipped, so a stage it alone names is not pinned.
+
+    A carrier's `hub_fetch_run.py` older than the manifest fetches this script alone.
+    A missing manifest therefore names the resync rather than falling back to a moving tag.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        raise CommandFailed(
+            f"the Docker lint pin manifest {PIN_MANIFEST} is not beside this script. "
+            "Resync hub_fetch_run.py from ptr727/ProjectTemplate, "
+            "since a current copy fetches the manifest with docker_lint.py"
+        ) from error
+    except (OSError, UnicodeDecodeError) as error:
+        raise CommandFailed(f"could not read the pin manifest {path}: {error}") from error
+    pins: dict[str, str] = {}
+    for line in text.splitlines():
+        match = PIN_LINE.fullmatch(line.rstrip())
+        if match is None:
+            continue
+        if match.group(2) in pins:
+            raise CommandFailed(f"the pin manifest {path} names the {match.group(2)} stage twice")
+        pins[match.group(2)] = match.group(1)
+    return pins
+
+
+def require_stages(pins: Mapping[str, str], stages: Iterable[str]) -> None:
+    """Raise CommandFailed naming each of `stages` that `pins` lacks."""
+    missing = sorted(set(stages) - set(pins))
+    if missing:
+        raise CommandFailed(
+            f"the pin manifest pins {', '.join(missing)} on no "
+            "'FROM <image>:<tag>@sha256:<digest> AS <stage>' line"
+        )
+
+
+def manifest_path() -> Path:
+    """The pin manifest at its hub-relative path from this script."""
+    return Path(__file__).resolve().parents[1] / PIN_MANIFEST
+
+
+def print_pins(stages: Sequence[str], path: Path | None = None) -> int:
+    """Print `<stage>=<image reference>` for each stage, one line each, and lint nothing.
+
+    The docker-lint-pins action appends this to its step outputs.
+    Nothing reaches stdout unless every stage is pinned, so a failure leaves no partial output.
+    """
+    try:
+        pins = read_pins(path or manifest_path())
+        require_stages(pins, stages)
+    except CommandFailed as error:
+        print(f"RESULT failed: {error}", file=sys.stderr, flush=True)
+        return 1
+    print("".join(f"{stage}={pins[stage]}\n" for stage in stages), end="", flush=True)
+    return 0
 
 
 def container_name(command: Sequence[str]) -> str | None:
@@ -572,7 +643,11 @@ def run_step(
     *,
     capture_output: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one visible bounded step and classify its result."""
+    """Run one visible bounded step and classify its result.
+
+    Captured error output joins the failure on one line. A registry's error text then never
+    starts a line GitHub Actions reads as a workflow command.
+    """
     print(f"START {label} (timeout {timeout}s)", flush=True)
     try:
         result = runner(command, timeout, capture_output=capture_output)
@@ -584,9 +659,75 @@ def run_step(
         raise
     if result.returncode != 0:
         print(f"FAILED {label} (exit {result.returncode})", flush=True)
-        raise CommandFailed(f"container failure (exit {result.returncode})")
+        detail = " ".join((result.stderr or "").split()) if capture_output else ""
+        suffix = f": {detail}" if detail else ""
+        raise CommandExited(f"container failure (exit {result.returncode}){suffix}")
     print(f"COMPLETE {label}", flush=True)
     return result
+
+
+def pull_image(
+    name: str,
+    image: str,
+    timeout: int,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+) -> None:
+    """Pull one pinned image, retrying a pull that exits non-zero a bounded number of times.
+
+    A transient registry error fails a pull that a later attempt completes.
+    A timeout or a client that cannot start is not retried, since a retry would meet it again.
+    The client's error output is captured into the failure, so a caller reporting it names the cause.
+    This is the one pull retry: the repo gate and validate-task.yml's lint steps pull through it too.
+    The waits are 15s, then 30s, the widest of the schedules it replaced. A connection reset on
+    Docker Hub's token endpoint once failed a release, and that blip clears within such a window.
+    """
+    for attempt in range(1, PULL_ATTEMPTS + 1):
+        label = f"pull {name}" if attempt == 1 else f"pull {name} attempt {attempt}/{PULL_ATTEMPTS}"
+        try:
+            run_step(
+                label, ["docker", "pull", "--quiet", image], timeout, runner, capture_output=True
+            )
+        except CommandExited:
+            if attempt == PULL_ATTEMPTS:
+                annotate("error", f"docker pull of {image} failed on all {PULL_ATTEMPTS} attempts.")
+                raise
+            annotate("warning", f"docker pull of {image} failed on attempt {attempt}.")
+            delay = PULL_BACKOFF * attempt
+            print(f"RETRY pull {name} in {delay}s", flush=True)
+            time.sleep(delay)
+        except CommandFailed:
+            annotate("error", f"docker pull of {image} timed out or could not start.")
+            raise
+        else:
+            return
+
+
+def annotate(level: str, message: str) -> None:
+    """Under GitHub Actions, show `message` on the run's summary, which a plain log line never reaches.
+
+    The message is built from the image reference alone, never from Docker's own output.
+    """
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        print(f"::{level}::{message}", flush=True)
+
+
+def pull(
+    images: Sequence[str],
+    timeout: int,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = run_command,
+) -> int:
+    """Pull each image with the bounded retry and lint nothing.
+
+    A caller that runs its own container pulls through here, so every pull shares one schedule.
+    """
+    try:
+        for image in images:
+            pull_image(image, image, timeout, runner)
+    except CommandFailed as error:
+        print(f"RESULT failed: {error}", flush=True)
+        return 1
+    print(f"RESULT success: {len(images)} image(s) pulled", flush=True)
+    return 0
 
 
 def powershell_command(files: Sequence[str]) -> str:
@@ -679,9 +820,16 @@ def lint(
     timeout: int,
     selected: set[str],
     runner: Callable[..., subprocess.CompletedProcess[str]] = run_command,
+    pins: Mapping[str, str] | None = None,
 ) -> int:
-    """Pull applicable images, then run every selected linter."""
+    """Pull applicable images, then run every selected linter.
+
+    The pins default to the manifest at its hub-relative path from this script.
+    """
     try:
+        if pins is None:
+            pins = read_pins(manifest_path())
+        require_stages(pins, (linter.stage for linter in LINTERS))
         applicable: list[tuple[Linter, list[str]]] = []
         for linter in LINTERS:
             if linter.name not in selected:
@@ -703,8 +851,9 @@ def lint(
         print("PHASE pull", flush=True)
         digests: dict[str, str] = {}
         for linter, _ in applicable:
-            run_step(f"pull {linter.name}", ["docker", "pull", linter.image], timeout, runner)
-            digests[linter.name] = resolve_digest(linter.name, linter.image, timeout, runner)
+            image = pins[linter.stage]
+            pull_image(linter.name, image, timeout, runner)
+            digests[linter.name] = resolve_digest(linter.name, image, timeout, runner)
 
         print("PHASE execution: pulls complete, repository mounts begin", flush=True)
         with owned_snapshot(parent) as snapshot:
@@ -742,11 +891,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--timeout", type=int, default=300, help="seconds allowed per Docker command"
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--linter",
         action="append",
         choices=[linter.name for linter in LINTERS],
         help="linter to run, repeat to select multiple (default: all)",
+    )
+    mode.add_argument(
+        "--pull",
+        action="append",
+        metavar="IMAGE",
+        help="only pull IMAGE with the bounded retry, repeat to pull several, and lint nothing",
+    )
+    mode.add_argument(
+        "--pin",
+        action="append",
+        metavar="STAGE",
+        help="only print STAGE=<image reference> from the pin manifest, repeat for several, "
+        "and lint nothing",
     )
     return parser.parse_args(argv)
 
@@ -768,6 +931,10 @@ def main(argv: Sequence[str] | None = None) -> int | signal.Signals:
     root = args.root.resolve()
     selected = set(args.linter or (linter.name for linter in LINTERS))
     try:
+        if args.pin:
+            return print_pins(args.pin)
+        if args.pull:
+            return pull(args.pull, args.timeout)
         return lint(root, args.timeout, selected)
     except KeyboardInterrupt:
         signum = signal.Signals(received[0] if received else signal.SIGINT)

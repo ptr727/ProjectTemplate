@@ -52,6 +52,21 @@ class LinuxFunctionsCase(unittest.TestCase):
         self.functions = self.dir / "functions.sh"
         self.functions.write_text(linux_functions(), encoding="utf-8")
 
+    def redirect_sources_dir(self, name: str, files: list[str]) -> Path:
+        """Point the sourced copy's readonly SOURCES_DIR at a fresh directory holding `files`."""
+        sources = self.dir / name
+        sources.mkdir()
+        for file in files:
+            (sources / file).write_text("", encoding="utf-8")
+        text = linux_functions()
+        old = 'readonly SOURCES_DIR="/etc/apt/sources.list.d"'
+        if old not in text:
+            raise AssertionError("install-tools.sh no longer declares SOURCES_DIR as expected")
+        self.functions.write_text(
+            text.replace(old, f'readonly SOURCES_DIR="{sources}"'), encoding="utf-8"
+        )
+        return sources
+
     def run_bash(self, body: str, argument: str = "") -> subprocess.CompletedProcess[str]:
         script = f'source "{self.functions}"\n{body}\n'
         return subprocess.run(
@@ -92,7 +107,7 @@ PATH=$host_path
         result = self.run_bash(body, AWKWARD)
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
-        self.assertEqual(report["schema"], 1)
+        self.assertEqual(report["schema"], 2)
         self.assertEqual(report["platform"], "linux")
         self.assertEqual(
             report["tools"],
@@ -606,16 +621,7 @@ class TestLinuxSourceNotes(LinuxFunctionsCase):
     STEMS: ClassVar[dict[str, str]] = {"gh": "github-cli", "node": "nodesource"}
 
     def probe(self, tool: str, files: list[str]) -> tuple[list[str], str]:
-        sources = self.dir / f"sources-{tool}-{'-'.join(files) or 'empty'}"
-        sources.mkdir()
-        for name in files:
-            (sources / name).write_text("", encoding="utf-8")
-        text = linux_functions().replace(
-            'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
-            f'readonly SOURCES_DIR="{sources}"',
-        )
-        self.assertIn(str(sources), text)
-        self.functions.write_text(text, encoding="utf-8")
+        self.redirect_sources_dir(f"sources-{tool}-{'-'.join(files) or 'empty'}", files)
         body = f"""tool_note {tool}
 for n in "${{NOTES[@]}}"; do printf 'NOTE %s\\n' "$n"; done
 tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
@@ -666,6 +672,144 @@ node_lts_major() { printf '22'; }
         for tool, stem in self.STEMS.items():
             self.assertRegex(text, rf"(?m)^    {tool}\) printf '{stem}' ;;$")
             self.assertRegex(text, rf'register_apt_source "{stem}" ')
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestMicrosoftFeedRows(LinuxFunctionsCase):
+    """A host without Microsoft's feed reads unmanaged where an install would add it."""
+
+    def probe(
+        self,
+        tool: str,
+        arch: str,
+        files: list[str],
+        sdk: str,
+        installed: str = "",
+        target: str = "",
+    ) -> str:
+        self.redirect_sources_dir(
+            f"sources-{tool}-{arch}-{'-'.join(files) or 'empty'}-{'sdk' if sdk else 'nosdk'}", files
+        )
+        body = f"""ARCH={arch}
+dotnet_sdk_packages() {{ printf '%s' "{sdk}"; }}
+printf '%s|%s' "$(tool_effective_status {tool} '{installed}' '{target}')" "$(dotnet_source)" """
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_an_installed_dotnet_keeps_its_status_without_the_feed(self) -> None:
+        out = self.probe("dotnet", "amd64", [], "", installed="8.0.1", target="8.0.1")
+        self.assertEqual(out.partition("|")[0], "current")
+
+    def test_an_installed_powershell_reads_unmanaged_only_where_the_feed_would_be_added(
+        self,
+    ) -> None:
+        cases: tuple[tuple[str, list[str], str], ...] = (
+            ("amd64", [], "unmanaged"),
+            ("amd64", ["microsoft-prod.sources"], "current"),
+            ("arm64", [], "current"),
+        )
+        for arch, files, expected in cases:
+            with self.subTest(arch=arch, files=files):
+                out = self.probe(
+                    "powershell", arch, files, "", installed="7.4.0-1", target="7.4.0-1"
+                )
+                self.assertEqual(out.partition("|")[0], expected)
+
+    def test_dotnet_with_nothing_installed_says_the_install_refreshes_before_adding_the_feed(
+        self,
+    ) -> None:
+        result = self.run_bash("""
+MODE=install
+tool_function() { printf 'stub_%s' "$2"; }
+stub_version() { :; }
+stub_target() { :; }
+stub_source() { printf 'packages.microsoft.com'; }
+stub_install() { echo "INSTALL RAN"; }
+tool_effective_status() { printf 'unmanaged'; }
+apply_tool dotnet
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("only where the refreshed lists show no distro SDK", result.stdout)
+        self.assertIn("INSTALL RAN", result.stdout)
+
+    def test_an_unmanaged_tool_with_nothing_installed_says_the_install_adds_the_feed(self) -> None:
+        result = self.run_bash("""
+MODE=install
+tool_function() { printf 'stub_%s' "$2"; }
+stub_version() { :; }
+stub_target() { :; }
+stub_source() { printf 'packages.microsoft.com'; }
+stub_install() { echo "INSTALL RAN"; }
+tool_effective_status() { printf 'unmanaged'; }
+apply_tool powershell
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Microsoft's feed is not configured, so this install adds it", result.stdout)
+        self.assertNotIn("installed without the sources file", result.stdout)
+        self.assertIn("INSTALL RAN", result.stdout)
+
+    def test_the_dotnet_note_checks_the_feed_and_the_architecture(self) -> None:
+        cases: tuple[tuple[str, list[str], str], ...] = (
+            ("amd64", [], "Microsoft's feed is not configured"),
+            ("amd64", ["microsoft-prod.list"], "although Microsoft's feed is configured"),
+            ("arm64", [], "carries amd64 only"),
+            ("arm64", ["microsoft-prod.list"], "carries amd64 only"),
+        )
+        for arch, files, expected in cases:
+            with self.subTest(arch=arch, files=files):
+                self.redirect_sources_dir(f"note-{arch}-{'-'.join(files) or 'empty'}", files)
+                result = self.run_bash(f"""ARCH={arch}
+dotnet_sdk_packages() {{ :; }}
+tool_note dotnet
+printf '%s\\n' "${{NOTES[@]}}" """)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stdout)
+
+    def test_the_powershell_note_checks_the_architecture_and_the_feed(self) -> None:
+        cases: tuple[tuple[str, list[str], str | None], ...] = (
+            ("arm64", [], "carries amd64 only"),
+            ("amd64", [], "Microsoft's repository is not configured"),
+            ("amd64", ["microsoft-prod.sources"], None),
+        )
+        for arch, files, expected in cases:
+            with self.subTest(arch=arch, files=files):
+                self.redirect_sources_dir(f"pwsh-note-{arch}-{'-'.join(files) or 'empty'}", files)
+                result = self.run_bash(f"""ARCH={arch}
+tool_note powershell
+printf '%s\\n' "${{NOTES[@]}}" """)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if expected is None:
+                    self.assertEqual(result.stdout.strip(), "")
+                else:
+                    self.assertIn(expected, result.stdout)
+
+    def test_each_host_state_reads_the_status_an_install_would_act_on(self) -> None:
+        feed = ["microsoft-prod.sources"]
+        cases: tuple[tuple[str, str, list[str], str, str, str], ...] = (
+            ("powershell", "amd64", [], "", "", "unmanaged"),
+            ("powershell", "amd64", feed, "", "", "unavailable"),
+            ("powershell", "arm64", [], "", "", "unavailable"),
+            ("dotnet", "amd64", [], "", "", "unmanaged|packages.microsoft.com"),
+            (
+                "dotnet",
+                "amd64",
+                ["microsoft-prod.list"],
+                "",
+                "",
+                "unavailable|packages.microsoft.com",
+            ),
+            ("dotnet", "amd64", [], "dotnet-sdk-8.0", "8.0.1", "missing|distro"),
+            ("dotnet", "arm64", [], "", "", "unavailable|distro"),
+        )
+        for tool, arch, files, sdk, target, expected in cases:
+            with self.subTest(tool=tool, arch=arch, files=files, sdk=sdk):
+                out = self.probe(tool, arch, files, sdk, target=target)
+                status, _, source = out.partition("|")
+                want_status, _, want_source = expected.partition("|")
+                self.assertEqual(status, want_status)
+                if tool == "dotnet":
+                    self.assertEqual(source, want_source)
 
 
 class TestInstallersNameTheBaselineLine(unittest.TestCase):
@@ -953,16 +1097,7 @@ class TestLinuxInstallRefusals(LinuxFunctionsCase):
 
     def setUp(self) -> None:
         super().setUp()
-        # SOURCES_DIR is readonly, so point it at an empty directory in the sourced copy, so the host's own feed files cannot take the fast path.
-        sources = self.dir / "sources.d"
-        sources.mkdir()
-        text = self.functions.read_text(encoding="utf-8")
-        old = 'readonly SOURCES_DIR="/etc/apt/sources.list.d"'
-        if old not in text:
-            raise AssertionError("install-tools.sh no longer declares SOURCES_DIR as expected")
-        self.functions.write_text(
-            text.replace(old, f'readonly SOURCES_DIR="{sources}"'), encoding="utf-8"
-        )
+        self.redirect_sources_dir("sources.d", [])
 
     def test_a_non_apt_pwsh_outside_the_known_paths_stops_the_install(self) -> None:
         result = self.run_bash("""

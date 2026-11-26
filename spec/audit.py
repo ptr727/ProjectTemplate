@@ -32,6 +32,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 import audit_contract
+import audit_dependabot
+import audit_environments
 import audit_pins
 import validate  # sibling, import-safe (its main is guarded)
 import yaml
@@ -330,9 +332,7 @@ def python_undeclared_root_findings(entry, tree):
         return []
     if not any(p.startswith("tests/") and p.endswith(".py") for p in tree):
         return []
-    if "uv.lock" in tree or any(
-        p.startswith("requirements") and p.endswith(".txt") and "/" not in p for p in tree
-    ):
+    if any("/" not in p and audit_dependabot.manifest_ecosystem(p) for p in tree):
         return []
     return [
         (
@@ -902,22 +902,19 @@ def hub_repo_name() -> str:
     return hub_name()[0]
 
 
-HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
-
-
 def gh(path, ok404=False) -> Any:
-    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body."""
-    r = subprocess.run(
-        ["gh", "api", path], capture_output=True, text=True, encoding="utf-8", check=False
-    )
-    if r.returncode != 0:
-        status = HTTP_STATUS.search(r.stderr)
+    """GET a REST path via gh, returning parsed JSON, or None on a 404 (when ok404) or an empty response body.
+
+    The run is scripts/gh_graphql.py's, which pins the host to github.com, where the registry names every repository.
+    """
+    transport = validate.scripts_module("gh_graphql")
+    code, out, err = transport.run_subprocess(["gh", "api", path])
+    if code != 0:
+        status = transport.HTTP_STATUS.search(err)
         if ok404 and status is not None and status.group(1) == "404":
             return None
-        raise RuntimeError(
-            f"gh api {path}: {r.stderr.strip().splitlines()[-1] if r.stderr else 'failed'}"
-        )
-    return json.loads(r.stdout) if r.stdout.strip() else None
+        raise RuntimeError(f"gh api {path}: {err.strip().splitlines()[-1] if err else 'failed'}")
+    return json.loads(out) if out.strip() else None
 
 
 def owner_repos(owner):
@@ -1539,21 +1536,6 @@ def concurrency_caller_findings(path, text):
             ("DRIFT", f"concurrency: {path} sets cancel-in-progress to '{cancel}', expected false")
         )
     return findings
-
-
-def dependabot_ecosystems(text):
-    """The package-ecosystem values a dependabot.yml declares, or None where it does not parse."""
-    doc, parsed = _yaml(text)
-    if not parsed:
-        return None
-    updates = doc.get("updates") if isinstance(doc, dict) else None
-    if not isinstance(updates, list):
-        return set()
-    return {
-        str(u["package-ecosystem"])
-        for u in updates
-        if isinstance(u, dict) and u.get("package-ecosystem")
-    }
 
 
 @functools.lru_cache(
@@ -2323,25 +2305,27 @@ def check_secrets_stems(run):
 
 def check_secrets_names(run):
     """Secret names per store, never values, against what the applicable mechanisms require and forbid."""
-    secrets = run.spec["secrets"]
-    stores = {}
-    # No ok404, since an empty store returns an empty list and a 404 is a failed call.
-    for store in ("actions", "dependabot"):
-        data = gh(f"repos/{run.slug}/{store}/secrets?per_page=100")
-        stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
-    required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree, run.read_project)
+    stores = audit_environments.resolve_secrets.read_live_names(run.slug)
+    required, forbidden = resolve_secret_stores(
+        run.spec["secrets"], run.entry, run.tree, run.read_project
+    )
     return [f for f in compare_stores(required, forbidden, stores) if f[0] != "OK"]
 
 
+def check_secrets_environments(run):
+    forbidden = resolve_secret_stores(run.spec["secrets"], run.entry, run.tree, run.read_project)[1]
+    return audit_environments.environment_findings(run.slug, run.entry, forbidden)
+
+
 def check_dependabot_ecosystems(run):
-    """An ecosystem the tree implies, github-actions for workflows and devcontainers for .devcontainer/ or .devcontainer.json, is declared."""
+    """An ecosystem the tree implies is declared: github-actions for workflows, devcontainers for .devcontainer/ or .devcontainer.json, and pip or uv per Python directory."""
     text = contents_text(
         gh(f"repos/{run.slug}/contents/.github/dependabot.yml?ref={run.ref}", ok404=True)
     )
     if not text:
         return []
-    declared = dependabot_ecosystems(text)
-    if declared is None:
+    doc, parsed = _yaml(text)
+    if not parsed:
         return [
             (
                 "DRIFT",
@@ -2358,7 +2342,8 @@ def check_dependabot_ecosystems(run):
         if gh(f"repos/{run.slug}/contents/{path}?ref={run.ref}", ok404=True) is not None:
             implied["devcontainers"] = f"{path} is present"
             break
-    return [
+    declared = audit_dependabot.ecosystems(doc)
+    findings = [
         (
             "DRIFT",
             f"dependabot: {eco} ecosystem not declared though {why}; add it for both main and develop per the fleet norm",
@@ -2366,6 +2351,10 @@ def check_dependabot_ecosystems(run):
         for eco, why in sorted(implied.items())
         if eco not in declared
     ]
+    if run.tree is not None:
+        directories = audit_dependabot.declared_directories(doc)
+        findings += audit_dependabot.python_findings(directories, run.tree, run.read_text)
+    return findings
 
 
 def check_pins_age(run):

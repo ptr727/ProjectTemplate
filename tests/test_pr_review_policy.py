@@ -363,6 +363,28 @@ class TestSideReaders(unittest.TestCase):
         pr = fixtures.payload([], comments=[stranger, chatty])
         self.assertEqual([], side.side_asks(pr, "/review"))
 
+    def test_the_asks_and_the_rounds_trust_the_same_comments(self) -> None:
+        """Each reader keeps only shown comments from write access, so the two cannot drift.
+
+        Every body strips to the ask, and its padding tells the comments apart.
+        """
+        cast = [("OWNER", False), ("MEMBER", False), ("COLLABORATOR", False), ("OWNER", True)]
+        cast += [("CONTRIBUTOR", False), ("NONE", False), ("", False)]
+        nodes = [
+            {
+                **trusted(" " * i + "/review", fixtures.LATE),
+                "authorAssociation": who,
+                "isMinimized": hid,
+            }
+            for i, (who, hid) in enumerate(cast)
+        ]
+        pr = fixtures.payload([], comments=nodes)
+        kept = nodes[:3]
+        self.assertEqual(kept, payload.trusted_comment_nodes(pr))
+        self.assertEqual(kept, side.side_asks(pr, "/review"))
+        bodies = [body for body, _ in rounds.trusted_comments(pr)]
+        self.assertEqual([n["body"] for n in kept], bodies)
+
     def test_coderabbit_answers_with_a_review_on_the_head_commit(self) -> None:
         body = side.side_command("coderabbit", "full review")
         self.assertEqual("@coderabbitai full review", body)
