@@ -2796,7 +2796,7 @@ class PythonVersionLineCase(unittest.TestCase):
             (
                 "lint",
                 ("Resolve lint Python version step",),
-                "steps.python.outputs.any == 'true' && inputs.python-versions == ''",
+                "steps.python.outputs.any == 'true'",
             ),
         ):
             with self.subTest(job=job):
@@ -2815,6 +2815,10 @@ class PythonVersionLineCase(unittest.TestCase):
                         resolved, yaml_value(yaml_step(body, step), "env", "PYTHON_VERSIONS")
                     )
         self.assertEqual("'false'", yaml_value(yaml_step(builder, self.SELECT), "with", "warn"))
+        self.assertEqual(
+            "${{ inputs.python-versions == '' }}",
+            yaml_value(yaml_step(jobs["lint"], self.SELECT), "with", "warn"),
+        )
         self.assertIn("      versions: ${{ steps.build.outputs.versions }}\n", builder)
 
         release = job_texts(

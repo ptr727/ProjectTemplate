@@ -419,10 +419,13 @@ jobs:
         if: steps.python.outputs.any == 'true'
         uses: $/.github/actions/python-tool-pins
 
+      # Run whatever python-versions names, so a malformed selector the release reads fails here first.
       - name: Select Python version step
         id: python-version
-        if: steps.python.outputs.any == 'true' && inputs.python-versions == ''
+        if: steps.python.outputs.any == 'true'
         uses: $/.github/actions/python-version
+        with:
+          warn: ${{ inputs.python-versions == '' }}
 
       # The job's Python steps run under the first interpreter the caller names or selects, so a uv.lock whose floor is above the default still syncs.
       # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
