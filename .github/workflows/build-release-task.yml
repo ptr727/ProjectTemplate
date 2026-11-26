@@ -278,6 +278,11 @@ jobs:
           assembly-file-version: ${{ needs.get-version.outputs.AssemblyFileVersion }}
           project-dir: ${{ inputs.pypi_project_dir }}
 
+      - name: Select Python version step
+        id: python-version
+        if: ${{ hashFiles('.github/actions/build-pypi/action.yml') == '' }}
+        uses: $/.github/actions/python-version
+
       - name: Run hub build-pypi default step
         if: ${{ hashFiles('.github/actions/build-pypi/action.yml') == '' }}
         uses: $/.github/actions/pypi-build-default
@@ -287,6 +292,7 @@ jobs:
           semver2: ${{ needs.get-version.outputs.SemVer2 }}
           project-dir: ${{ inputs.pypi_project_dir }}
           version-file: ${{ inputs.pypi_version_file }}
+          python-version: ${{ steps.python-version.outputs.version }}
 
   # The hook only writes files, so the upload, its smoke gate (D1.3), and its retention (D5.4) stay here for every caller.
   build-release-asset:

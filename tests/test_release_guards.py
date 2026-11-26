@@ -2058,9 +2058,13 @@ gh() {
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
 
-        # Only a file needs the tree, and it has to be there before the check reads it.
+        # A file needs the whole tree, and it has to be there before the check reads it.
         checkout = yaml_step(job, "Checkout code step")
-        self.assertIn("        if: ${{ inputs.test-matrix-file != '' }}\n", checkout)
+        self.assertIn("        if: ${{ inputs.test-matrix-file != '' || ", checkout)
+        self.assertEqual(
+            "${{ inputs.test-matrix-file == '' && '/.python-version' || '' }}",
+            yaml_value(checkout, "with", "sparse-checkout"),
+        )
         self.assertEqual(yaml_value(checkout, "with", "persist-credentials"), "false")
         steps = re.findall(r"(?m)^      - name: (.*)$", job)
         self.assertLess(
@@ -2117,9 +2121,11 @@ gh() {
             """The matrix the build step writes after a passing check, with the check's legs output."""
             status, log, output = step(check, **env)
             self.assertEqual(0, status, log)
-            status, log, line = step(build, LEGS=output.removeprefix("legs=").strip())
+            status, log, lines = step(build, LEGS=output.removeprefix("legs=").strip())
             self.assertEqual(0, status, log)
-            return json.loads(line.removeprefix("matrix="))
+            matrix, versions = lines.splitlines()
+            self.assertEqual('versions=["3.13"]', versions)
+            return json.loads(matrix.removeprefix("matrix="))
 
         # Each input builds the legs it holds, the inline one differing so a stale resolved file cannot pass for it.
         self.assertEqual({"include": legs}, built(TEST_MATRIX_FILE="ci/legs.json"))
@@ -2163,15 +2169,9 @@ gh() {
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
 
-        # The default's shape is asserted and its content is not.
-        # Neither bumping the fleet default nor adding a second interpreter to it is a regression here.
+        # Empty is the default, so a caller naming nothing runs the line its own .python-version selects.
         declaration = workflow.split("      python-versions:\n", 1)[1].split("\n    secrets:", 1)[0]
-        default = re.search(r"(?m)^        default: ['\"](.*)['\"]$", declaration)
-        self.assertIsNotNone(default)
-        assert default is not None
-        versions = json.loads(default.group(1))
-        self.assertTrue(versions)
-        self.assertTrue(all(isinstance(version, str) for version in versions))
+        self.assertRegex(declaration, r"(?m)^        default: ''$")
 
         # An explicit name: is used verbatim rather than falling back to a matrix-suffixed default.
         # Without the interpolation every leg renders one indistinguishable check name.
@@ -2183,7 +2183,7 @@ gh() {
         # The matrix comes from the test-matrix job's output and the uv setup reads the matrix, so no literal survives between them.
         self.assertIn("      matrix: ${{ fromJSON(needs.test-matrix.outputs.matrix) }}\n", job)
         self.assertIn(
-            "          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}\n",
+            "          python-version: ${{ matrix.python-version || fromJSON(needs.test-matrix.outputs.versions)[0] }}\n",
             job,
         )
         self.assertNotIn('python-version: "', job)
@@ -2714,6 +2714,131 @@ class DotnetSdkLineCase(unittest.TestCase):
                     yaml_value(setup, "if"), yaml_value(yaml_step(steps, default), "if")
                 )
                 self.assertLess(steps.index("Setup .NET SDK step"), steps.index(default))
+
+
+class PythonVersionLineCase(unittest.TestCase):
+    """The hub's Python steps run the line the caller's root .python-version selects, else the baseline's."""
+
+    ACTION = REPO / ".github/actions/python-version/action.yml"
+    BASELINE = REPO / "catalog/snippets/configs/.python-version"
+    SELECT = "Select Python version step"
+    last_stdout = ""
+
+    def select(self, python_version: str | None, warn: str = "true") -> list[str]:
+        """The outputs the selection step writes in a workspace holding `python_version`, or none.
+
+        The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
+        """
+        bash = bash_or_skip()
+        script = step_script(self.ACTION, self.SELECT)
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Path(directory)
+            if python_version is not None:
+                (workspace / ".python-version").write_bytes(python_version.encode("utf-8"))
+            output = workspace / "github-output"
+            output.write_text("", encoding="utf-8")
+            step = workspace / "select.sh"
+            step.write_text(script, encoding="utf-8", newline="\n")
+            result = run(
+                [bash, str(step)],
+                cwd=workspace,
+                env={**os.environ, "GITHUB_OUTPUT": str(output), "WARN": warn},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.last_stdout = result.stdout
+            return output.read_text(encoding="utf-8").splitlines()
+
+    def baseline(self) -> str:
+        return self.BASELINE.read_text(encoding="utf-8").strip()
+
+    def test_the_fallback_is_the_baseline_line(self) -> None:
+        self.assertRegex(self.baseline(), r"\A[0-9]+\.[0-9]+\Z")
+        self.assertEqual(self.select(None), [f"version={self.baseline()}"])
+        self.assertIn("::warning::No root .python-version selects a Python line", self.last_stdout)
+
+    def test_the_first_request_line_is_read(self) -> None:
+        self.assertEqual(self.select("3.13\n"), ["version=3.13"])
+        self.assertEqual(self.select("# the line\n\n  3.15  \r\n3.13\n"), ["version=3.15"])
+        self.assertEqual(self.select("3.12"), ["version=3.12"])
+        self.assertEqual("", self.last_stdout)
+
+    def test_a_file_naming_no_line_falls_back_with_a_warning(self) -> None:
+        for text in ("", "# only a comment\n", "3.14.1\n", "cpython@3.14\n", "3\n"):
+            with self.subTest(text=text):
+                self.assertEqual(self.select(text), [f"version={self.baseline()}"])
+                self.assertIn(
+                    "::warning::The root .python-version names no X.Y line", self.last_stdout
+                )
+
+    def test_a_caller_that_cannot_tell_is_not_warned(self) -> None:
+        self.assertEqual(self.select(None, warn="false"), [f"version={self.baseline()}"])
+        self.assertEqual("", self.last_stdout)
+
+    def test_each_python_job_reaches_the_selection(self) -> None:
+        """Validate's jobs and the PyPI release build each run the action after a checkout that holds the file."""
+        validate = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        jobs = job_texts(validate)
+        builder = jobs["test-matrix"]
+        checkout = yaml_step(builder, "Checkout code step")
+        self.assertEqual(
+            "${{ inputs.test-matrix-file != '' || inputs.python-versions == '' }}",
+            yaml_value(checkout, "if"),
+        )
+        self.assertIn("'/.python-version'", yaml_value(checkout, "with", "sparse-checkout") or "")
+        resolved = "${{ inputs.python-versions || format('[\"{0}\"]', steps.python-version.outputs.version) }}"
+        for job, steps, condition in (
+            (
+                "test-matrix",
+                ("Validate python-versions input step", "Build unit-test matrix step"),
+                "${{ inputs.python-versions == '' }}",
+            ),
+            (
+                "lint",
+                ("Resolve lint Python version step",),
+                "steps.python.outputs.any == 'true' && inputs.python-versions == ''",
+            ),
+        ):
+            with self.subTest(job=job):
+                body = jobs[job]
+                select = yaml_step(body, self.SELECT)
+                self.assertEqual("$/.github/actions/python-version", yaml_value(select, "uses"))
+                self.assertEqual(condition, yaml_value(select, "if"))
+                self.assertLess(
+                    body.index("- name: Checkout code step"), body.index(f"- name: {self.SELECT}")
+                )
+                for step in steps:
+                    self.assertLess(
+                        body.index(f"- name: {self.SELECT}"), body.index(f"- name: {step}")
+                    )
+                    self.assertEqual(
+                        resolved, yaml_value(yaml_step(body, step), "env", "PYTHON_VERSIONS")
+                    )
+        self.assertEqual("'false'", yaml_value(yaml_step(builder, self.SELECT), "with", "warn"))
+        self.assertIn("      versions: ${{ steps.build.outputs.versions }}\n", builder)
+
+        release = job_texts(
+            (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        )
+        pypi = release["build-pypi"]
+        default = "Run hub build-pypi default step"
+        select = yaml_step(pypi, self.SELECT)
+        self.assertEqual("$/.github/actions/python-version", yaml_value(select, "uses"))
+        self.assertEqual(yaml_value(select, "if"), yaml_value(yaml_step(pypi, default), "if"))
+        self.assertLess(pypi.index(self.SELECT), pypi.index(default))
+        self.assertEqual(
+            "${{ steps.python-version.outputs.version }}",
+            yaml_value(yaml_step(pypi, default), "with", "python-version"),
+        )
+        build = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(encoding="utf-8")
+        self.assertEqual(
+            "${{ inputs.python-version }}",
+            yaml_value(yaml_step(build, "Setup uv step"), "with", "python-version"),
+        )
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks.json", "appliesTo": ["csharp"] },
         { "path": ".vscode/tasks.json", "sections": ["clean-compile task group"], "reference": "catalog/snippets/configs/vscode-tasks-python.json", "appliesTo": ["python"] },
         { "path": "global.json", "fidelity": "intent", "reference": "catalog/snippets/configs/global.json", "repoOwnedKeys": ["sdk.version"], "intentRef": "CODESTYLE.md", "appliesTo": ["csharp"] },
+        { "path": ".python-version", "fidelity": "intent", "reference": "catalog/snippets/configs/.python-version", "intentRef": "CODESTYLE.md", "appliesTo": ["python"] },
         { "path": ".codecov.yml", "fidelity": "intent", "reference": "catalog/snippets/configs/.codecov.yml", "intentRef": "WORKFLOW.md", "appliesTo": ["csharp", "python"] },
         { "path": ".dockerignore", "appliesTo": ["docker"] },
         { "path": "Docker/README.md", "reference": "catalog/snippets/configs/docker-hub-readme.md", "appliesTo": ["docker"] }
