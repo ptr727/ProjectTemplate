@@ -899,8 +899,12 @@ docker_install() {
 
 # --- dotnet ---
 
+microsoft_feed_configured() {
+    [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]
+}
+
 dotnet_source() {
-    if [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+    if microsoft_feed_configured || { [[ $ARCH == "amd64" ]] && [[ -z $(dotnet_sdk_latest) ]]; }; then
         printf 'packages.microsoft.com'
     else
         printf 'distro'
@@ -975,7 +979,7 @@ microsoft_feed() {
     # The feed already configured is the fast path.
     # A repeat run, or a run selecting both dotnet and powershell, therefore does not re-install the deb.
     # Nor does it force the apt refresh this file reserves for a changed sources file.
-    if [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+    if microsoft_feed_configured; then
         return 0
     fi
 
@@ -1213,6 +1217,8 @@ tool_configured() {
     gh | node) [[ -f "$SOURCES_DIR/$(tool_sources_stem "$1").sources" ]] ;;
     # No distro carries 1password-cli, so the cases this guards are the vendor's one-line source and a .deb installed by hand.
     op) [[ -f "$SOURCES_DIR/1password.sources" ]] ;;
+    powershell) microsoft_feed_configured || [[ $ARCH != "amd64" ]] ;;
+    dotnet) microsoft_feed_configured || [[ $ARCH != "amd64" ]] || [[ -n $(dotnet_sdk_latest) ]] ;;
     *) return 0 ;;
     esac
 }
@@ -1229,6 +1235,8 @@ tool_effective_status() {
     local tool="$1" status
     status=$(tool_status "$2" "$3")
     if [[ $status == "current" || $status == "outdated" ]] && ! tool_configured "$tool"; then
+        status="unmanaged"
+    elif [[ $status == "unavailable" && ($tool == "dotnet" || $tool == "powershell") ]] && ! tool_configured "$tool"; then
         status="unmanaged"
     fi
     printf '%s' "$status"
@@ -1386,7 +1394,7 @@ tool_note() {
     powershell)
         # A host without the feed reads no candidate at all, since the distro never carries a powershell package.
         # So the note says why rather than reading as absent.
-        if [[ ! -f "$SOURCES_DIR/microsoft-prod.sources" && ! -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+        if ! microsoft_feed_configured; then
             note "powershell" "Microsoft's repository is not configured, so no package is available yet"
         fi
         ;;
@@ -1607,6 +1615,8 @@ apply_tool() {
 
     if [[ $status == "current" ]]; then
         log "$tool: current at ${installed}, checking the package set"
+    elif [[ $status == "unmanaged" && -z $installed ]]; then
+        log "$tool: not installed and Microsoft's feed is not configured, this install adds the feed at $("$(tool_function "$tool" source)")"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is whatever apt already has until the managed source is written, so quoting it here could name the wrong upstream.
         if [[ $tool == "node" || $MODE == "upgrade" ]]; then

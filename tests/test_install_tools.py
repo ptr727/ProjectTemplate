@@ -668,6 +668,52 @@ node_lts_major() { printf '22'; }
             self.assertRegex(text, rf'register_apt_source "{stem}" ')
 
 
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestMicrosoftFeedRows(LinuxFunctionsCase):
+    """A host without Microsoft's feed reads unmanaged where an install would add it."""
+
+    def probe(self, tool: str, arch: str, files: list[str], sdk: str) -> str:
+        sources = (
+            self.dir
+            / f"sources-{tool}-{arch}-{'-'.join(files) or 'empty'}-{'sdk' if sdk else 'nosdk'}"
+        )
+        sources.mkdir()
+        for name in files:
+            (sources / name).write_text("", encoding="utf-8")
+        text = linux_functions().replace(
+            'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
+            f'readonly SOURCES_DIR="{sources}"',
+        )
+        self.assertIn(str(sources), text)
+        self.functions.write_text(text, encoding="utf-8")
+        body = f"""ARCH={arch}
+dotnet_sdk_packages() {{ printf '%s' "{sdk}"; }}
+printf '%s|%s' "$(tool_effective_status {tool} '' '')" "$(dotnet_source)" """
+        result = self.run_bash(body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout
+
+    def test_each_host_state_reads_the_status_an_install_would_act_on(self) -> None:
+        feed = ["microsoft-prod.sources"]
+        cases: tuple[tuple[str, str, list[str], str, str], ...] = (
+            ("powershell", "amd64", [], "", "unmanaged"),
+            ("powershell", "amd64", feed, "", "unavailable"),
+            ("powershell", "arm64", [], "", "unavailable"),
+            ("dotnet", "amd64", [], "", "unmanaged|packages.microsoft.com"),
+            ("dotnet", "amd64", ["microsoft-prod.list"], "", "unavailable|packages.microsoft.com"),
+            ("dotnet", "amd64", [], "dotnet-sdk-8.0", "unavailable|distro"),
+            ("dotnet", "arm64", [], "", "unavailable|distro"),
+        )
+        for tool, arch, files, sdk, expected in cases:
+            with self.subTest(tool=tool, arch=arch, files=files, sdk=sdk):
+                out = self.probe(tool, arch, files, sdk)
+                status, _, source = out.partition("|")
+                want_status, _, want_source = expected.partition("|")
+                self.assertEqual(status, want_status)
+                if tool == "dotnet":
+                    self.assertEqual(source, want_source)
+
+
 class TestInstallersNameTheBaselineLine(unittest.TestCase):
     """Each installer names the SDK line the global.json baseline selects.
 
