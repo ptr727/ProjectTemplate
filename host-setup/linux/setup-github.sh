@@ -3,11 +3,11 @@
 # Sets up git and GitHub on a host: the SSH key, the git configuration, and commit signing.
 # Every step is idempotent, so a re-run repairs a half configured host rather than duplicating what is already there.
 #
-# Two steps cannot be automated, because they happen in a browser:
-#   - Registering the public key as an authentication key.
-#   - Registering the same key as a signing key.
+# The public key is registered twice, once as an authentication key and once as a signing key.
 # Both are gates rather than suggestions.
-# The script stops at each and prints the key to paste and where to paste it.
+# Where gh is already logged in, with the admin:public_key and admin:ssh_signing_key scopes, the script registers each through gh ssh-key add.
+# Logging gh in stays interactive and is never run from here.
+# Otherwise the script stops at each registration and prints the key to paste and where to paste it.
 # The script checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
 
 set -Eeuo pipefail
@@ -126,11 +126,14 @@ The identity comes from --name and --email, or from what this host already carri
 default the maintainer commits under, in that order. A host configured for somebody else keeps its
 own identity rather than being quietly rewritten.
 
-Registering the key is done in a browser and cannot be automated, so --configure stops at each
-registration and prints what to paste. The same key is registered twice, once as an authentication
-key and once as a signing key: authentication reaches private repositories, signing is what marks a
-commit verified. Each is checked against the keys GitHub publishes for the account, so a run says
-whether the registration took rather than assuming it.
+The same key is registered twice, once as an authentication key and once as a signing key:
+authentication reaches private repositories, signing is what marks a commit verified. Where gh is
+already logged in with the admin:public_key and admin:ssh_signing_key scopes, --configure registers
+whichever is missing through gh ssh-key add. Logging gh in is never run for you, and
+gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes. Without a
+usable gh login, --configure stops at each registration and prints what to paste. Each is checked
+against the keys GitHub publishes for the account, so a run says whether the registration took
+rather than assuming it.
 
 Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF
@@ -359,7 +362,7 @@ github_signing_key_registered() {
     grep -qxF "$body" <<<"$keys"
 }
 
-# A registration is a browser step, so this prints what to paste and where, then stops.
+# The paste is the fallback where gh cannot register the key, so this prints what to paste and where, then stops.
 # The consequence of not registering differs per caller, so each says its own rather than this saying one for all.
 # Authentication failing stops everything that reaches GitHub.
 # Signing not being registered stops nothing locally.
@@ -380,6 +383,55 @@ registration_needed() {
         info "No key at $KEY.pub yet, so there is nothing to paste. A run that is not a dry run creates it."
     fi
     log ""
+}
+
+# Registers one kind of key through gh, for an account gh is already logged in as.
+# The kind is "authentication" or "signing", which is also gh's own --type value.
+# Always returns 0, because the checks that follow report any key still unregistered and print the paste.
+# A refused registration, such as a token without the scope, is a warning that names the remedy and never ends the run.
+register_through_gh() {
+    local kind="$1" account="$2" registered_rc=0 title
+    GITHUB_USER="$account"
+    if [[ $kind == "authentication" ]]; then
+        github_auth_key_registered || registered_rc=$?
+    else
+        github_signing_key_registered || registered_rc=$?
+    fi
+    case "$registered_rc" in
+    0)
+        info "Already registered as the $kind key"
+        return 0
+        ;;
+    2)
+        warn "GitHub could not be reached, so whether the $kind key is registered is unknown"
+        return 0
+        ;;
+    esac
+
+    if [[ $DRY_RUN == false && ! -f $KEY.pub ]]; then
+        return 0
+    fi
+    title=$(hostname)
+    if run gh ssh-key add "$KEY.pub" --title "$title" --type "$kind"; then
+        [[ $DRY_RUN == true ]] || info "Registered as the $kind key through gh, titled $title"
+        return 0
+    fi
+    warn "gh could not register the $kind key. gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs."
+    return 0
+}
+
+# Registers both keys through gh where gh is logged in, before the checks that read them.
+# Not being logged in, or not having gh, is the paste's case, so it is silent here and the checks below report it.
+# The login itself is interactive and stays the operator's, so it is never run from here.
+register_keys_through_gh() {
+    command -v gh >/dev/null || return 0
+    local account
+    account=$(gh_account)
+    [[ -n $account ]] || return 0
+
+    step "Registering the key through gh, logged in as $account"
+    register_through_gh authentication "$account"
+    register_through_gh signing "$account"
 }
 
 # --- git configuration ---
@@ -719,6 +771,8 @@ configure() {
     else
         die "A commit did not verify. Check $ALLOWED_SIGNERS holds this host's key against $EMAIL."
     fi
+
+    register_keys_through_gh
 
     # Authentication is the gate for everything GitHub answers.
     # Without it this host reaches no private repository, and the registration check below has no account to read.

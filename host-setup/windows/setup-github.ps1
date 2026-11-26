@@ -1,11 +1,11 @@
 # Sets up git and GitHub on a Windows host: the SSH key, the git configuration, and commit signing.
 # Every step is idempotent, so a re-run repairs a half configured host rather than duplicating what is already there.
 #
-# Two steps cannot be automated, because they happen in a browser:
-#   - Registering the public key as an authentication key.
-#   - Registering the same key as a signing key.
+# The public key is registered twice, once as an authentication key and once as a signing key.
 # Both are gates rather than suggestions.
-# The script stops at each and prints the key to paste and where to paste it.
+# Where gh is already logged in, with the admin:public_key and admin:ssh_signing_key scopes, the script registers each through gh ssh-key add.
+# Logging gh in stays interactive and is never run from here.
+# Otherwise the script stops at each registration and prints the key to paste and where to paste it.
 # The script checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
 #
 # The path settings are written in the tilde form the Linux peer writes, because of the following.
@@ -112,10 +112,13 @@ The identity comes from -Name and -Email, or from what this host already carries
 default the maintainer commits under, in that order. A host configured for somebody else keeps its
 own identity rather than being quietly rewritten.
 
-Registering the key is done in a browser and cannot be automated, so -Configure stops at each
-registration and prints what to paste. The same key is registered twice, once as an authentication
-key and once as a signing key: authentication reaches private repositories, signing is what marks a
-commit verified. Each is checked against the keys GitHub publishes for the account.
+The same key is registered twice, once as an authentication key and once as a signing key:
+authentication reaches private repositories, signing is what marks a commit verified. Where gh is
+already logged in with the admin:public_key and admin:ssh_signing_key scopes, -Configure registers
+whichever is missing through gh ssh-key add. Logging gh in is never run for you, and
+gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes. Without a
+usable gh login, -Configure stops at each registration and prints what to paste. Each is checked
+against the keys GitHub publishes for the account.
 
 Two host settings are reported and never written, because both need administrator and rewriting a
 working host is worse than naming what to change: the ssh-agent service, and the key file's ACL.
@@ -340,7 +343,7 @@ function Test-KeyRegistered {
     return 'missing'
 }
 
-# A registration is a browser step, so this prints what to paste and where, then stops.
+# The paste is the fallback where gh cannot register the key, so this prints what to paste and where, then stops.
 function Show-RegistrationNeeded {
     param([string]$Kind, [string]$Type)
     log ''
@@ -576,6 +579,49 @@ function Set-GhProtocol {
     if (-not $script:DRY_RUN) { info "Was $(if ($current) { $current } else { 'unreported' }), set to ssh" }
 }
 
+# Registers one kind of key through gh, for an account gh is already logged in as.
+# The kind is 'authentication' or 'signing', which is also gh's own --type value.
+# A refused registration, such as a token without the scope, is a warning that names the remedy and never ends the run.
+# The checks that follow report any key still unregistered and print the paste.
+function Register-KeyThroughGh {
+    param([ValidateSet('authentication', 'signing')][string]$Kind, [string]$Account)
+    $script:GITHUB_USER = $Account
+    $state = Test-KeyRegistered -Kind $(if ($Kind -eq 'authentication') { 'auth' } else { 'signing' })
+    if ($state -eq 'registered') {
+        info "Already registered as the $Kind key"
+        return
+    }
+    if ($state -eq 'unknown') {
+        if ($script:DRY_RUN -and -not (Test-Path "$($script:KEY).pub")) {
+            info "[dry run] gh ssh-key add $($script:KEY).pub --type $Kind"
+        } else {
+            warn "GitHub could not be reached, or there is no key yet, so whether the $Kind key is registered is unknown"
+        }
+        return
+    }
+
+    $title = [System.Net.Dns]::GetHostName()
+    $code = run -Command 'gh' -Arguments @('ssh-key', 'add', "$($script:KEY).pub", '--title', $title, '--type', $Kind)
+    if ($code -ne 0) {
+        warn "gh could not register the $Kind key. gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs."
+    } elseif (-not $script:DRY_RUN) {
+        info "Registered as the $Kind key through gh, titled $title"
+    }
+}
+
+# Registers both keys through gh where gh is logged in, before the checks that read them.
+# Not being logged in, or not having gh, is the paste's case, so it is silent here and the checks below report it.
+# The login itself is interactive and stays the operator's, so it is never run from here.
+function Register-KeysThroughGh {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
+    $account = Get-GhAccount
+    if (-not $account) { return }
+
+    step "Registering the key through gh, logged in as $account"
+    Register-KeyThroughGh -Kind 'authentication' -Account $account
+    Register-KeyThroughGh -Kind 'signing' -Account $account
+}
+
 # --- Actions ---
 
 function Show-Status {
@@ -671,6 +717,8 @@ function Invoke-Configure {
     } else {
         die "A commit did not verify. Check $($script:ALLOWED_SIGNERS) holds this host key against $($script:WANT_EMAIL)."
     }
+
+    Register-KeysThroughGh
 
     step 'Checking the key registrations at GitHub'
     Resolve-GitHubUser

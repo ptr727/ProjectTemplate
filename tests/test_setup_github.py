@@ -697,6 +697,296 @@ class TestWindowsGitHubCli(unittest.TestCase):
         self.assertIn("-GhSshProtocol", result.stdout)
 
 
+PUBLIC_KEY = "ssh-ed25519 AAAAexampleconstructedkeybody"
+ADD_REFRESH = "gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key"
+
+# A gh answering the calls the registration makes, recording each, and a fetch answering GitHub's published key lists.
+# Both are shell functions, so nothing reaches a real account and no real host is read.
+# $REGISTERED names which lists already hold the key, as a space separated subset of "auth signing".
+LINUX_REGISTER_BODY = r"""
+hostname() { printf 'example-host\n'; }
+gh() {
+    printf '%s\n' "$*" >>"$CALLS"
+    case "$*" in
+    "auth status --active --help") return 0 ;;
+    "auth status --active --hostname github.com")
+        [[ -n $ACCOUNT ]] || return 1
+        printf 'github.com\n  \xe2\x9c\x93 Logged in to github.com account %s (keyring)\n  - Active account: true\n' "$ACCOUNT"
+        ;;
+    "ssh-key add "*) return "${ADD_RC:-0}" ;;
+    *) return 9 ;;
+    esac
+}
+fetch() {
+    case "$1" in
+    */ssh_signing_keys)
+        if [[ " $REGISTERED " == *" signing "* ]]; then printf '[{"id": 1, "key": "%s", "title": "t"}]' "$PUB"; else printf '[]'; fi
+        ;;
+    *.keys)
+        if [[ " $REGISTERED " == *" auth "* ]]; then printf '%s\n' "$PUB"; fi
+        ;;
+    esac
+}
+"""
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux script's own functions")
+class TestLinuxKeyRegistration(unittest.TestCase):
+    """`setup-github.sh` registers both keys through a logged-in gh, and otherwise leaves the paste."""
+
+    def register(
+        self,
+        *,
+        account: str = ACCOUNT,
+        registered: str = "",
+        add_rc: int = 0,
+        dry_run: bool = False,
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        functions = directory / "functions.sh"
+        functions.write_text(linux_functions(), encoding="utf-8")
+        home = directory / "home"
+        (home / ".ssh").mkdir(parents=True)
+        (home / ".ssh" / "id_ed25519.pub").write_text(PUBLIC_KEY + " comment\n", encoding="ascii")
+        calls = directory / "calls"
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(home),
+            "CALLS": str(calls),
+            "ACCOUNT": account,
+            "REGISTERED": registered,
+            "ADD_RC": str(add_rc),
+            "PUB": PUBLIC_KEY,
+        }
+        dry = "DRY_RUN=true\n" if dry_run else ""
+        script = f'source "{functions}"\n{LINUX_REGISTER_BODY}\n{dry}register_keys_through_gh\n'
+        result = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            check=False,
+            timeout=30,
+            env=env,
+        )
+        adds = [
+            c for c in (calls.read_text().splitlines() if calls.exists() else []) if "ssh-key" in c
+        ]
+        return result, adds
+
+    def test_both_missing_keys_are_registered_with_their_types(self) -> None:
+        result, adds = self.register()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        home_key = adds[0].split(" ")[2]
+        self.assertTrue(home_key.endswith("/.ssh/id_ed25519.pub"), adds)
+        self.assertEqual(
+            [a.replace(home_key, "KEY") for a in adds],
+            [
+                "ssh-key add KEY --title example-host --type authentication",
+                "ssh-key add KEY --title example-host --type signing",
+            ],
+        )
+
+    def test_only_the_missing_kind_is_registered(self) -> None:
+        result, adds = self.register(registered="auth")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
+
+    def test_a_rerun_with_both_registered_changes_nothing(self) -> None:
+        result, adds = self.register(registered="auth signing")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertIn("Already registered as the authentication key", result.stdout)
+        self.assertIn("Already registered as the signing key", result.stdout)
+
+    def test_a_logged_out_gh_registers_nothing_and_never_logs_in(self) -> None:
+        result, adds = self.register(account="")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertNotIn("Registering the key through gh", result.stdout)
+
+    def test_a_refused_registration_names_the_scope_remedy_and_carries_on(self) -> None:
+        result, adds = self.register(add_rc=1)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 2, adds)
+        self.assertIn(ADD_REFRESH, result.stderr)
+
+    def test_a_dry_run_prints_the_commands_and_registers_nothing(self) -> None:
+        result, adds = self.register(dry_run=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertIn("[dry run] gh ssh-key add", result.stdout)
+
+    def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
+        text = LINUX_SCRIPT.read_text(encoding="utf-8")
+        self.assertNotIn("cannot be automated", text)
+        self.assertIn("gh ssh-key add", function_body(text, "\nusage() {"))
+
+    def test_configure_registers_before_it_checks_authentication(self) -> None:
+        body = function_body(LINUX_SCRIPT.read_text(encoding="utf-8"), "\nconfigure() {")
+        self.assertIn("\n    register_keys_through_gh\n", body)
+        self.assertLess(body.index("register_keys_through_gh"), body.index("resolve_github_user"))
+
+
+WINDOWS_REGISTER_FUNCTIONS = [
+    "log",
+    "info",
+    "step",
+    "run",
+    "Get-KeyBody",
+    "Get-GhAccount",
+    "Test-KeyRegistered",
+    "Register-KeyThroughGh",
+    "Register-KeysThroughGh",
+]
+WINDOWS_REGISTER_BODY = r"""
+function warn { param([string]$Message) Write-Host "WARNING: $Message" }
+# GitHub's published lists and gh are both stubs, so nothing reaches an account.
+function Invoke-RestMethod {
+    param([string]$Uri, [int]$TimeoutSec)
+    if ($Uri -like '*ssh_signing_keys') {
+        if ($script:Case.registered -contains 'signing') { return @([pscustomobject]@{ key = $script:Case.pub }) }
+        return @()
+    }
+    if ($script:Case.registered -contains 'auth') { return "$($script:Case.pub)`n" }
+    return "`n"
+}
+$GhStub = {
+    $script:Calls += ($args -join ' ')
+    $global:LASTEXITCODE = 0
+    switch -Wildcard ($args -join ' ') {
+        'auth status --active --help' { return }
+        'auth status --active --hostname github.com' {
+            if (-not $script:Case.account) { $global:LASTEXITCODE = 1; return 'You are not logged into any GitHub hosts.' }
+            return @("github.com", "  Logged in to github.com account $($script:Case.account) (keyring)", "  - Active account: true")
+        }
+        'ssh-key add *' { $global:LASTEXITCODE = [int]$script:Case.addRc; return }
+        default { $global:LASTEXITCODE = 9 }
+    }
+}
+Set-Item function:script:gh $GhStub
+$directory = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
+New-Item -ItemType Directory -Path $directory | Out-Null
+$script:KEY = Join-Path $directory 'id_ed25519'
+$results = [ordered]@{}
+foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
+    $script:Case = $case
+    $script:Calls = @()
+    $script:DRY_RUN = [bool]$case.dryRun
+    $script:GITHUB_USER = ''
+    Set-Content -Path "$($script:KEY).pub" -Value "$($case.pub) comment"
+    $output = & { Register-KeysThroughGh } 6>&1 | ForEach-Object { "$_" }
+    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key*' }) }
+}
+Remove-Item $directory -Recurse
+$results | ConvertTo-Json -Depth 4
+"""
+
+
+def windows_register_case(
+    name: str,
+    *,
+    account: str = ACCOUNT,
+    registered: list[str] | None = None,
+    add_rc: int = 0,
+    dry_run: bool = False,
+) -> dict[str, object]:
+    return {
+        "name": name,
+        "account": account,
+        "registered": registered or [],
+        "addRc": add_rc,
+        "dryRun": dry_run,
+        "pub": PUBLIC_KEY,
+    }
+
+
+@unittest.skipUnless(shutil.which("pwsh"), "needs pwsh to drive the Windows script's own functions")
+class TestWindowsKeyRegistration(unittest.TestCase):
+    """`setup-github.ps1` registers both keys through a logged-in gh, with `gh` and GitHub stubbed."""
+
+    results: dict[str, Any]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            harness = Path(directory, "harness.ps1")
+            text = windows_harness(
+                "[string]$Cases", WINDOWS_REGISTER_FUNCTIONS, WINDOWS_REGISTER_BODY
+            )
+            harness.write_text(text, encoding="utf-8")
+            cases = Path(directory, "cases.json")
+            cases.write_text(
+                json.dumps(
+                    [
+                        windows_register_case("none"),
+                        windows_register_case("auth-done", registered=["auth"]),
+                        windows_register_case("both-done", registered=["auth", "signing"]),
+                        windows_register_case("logged-out", account=""),
+                        windows_register_case("refused", add_rc=1),
+                        windows_register_case("dry-run", dry_run=True),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            result = run_pwsh(
+                ["-File", str(harness), "-Script", str(WINDOWS_SCRIPT), "-Cases", str(cases)]
+            )
+        if result.returncode != 0:
+            raise AssertionError(result.stderr or result.stdout)
+        cls.results = json.loads(result.stdout)
+
+    def adds(self, name: str) -> list[str]:
+        calls = self.results[name]["calls"]
+        return [calls] if isinstance(calls, str) else list(calls)
+
+    def output(self, name: str) -> str:
+        output = self.results[name]["output"]
+        return output if isinstance(output, str) else "\n".join(output)
+
+    def test_both_missing_keys_are_registered_with_their_types(self) -> None:
+        adds = self.adds("none")
+        self.assertEqual(len(adds), 2, adds)
+        self.assertTrue(adds[0].endswith("--type authentication"), adds)
+        self.assertTrue(adds[1].endswith("--type signing"), adds)
+        self.assertIn("--title", adds[0])
+
+    def test_only_the_missing_kind_is_registered(self) -> None:
+        adds = self.adds("auth-done")
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
+
+    def test_a_rerun_with_both_registered_changes_nothing(self) -> None:
+        self.assertEqual(self.adds("both-done"), [])
+        self.assertIn("Already registered as the signing key", self.output("both-done"))
+
+    def test_a_logged_out_gh_registers_nothing(self) -> None:
+        self.assertEqual(self.adds("logged-out"), [])
+        self.assertNotIn("Registering the key through gh", self.output("logged-out"))
+
+    def test_a_refused_registration_names_the_scope_remedy_and_carries_on(self) -> None:
+        self.assertEqual(len(self.adds("refused")), 2)
+        self.assertIn(ADD_REFRESH, self.output("refused"))
+
+    def test_a_dry_run_prints_the_commands_and_registers_nothing(self) -> None:
+        self.assertEqual(self.adds("dry-run"), [])
+        self.assertIn("[dry run] gh ssh-key add", self.output("dry-run"))
+
+    def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
+        result = run_pwsh(["-File", str(WINDOWS_SCRIPT), "-Help"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("cannot be automated", result.stdout)
+        self.assertIn("gh ssh-key add", result.stdout)
+
+    def test_configure_registers_before_it_checks_authentication(self) -> None:
+        body = function_body(
+            WINDOWS_SCRIPT.read_text(encoding="utf-8"), "\nfunction Invoke-Configure {"
+        )
+        self.assertIn("\n    Register-KeysThroughGh\n", body)
+        self.assertLess(body.index("Register-KeysThroughGh"), body.index("Resolve-GitHubUser"))
+
+
 def function_body(text: str, opener: str) -> str:
     """The text from `opener` to the closing brace at column 0 that ends the function it opens."""
     start = text.index(opener)
