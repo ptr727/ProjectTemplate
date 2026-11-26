@@ -515,6 +515,25 @@ def name_list_errors(names, label, kind):
     ]
 
 
+def forbidden_environment_names(repo, forbids):
+    """Each forbidden name a registry entry's environment lists declare, sorted.
+
+    spec/audit_environments.py reports such a name missing until it is stored, and forbidden once it is.
+    A declaration naming one can never pass, so it is refused here, as a requiredSecrets one is.
+    """
+    envs = repo.get("environments")
+    declared = {
+        s
+        for env in (envs if isinstance(envs, list) else [])
+        if isinstance(env, dict)
+        for key in ("secrets", "variables")
+        if isinstance(env.get(key), list)
+        for s in env[key]
+        if isinstance(s, str)
+    }
+    return sorted(declared & set(forbids))
+
+
 def environment_name_list_errors(env, where):
     """Shape errors for one environment entry's optional `secrets` and `variables` name lists.
 
@@ -1962,6 +1981,10 @@ def main(argv=()):
             for bad in spec_mech.get("forbids", []):
                 if bad in required:
                     errors.append(f"{name}: {target} forbids secret '{bad}' (present)")
+            for bad in forbidden_environment_names(repo, spec_mech.get("forbids", [])):
+                errors.append(
+                    f"{name}: {target} forbids secret '{bad}' (declared in an environment)"
+                )
             # The repo's mechanism label, oidc or static-secret, must match the target mechanism's kind.
             # An OIDC mechanism may still require a non-secret stored value, NUGET_USERNAME for a NuGet login being one.
             # So an empty requires list is not the signal.

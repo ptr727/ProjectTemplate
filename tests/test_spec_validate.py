@@ -1397,6 +1397,21 @@ class RegistryEnvironmentCase(unittest.TestCase):
                     ],
                 )
 
+    def test_a_forbidden_name_an_environment_declares_is_found(self) -> None:
+        """The audit would report it missing until stored and forbidden once stored, so it can never pass."""
+        repo = {
+            "environments": [
+                {"name": "pypi", "branchPolicy": "none", "secrets": ["OLD_TOKEN", "KEPT"]},
+                {"name": "docs", "branchPolicy": "none", "variables": ["OLD_TOKEN", "LEGACY"]},
+                "malformed",
+            ]
+        }
+        self.assertEqual(
+            validate.forbidden_environment_names(repo, ["OLD_TOKEN", "LEGACY", "ABSENT"]),
+            ["LEGACY", "OLD_TOKEN"],
+        )
+        self.assertEqual(validate.forbidden_environment_names({}, ["OLD_TOKEN"]), [])
+
     def test_one_name_in_both_lists_is_accepted(self) -> None:
         """A secret and a variable are separate stores, so one name may sit in each."""
         env = {
