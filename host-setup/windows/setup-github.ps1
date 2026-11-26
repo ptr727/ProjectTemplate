@@ -603,7 +603,7 @@ function Register-KeyThroughGh {
     $title = [System.Net.Dns]::GetHostName()
     $code = run -Command 'gh' -Arguments @('ssh-key', 'add', "$($script:KEY).pub", '--title', $title, '--type', $Kind)
     if ($code -ne 0) {
-        warn "gh could not register the $Kind key. gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs."
+        warn "gh could not register the $Kind key. A missing scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs. The key being in use on another account is the other."
     } elseif (-not $script:DRY_RUN) {
         info "Registered as the $Kind key through gh, titled $title"
     }

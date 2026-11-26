@@ -418,7 +418,7 @@ register_through_gh() {
         [[ $DRY_RUN == true ]] || info "Registered as the $kind key through gh, titled $title"
         return 0
     fi
-    warn "gh could not register the $kind key. gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs."
+    warn "gh could not register the $kind key. A missing scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs. The key being in use on another account is the other."
     return 0
 }
 

@@ -968,6 +968,7 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                         windows_register_case("dry-run", dry_run=True),
                         windows_register_case("dry-run-no-key", dry_run=True, no_key=True),
                         windows_register_case("other-account", managed=SECOND),
+                        windows_register_case("same-account", managed=ACCOUNT, registered=["auth"]),
                     ]
                 ),
                 encoding="utf-8",
@@ -1024,6 +1025,10 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     def test_a_key_belonging_to_another_account_is_not_registered_through_gh(self) -> None:
         self.assertEqual(self.adds("other-account"), [])
         self.assertIn(f"the managed key belongs to {SECOND}", self.output("other-account"))
+
+    def test_a_key_authenticating_as_the_gh_account_is_registered(self) -> None:
+        adds = self.adds("same-account")
+        self.assertEqual(len(adds), 1, adds)
 
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         result = run_pwsh(["-File", str(WINDOWS_SCRIPT), "-Help"])
