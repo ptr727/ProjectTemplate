@@ -698,13 +698,30 @@ class TestWindowsGitHubCli(unittest.TestCase):
 
 
 PUBLIC_KEY = "ssh-ed25519 AAAAexampleconstructedkeybody"
+FINGERPRINT = "SHA256:exampleconstructedfingerprint"
 ADD_REFRESH = "gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key"
 
-# A gh answering the calls the registration makes, recording each, and a fetch answering GitHub's published key lists.
-# Both are shell functions, so nothing reaches a real account and no real host is read.
-# $REGISTERED names which lists already hold the key, as a space separated subset of "auth signing".
+# What the isolated managed-key probe prints for each state it can meet, as `ssh -v` would.
+# Only "offered" shows ssh offering this key's own fingerprint and GitHub refusing it, which is positive evidence of a key registered nowhere.
+# Every other denial is a key ssh never offered, or an offer of some other key, and says nothing about this one.
+DENIAL = "git@github.com: Permission denied (publickey)."
+SSH_STATES: dict[str, str] = {
+    "offered": f"debug1: Offering public key: KEYPATH ED25519 {FINGERPRINT} explicit\n{DENIAL}",
+    "wrong-offer": f"debug1: Offering public key: KEYPATH ED25519 SHA256:other explicit\n{DENIAL}",
+    "passphrase": f"debug1: read_passphrase: can't open /dev/tty\n{DENIAL}",
+    "no-tty": f'Load key "KEYPATH": incorrect passphrase supplied to decrypt private key\n{DENIAL}',
+    "unprotected": f'@ WARNING: UNPROTECTED PRIVATE KEY FILE! @\nLoad key "KEYPATH": bad permissions\n{DENIAL}',
+    "silent": "",
+}
+CANNOT_TELL = ("wrong-offer", "passphrase", "no-tty", "unprotected", "silent")
+LIST_ROW = "example-host\t" + PUBLIC_KEY + "\t{kind}\t2024-01-01\t1"
+
+# A gh answering the calls the registration makes, recording each, and keeping the registered kinds in $STATE.
+# Both gh and ssh are shell functions, so nothing reaches a real account and no real host is read.
+# The public key lists stay empty throughout, so a check that read them instead of gh's would report a missing key.
 LINUX_REGISTER_BODY = r"""
 hostname() { printf 'example-host\n'; }
+ssh-keygen() { printf '256 %s comment (ED25519)\n' "$FINGERPRINT"; }
 gh() {
     printf '%s\n' "$*" >>"$CALLS"
     case "$*" in
@@ -713,7 +730,14 @@ gh() {
         [[ -n $ACCOUNT ]] || return 1
         printf 'github.com\n  \xe2\x9c\x93 Logged in to github.com account %s (keyring)\n  - Active account: true\n' "$ACCOUNT"
         ;;
-    "ssh-key add "*) return "${ADD_RC:-0}" ;;
+    "ssh-key list")
+        local kind
+        for kind in $(<"$STATE"); do printf 'example-host\t%s\t%s\t2024-01-01\t1\n' "$PUB" "$kind"; done
+        ;;
+    "ssh-key add "*)
+        [[ ${ADD_RC:-0} == 0 ]] || return "$ADD_RC"
+        printf '%s\n' "${*##* }" >>"$STATE"
+        ;;
     *) return 9 ;;
     esac
 }
@@ -721,20 +745,11 @@ ssh() {
     printf 'ssh %s\n' "$*" >>"$CALLS"
     if [[ -n $MANAGED ]]; then
         printf 'Hi %s! You have successfully authenticated.\n' "$MANAGED"
-    elif [[ $DENIED == yes ]]; then
-        printf 'git@github.com: Permission denied (publickey).\n'
+    else
+        printf '%s' "$SSH_OUTPUT"
     fi
 }
-fetch() {
-    case "$1" in
-    */ssh_signing_keys)
-        if [[ " $REGISTERED " == *" signing "* ]]; then printf '[{"id": 1, "key": "%s", "title": "t"}]' "$PUB"; else printf '[]'; fi
-        ;;
-    *.keys)
-        if [[ " $REGISTERED " == *" auth "* ]]; then printf '%s\n' "$PUB"; fi
-        ;;
-    esac
-}
+fetch() { printf '[]'; }
 """
 
 
@@ -751,7 +766,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         dry_run: bool = False,
         managed: str = "",
         key: bool = True,
-        denied: bool = True,
+        ssh_state: str = "offered",
         then: str = "",
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -766,16 +781,21 @@ class TestLinuxKeyRegistration(unittest.TestCase):
                 PUBLIC_KEY + " comment\n", encoding="ascii"
             )
         calls = directory / "calls"
+        state = directory / "state"
+        state.write_text(registered.replace("auth", "authentication") + "\n", encoding="ascii")
         env = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(home),
             "CALLS": str(calls),
+            "STATE": str(state),
             "ACCOUNT": account,
-            "REGISTERED": registered,
             "ADD_RC": str(add_rc),
             "PUB": PUBLIC_KEY,
+            "FINGERPRINT": FINGERPRINT,
             "MANAGED": managed,
-            "DENIED": "yes" if denied else "no",
+            "SSH_OUTPUT": SSH_STATES[ssh_state].replace(
+                "KEYPATH", str(home / ".ssh" / "id_ed25519")
+            ),
         }
         dry = "DRY_RUN=true\n" if dry_run else ""
         script = (
@@ -790,12 +810,10 @@ class TestLinuxKeyRegistration(unittest.TestCase):
             timeout=30,
             env=env,
         )
-        adds = [
-            c for c in (calls.read_text().splitlines() if calls.exists() else []) if "ssh-key" in c
-        ]
-        return result, adds
+        lines = calls.read_text().splitlines() if calls.exists() else []
+        return result, [c for c in lines if "ssh-key add" in c]
 
-    def test_both_missing_keys_are_registered_with_their_types(self) -> None:
+    def test_both_missing_keys_are_registered_with_their_types_in_order(self) -> None:
         result, adds = self.register()
         self.assertEqual(result.returncode, 0, result.stderr)
         home_key = adds[0].split(" ")[2]
@@ -827,11 +845,13 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(adds, [])
         self.assertNotIn("Registering the key through gh", result.stdout)
 
-    def test_a_refused_registration_names_the_scope_remedy_and_carries_on(self) -> None:
+    def test_a_refused_authentication_add_skips_the_signing_add(self) -> None:
         result, adds = self.register(add_rc=1)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(adds), 2, adds)
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type authentication"), adds)
         self.assertIn(ADD_REFRESH, result.stderr)
+        self.assertIn("in use on another account", result.stderr)
 
     def test_a_dry_run_prints_the_commands_and_registers_nothing(self) -> None:
         result, adds = self.register(dry_run=True)
@@ -852,34 +872,37 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(adds, [])
         self.assertIn(f"the managed key belongs to {SECOND}", result.stderr)
 
-    def test_a_probe_that_cannot_tell_registers_nothing(self) -> None:
-        result, adds = self.register(denied=False)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(adds, [])
-        self.assertIn("Could not tell which account the managed key belongs to", result.stderr)
-
-    def test_the_managed_key_is_probed_once_for_the_registration_and_the_check(self) -> None:
-        result, _ = self.register(
-            managed=ACCOUNT, registered="auth signing", then="resolve_github_user"
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        calls = (Path(self.tmp) / "calls").read_text().splitlines()
-        self.assertEqual(len([c for c in calls if "IdentitiesOnly" in c]), 1, calls)
-
-    def test_a_signing_key_registered_here_is_a_note_while_the_list_lags(self) -> None:
-        result, _ = self.register(then="SIGNING_REGISTERED_HERE=true\nreport_signing_missing")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("does not show it yet", result.stdout)
-        self.assertNotIn("This step happens in a browser", result.stdout)
-
-    def test_a_signing_key_not_registered_here_prints_the_paste(self) -> None:
-        result, _ = self.register(add_rc=1, then="report_signing_missing")
-        self.assertIn("This step happens in a browser", result.stdout)
-
     def test_a_key_authenticating_as_the_gh_account_is_registered(self) -> None:
         result, adds = self.register(managed=ACCOUNT, registered="auth")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(adds), 1, adds)
+
+    def test_a_denial_without_an_offer_of_this_key_registers_nothing(self) -> None:
+        for state in CANNOT_TELL:
+            with self.subTest(state=state):
+                result, adds = self.register(ssh_state=state)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(adds, [])
+                self.assertIn(
+                    "Could not tell which account the managed key belongs to", result.stderr
+                )
+
+    def test_the_managed_key_is_probed_once_in_batch_mode_for_registration_and_check(self) -> None:
+        result, _ = self.register(
+            managed=ACCOUNT, registered="auth signing", then="resolve_github_user"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = (self.tmp / "calls").read_text().splitlines()
+        probes = [c for c in calls if "IdentitiesOnly" in c]
+        self.assertEqual(len(probes), 1, calls)
+        self.assertIn("BatchMode=yes", probes[0])
+        self.assertIn(" -v ", probes[0])
+
+    def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
+        result, adds = self.register(then='signing_registration_state && echo "state=registered"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 2, adds)
+        self.assertIn("state=registered", result.stdout)
 
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         text = LINUX_SCRIPT.read_text(encoding="utf-8")
@@ -903,23 +926,26 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "Get-ManagedGreeting",
     "Get-GreetingUser",
     "Resolve-GitHubUser",
-    "Show-RegistrationNeeded",
-    "Show-SigningMissing",
+    "Test-ManagedKeyDenied",
+    "Get-GhKeyState",
     "Test-KeyRegistered",
+    "Get-SigningRegistrationState",
     "Register-KeyThroughGh",
     "Register-KeysThroughGh",
 ]
 WINDOWS_REGISTER_BODY = r"""
 function warn { param([string]$Message) Write-Host "WARNING: $Message" }
-# GitHub's published lists and gh are both stubs, so nothing reaches an account.
+# GitHub's public lists stay empty and gh's are kept in $script:Reg, so a check reading the wrong one reports a missing key.
 function Invoke-RestMethod {
     param([string]$Uri, [int]$TimeoutSec)
-    if ($Uri -like '*ssh_signing_keys') {
-        if ($script:Case.registered -contains 'signing') { return @([pscustomobject]@{ key = $script:Case.pub }) }
-        return @()
-    }
-    if ($script:Case.registered -contains 'auth') { return "$($script:Case.pub)`n" }
+    if ($Uri -like '*ssh_signing_keys') { return @() }
     return "`n"
+}
+function ssh-keygen { $global:LASTEXITCODE = 0; return "256 $($script:Case.fingerprint) comment (ED25519)" }
+function ssh {
+    $script:SshCalls += ($args -join ' ')
+    if ($script:Case.managed) { return "Hi $($script:Case.managed)! You have successfully authenticated." }
+    return $script:Case.sshOutput
 }
 $GhStub = {
     $script:Calls += ($args -join ' ')
@@ -930,16 +956,19 @@ $GhStub = {
             if (-not $script:Case.account) { $global:LASTEXITCODE = 1; return 'You are not logged into any GitHub hosts.' }
             return @("github.com", "  Logged in to github.com account $($script:Case.account) (keyring)", "  - Active account: true")
         }
-        'ssh-key add *' { $global:LASTEXITCODE = [int]$script:Case.addRc; return }
+        'ssh-key list' {
+            foreach ($kind in $script:Reg) { "example-host`t$($script:Case.pub)`t$kind`t2024-01-01`t1" }
+            return
+        }
+        'ssh-key add *' {
+            $global:LASTEXITCODE = [int]$script:Case.addRc
+            if ($global:LASTEXITCODE -eq 0) { $script:Reg += $args[-1] }
+            return
+        }
         default { $global:LASTEXITCODE = 9 }
     }
 }
 Set-Item function:script:gh $GhStub
-function ssh {
-    $script:SshCalls += ($args -join ' ')
-    if ($script:Case.managed) { return "Hi $($script:Case.managed)! You have successfully authenticated." }
-    if ($script:Case.denied) { return 'git@github.com: Permission denied (publickey).' }
-}
 $script:KEY_SETTINGS_URL = 'https://github.com/settings/ssh/new'
 $script:MODE = 'configure'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
@@ -949,10 +978,11 @@ $results = [ordered]@{}
 foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $script:Case = $case
     $script:Calls = @()
+    $script:Reg = @($case.registered | ForEach-Object { $_ })
     $script:DRY_RUN = [bool]$case.dryRun
     $script:GITHUB_USER = ''
     $script:MANAGED_GREETING = $null
-    $script:SIGNING_REGISTERED_HERE = $false
+    $script:GH_REGISTERING = $false
     $script:SshCalls = @()
     Remove-Item "$($script:KEY)*" -ErrorAction SilentlyContinue
     if (-not $case.noKey) {
@@ -962,9 +992,9 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $output = & {
         Register-KeysThroughGh
         if ($case.resolve) { Resolve-GitHubUser }
-        if ($case.report) { Show-SigningMissing }
+        if ($case.check) { "state=$(Get-SigningRegistrationState)" }
     } 6>&1 | ForEach-Object { "$_" }
-    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }) }
+    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }) }
 }
 Remove-Item $directory -Recurse
 $results | ConvertTo-Json -Depth 4
@@ -980,9 +1010,9 @@ def windows_register_case(
     dry_run: bool = False,
     managed: str = "",
     no_key: bool = False,
-    denied: bool = True,
+    ssh_state: str = "offered",
     resolve: bool = False,
-    report: bool = False,
+    check: bool = False,
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -992,9 +1022,10 @@ def windows_register_case(
         "dryRun": dry_run,
         "managed": managed,
         "noKey": no_key,
-        "denied": denied,
+        "sshOutput": SSH_STATES[ssh_state].replace("KEYPATH", "id_ed25519"),
+        "fingerprint": FINGERPRINT,
         "resolve": resolve,
-        "report": report,
+        "check": check,
         "pub": PUBLIC_KEY,
     }
 
@@ -1007,54 +1038,51 @@ class TestWindowsKeyRegistration(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
+        cases = [
+            windows_register_case("none"),
+            windows_register_case("auth-done", registered=["authentication"]),
+            windows_register_case("both-done", registered=["authentication", "signing"]),
+            windows_register_case("logged-out", account=""),
+            windows_register_case("refused", add_rc=1),
+            windows_register_case("dry-run", dry_run=True),
+            windows_register_case("dry-run-no-key", dry_run=True, no_key=True),
+            windows_register_case("other-account", managed=SECOND, ssh_state="silent"),
+            windows_register_case("same-account", managed=ACCOUNT, registered=["authentication"]),
+            windows_register_case(
+                "probe-once",
+                managed=ACCOUNT,
+                registered=["authentication", "signing"],
+                resolve=True,
+            ),
+            windows_register_case("lag", check=True),
+            *(windows_register_case(f"tell-{state}", ssh_state=state) for state in CANNOT_TELL),
+        ]
         with tempfile.TemporaryDirectory() as directory:
             harness = Path(directory, "harness.ps1")
             text = windows_harness(
                 "[string]$Cases", WINDOWS_REGISTER_FUNCTIONS, WINDOWS_REGISTER_BODY
             )
             harness.write_text(text, encoding="utf-8")
-            cases = Path(directory, "cases.json")
-            cases.write_text(
-                json.dumps(
-                    [
-                        windows_register_case("none"),
-                        windows_register_case("auth-done", registered=["auth"]),
-                        windows_register_case("both-done", registered=["auth", "signing"]),
-                        windows_register_case("logged-out", account=""),
-                        windows_register_case("refused", add_rc=1),
-                        windows_register_case("dry-run", dry_run=True),
-                        windows_register_case("dry-run-no-key", dry_run=True, no_key=True),
-                        windows_register_case("other-account", managed=SECOND),
-                        windows_register_case("same-account", managed=ACCOUNT, registered=["auth"]),
-                        windows_register_case("cannot-tell", denied=False),
-                        windows_register_case(
-                            "probe-once",
-                            managed=ACCOUNT,
-                            registered=["auth", "signing"],
-                            resolve=True,
-                        ),
-                        windows_register_case("lag-note", report=True),
-                        windows_register_case("refused-report", add_rc=1, report=True),
-                    ]
-                ),
-                encoding="utf-8",
-            )
+            case_file = Path(directory, "cases.json")
+            case_file.write_text(json.dumps(cases), encoding="utf-8")
             result = run_pwsh(
-                ["-File", str(harness), "-Script", str(WINDOWS_SCRIPT), "-Cases", str(cases)]
+                ["-File", str(harness), "-Script", str(WINDOWS_SCRIPT), "-Cases", str(case_file)]
             )
         if result.returncode != 0:
             raise AssertionError(result.stderr or result.stdout)
         cls.results = json.loads(result.stdout)
 
+    def listed(self, name: str, field: str) -> list[str]:
+        value = self.results[name][field]
+        return [value] if isinstance(value, str) else list(value)
+
     def adds(self, name: str) -> list[str]:
-        calls = self.results[name]["calls"]
-        return [calls] if isinstance(calls, str) else list(calls)
+        return self.listed(name, "calls")
 
     def output(self, name: str) -> str:
-        output = self.results[name]["output"]
-        return output if isinstance(output, str) else "\n".join(output)
+        return "\n".join(self.listed(name, "output"))
 
-    def test_both_missing_keys_are_registered_with_their_types(self) -> None:
+    def test_both_missing_keys_are_registered_with_their_types_in_order(self) -> None:
         adds = self.adds("none")
         self.assertEqual(len(adds), 2, adds)
         self.assertTrue(adds[0].endswith("--type authentication"), adds)
@@ -1074,9 +1102,12 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertEqual(self.adds("logged-out"), [])
         self.assertNotIn("Registering the key through gh", self.output("logged-out"))
 
-    def test_a_refused_registration_names_the_scope_remedy_and_carries_on(self) -> None:
-        self.assertEqual(len(self.adds("refused")), 2)
+    def test_a_refused_authentication_add_skips_the_signing_add(self) -> None:
+        adds = self.adds("refused")
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type authentication"), adds)
         self.assertIn(ADD_REFRESH, self.output("refused"))
+        self.assertIn("in use on another account", self.output("refused"))
 
     def test_a_dry_run_prints_the_commands_and_registers_nothing(self) -> None:
         self.assertEqual(self.adds("dry-run"), [])
@@ -1092,27 +1123,28 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertEqual(self.adds("other-account"), [])
         self.assertIn(f"the managed key belongs to {SECOND}", self.output("other-account"))
 
-    def test_a_probe_that_cannot_tell_registers_nothing(self) -> None:
-        self.assertEqual(self.adds("cannot-tell"), [])
-        self.assertIn(
-            "Could not tell which account the managed key belongs to", self.output("cannot-tell")
-        )
-
-    def test_the_managed_key_is_probed_once_for_the_registration_and_the_check(self) -> None:
-        probes = self.results["probe-once"]["probes"]
-        probes = [probes] if isinstance(probes, str) else probes
-        self.assertEqual(len(probes), 1, probes)
-
-    def test_a_signing_key_registered_here_is_a_note_while_the_list_lags(self) -> None:
-        self.assertIn("does not show it yet", self.output("lag-note"))
-        self.assertNotIn("This step happens in a browser", self.output("lag-note"))
-
-    def test_a_signing_key_not_registered_here_prints_the_paste(self) -> None:
-        self.assertIn("This step happens in a browser", self.output("refused-report"))
-
     def test_a_key_authenticating_as_the_gh_account_is_registered(self) -> None:
         adds = self.adds("same-account")
         self.assertEqual(len(adds), 1, adds)
+
+    def test_a_denial_without_an_offer_of_this_key_registers_nothing(self) -> None:
+        for state in CANNOT_TELL:
+            with self.subTest(state=state):
+                self.assertEqual(self.adds(f"tell-{state}"), [])
+                self.assertIn(
+                    "Could not tell which account the managed key belongs to",
+                    self.output(f"tell-{state}"),
+                )
+
+    def test_the_managed_key_is_probed_once_in_batch_mode_for_registration_and_check(self) -> None:
+        probes = self.listed("probe-once", "probes")
+        self.assertEqual(len(probes), 1, probes)
+        self.assertIn("BatchMode=yes", probes[0])
+        self.assertIn("-v", probes[0].split())
+
+    def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
+        self.assertEqual(len(self.adds("lag")), 2)
+        self.assertIn("state=registered", self.output("lag"))
 
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         result = run_pwsh(["-File", str(WINDOWS_SCRIPT), "-Help"])

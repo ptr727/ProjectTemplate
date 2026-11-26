@@ -5,10 +5,14 @@
 #
 # The public key is registered twice, once as an authentication key and once as a signing key.
 # Both are gates rather than suggestions.
-# Where gh is already logged in, with the admin:public_key and admin:ssh_signing_key scopes, the script registers each through gh ssh-key add.
+# Where gh is already logged in with the admin:public_key and admin:ssh_signing_key scopes, the script registers each through gh ssh-key add.
+# That also needs GitHub to show the managed key as belonging to gh's account, or as unknown to it.
 # Logging gh in stays interactive and is never run from here.
-# Otherwise the script stops at each registration and prints the key to paste and where to paste it.
-# The script checks afterwards that the registration took, by reading the keys GitHub publishes for the account.
+# Where gh cannot register the key, the script stops at each registration and prints the key to paste and where to paste it.
+# That covers no gh login, a login missing the scopes, a key that belongs to another account, and a key probe that could not tell.
+# A probe that could not tell includes a host that reaches GitHub only through its ssh config.
+# The script checks afterwards that the registration took.
+# It reads gh's own key lists where gh registered the key, and the keys GitHub publishes for the account otherwise.
 
 set -Eeuo pipefail
 
@@ -44,7 +48,8 @@ MANAGED_KEY_AUTHENTICATES=false
 MANAGED_PROBED=false
 MANAGED_USER=""
 MANAGED_DENIED=false
-SIGNING_REGISTERED_HERE=false
+GH_REGISTERING=false
+KEY_REGISTERED=false
 SHARED_CHECKOUT=""
 GH_SSH_PROTOCOL=false
 SUDO=()
@@ -133,11 +138,13 @@ own identity rather than being quietly rewritten.
 The same key is registered twice, once as an authentication key and once as a signing key:
 authentication reaches private repositories, signing is what marks a commit verified. Where gh is
 already logged in with the admin:public_key and admin:ssh_signing_key scopes, --configure registers
-whichever is missing through gh ssh-key add. Logging gh in is never run for you, and
-gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes. Without a
-usable gh login, --configure stops at each registration and prints what to paste. Each is checked
-against the keys GitHub publishes for the account, so a run says whether the registration took
-rather than assuming it.
+whichever is missing through gh ssh-key add, provided GitHub shows the key as gh's account's or as
+unknown to it. Logging gh in is never run for you, and
+gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes. Where gh
+cannot register the key, --configure stops at each registration and prints what to paste. That
+covers no login, missing scopes, a key on another account, and a key probe that could not tell,
+such as a host reaching GitHub only through its ssh config. Each registration is checked, so a run
+says whether it took rather than assuming it.
 
 Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
 EOF
@@ -308,18 +315,25 @@ github_auth_user() {
 # So a failure here means the managed key did not answer, rather than that the host cannot reach GitHub.
 #
 # It runs once and keeps its answer, since a passphrase-protected key outside an agent prompts on every probe.
-# MANAGED_DENIED is GitHub answering that it does not know the key, which is the one empty answer that says the key is registered nowhere.
-# Any other empty answer is a probe that did not reach GitHub, and says nothing about the key.
+# MANAGED_DENIED is positive evidence that the key is registered as an authentication key nowhere.
+# It needs ssh to say it offered this key's own fingerprint and GitHub to refuse it.
+# A denial without that offer is also what a key ssh could not load prints.
+# An unprotected key file and a passphrase it could not ask for are two such keys.
+# So the probe runs in batch mode, and any other empty answer says nothing about the key.
 probe_managed_key() {
     MANAGED_PROBED=true
     MANAGED_USER=""
     MANAGED_DENIED=false
     [[ -f $KEY ]] || return 0
 
-    local greeting
-    greeting=$(ssh_probe -F /dev/null -o IdentitiesOnly=yes -i "$KEY" -T git@github.com 2>&1 || true)
+    local greeting fingerprint
+    greeting=$(ssh_probe -v -o BatchMode=yes -F /dev/null -o IdentitiesOnly=yes -i "$KEY" -T git@github.com 2>&1 || true)
     MANAGED_USER=$(printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p')
-    if [[ $greeting == *"Permission denied"* ]]; then
+    [[ -f $KEY.pub ]] || return 0
+    fingerprint=$(ssh-keygen -lf "$KEY.pub" | awk '{ print $2 }') || return 0
+    [[ -n $fingerprint ]] || return 0
+    if [[ $greeting == *"Permission denied (publickey)"* ]] &&
+        awk -v fp="$fingerprint" '/Offering public key:/ && index($0, fp) { found = 1 } END { exit !found }' <<<"$greeting"; then
         MANAGED_DENIED=true
     fi
 }
@@ -400,30 +414,52 @@ registration_needed() {
     log ""
 }
 
+# The lists gh itself returns show both kinds for the logged in account, and are not the cached public lists.
+# So they answer right after a registration, and a lagging public list cannot cause a second add or a false paste.
+# Each returns 0 registered, 1 not registered, and 2 when the answer could not be read.
+# A line holds the key body and its kind, so a title that happens to name a kind is the only false match.
+gh_key_registered() {
+    local kind="$1" body key listing matches rc=0
+    body=$(key_body) || return 2
+    key=$(awk '{ print $2 }' <<<"$body")
+    listing=$(gh ssh-key list) || return 2
+    matches=$(grep -F -- "$key" <<<"$listing") || rc=$?
+    ((rc <= 1)) || return 2
+    grep -qE "(^|[[:space:]])$kind([[:space:]]|$)" <<<"$matches"
+}
+
+# Where gh registered the key, gh's lists are the check, and the public lists are the check otherwise.
+signing_registration_state() {
+    if [[ $GH_REGISTERING == true ]]; then
+        gh_key_registered signing
+    else
+        github_signing_key_registered
+    fi
+}
+
 # Registers one kind of key through gh, for an account gh is already logged in as.
 # The kind is "authentication" or "signing", which is also gh's own --type value.
-# Always returns 0, because the checks that follow report any key still unregistered and print the paste.
+# KEY_REGISTERED says whether the key is registered or now is, so the next kind may follow.
+# It always returns 0, since a caller under set -e would end the run on a refusal.
 # A refused registration, such as a token without the scope, is a warning that names the remedy and never ends the run.
 register_through_gh() {
-    local kind="$1" account="$2" registered_rc=0 title
+    local kind="$1" registered_rc=0 title
+    KEY_REGISTERED=false
     # A dry run before the key exists has nothing to read or register, so it says what a real run would do.
     if [[ ! -f $KEY.pub ]]; then
         [[ $DRY_RUN == true ]] && info "[dry run] gh ssh-key add $KEY.pub --type $kind"
+        KEY_REGISTERED=true
         return 0
     fi
-    GITHUB_USER="$account"
-    if [[ $kind == "authentication" ]]; then
-        github_auth_key_registered || registered_rc=$?
-    else
-        github_signing_key_registered || registered_rc=$?
-    fi
+    gh_key_registered "$kind" || registered_rc=$?
     case "$registered_rc" in
     0)
         info "Already registered as the $kind key"
+        KEY_REGISTERED=true
         return 0
         ;;
     2)
-        warn "GitHub could not be reached, so whether the $kind key is registered is unknown"
+        warn "gh could not list its keys, so whether the $kind key is registered is unknown"
         return 0
         ;;
     esac
@@ -434,8 +470,9 @@ register_through_gh() {
             info "Registered as the $kind key through gh, titled $title"
             # The managed key authenticates now, so the probe is asked again afterwards.
             MANAGED_PROBED=false
-            [[ $kind == "signing" ]] && SIGNING_REGISTERED_HERE=true
         fi
+        # shellcheck disable=SC2034  # The signing call is the last, and no caller reads its answer.
+        KEY_REGISTERED=true
         return 0
     fi
     warn "gh could not register the $kind key. A missing scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs. The key being in use on another account is the other."
@@ -445,6 +482,7 @@ register_through_gh() {
 # Registers both keys through gh where gh is logged in, before the checks that read them.
 # Not being logged in, or not having gh, is the paste's case, so it is silent here and the checks below report it.
 # The login itself is interactive and stays the operator's, so it is never run from here.
+# The authentication key goes first, and a refusal there skips the signing key, since a refusal can mean the key belongs elsewhere.
 register_keys_through_gh() {
     command -v gh >/dev/null || return 0
     local account
@@ -452,8 +490,8 @@ register_keys_through_gh() {
     [[ -n $account ]] || return 0
 
     # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
-    # A probe that could not tell is not a pass, since a proxy or a port 443 host drops the config the isolated probe needs.
-    # Only GitHub answering that it does not know the key says the key is registered nowhere, which is when registering it is safe.
+    # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
+    # Only the key's own account naming gh's, or ssh offering the key and GitHub refusing it, lets the registration run.
     if [[ -f $KEY ]]; then
         probe_managed_key
         if [[ -n $MANAGED_USER && $MANAGED_USER != "$account" ]]; then
@@ -461,26 +499,17 @@ register_keys_through_gh() {
             return 0
         fi
         if [[ -z $MANAGED_USER && $MANAGED_DENIED == false ]]; then
-            warn "Could not tell which account the managed key belongs to, because GitHub did not answer the key probe, so the key was not registered through gh. Register it with the paste below."
+            warn "Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. Register it with the paste below."
             return 0
         fi
     fi
 
+    GH_REGISTERING=true
     step "Registering the key through gh, logged in as $account"
-    register_through_gh authentication "$account"
-    register_through_gh signing "$account"
-}
-
-# GitHub's published lists can lag a registration just made, since they are served unauthenticated and may be cached.
-# A signing key gh registered in this run and not yet listed is therefore a note.
-# A paste would send the reader to register it twice.
-report_signing_missing() {
-    if [[ $SIGNING_REGISTERED_HERE == true ]]; then
-        info "The signing key was registered through gh in this run, and GitHub's public list does not show it yet. A re-run confirms it."
-        return 0
+    register_through_gh authentication
+    if [[ $KEY_REGISTERED == true ]]; then
+        register_through_gh signing
     fi
-    registration_needed "signing" "Signing"
-    warn "Commits sign locally but show as unverified on GitHub until the key is registered"
 }
 
 # --- git configuration ---
@@ -847,11 +876,14 @@ configure() {
     #   - The registration is what makes GitHub show the commit as verified.
     step "Checking the signing key registration"
     local signing_rc=0
-    github_signing_key_registered || signing_rc=$?
+    signing_registration_state || signing_rc=$?
     case "$signing_rc" in
     0) info "Registered as a signing key" ;;
     2) warn "GitHub could not be reached, so whether the signing key is registered is unknown" ;;
-    *) report_signing_missing ;;
+    *)
+        registration_needed "signing" "Signing"
+        warn "Commits sign locally but show as unverified on GitHub until the key is registered"
+        ;;
     esac
 
     step "Done"
