@@ -33,6 +33,7 @@ from typing import Any
 
 import audit_contract
 import audit_dependabot
+import audit_environments
 import audit_pins
 import validate  # sibling, import-safe (its main is guarded)
 import yaml
@@ -2315,6 +2316,11 @@ def check_secrets_names(run):
         stores[store] = {s["name"] for s in (data or {}).get("secrets", [])}
     required, forbidden = resolve_secret_stores(secrets, run.entry, run.tree, run.read_project)
     return [f for f in compare_stores(required, forbidden, stores) if f[0] != "OK"]
+
+
+def check_secrets_environments(run):
+    forbidden = resolve_secret_stores(run.spec["secrets"], run.entry, run.tree, run.read_project)[1]
+    return audit_environments.environment_findings(run.slug, run.entry, forbidden)
 
 
 def check_dependabot_ecosystems(run):
