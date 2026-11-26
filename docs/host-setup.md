@@ -4,7 +4,7 @@ Prerequisites for working with this repo locally, applied once per machine befor
 
 Supported hosts, weighted per [`GOVERNANCE.md` "Supported Development Platforms"][governance-platforms]:
 
-- **Linux** - the primary platform, which sets the minimum tool versions. Both the devcontainer flow and the host-install flow.
+- **Linux** - the primary platform. Both the devcontainer flow and the host-install flow.
 - **Windows** - fully supported. The supported devcontainer route is opening the repo from inside a **WSL2** distribution. Native Windows (PowerShell + winget) is supported for the host-install flow described in `README.md`. A native launch of a `catalog/snippets/devcontainer/` definition opens the repo from Windows instead, and has its own conditions, per [Devcontainer troubleshooting][devcontainer-troubleshooting].
 - **macOS** - best-effort, with no CI. Both the devcontainer flow and the host-install flow, where a host may need installs beyond what macOS ships.
 
