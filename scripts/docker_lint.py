@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -154,6 +154,13 @@ def read_pins(path: Path) -> dict[str, str]:
     return pins
 
 
+def require_stages(pins: Mapping[str, str], stages: Iterable[str]) -> None:
+    """Raise CommandFailed naming each of `stages` that `pins` lacks."""
+    missing = sorted(set(stages) - set(pins))
+    if missing:
+        raise CommandFailed(f"the pin manifest names no {', '.join(missing)} stage")
+
+
 def manifest_path() -> Path:
     """The pin manifest at its hub-relative path from this script."""
     return Path(__file__).resolve().parents[1] / PIN_MANIFEST
@@ -167,17 +174,9 @@ def print_pins(stages: Sequence[str], path: Path | None = None) -> int:
     """
     try:
         pins = read_pins(path or manifest_path())
+        require_stages(pins, stages)
     except CommandFailed as error:
         print(f"RESULT failed: {error}", file=sys.stderr, flush=True)
-        return 1
-    missing = [stage for stage in stages if stage not in pins]
-    if missing:
-        print(
-            f"RESULT failed: the pin manifest pins no {', '.join(missing)} stage on a "
-            "'FROM <image>:<tag>@sha256:<digest> AS <stage>' line",
-            file=sys.stderr,
-            flush=True,
-        )
         return 1
     print("".join(f"{stage}={pins[stage]}\n" for stage in stages), end="", flush=True)
     return 0
@@ -827,9 +826,7 @@ def lint(
     try:
         if pins is None:
             pins = read_pins(manifest_path())
-        missing = sorted({linter.stage for linter in LINTERS} - set(pins))
-        if missing:
-            raise CommandFailed(f"the pin manifest names no {', '.join(missing)} stage")
+        require_stages(pins, (linter.stage for linter in LINTERS))
         applicable: list[tuple[Linter, list[str]]] = []
         for linter in LINTERS:
             if linter.name not in selected:

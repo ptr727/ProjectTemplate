@@ -697,21 +697,15 @@ def shellcheck_image(docker_lint: ModuleType) -> str:
     `docker_lint.read_pins` is the manifest's one parser, which the docker-lint-pins action also reads through.
     Raises ValueError where the manifest cannot be read, names a stage twice, or pins no shellcheck stage.
     """
-    manifest = docker_lint.manifest_path()
     try:
-        pins = docker_lint.read_pins(manifest)
+        pins = docker_lint.read_pins(docker_lint.manifest_path())
+        docker_lint.require_stages(pins, ["shellcheck"])
     except docker_lint.CommandFailed as error:
         raise ValueError(str(error)) from error
-    if "shellcheck" not in pins:
-        raise ValueError(
-            f"{manifest} pins no shellcheck stage on a "
-            "'FROM <image>:<tag>@sha256:<digest> AS shellcheck' line"
-        )
     return pins["shellcheck"]
 
 
-def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
-    image = shellcheck_image(hub_docker_lint())
+def shellcheck_body(label: str, dialect: str, text: str, image: str) -> list[str]:
     # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
     command = ["docker", "run", "--rm", "-i", "--network=none", image]
     command += ["-s", dialect, "-S", "warning", "-e", "SC2154", "-f", "gcc", "-"]
@@ -780,7 +774,7 @@ def docker_unreachable() -> str | None:
     return None
 
 
-def check_composite_shell(root: Path, path: str) -> list[str]:
+def check_composite_shell(root: Path, path: str, image: str) -> list[str]:
     try:
         action = load_action(root / path)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
@@ -803,7 +797,7 @@ def check_composite_shell(root: Path, path: str) -> list[str]:
         name = step.get("name")
         if name and not isinstance(name, (dict, list)):
             label += f" ({name})"
-        hits.extend(shellcheck_body(label, dialect, substitute_expressions(body)))
+        hits.extend(shellcheck_body(label, dialect, substitute_expressions(body), image))
     return hits
 
 
@@ -861,9 +855,10 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
         hits.append(f"{unreachable}, so no run body was shellchecked")
     else:
         PYYAML_PYTHON.clear()
+        image = shellcheck_image(hub_docker_lint())
         for path in actions:
             try:
-                hits.extend(check_composite_shell(root, path))
+                hits.extend(check_composite_shell(root, path, image))
             except UvxUnavailable as error:
                 hits.append(f"{error}, so no run body was shellchecked")
                 break

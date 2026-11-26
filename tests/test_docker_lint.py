@@ -262,7 +262,7 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual((expected, ""), (out.getvalue(), err.getvalue()))
         twice = path.read_text(encoding="utf-8") + lines[1] + "\n"
         for label, text, stages, reason in (
-            ("a stage missing", None, ["cspell", "markdownlint"], "pins no markdownlint stage"),
+            ("a stage missing", None, ["cspell", "markdownlint"], "names no markdownlint stage"),
             ("a stage named twice", twice, ["cspell"], "names the shfmt stage twice"),
         ):
             with self.subTest(label):

@@ -37,6 +37,7 @@ GOVERNANCE = REPO / "GOVERNANCE.md"
 real_run = subprocess.run
 
 PINNED = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+IMAGE = "r.io/shellcheck:v1@sha256:" + "a" * 64
 
 
 class TreeCase(unittest.TestCase):
@@ -1098,7 +1099,8 @@ class TestCompositeActions(TreeCase):
         return [".github/actions/hook/action.yml"]
 
     def shell_hits(self, files: list[str]) -> list[str]:
-        return [h for f in files for h in repo_gate.check_composite_shell(self.tmp, f)]
+        image = repo_gate.shellcheck_image(repo_gate.hub_docker_lint())
+        return [h for f in files for h in repo_gate.check_composite_shell(self.tmp, f, image)]
 
     def body_hits(self, body: str) -> list[str]:
         indented = "".join(f"        {line}\n" for line in body.splitlines())
@@ -1156,7 +1158,7 @@ class TestCompositeActions(TreeCase):
             mock.patch.object(repo_gate, "load_action", return_value={"runs": {"steps": steps}}),
             mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
         ):
-            self.assertEqual([], repo_gate.check_composite_shell(self.tmp, "a/action.yml"))
+            self.assertEqual([], repo_gate.check_composite_shell(self.tmp, "a/action.yml", IMAGE))
         labels = [call.args[0] for call in body.call_args_list]
         self.assertEqual(["a/action.yml step 1", "a/action.yml step 2"], labels)
 
@@ -1282,7 +1284,7 @@ class TestCompositeActions(TreeCase):
     def test_the_body_goes_to_shellcheck_as_utf8_bytes_at_warning_severity(self) -> None:
         proc = subprocess.CompletedProcess([], 0, b"", b"")
         with mock.patch.object(repo_gate.subprocess, "run", return_value=proc) as run:
-            repo_gate.shellcheck_body("a.yml step 1", "bash", "echo \u00e9\n")
+            repo_gate.shellcheck_body("a.yml step 1", "bash", "echo \u00e9\n", IMAGE)
         self.assertEqual("echo \u00e9\n".encode(), run.call_args.kwargs["input"])
         self.assertNotIn("text", run.call_args.kwargs)
         command = run.call_args.args[0]
@@ -1302,7 +1304,7 @@ class TestCompositeActions(TreeCase):
     def test_exit_one_reports_each_gcc_line(self) -> None:
         proc = self.completed_bytes(1, b"-:2:5: note: Double quote [SC2086]\n")
         with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
-            hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x")
+            hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x", IMAGE)
         self.assertEqual(["a.yml step 1: run line 2:5: note: Double quote [SC2086]"], hits)
 
     def test_another_nonzero_exit_is_a_distinct_finding(self) -> None:
@@ -1310,14 +1312,14 @@ class TestCompositeActions(TreeCase):
             with self.subTest(code=code):
                 proc = self.completed_bytes(code, out.encode(), b"boom")
                 with mock.patch.object(repo_gate.subprocess, "run", return_value=proc):
-                    hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x")
+                    hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x", IMAGE)
                 self.assertEqual([f"a.yml step 1: shellcheck exited {code}: boom"], hits)
 
     def test_a_shellcheck_timeout_is_a_finding(self) -> None:
         with mock.patch.object(
             repo_gate.subprocess, "run", side_effect=subprocess.TimeoutExpired("docker", 1)
         ):
-            hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x")
+            hits = repo_gate.shellcheck_body("a.yml step 1", "bash", "x", IMAGE)
         self.assertIn("timed out", hits[0])
 
     def test_docker_missing_is_a_finding_and_the_schema_half_still_runs(self) -> None:
@@ -1437,7 +1439,7 @@ class TestCompositeActions(TreeCase):
         cases = {
             "missing": (None, "from a hub checkout or through the repo-gate action"),
             "named twice": (pin * 2, "names the shellcheck stage twice"),
-            "an empty tag": (pin.replace(":v1@", ":@"), "pins no shellcheck stage"),
+            "an empty tag": (pin.replace(":v1@", ":@"), "names no shellcheck stage"),
         }
         for label, (text, expected) in cases.items():
             with self.subTest(label):
@@ -1483,6 +1485,22 @@ class TestCompositeActions(TreeCase):
         self.assertEqual(
             ["neither uvx nor pipx is installed, so no action was schema-checked"], hits
         )
+
+    def test_the_pin_is_read_once_for_every_body_of_every_action(self) -> None:
+        """Each read executes the hub's docker_lint.py afresh, so a run reads it once."""
+        steps = "    - shell: bash\n      run: echo a\n    - shell: bash\n      run: echo b\n"
+        files = self.action(steps) + self.action(steps, name="other")
+        loads = mock.Mock(wraps=repo_gate.hub_script)
+        with (
+            mock.patch.object(repo_gate.shutil, "which", side_effect={"docker": "/d"}.get),
+            mock.patch.object(repo_gate, "docker_unreachable", return_value=None),
+            mock.patch.object(repo_gate, "hub_script", loads),
+            mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
+        ):
+            repo_gate.check_composite_actions(self.tmp, files)
+        image = repo_gate.shellcheck_image(repo_gate.hub_docker_lint())
+        self.assertEqual([image] * 4, [call.args[3] for call in body.call_args_list])
+        self.assertEqual(1, loads.call_count)
 
     def test_uvx_runs_the_latest_schema_checker(self) -> None:
         with (
@@ -1550,7 +1568,7 @@ class TestCompositeActions(TreeCase):
             self.reader_run(payload) as run,
             mock.patch.object(repo_gate, "shellcheck_body", return_value=["seen"]) as body,
         ):
-            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml", IMAGE)
         self.assertEqual(["seen"], hits)
         self.assertEqual("echo $x", body.call_args.args[2])
         self.assertEqual(["/py", "-I", "-X", "utf8", "-c"], run.call_args.args[0][:5])
@@ -1561,7 +1579,7 @@ class TestCompositeActions(TreeCase):
             mock.patch.object(repo_gate, "PYYAML_PYTHON", ["/py"]),
             self.reader_run("", 1),
         ):
-            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml", IMAGE)
         self.assertEqual(["a/action.yml: could not read the action: bad"], hits)
 
     def uvx_hits(self, run: mock.Mock, which: dict[str, str]) -> list[str]:
@@ -1646,7 +1664,7 @@ class TestCompositeActions(TreeCase):
             mock.patch.dict(sys.modules, {"yaml": None}),
             mock.patch.object(repo_gate, "PYYAML_PYTHON", [stub]),
         ):
-            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml", IMAGE)
         self.assertEqual(
             ["a/action.yml: could not read the action: invalid YAML: -I -X utf8 \ufffd"], hits
         )
@@ -1660,7 +1678,7 @@ class TestCompositeActions(TreeCase):
             mock.patch.object(repo_gate, "PYYAML_PYTHON", [stub]),
             mock.patch.object(repo_gate, "YAML_TIMEOUT", 1),
         ):
-            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml")
+            hits = repo_gate.check_composite_shell(self.tmp, "a/action.yml", IMAGE)
         self.assertEqual(
             ["a/action.yml: could not read the action: reading timed out after 1s"], hits
         )
