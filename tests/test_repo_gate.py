@@ -1507,11 +1507,12 @@ class TestCompositeActions(TreeCase):
 
     def test_the_pin_is_read_once_for_every_body_of_every_action(self) -> None:
         """Each read executes the hub's docker_lint.py afresh, so a run reads it once and hands it on."""
-        steps = "    - shell: bash\n      run: echo a\n    - shell: bash\n      run: echo b\n"
-        files = self.action(steps) + self.action(steps, name="other")
+        files = self.action("") + self.action("", name="other")
+        steps = [{"shell": "bash", "run": "echo a"}, {"shell": "bash", "run": "echo b"}]
         loads = mock.Mock(wraps=repo_gate.hub_script)
         with (
             mock.patch.object(repo_gate.shutil, "which", side_effect={"docker": "/d"}.get),
+            mock.patch.object(repo_gate, "load_action", return_value={"runs": {"steps": steps}}),
             mock.patch.object(repo_gate, "docker_unreachable", return_value=None) as unreachable,
             mock.patch.object(repo_gate, "hub_script", loads),
             mock.patch.object(repo_gate, "shellcheck_body", return_value=[]) as body,
