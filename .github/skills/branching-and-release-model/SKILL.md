@@ -49,7 +49,13 @@ rather than guessing from the repo's contents.
   GitHub's web-flow key.
 - **`develop` is forward-only, with no `main -> develop` back-merges.** The `develop` ruleset's
   squash-only setting physically blocks merge commits on `develop`. Any historical back-merge
-  commits in `git log` predate this rule and must not be repeated.
+  commits in `git log` predate this rule and must not be repeated. A change such as a hotfix can land on `main`
+  outside the feature -> `develop` -> `main` flow. Such a change reaches `develop` by a feature
+  pull request of its own. To catch one before starting work, run
+  `git diff origin/develop origin/main` after `git fetch origin`. Read each hunk that only adds
+  lines, since that is content `main` holds and `develop` lacks.
+  `git log origin/develop..origin/main` is no substitute, because every promotion merge and every
+  `main`-direct bot commit lists there too.
 - **Never delete `develop`, and take the EOL-only conflict by taking develop's side.** A
   promotion PR's head *is* `develop`, so `--delete-branch` deletes it. An EOL-only conflict on a
   workflow YAML file resolves on a throwaway branch off `main`, not on `develop`. Full recovery and
