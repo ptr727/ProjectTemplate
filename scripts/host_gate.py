@@ -37,6 +37,7 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 from run_deadline import run_with_deadline
@@ -150,6 +151,8 @@ def field_problems(entry: dict) -> list[str]:
         problems.append("why must be a non-empty string")
     if "required" in entry and not isinstance(entry["required"], bool):
         problems.append(f"required must be true or false, not {entry['required']!r}")
+    if "platforms" in entry:
+        problems.extend(platforms_problems(entry["platforms"]))
     if (
         "minimum" in entry
         and entry["minimum"] is not None
@@ -207,6 +210,42 @@ def field_problems(entry: dict) -> list[str]:
     return problems
 
 
+def stray_platforms(names: Iterable[object]) -> str | None:
+    """The `names ..., which no platform reads` text for names outside PLATFORM_KEYS, or None.
+
+    `source`, `remedy`, and `platforms` each name platforms, so one reader keeps their findings
+    worded alike and their membership test the same.
+    """
+    stray = sorted({str(n) for n in names if n not in PLATFORM_KEYS})
+    if not stray:
+        return None
+    return f"names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
+
+
+def platforms_problems(platforms: object) -> list[str]:
+    """What is wrong with a `platforms` value, naming each problem, or nothing where it is usable.
+
+    Membership is read as well as type, since a misspelled key is a platform on which the entry
+    silently never applies. A required tool would then be retired there without a word.
+    """
+    if not isinstance(platforms, list) or not platforms:
+        return [f"platforms must be a non-empty array of platform names, not {platforms!r}"]
+    stray = stray_platforms(platforms)
+    return [f"platforms {stray}"] if stray else []
+
+
+def effective_platforms(tool: dict) -> set[str]:
+    """The platforms an entry applies on, as both the check and the merge read them.
+
+    An absent `platforms` means every platform. A malformed one reads the same way and is reported
+    by contract_problems, so the tool is still checked rather than skipped unseen.
+    """
+    platforms = tool.get("platforms")
+    if platforms is None or platforms_problems(platforms):
+        return set(PLATFORM_KEYS)
+    return set(platforms)
+
+
 def read_declaration(path: Path, what: str) -> list[dict] | str:
     """The `tools` array from a declaration file, or a diagnostic string where it cannot be had.
 
@@ -244,9 +283,14 @@ def contract_problems(tools: list[dict]) -> list[str]:
 
     The platform keys are read here too, since a source naming a key nothing looks up is a source
     only in shape.
+
+    So is every entry's `platforms`, floor or no floor. field_problems reads only an overlay's
+    entries, so the hub declaration's value would otherwise reach the gate unchecked.
     """
-    problems = []
+    problems: list[str] = []
     for t in tools:
+        if "platforms" in t:
+            problems.extend(f"{t['name']} {p}" for p in platforms_problems(t["platforms"]))
         if t.get("minimum") is None:
             continue
         name, src = t["name"], t.get("source")
@@ -255,11 +299,9 @@ def contract_problems(tools: list[dict]) -> list[str]:
                 f"{name} declares the {t['minimum']} floor with no source, so a host below it is told to upgrade and not where from"
             )
             continue
-        stray = sorted(set(src) - set(PLATFORM_KEYS))
+        stray = stray_platforms(src)
         if stray:
-            problems.append(
-                f"{name} source names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
-            )
+            problems.append(f"{name} source {stray}")
         for plat in sorted(set(src) & set(PLATFORM_KEYS)):
             if not isinstance(src[plat], str) or not src[plat]:
                 problems.append(
@@ -273,11 +315,9 @@ def contract_problems(tools: list[dict]) -> list[str]:
                 f"{name} remedy must be an object keyed by platform, so its command was not read"
             )
         elif isinstance(rem, dict):
-            stray = sorted(set(rem) - set(PLATFORM_KEYS))
+            stray = stray_platforms(rem)
             if stray:
-                problems.append(
-                    f"{name} remedy names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
-                )
+                problems.append(f"{name} remedy {stray}")
             for plat in sorted(set(rem) & set(PLATFORM_KEYS)):
                 if not isinstance(rem[plat], str) or not rem[plat]:
                     problems.append(
@@ -303,12 +343,14 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     - Raise a floor.
     - Add one where the hub declares none.
     - Turn an optional tool required.
+    - Widen the platforms a tool applies on.
 
     It may not:
 
     - Lower a floor.
     - Remove one.
     - Turn a required tool optional.
+    - Narrow the platforms a tool applies on, read through effective_platforms.
 
     The reason is that those are the edits that quietly retire a fleet check from inside
     the repository it was written to protect. A rejected override is reported rather than dropped,
@@ -357,6 +399,11 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
             if field == "required" and merged.get("required", True) and value is False:
                 rejected.append(
                     f"local tool {name} tried to turn a required tool optional, which is a relaxation, so the hub value stands"
+                )
+                continue
+            if field == "platforms" and not effective_platforms(merged) <= set(value):
+                rejected.append(
+                    f"local tool {name} tried to narrow the platforms it applies on to {', '.join(value)}, which is a relaxation, so the hub value stands"
                 )
                 continue
             if field == "minimum":
@@ -478,10 +525,19 @@ def overlay_above(start: Path) -> Path | None:
 
 
 def check(tools: list[dict]) -> list[str]:
-    """Every declared tool against its floor, returning one line per failure."""
+    """Every declared tool against its floor, returning one line per failure.
+
+    An entry whose `platforms` leaves this platform out is noted rather than read. A reader here
+    can then see that the entry exists and why nothing was read for it.
+    """
     issues = []
     for tool in tools:
         name = tool["name"]
+        if platform_key() not in effective_platforms(tool):
+            NOTES.append(
+                f"{name} applies on {', '.join(tool['platforms'])} only, so nothing was read for it on {platform_key()}"
+            )
+            continue
         required = tool.get("required", True)
         status, version, how = read_tool(tool)
 
