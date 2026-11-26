@@ -734,11 +734,12 @@ gh() {
         printf 'github.com\n  \xe2\x9c\x93 Logged in to github.com account %s (keyring)\n  - Active account: true\n' "$ACCOUNT"
         ;;
     "ssh-key list")
+        [[ ${LIST_RC:-0} == 0 ]] || return "$LIST_RC"
         local kind
         for kind in $(<"$STATE"); do printf 'example-host\t%s\t%s\t2024-01-01\t1\n' "$PUB" "$kind"; done
         ;;
     "ssh-key add "*)
-        [[ ${ADD_RC:-0} == 0 ]] || return "$ADD_RC"
+        [[ ${ADD_RC:-0} == 0 && ( $* != *"--type signing" || ${ADD_SIGNING_RC:-0} == 0 ) ]] || return "${ADD_SIGNING_RC:-$ADD_RC}"
         printf '%s\n' "${*##* }" >>"$STATE"
         ;;
     *) return 9 ;;
@@ -758,7 +759,17 @@ ssh() {
     *) [[ -z $GENERAL ]] || printf 'Hi %s! You have successfully authenticated.\n' "$GENERAL" ;;
     esac
 }
-fetch() { printf '[]'; }
+fetch() {
+    case "$1" in
+    */ssh_signing_keys)
+        if [[ $PUBLIC_SIGNING == yes ]]; then
+            printf '[{"id": 1, "key": "%s", "title": "t"}]' "$PUB"
+        else
+            printf '[]'
+        fi
+        ;;
+    esac
+}
 """
 
 
@@ -778,6 +789,9 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         ssh_state: str = "offered",
         batch_user: str | None = None,
         general: str = "",
+        list_rc: int = 0,
+        add_signing_rc: int | None = None,
+        public_signing: bool = False,
         then: str = "",
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -806,6 +820,9 @@ class TestLinuxKeyRegistration(unittest.TestCase):
             "MANAGED": managed,
             "BATCH_USER": managed if batch_user is None else batch_user,
             "GENERAL": general,
+            "LIST_RC": str(list_rc),
+            "ADD_SIGNING_RC": str(add_rc if add_signing_rc is None else add_signing_rc),
+            "PUBLIC_SIGNING": "yes" if public_signing else "no",
             "SSH_OUTPUT": SSH_STATES[ssh_state].replace(
                 "KEYPATH", str(home / ".ssh" / "id_ed25519")
             ),
@@ -925,6 +942,23 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(adds, [])
         self.assertIn(f"user={ACCOUNT} managed=true", result.stdout)
 
+    def test_a_gh_listing_that_fails_registers_nothing_and_the_public_list_answers(self) -> None:
+        check = "GITHUB_USER=x\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
+        result, adds = self.register(list_rc=1, public_signing=True, then=check)
+        self.assertEqual(adds, [])
+        self.assertIn("gh could not list its keys", result.stderr)
+        self.assertIn("rc=0", result.stdout)
+        result, _ = self.register(list_rc=1, then=check)
+        self.assertIn("rc=1", result.stdout)
+
+    def test_a_login_with_only_the_authentication_scope_falls_back_to_the_public_list(self) -> None:
+        check = "GITHUB_USER=x\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
+        result, adds = self.register(add_signing_rc=1, then=check)
+        self.assertEqual(len(adds), 2, adds)
+        self.assertIn("rc=1", result.stdout)
+        result, _ = self.register(add_signing_rc=1, public_signing=True, then=check)
+        self.assertIn("rc=0", result.stdout)
+
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
         result, adds = self.register(then='signing_registration_state && echo "state=registered"')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -964,7 +998,10 @@ function warn { param([string]$Message) Write-Host "WARNING: $Message" }
 # GitHub's public lists stay empty and gh's are kept in $script:Reg, so a check reading the wrong one reports a missing key.
 function Invoke-RestMethod {
     param([string]$Uri, [int]$TimeoutSec)
-    if ($Uri -like '*ssh_signing_keys') { return @() }
+    if ($Uri -like '*ssh_signing_keys') {
+        if ($script:Case.publicSigning) { return @([pscustomobject]@{ key = $script:Case.pub }) }
+        return @()
+    }
     return "`n"
 }
 function ssh-keygen { $global:LASTEXITCODE = 0; return "256 $($script:Case.fingerprint) comment (ED25519)" }
@@ -991,11 +1028,12 @@ $GhStub = {
             return @("github.com", "  Logged in to github.com account $($script:Case.account) (keyring)", "  - Active account: true")
         }
         'ssh-key list' {
+            if ($script:Case.listRc) { $global:LASTEXITCODE = [int]$script:Case.listRc; return }
             foreach ($kind in $script:Reg) { "example-host`t$($script:Case.pub)`t$kind`t2024-01-01`t1" }
             return
         }
         'ssh-key add *' {
-            $global:LASTEXITCODE = [int]$script:Case.addRc
+            $global:LASTEXITCODE = if ($args[-1] -eq 'signing') { [int]$script:Case.addSigningRc } else { [int]$script:Case.addRc }
             if ($global:LASTEXITCODE -eq 0) { $script:Reg += $args[-1] }
             return
         }
@@ -1015,7 +1053,7 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $script:Reg = @($case.registered | ForEach-Object { $_ })
     $script:DRY_RUN = [bool]$case.dryRun
     $script:GITHUB_USER = ''
-    $script:GH_REGISTERING = $false
+    $script:GH_SIGNING_ADDED = $false
     $script:SshCalls = @()
     Remove-Item "$($script:KEY)*" -ErrorAction SilentlyContinue
     if (-not $case.noKey) {
@@ -1028,7 +1066,10 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
             Resolve-GitHubUser
             "user=$($script:GITHUB_USER) managed=$($script:MANAGED_KEY_AUTHENTICATES)"
         }
-        if ($case.check) { "state=$(Get-SigningRegistrationState)" }
+        if ($case.check) {
+            $script:GITHUB_USER = 'x'
+            "state=$(Get-SigningRegistrationState)"
+        }
     } 6>&1 | ForEach-Object { "$_" }
     $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }) }
 }
@@ -1049,6 +1090,9 @@ def windows_register_case(
     ssh_state: str = "offered",
     batch_user: str | None = None,
     general: str = "",
+    list_rc: int = 0,
+    add_signing_rc: int | None = None,
+    public_signing: bool = False,
     resolve: bool = False,
     check: bool = False,
 ) -> dict[str, object]:
@@ -1061,6 +1105,9 @@ def windows_register_case(
         "managed": managed,
         "batchUser": managed if batch_user is None else batch_user,
         "general": general,
+        "listRc": list_rc,
+        "addSigningRc": add_rc if add_signing_rc is None else add_signing_rc,
+        "publicSigning": public_signing,
         "noKey": no_key,
         "sshOutput": SSH_STATES[ssh_state].replace("KEYPATH", "id_ed25519"),
         "fingerprint": FINGERPRINT,
@@ -1101,6 +1148,12 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                 ssh_state="passphrase",
                 general=SECOND,
                 resolve=True,
+            ),
+            windows_register_case("list-fails", list_rc=1, public_signing=True, check=True),
+            windows_register_case("list-fails-empty", list_rc=1, check=True),
+            windows_register_case("auth-scope-only", add_signing_rc=1, check=True),
+            windows_register_case(
+                "auth-scope-only-listed", add_signing_rc=1, public_signing=True, check=True
             ),
             windows_register_case("lag", check=True),
             *(windows_register_case(f"tell-{state}", ssh_state=state) for state in CANNOT_TELL),
@@ -1198,6 +1251,23 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     ) -> None:
         self.assertEqual(self.adds("passphrase-resolve"), [])
         self.assertIn(f"user={ACCOUNT} managed=True", self.output("passphrase-resolve"))
+
+    def test_a_gh_listing_that_fails_registers_nothing_and_the_public_list_answers(self) -> None:
+        self.assertEqual(self.adds("list-fails"), [])
+        self.assertIn("gh could not list its keys", self.output("list-fails"))
+        self.assertIn("state=registered", self.output("list-fails"))
+        self.assertIn("state=missing", self.output("list-fails-empty"))
+
+    def test_a_login_with_only_the_authentication_scope_falls_back_to_the_public_list(self) -> None:
+        self.assertEqual(len(self.adds("auth-scope-only")), 2)
+        self.assertIn("state=missing", self.output("auth-scope-only"))
+        self.assertIn("state=registered", self.output("auth-scope-only-listed"))
+
+    def test_the_signing_check_names_an_unknown_apart_from_a_registered_key(self) -> None:
+        body = function_body(
+            WINDOWS_SCRIPT.read_text(encoding="utf-8"), "\nfunction Invoke-Configure {"
+        )
+        self.assertIn("default { warn 'GitHub could not be reached", body)
 
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
         self.assertEqual(len(self.adds("lag")), 2)

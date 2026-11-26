@@ -10,7 +10,7 @@
 # That covers no gh login, a login missing the scopes, a key that belongs to another account, and a key probe that could not tell.
 # A probe that could not tell includes a host that reaches GitHub only through its ssh config.
 # The script checks afterwards that the registration took.
-# It reads gh's own key lists where gh registered the key, and the keys GitHub publishes for the account otherwise.
+# It reads gh's own key lists where this run's gh add of the signing key succeeded, and the keys GitHub publishes for the account otherwise.
 #
 # The path settings are written in the tilde form the Linux peer writes, because of the following.
 #   - Git expands it on Windows too.
@@ -73,7 +73,7 @@ $SHARED = $SharedCheckout
 $GH_SSH_PROTOCOL = [bool]$GhSshProtocol
 $GITHUB_USER = ''
 $MANAGED_KEY_AUTHENTICATES = $false
-$GH_REGISTERING = $false
+$GH_SIGNING_ADDED = $false
 
 # --- Output ---
 
@@ -625,9 +625,10 @@ function Get-GhKeyState {
     return 'missing'
 }
 
-# Where gh registered the key, gh's lists are the check, and the public lists are the check otherwise.
+# Where this run's gh add of the signing key succeeded, gh's lists are the check, since the public lists may lag the add.
+# Everywhere else the public lists are the check, so a login missing scopes or a gh listing that fails cannot hide a registered key.
 function Get-SigningRegistrationState {
-    if ($script:GH_REGISTERING) { return Get-GhKeyState -Kind 'signing' }
+    if ($script:GH_SIGNING_ADDED) { return Get-GhKeyState -Kind 'signing' }
     return Test-KeyRegistered -Kind 'signing'
 }
 
@@ -660,6 +661,7 @@ function Register-KeyThroughGh {
     }
     if (-not $script:DRY_RUN) {
         info "Registered as the $Kind key through gh, titled $title"
+        if ($Kind -eq 'signing') { $script:GH_SIGNING_ADDED = $true }
     }
     return $true
 }
@@ -689,7 +691,6 @@ function Register-KeysThroughGh {
         }
     }
 
-    $script:GH_REGISTERING = $true
     step "Registering the key through gh, logged in as $account"
     if (Register-KeyThroughGh -Kind 'authentication') {
         $null = Register-KeyThroughGh -Kind 'signing'
@@ -803,11 +804,13 @@ function Invoke-Configure {
     }
     info "Authenticated as $($script:GITHUB_USER)"
 
-    if ((Get-SigningRegistrationState) -eq 'missing') {
-        Show-RegistrationNeeded -Kind 'signing' -Type 'Signing'
-        warn 'Commits sign and verify locally, and show as unverified on GitHub until the key above is registered as a signing key'
-    } else {
-        info 'The signing key is registered'
+    switch (Get-SigningRegistrationState) {
+        'registered' { info 'The signing key is registered' }
+        'missing' {
+            Show-RegistrationNeeded -Kind 'signing' -Type 'Signing'
+            warn 'Commits sign and verify locally, and show as unverified on GitHub until the key above is registered as a signing key'
+        }
+        default { warn 'GitHub could not be reached, so whether the signing key is registered is unknown' }
     }
 
     Show-AgentStatus

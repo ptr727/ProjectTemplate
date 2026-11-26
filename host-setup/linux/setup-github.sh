@@ -12,7 +12,7 @@
 # That covers no gh login, a login missing the scopes, a key that belongs to another account, and a key probe that could not tell.
 # A probe that could not tell includes a host that reaches GitHub only through its ssh config.
 # The script checks afterwards that the registration took.
-# It reads gh's own key lists where gh registered the key, and the keys GitHub publishes for the account otherwise.
+# It reads gh's own key lists where this run's gh add of the signing key succeeded, and the keys GitHub publishes for the account otherwise.
 
 set -Eeuo pipefail
 
@@ -47,7 +47,7 @@ GITHUB_USER=""
 MANAGED_KEY_AUTHENTICATES=false
 MANAGED_USER=""
 MANAGED_DENIED=false
-GH_REGISTERING=false
+GH_SIGNING_ADDED=false
 KEY_REGISTERED=false
 SHARED_CHECKOUT=""
 GH_SSH_PROTOCOL=false
@@ -299,9 +299,12 @@ ssh_probe() {
 # Authentication over SSH, which also names the account answering.
 # GitHub always closes the session, so the greeting is the result rather than the exit code.
 github_auth_user() {
-    local greeting
-    greeting=$(ssh_probe -T git@github.com 2>&1 || true)
-    printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p'
+    greeting_user "$(ssh_probe -T git@github.com 2>&1 || true)"
+}
+
+# The account a greeting names, empty where it names none.
+greeting_user() {
+    printf '%s' "$1" | sed -n 's/^Hi \([^!]*\)!.*/\1/p'
 }
 
 # The same question asked of the managed key alone.
@@ -313,12 +316,15 @@ github_auth_user() {
 # A host reaching GitHub through a proxy or over port 443 needs the config this probe discards.
 # So a failure here means the managed key did not answer, rather than that the host cannot reach GitHub.
 #
-github_auth_user_managed() {
+managed_greeting() {
     [[ -f $KEY ]] || return 1
+    ssh_probe "$@" -F /dev/null -o IdentitiesOnly=yes -i "$KEY" -T git@github.com 2>&1 || true
+}
 
+github_auth_user_managed() {
     local greeting
-    greeting=$(ssh_probe -F /dev/null -o IdentitiesOnly=yes -i "$KEY" -T git@github.com 2>&1 || true)
-    printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p'
+    greeting=$(managed_greeting) || return 1
+    greeting_user "$greeting"
 }
 
 # The same probe as evidence for the gh registration gate, which never prompts and shows what ssh did.
@@ -336,8 +342,8 @@ probe_managed_key() {
     [[ -f $KEY ]] || return 0
 
     local greeting fingerprint
-    greeting=$(ssh_probe -v -o BatchMode=yes -F /dev/null -o IdentitiesOnly=yes -i "$KEY" -T git@github.com 2>&1 || true)
-    MANAGED_USER=$(printf '%s' "$greeting" | sed -n 's/^Hi \([^!]*\)!.*/\1/p')
+    greeting=$(managed_greeting -v -o BatchMode=yes)
+    MANAGED_USER=$(greeting_user "$greeting")
     [[ -f $KEY.pub ]] || return 0
     fingerprint=$(ssh-keygen -lf "$KEY.pub" | awk '{ print $2 }') || return 0
     [[ -n $fingerprint ]] || return 0
@@ -437,9 +443,10 @@ gh_key_registered() {
     grep -qE "(^|[[:space:]])$kind([[:space:]]|$)" <<<"$matches"
 }
 
-# Where gh registered the key, gh's lists are the check, and the public lists are the check otherwise.
+# Where this run's gh add of the signing key succeeded, gh's lists are the check, since the public lists may lag the add.
+# Everywhere else the public lists are the check, so a login missing scopes or a gh listing that fails cannot hide a registered key.
 signing_registration_state() {
-    if [[ $GH_REGISTERING == true ]]; then
+    if [[ $GH_SIGNING_ADDED == true ]]; then
         gh_key_registered signing
     else
         github_signing_key_registered
@@ -477,6 +484,7 @@ register_through_gh() {
     if run gh ssh-key add "$KEY.pub" --title "$title" --type "$kind"; then
         if [[ $DRY_RUN == false ]]; then
             info "Registered as the $kind key through gh, titled $title"
+            [[ $kind == "signing" ]] && GH_SIGNING_ADDED=true
         fi
         # shellcheck disable=SC2034  # The signing call is the last, and no caller reads its answer.
         KEY_REGISTERED=true
@@ -511,7 +519,6 @@ register_keys_through_gh() {
         fi
     fi
 
-    GH_REGISTERING=true
     step "Registering the key through gh, logged in as $account"
     register_through_gh authentication
     if [[ $KEY_REGISTERED == true ]]; then
