@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
 
       # The caller's hook-input reaches the hook only from a step of its own, run when the caller set it.
-      # A hook declaring no such input, such as one written before hook-input existed, is then never handed one.
+      # So a caller passing none runs a hook declaring no such input, such as one written before hook-input existed, exactly as before.
       - name: Run resolve-upstream hook step
         id: resolve-upstream
         if: ${{ hashFiles('.github/actions/resolve-upstream/action.yml') != '' && inputs.hook-input == '' }}

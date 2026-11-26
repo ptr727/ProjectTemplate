@@ -1103,7 +1103,7 @@ jobs:
       # A local composite action resolves at step time from the workspace, which is what makes this fallback expressible at all.
       # It runs the caller's own hook when it carries one, else the hub's no-op default.
       # The caller's hook-input reaches the hook only from a step of its own, run when the caller set it.
-      # A hook declaring no such input is then never handed one.
+      # So a caller passing none runs a hook declaring no such input exactly as before.
       - name: Run repository validate hook step
         if: hashFiles('.github/actions/validate/action.yml') != '' && inputs.hook-input == ''
         uses: ./.github/actions/validate

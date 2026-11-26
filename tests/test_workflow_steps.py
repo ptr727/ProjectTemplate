@@ -114,7 +114,7 @@ def hook_input_violations(text: str, route: HookRoute) -> list[str]:
 
 
 class HookInputCase(unittest.TestCase):
-    """Each task hands hook-input to its hook from a step of its own, so a hook that never declared it is never handed it."""
+    """Each task hands hook-input to its hook from a step of its own, so a caller passing none hands its hook nothing."""
 
     def test_each_task_is_clean(self) -> None:
         for route in HOOK_ROUTES:
