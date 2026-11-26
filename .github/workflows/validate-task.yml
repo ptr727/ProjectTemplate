@@ -23,12 +23,12 @@ on:
         default: ''
       # Built into the unit-test matrix by the test-matrix job, and read raw by its python-versions check and the lint job's Resolve lint Python version step.
       python-versions:
-        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix or test-matrix-file set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string.
+        description: JSON array of the Python versions the pytest leg runs under, one leg per entry, for example ["3.13", "3.14"]. With test-matrix or test-matrix-file set, only the first entry is used, as the fallback interpreter. Quote each entry, since an unquoted one is a JSON number rather than a version string. Empty runs the one line the caller's root .python-version selects, or the hub's fallback line, with a warning, where it carries none.
         required: false
         type: string
-        default: '["3.13"]'
+        default: ''
       test-matrix:
-        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. The hook may also run a check needing that leg's environment, and a failure there fails the leg before its Python tests run. Set at most one of this and test-matrix-file. Empty, with test-matrix-file empty too, runs the python-versions legs with no hook.
+        description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry, or to the selected line where python-versions is empty. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. The hook may also run a check needing that leg's environment, and a failure there fails the leg before its Python tests run. Set at most one of this and test-matrix-file. Empty, with test-matrix-file empty too, runs the python-versions legs with no hook.
         required: false
         type: string
         default: ''
@@ -64,13 +64,25 @@ jobs:
     outputs:
       matrix: ${{ steps.build.outputs.matrix }}
       legs: ${{ steps.check.outputs.legs }}
+      versions: ${{ steps.build.outputs.versions }}
     steps:
 
+      # The selector alone is read where no matrix file is named, so the checkout stays one file.
       - name: Checkout code step
-        if: ${{ inputs.test-matrix-file != '' }}
+        if: ${{ inputs.test-matrix-file != '' || inputs.python-versions == '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          sparse-checkout: ${{ inputs.test-matrix-file == '' && '/.python-version' || '' }}
+          sparse-checkout-cone-mode: false
+
+      # This job cannot tell whether the caller holds Python, so the lint job, which can, warns of a fallback instead.
+      - name: Select Python version step
+        id: python-version
+        if: ${{ inputs.python-versions == '' }}
+        uses: $/.github/actions/python-version
+        with:
+          warn: 'false'
 
       # Either input lands in one file here, so the check below and the build step read the same bytes whichever input the caller set.
       - name: Validate test-matrix input step
@@ -128,7 +140,7 @@ jobs:
       # With either matrix input set, python-versions never expands, so this step alone guards the first entry that setup-uv reads.
       - name: Validate python-versions input step
         env:
-          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+          PYTHON_VERSIONS: ${{ inputs.python-versions || format('["{0}"]', steps.python-version.outputs.version) }}
         run: |
           set -Eeuo pipefail
           if ! jq -e -s 'length == 1 and (.[0] | type == "array" and length > 0 and all(.[]; type == "string" and test("\\S")))' <<<"$PYTHON_VERSIONS" >/dev/null 2>&1; then
@@ -148,7 +160,7 @@ jobs:
         id: build
         env:
           LEGS: ${{ steps.check.outputs.legs }}
-          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+          PYTHON_VERSIONS: ${{ inputs.python-versions || format('["{0}"]', steps.python-version.outputs.version) }}
         run: |
           set -Eeuo pipefail
           if [[ "$LEGS" == "true" ]]; then
@@ -157,6 +169,7 @@ jobs:
             matrix=$(jq -c --argjson versions "$PYTHON_VERSIONS" -n '{"python-version": $versions}')
           fi
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "versions=$(jq -c . <<< "$PYTHON_VERSIONS")" >> "$GITHUB_OUTPUT"
 
   lint:
     name: Lint sources job
@@ -406,17 +419,31 @@ jobs:
         if: steps.python.outputs.any == 'true'
         uses: $/.github/actions/python-tool-pins
 
-      # The job's Python steps run under the first interpreter the caller names, so a uv.lock whose floor is above the default still syncs.
+      # Run whatever python-versions names, so a malformed selector the release reads fails here first.
+      - name: Select Python version step
+        id: python-version
+        if: steps.python.outputs.any == 'true'
+        uses: $/.github/actions/python-version
+        with:
+          warn: ${{ inputs.python-versions == '' }}
+
+      # The job's Python steps run under the first interpreter the caller names or selects, so a uv.lock whose floor is above the default still syncs.
       # Read here rather than through fromJSON, which would fail this job on a malformed input with no cause named.
       - name: Resolve lint Python version step
         id: lint-python
         if: steps.python.outputs.any == 'true'
         env:
-          PYTHON_VERSIONS: ${{ inputs.python-versions }}
+          PYTHON_VERSIONS: ${{ inputs.python-versions || format('["{0}"]', steps.python-version.outputs.version) }}
+          SELECTED: ${{ steps.python-version.outputs.selected }}
         run: |
           set -Eeuo pipefail
           if ! version=$(jq -er -s 'if length == 1 and (.[0] | type == "array" and length > 0 and (.[0] | type == "string" and test("\\S"))) then .[0][0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
             echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry is the interpreter the lint job runs under."
+            exit 1
+          fi
+          # The release builds on the selected line, so validate refuses to test a different one first.
+          if [[ -n "${SELECTED:-}" && "$version" != "$SELECTED" ]]; then
+            echo "::error::The first python-versions entry differs from the line the root .python-version selects, which the release builds on."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -940,7 +967,7 @@ jobs:
         if: steps.python.outputs.any == 'true'
         uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
-          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}
+          python-version: ${{ matrix.python-version || fromJSON(needs.test-matrix.outputs.versions)[0] }}
           ignore-nothing-to-cache: true
 
       - name: Install Python dependencies step

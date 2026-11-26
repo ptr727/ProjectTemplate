@@ -1347,9 +1347,6 @@ gh() {
             yaml_value(yaml_step(job, "Resolve lint Python version step"), "if"),
         )
         script = step_script_text(job, "Resolve lint Python version step")
-        # A file rather than bash -c, since Git Bash collapses the filter's doubled backslash in a -c argument.
-        resolve_script = Path(self.enterContext(tempfile.TemporaryDirectory())) / "resolve.sh"
-        resolve_script.write_text(script, encoding="utf-8", newline="\n")
         cases = {
             '["3.14", "3.13"]': "version=3.14\n",
             '["3.13"]': "version=3.13\n",
@@ -1359,26 +1356,29 @@ gh() {
             "not json": None,
             '["3.14"] ["3.13"]': None,
         }
-        for versions, want in cases.items():
-            with self.subTest(versions=versions), tempfile.TemporaryDirectory() as scratch:
-                output = Path(scratch) / "output"
-                output.write_text("", encoding="utf-8")
-                result = run(
-                    [bash_or_skip(), str(resolve_script)],
-                    env={**os.environ, "PYTHON_VERSIONS": versions, "GITHUB_OUTPUT": str(output)},
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    timeout=60,
-                    check=False,
-                )
+        selected = {
+            ('["3.13", "3.14"]', "3.13"): "version=3.13\n",
+            ('["3.14", "3.13"]', "3.13"): None,
+        }
+        for versions, line, want in [
+            *((versions, "", want) for versions, want in cases.items()),
+            *((versions, line, want) for (versions, line), want in selected.items()),
+        ]:
+            with (
+                self.subTest(versions=versions, selected=line),
+                tempfile.TemporaryDirectory() as scratch,
+            ):
+                env = {"PYTHON_VERSIONS": versions, "SELECTED": line}
+                code, stdout, stderr, written = run_step_script(script, Path(scratch), env)
                 if want is None:
-                    self.assertEqual(1, result.returncode)
-                    self.assertIn("::error::The python-versions input", result.stdout)
-                    self.assertEqual("", output.read_text(encoding="utf-8"))
+                    self.assertEqual(1, code)
+                    refusal = "differs from the line" if line else "The python-versions input"
+                    self.assertIn("::error::", stdout)
+                    self.assertIn(refusal, stdout)
+                    self.assertEqual("", written)
                 else:
-                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-                    self.assertEqual(want, output.read_text(encoding="utf-8"))
+                    self.assertEqual(0, code, stdout + stderr)
+                    self.assertEqual(want, written)
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
@@ -1615,25 +1615,18 @@ gh() {
     def run_tool_pins_step(self, manifest: str | None) -> tuple[int, str, str]:
         """Run the python-tool-pins action's step over a constructed manifest, or the hub's own where None."""
         action = REPO / ".github/actions/python-tool-pins"
-        script = step_script(action / "action.yml", "Read tool pins step")
+        definition = action / "action.yml"
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         if manifest is not None:
             action = root / "action"
             action.mkdir()
             (action / "requirements.txt").write_text(manifest, encoding="utf-8")
-        output = root / "output"
-        output.write_text("", encoding="utf-8")
-        result = run(
-            [bash_or_skip(), "-c", script],
-            cwd=root,
-            env={**os.environ, "GITHUB_ACTION_PATH": str(action), "GITHUB_OUTPUT": str(output)},
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-            check=False,
+        code, stdout, _, written = run_step_script(
+            step_script(definition, "Read tool pins step"),
+            root,
+            {"GITHUB_ACTION_PATH": str(action)},
         )
-        return result.returncode, result.stdout, output.read_text(encoding="utf-8")
+        return code, stdout, written
 
     def test_tool_pins_read_exactly_one_ruff_pin(self) -> None:
         """The validator's uvx ruff runs the version the hub's Dependabot-tracked manifest pins."""
@@ -1674,25 +1667,18 @@ gh() {
     def run_docker_pins_step(self, manifest: str | None) -> tuple[int, str, str]:
         """Run the docker-lint-pins action's step over a constructed manifest, or the hub's own where None."""
         action = REPO / ".github/actions/docker-lint-pins"
-        script = step_script(action / "action.yml", "Read Docker lint pins step")
+        definition = action / "action.yml"
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         if manifest is not None:
             action = root / "action"
             action.mkdir()
             (action / "Dockerfile").write_text(manifest, encoding="utf-8")
-        output = root / "output"
-        output.write_text("", encoding="utf-8")
-        result = run(
-            [bash_or_skip(), "-c", script],
-            cwd=root,
-            env={**os.environ, "GITHUB_ACTION_PATH": str(action), "GITHUB_OUTPUT": str(output)},
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-            check=False,
+        code, stdout, _, written = run_step_script(
+            step_script(definition, "Read Docker lint pins step"),
+            root,
+            {"GITHUB_ACTION_PATH": str(action)},
         )
-        return result.returncode, result.stdout, output.read_text(encoding="utf-8")
+        return code, stdout, written
 
     def test_docker_pins_output_one_digest_pinned_reference_per_stage(self) -> None:
         """Each lint step runs the image the hub's Dependabot-tracked Dockerfile pins, never a moving tag."""
@@ -2058,9 +2044,13 @@ gh() {
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  test-matrix:\n", 1)[1].split("\n  lint:\n", 1)[0]
 
-        # Only a file needs the tree, and it has to be there before the check reads it.
+        # A file needs the whole tree, and it has to be there before the check reads it.
         checkout = yaml_step(job, "Checkout code step")
-        self.assertIn("        if: ${{ inputs.test-matrix-file != '' }}\n", checkout)
+        self.assertIn("        if: ${{ inputs.test-matrix-file != '' || ", checkout)
+        self.assertEqual(
+            "${{ inputs.test-matrix-file == '' && '/.python-version' || '' }}",
+            yaml_value(checkout, "with", "sparse-checkout"),
+        )
         self.assertEqual(yaml_value(checkout, "with", "persist-credentials"), "false")
         steps = re.findall(r"(?m)^      - name: (.*)$", job)
         self.assertLess(
@@ -2071,14 +2061,8 @@ gh() {
         )
 
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        check = root / "check.sh"
-        check.write_text(
-            step_script_text(job, "Validate test-matrix input step"), encoding="utf-8", newline="\n"
-        )
-        build = root / "build.sh"
-        build.write_text(
-            step_script_text(job, "Build unit-test matrix step"), encoding="utf-8", newline="\n"
-        )
+        check = step_script_text(job, "Validate test-matrix input step")
+        build = step_script_text(job, "Build unit-test matrix step")
         workspace = root / "workspace"
         (workspace / "ci").mkdir(parents=True)
         legs = [{"label": "minimum", "lib": "1.0.0"}, {"label": "latest", "lib": "2.0.0"}]
@@ -2090,36 +2074,30 @@ gh() {
         temp = root / "runner-temp"
         temp.mkdir()
 
-        def step(script: Path, **env: str) -> tuple[int, str, str]:
+        def step(script: str, **env: str) -> tuple[int, str, str]:
             """Run one step's script, keeping runner-temp, since the build step reads what the check left there."""
-            output = root / "output"
-            output.write_text("", encoding="utf-8")
-            result = run(
-                [bash_or_skip(), str(script)],
-                cwd=workspace,
-                env={
-                    **os.environ,
+            code, stdout, stderr, written = run_step_script(
+                script,
+                workspace,
+                {
                     "RUNNER_TEMP": str(temp),
-                    "GITHUB_OUTPUT": str(output),
                     "TEST_MATRIX": "",
                     "TEST_MATRIX_FILE": "",
                     "PYTHON_VERSIONS": '["3.13"]',
                     **env,
                 },
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
             )
-            return result.returncode, result.stdout + result.stderr, output.read_text("utf-8")
+            return code, stdout + stderr, written
 
         def built(**env: str) -> object:
             """The matrix the build step writes after a passing check, with the check's legs output."""
             status, log, output = step(check, **env)
             self.assertEqual(0, status, log)
-            status, log, line = step(build, LEGS=output.removeprefix("legs=").strip())
+            status, log, lines = step(build, LEGS=output.removeprefix("legs=").strip())
             self.assertEqual(0, status, log)
-            return json.loads(line.removeprefix("matrix="))
+            matrix, versions = lines.splitlines()
+            self.assertEqual('versions=["3.13"]', versions)
+            return json.loads(matrix.removeprefix("matrix="))
 
         # Each input builds the legs it holds, the inline one differing so a stale resolved file cannot pass for it.
         self.assertEqual({"include": legs}, built(TEST_MATRIX_FILE="ci/legs.json"))
@@ -2163,15 +2141,9 @@ gh() {
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         job = workflow.split("\n  unit-test:\n", 1)[1].split("\n  validate:\n", 1)[0]
 
-        # The default's shape is asserted and its content is not.
-        # Neither bumping the fleet default nor adding a second interpreter to it is a regression here.
+        # Empty is the default, so a caller naming nothing runs the line its own .python-version selects.
         declaration = workflow.split("      python-versions:\n", 1)[1].split("\n    secrets:", 1)[0]
-        default = re.search(r"(?m)^        default: ['\"](.*)['\"]$", declaration)
-        self.assertIsNotNone(default)
-        assert default is not None
-        versions = json.loads(default.group(1))
-        self.assertTrue(versions)
-        self.assertTrue(all(isinstance(version, str) for version in versions))
+        self.assertRegex(declaration, r"(?m)^        default: ''$")
 
         # An explicit name: is used verbatim rather than falling back to a matrix-suffixed default.
         # Without the interpolation every leg renders one indistinguishable check name.
@@ -2183,7 +2155,7 @@ gh() {
         # The matrix comes from the test-matrix job's output and the uv setup reads the matrix, so no literal survives between them.
         self.assertIn("      matrix: ${{ fromJSON(needs.test-matrix.outputs.matrix) }}\n", job)
         self.assertIn(
-            "          python-version: ${{ matrix.python-version || fromJSON(inputs.python-versions)[0] }}\n",
+            "          python-version: ${{ matrix.python-version || fromJSON(needs.test-matrix.outputs.versions)[0] }}\n",
             job,
         )
         self.assertNotIn('python-version: "', job)
@@ -2585,6 +2557,45 @@ gh() {
                     )
 
 
+def run_step_script(script: str, workspace: Path, env: dict[str, str]) -> tuple[int, str, str, str]:
+    """Run a step's `script` in `workspace`, with `env` added.
+
+    Returns the exit status, the step's stdout where its workflow commands go, its stderr, and
+    the text it wrote to GITHUB_OUTPUT.
+    """
+    output = workspace / "github-output"
+    output.write_text("", encoding="utf-8")
+    # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
+    step = workspace / "step.sh"
+    step.write_text(script, encoding="utf-8", newline="\n")
+    result = run(
+        [bash_or_skip(), str(step)],
+        cwd=workspace,
+        env={**os.environ, "GITHUB_OUTPUT": str(output), **env},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=60,
+    )
+    return result.returncode, result.stdout, result.stderr, output.read_text(encoding="utf-8")
+
+
+def run_selection_step(
+    action: Path, name: str, selector: str, content: bytes | None, env: dict[str, str]
+) -> tuple[int, str, str, list[str]]:
+    """Run an action's selection step where `selector` holds `content`, or is absent where it is None.
+
+    Returns the exit status, the step's stdout and stderr, and its output lines.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        if content is not None:
+            (workspace / selector).write_bytes(content)
+        code, stdout, stderr, written = run_step_script(step_script(action, name), workspace, env)
+        return code, stdout, stderr, written.splitlines()
+
+
 class DotnetSdkLineCase(unittest.TestCase):
     """The hub's .NET SDK steps install the line the caller's global.json selects, else 10.x."""
 
@@ -2604,31 +2615,13 @@ class DotnetSdkLineCase(unittest.TestCase):
             self.skipTest(
                 "the selection step reads global.json with python3, which bash here cannot run"
             )
-        script = step_script(self.ACTION, self.SELECT)
-        with tempfile.TemporaryDirectory() as directory:
-            workspace = Path(directory)
-            if isinstance(global_json, bytes):
-                (workspace / "global.json").write_bytes(global_json)
-            elif global_json is not None:
-                (workspace / "global.json").write_text(global_json, encoding="utf-8")
-            output = workspace / "github-output"
-            output.write_text("", encoding="utf-8")
-            # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
-            step = Path(directory) / "select.sh"
-            step.write_text(script, encoding="utf-8", newline="\n")
-            result = run(
-                [bash, str(step)],
-                cwd=workspace,
-                env={**os.environ, "GITHUB_OUTPUT": str(output)},
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-                timeout=30,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.last_stdout = result.stdout
-            return output.read_text(encoding="utf-8").splitlines()
+        if isinstance(global_json, str):
+            global_json = global_json.encode("utf-8")
+        code, self.last_stdout, stderr, outputs = run_selection_step(
+            self.ACTION, self.SELECT, "global.json", global_json, {}
+        )
+        self.assertEqual(code, 0, stderr)
+        return outputs
 
     def test_a_global_json_selecting_a_line_is_read(self) -> None:
         selects = json.dumps({"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}})
@@ -2714,6 +2707,127 @@ class DotnetSdkLineCase(unittest.TestCase):
                     yaml_value(setup, "if"), yaml_value(yaml_step(steps, default), "if")
                 )
                 self.assertLess(steps.index("Setup .NET SDK step"), steps.index(default))
+
+
+class PythonVersionLineCase(unittest.TestCase):
+    """The hub's Python steps run the line the caller's root .python-version selects, else the fallback."""
+
+    ACTION = REPO / ".github/actions/python-version/action.yml"
+    BASELINE = REPO / "catalog/snippets/devcontainer/python/devcontainer.json"
+    SELECT = "Select Python version step"
+    last_stdout = ""
+    last_stderr = ""
+
+    def select(self, python_version: str | None, warn: str = "true") -> tuple[int, list[str]]:
+        """The exit and outputs of the selection step in a workspace holding `python_version`, or none.
+
+        The step's own stdout, where its workflow commands go, is kept in `last_stdout`, and its
+        stderr in `last_stderr`.
+        """
+        content = None if python_version is None else python_version.encode("utf-8")
+        code, self.last_stdout, self.last_stderr, outputs = run_selection_step(
+            self.ACTION, self.SELECT, ".python-version", content, {"WARN": warn}
+        )
+        return code, outputs
+
+    def baseline(self) -> str:
+        """The Python line the devcontainer snippet's image tag names, read by pattern since the file is JSONC."""
+        text = self.BASELINE.read_text(encoding="utf-8")
+        line = re.search(
+            r'"image": "mcr\.microsoft\.com/devcontainers/python:\d+-(\d+\.\d+)-\w+"', text
+        )
+        assert line is not None, self.BASELINE
+        return line.group(1)
+
+    def test_the_fallback_is_the_baseline_line(self) -> None:
+        self.assertEqual(self.select(None), (0, [f"version={self.baseline()}"]), self.last_stderr)
+        self.assertIn("::warning::No root .python-version selects a Python line", self.last_stdout)
+
+    def test_the_first_request_line_is_read(self) -> None:
+        self.assertEqual(self.select("3.13\n"), (0, ["selected=3.13", "version=3.13"]))
+        self.assertEqual(
+            self.select("# the line\n\n  3.15  \r\n3.13\n"), (0, ["selected=3.15", "version=3.15"])
+        )
+        self.assertEqual(self.select("3.12"), (0, ["selected=3.12", "version=3.12"]))
+        self.assertEqual("", self.last_stdout)
+
+    def test_a_file_naming_no_line_fails(self) -> None:
+        for text in ("", "# only a comment\n", "3.14.1\n", "3.13t\n", "cpython@3.14\n", "3\n"):
+            with self.subTest(text=text):
+                self.assertEqual(self.select(text), (1, []))
+                self.assertIn(
+                    "::error::The root .python-version names no X.Y line", self.last_stdout
+                )
+
+    def test_a_caller_that_cannot_tell_is_not_warned(self) -> None:
+        self.assertEqual(self.select(None, warn="false"), (0, [f"version={self.baseline()}"]))
+        self.assertEqual("", self.last_stdout)
+
+    def test_each_python_job_reaches_the_selection(self) -> None:
+        """Validate's jobs and the PyPI release build each run the action after a checkout that holds the file."""
+        validate = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        jobs = job_texts(validate)
+        builder = jobs["test-matrix"]
+        checkout = yaml_step(builder, "Checkout code step")
+        self.assertEqual(
+            "${{ inputs.test-matrix-file != '' || inputs.python-versions == '' }}",
+            yaml_value(checkout, "if"),
+        )
+        self.assertIn("'/.python-version'", yaml_value(checkout, "with", "sparse-checkout") or "")
+        resolved = "${{ inputs.python-versions || format('[\"{0}\"]', steps.python-version.outputs.version) }}"
+        for job, steps, condition in (
+            (
+                "test-matrix",
+                ("Validate python-versions input step", "Build unit-test matrix step"),
+                "${{ inputs.python-versions == '' }}",
+            ),
+            (
+                "lint",
+                ("Resolve lint Python version step",),
+                "steps.python.outputs.any == 'true'",
+            ),
+        ):
+            with self.subTest(job=job):
+                body = jobs[job]
+                select = yaml_step(body, self.SELECT)
+                self.assertEqual("$/.github/actions/python-version", yaml_value(select, "uses"))
+                self.assertEqual(condition, yaml_value(select, "if"))
+                self.assertLess(
+                    body.index("- name: Checkout code step"), body.index(f"- name: {self.SELECT}")
+                )
+                for step in steps:
+                    self.assertLess(
+                        body.index(f"- name: {self.SELECT}"), body.index(f"- name: {step}")
+                    )
+                    self.assertEqual(
+                        resolved, yaml_value(yaml_step(body, step), "env", "PYTHON_VERSIONS")
+                    )
+        self.assertEqual("'false'", yaml_value(yaml_step(builder, self.SELECT), "with", "warn"))
+        self.assertEqual(
+            "${{ inputs.python-versions == '' }}",
+            yaml_value(yaml_step(jobs["lint"], self.SELECT), "with", "warn"),
+        )
+        self.assertIn("      versions: ${{ steps.build.outputs.versions }}\n", builder)
+
+        release = job_texts(
+            (REPO / ".github/workflows/build-release-task.yml").read_text(encoding="utf-8")
+        )
+        pypi = release["build-pypi"]
+        default = "Run hub build-pypi default step"
+        select = yaml_step(pypi, self.SELECT)
+        self.assertEqual("$/.github/actions/python-version", yaml_value(select, "uses"))
+        self.assertEqual(yaml_value(select, "if"), yaml_value(yaml_step(pypi, default), "if"))
+        self.assertLess(pypi.index(self.SELECT), pypi.index(default))
+        self.assertEqual(
+            "${{ steps.python-version.outputs.selected }}",
+            yaml_value(yaml_step(pypi, default), "with", "python-version"),
+        )
+        self.assertEqual("'false'", yaml_value(select, "with", "warn"))
+        build = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(encoding="utf-8")
+        self.assertEqual(
+            "${{ inputs.python-version }}",
+            yaml_value(yaml_step(build, "Setup uv step"), "with", "python-version"),
+        )
 
 
 if __name__ == "__main__":
