@@ -52,6 +52,21 @@ class LinuxFunctionsCase(unittest.TestCase):
         self.functions = self.dir / "functions.sh"
         self.functions.write_text(linux_functions(), encoding="utf-8")
 
+    def redirect_sources_dir(self, name: str, files: list[str]) -> Path:
+        """Point the sourced copy's readonly SOURCES_DIR at a fresh directory holding `files`."""
+        sources = self.dir / name
+        sources.mkdir()
+        for file in files:
+            (sources / file).write_text("", encoding="utf-8")
+        text = linux_functions()
+        old = 'readonly SOURCES_DIR="/etc/apt/sources.list.d"'
+        if old not in text:
+            raise AssertionError("install-tools.sh no longer declares SOURCES_DIR as expected")
+        self.functions.write_text(
+            text.replace(old, f'readonly SOURCES_DIR="{sources}"'), encoding="utf-8"
+        )
+        return sources
+
     def run_bash(self, body: str, argument: str = "") -> subprocess.CompletedProcess[str]:
         script = f'source "{self.functions}"\n{body}\n'
         return subprocess.run(
@@ -606,16 +621,7 @@ class TestLinuxSourceNotes(LinuxFunctionsCase):
     STEMS: ClassVar[dict[str, str]] = {"gh": "github-cli", "node": "nodesource"}
 
     def probe(self, tool: str, files: list[str]) -> tuple[list[str], str]:
-        sources = self.dir / f"sources-{tool}-{'-'.join(files) or 'empty'}"
-        sources.mkdir()
-        for name in files:
-            (sources / name).write_text("", encoding="utf-8")
-        text = linux_functions().replace(
-            'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
-            f'readonly SOURCES_DIR="{sources}"',
-        )
-        self.assertIn(str(sources), text)
-        self.functions.write_text(text, encoding="utf-8")
+        self.redirect_sources_dir(f"sources-{tool}-{'-'.join(files) or 'empty'}", files)
         body = f"""tool_note {tool}
 for n in "${{NOTES[@]}}"; do printf 'NOTE %s\\n' "$n"; done
 tool_configured {tool} && echo CONFIGURED || echo UNCONFIGURED"""
@@ -672,26 +678,54 @@ node_lts_major() { printf '22'; }
 class TestMicrosoftFeedRows(LinuxFunctionsCase):
     """A host without Microsoft's feed reads unmanaged where an install would add it."""
 
-    def probe(self, tool: str, arch: str, files: list[str], sdk: str) -> str:
-        sources = (
-            self.dir
-            / f"sources-{tool}-{arch}-{'-'.join(files) or 'empty'}-{'sdk' if sdk else 'nosdk'}"
+    def probe(self, tool: str, arch: str, files: list[str], sdk: str, installed: str = "") -> str:
+        self.redirect_sources_dir(
+            f"sources-{tool}-{arch}-{'-'.join(files) or 'empty'}-{'sdk' if sdk else 'nosdk'}", files
         )
-        sources.mkdir()
-        for name in files:
-            (sources / name).write_text("", encoding="utf-8")
-        text = linux_functions().replace(
-            'readonly SOURCES_DIR="/etc/apt/sources.list.d"',
-            f'readonly SOURCES_DIR="{sources}"',
-        )
-        self.assertIn(str(sources), text)
-        self.functions.write_text(text, encoding="utf-8")
         body = f"""ARCH={arch}
 dotnet_sdk_packages() {{ printf '%s' "{sdk}"; }}
-printf '%s|%s' "$(tool_effective_status {tool} '' '')" "$(dotnet_source)" """
+printf '%s|%s' "$(tool_effective_status {tool} '{installed}' '{installed}')" "$(dotnet_source)" """
         result = self.run_bash(body)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
+
+    def test_an_installed_tool_keeps_its_status_without_the_feed(self) -> None:
+        for tool in ("powershell", "dotnet"):
+            with self.subTest(tool=tool):
+                out = self.probe(tool, "amd64", [], "", installed="7.4.0-1")
+                self.assertEqual(out.partition("|")[0], "current")
+
+    def test_an_unmanaged_tool_with_nothing_installed_says_the_install_adds_the_feed(self) -> None:
+        result = self.run_bash("""
+MODE=install
+tool_function() { printf 'stub_%s' "$2"; }
+stub_version() { :; }
+stub_target() { :; }
+stub_source() { printf 'packages.microsoft.com'; }
+stub_install() { echo "INSTALL RAN"; }
+tool_effective_status() { printf 'unmanaged'; }
+apply_tool powershell
+""")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Microsoft's feed is not configured, so this install adds it", result.stdout)
+        self.assertNotIn("installed without the sources file", result.stdout)
+        self.assertIn("INSTALL RAN", result.stdout)
+
+    def test_the_dotnet_note_checks_the_feed_and_the_architecture(self) -> None:
+        cases: tuple[tuple[str, list[str], str], ...] = (
+            ("amd64", [], "Microsoft's feed is not configured"),
+            ("amd64", ["microsoft-prod.list"], "although Microsoft's feed is configured"),
+            ("arm64", [], "carries amd64 only"),
+        )
+        for arch, files, expected in cases:
+            with self.subTest(arch=arch, files=files):
+                self.redirect_sources_dir(f"note-{arch}-{'-'.join(files) or 'empty'}", files)
+                result = self.run_bash(f"""ARCH={arch}
+dotnet_sdk_packages() {{ :; }}
+tool_note dotnet
+printf '%s\\n' "${{NOTES[@]}}" """)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(expected, result.stdout)
 
     def test_each_host_state_reads_the_status_an_install_would_act_on(self) -> None:
         feed = ["microsoft-prod.sources"]
@@ -999,16 +1033,7 @@ class TestLinuxInstallRefusals(LinuxFunctionsCase):
 
     def setUp(self) -> None:
         super().setUp()
-        # SOURCES_DIR is readonly, so point it at an empty directory in the sourced copy, so the host's own feed files cannot take the fast path.
-        sources = self.dir / "sources.d"
-        sources.mkdir()
-        text = self.functions.read_text(encoding="utf-8")
-        old = 'readonly SOURCES_DIR="/etc/apt/sources.list.d"'
-        if old not in text:
-            raise AssertionError("install-tools.sh no longer declares SOURCES_DIR as expected")
-        self.functions.write_text(
-            text.replace(old, f'readonly SOURCES_DIR="{sources}"'), encoding="utf-8"
-        )
+        self.redirect_sources_dir("sources.d", [])
 
     def test_a_non_apt_pwsh_outside_the_known_paths_stops_the_install(self) -> None:
         result = self.run_bash("""

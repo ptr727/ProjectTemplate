@@ -1234,7 +1234,7 @@ tool_is_optional() {
 tool_effective_status() {
     local tool="$1" status
     status=$(tool_status "$2" "$3")
-    if [[ $status == "current" || $status == "outdated" ]] && ! tool_configured "$tool"; then
+    if [[ $status == "current" || $status == "outdated" ]] && [[ $tool != "dotnet" && $tool != "powershell" ]] && ! tool_configured "$tool"; then
         status="unmanaged"
     elif [[ $status == "unavailable" && ($tool == "dotnet" || $tool == "powershell") ]] && ! tool_configured "$tool"; then
         status="unmanaged"
@@ -1334,7 +1334,13 @@ tool_note() {
         local -a sdks=()
         readarray -t sdks < <(dotnet_sdk_packages)
         if [[ ${#sdks[@]} -eq 0 ]]; then
-            note "dotnet" "no SDK package available, Microsoft's feed is not configured"
+            if microsoft_feed_configured; then
+                note "dotnet" "no SDK package available although Microsoft's feed is configured, so the apt lists may need a refresh"
+            elif [[ $ARCH != "amd64" ]]; then
+                note "dotnet" "no SDK package available, and Microsoft's feed carries amd64 only"
+            else
+                note "dotnet" "no SDK package available, Microsoft's feed is not configured"
+            fi
         else
             local fleet latest
             fleet=$(dotnet_sdk_fleet)
@@ -1395,7 +1401,7 @@ tool_note() {
         # A host without the feed reads no candidate at all, since the distro never carries a powershell package.
         # So the note says why rather than reading as absent.
         if ! microsoft_feed_configured; then
-            note "powershell" "Microsoft's repository is not configured, so no package is available yet"
+            note "powershell" "Microsoft's repository is not configured, so apt reads no upstream version yet"
         fi
         ;;
     op)
@@ -1616,7 +1622,7 @@ apply_tool() {
     if [[ $status == "current" ]]; then
         log "$tool: current at ${installed}, checking the package set"
     elif [[ $status == "unmanaged" && -z $installed ]]; then
-        log "$tool: not installed and Microsoft's feed is not configured, this install adds the feed at $("$(tool_function "$tool" source)")"
+        log "$tool: not installed and Microsoft's feed is not configured, so this install adds it where Microsoft publishes one for this release and the refreshed apt lists carry no distro SDK"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is whatever apt already has until the managed source is written, so quoting it here could name the wrong upstream.
         if [[ $tool == "node" || $MODE == "upgrade" ]]; then
