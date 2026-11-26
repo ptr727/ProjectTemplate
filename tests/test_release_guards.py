@@ -1359,13 +1359,26 @@ gh() {
             "not json": None,
             '["3.14"] ["3.13"]': None,
         }
-        for versions, want in cases.items():
-            with self.subTest(versions=versions), tempfile.TemporaryDirectory() as scratch:
+        selected = {
+            ('["3.13", "3.14"]', "3.13"): "version=3.13\n",
+            ('["3.14", "3.13"]', "3.13"): None,
+        }
+        for versions, line, want in [
+            *((versions, "", want) for versions, want in cases.items()),
+            *((versions, line, want) for (versions, line), want in selected.items()),
+        ]:
+            with (
+                self.subTest(versions=versions, selected=line),
+                tempfile.TemporaryDirectory() as scratch,
+            ):
                 output = Path(scratch) / "output"
                 output.write_text("", encoding="utf-8")
+                env = {**os.environ, "PYTHON_VERSIONS": versions, "GITHUB_OUTPUT": str(output)}
+                if line:
+                    env["SELECTED"] = line
                 result = run(
                     [bash_or_skip(), str(resolve_script)],
-                    env={**os.environ, "PYTHON_VERSIONS": versions, "GITHUB_OUTPUT": str(output)},
+                    env=env,
                     capture_output=True,
                     text=True,
                     encoding="utf-8",
@@ -1374,7 +1387,9 @@ gh() {
                 )
                 if want is None:
                     self.assertEqual(1, result.returncode)
-                    self.assertIn("::error::The python-versions input", result.stdout)
+                    refusal = "differs from the line" if line else "The python-versions input"
+                    self.assertIn("::error::", result.stdout)
+                    self.assertIn(refusal, result.stdout)
                     self.assertEqual("", output.read_text(encoding="utf-8"))
                 else:
                     self.assertEqual(0, result.returncode, result.stdout + result.stderr)

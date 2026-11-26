@@ -434,10 +434,16 @@ jobs:
         if: steps.python.outputs.any == 'true'
         env:
           PYTHON_VERSIONS: ${{ inputs.python-versions || format('["{0}"]', steps.python-version.outputs.version) }}
+          SELECTED: ${{ steps.python-version.outputs.selected }}
         run: |
           set -Eeuo pipefail
           if ! version=$(jq -er -s 'if length == 1 and (.[0] | type == "array" and length > 0 and (.[0] | type == "string" and test("\\S"))) then .[0][0] else error("") end' <<< "$PYTHON_VERSIONS" 2> /dev/null); then
             echo "::error::The python-versions input must be a non-empty JSON array of quoted version strings, whose first entry is the interpreter the lint job runs under."
+            exit 1
+          fi
+          # The release builds on the selected line, so validate refuses to test a different one first.
+          if [[ -n "${SELECTED:-}" && "$version" != "$SELECTED" ]]; then
+            echo "::error::The first python-versions entry differs from the line the root .python-version selects, which the release builds on."
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
