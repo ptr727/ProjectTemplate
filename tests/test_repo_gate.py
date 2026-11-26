@@ -359,6 +359,31 @@ class TestGitHubRead(unittest.TestCase):
         ):
             self.assertIsNone(repo_gate.gh_exists("repos/o/r"))
 
+    def test_the_child_reads_github_com_whatever_gh_host_names(self) -> None:
+        """An exported host that lacks the path would answer 404, and a correct pin would read as absent.
+
+        A hub tree beside the gate pins through gh_graphql, and a single-file fetch with none pins here.
+        """
+        proc = subprocess.CompletedProcess([], 0, "", "")
+        loads = mock.Mock(wraps=repo_gate.hub_script)
+        for hub in (REPO, None):
+            with (
+                self.subTest(hub=hub),
+                mock.patch.dict(os.environ, {"GH_HOST": "other.example", "GATE_PROBE": "kept"}),
+                mock.patch.object(repo_gate, "gate_hub_root", return_value=hub),
+                mock.patch.object(repo_gate, "hub_script", loads),
+                mock.patch.object(repo_gate.subprocess, "run", return_value=proc) as run,
+            ):
+                self.assertIs(True, repo_gate.gh_exists("repos/o/r/commits/deadbeef"))
+                env = run.call_args.kwargs["env"]
+                self.assertEqual(("github.com", "kept"), (env["GH_HOST"], env["GATE_PROBE"]))
+                self.assertEqual("other.example", os.environ["GH_HOST"])
+        loads.assert_any_call(REPO, "gh_graphql")
+
+    def test_the_gate_s_own_pin_names_the_host_gh_graphql_names(self) -> None:
+        gh_graphql = repo_gate.hub_script(REPO, "gh_graphql")
+        self.assertEqual(gh_graphql.HOST, repo_gate.GITHUB_HOST)
+
     def test_the_read_is_a_get_and_carries_no_state_changing_verb(self) -> None:
         """A gate is read-only, so the one network call it makes is held to that."""
         source = (REPO / "scripts" / "repo_gate.py").read_text(encoding="utf-8")
@@ -1366,7 +1391,7 @@ class TestCompositeActions(TreeCase):
             contextlib.redirect_stdout(io.StringIO()),
         ):
             self.assertIsNone(repo_gate.docker_unreachable())
-        image = repo_gate.shellcheck_image()
+        image = repo_gate.shellcheck_image(docker_lint)
         pulls = [c.args[0] for c in run.call_args_list if c.args[0][:2] == ["docker", "pull"]]
         self.assertEqual([["docker", "pull", "--quiet", image]] * 2, pulls)
         self.assertEqual([docker_lint.PULL_BACKOFF], sleeps)
@@ -1393,48 +1418,58 @@ class TestCompositeActions(TreeCase):
         self.assertIn("timed out after 300s", reason)
         self.assertEqual(3, run.call_count)
 
-    def test_a_docker_lint_that_will_not_load_is_the_reason(self) -> None:
-        ok = subprocess.CompletedProcess([], 0, b"", b"")
-        missing = subprocess.CompletedProcess([], 1, b"", b"")
+    def test_a_docker_lint_that_will_not_load_is_the_reason_and_no_docker_call(self) -> None:
+        """The script parses the pin, so a load failure is found before docker is asked anything."""
         with (
-            mock.patch.object(repo_gate.subprocess, "run", side_effect=[ok, missing]),
+            mock.patch.object(repo_gate.subprocess, "run") as run,
             mock.patch.object(repo_gate, "hub_script", side_effect=SyntaxError("newer syntax")),
         ):
             reason = repo_gate.docker_unreachable() or ""
-        self.assertIn("scripts/docker_lint.py, which holds the pull retry, failed to load", reason)
-        self.assertIn("newer syntax", reason)
+        self.assertIn(
+            "scripts/docker_lint.py, which parses the pin manifest and holds the pull retry, "
+            "failed to load: newer syntax",
+            reason,
+        )
+        run.assert_not_called()
 
     def test_the_shellcheck_image_is_the_manifest_s_digest_pin(self) -> None:
         """The pin is the one the docker-lint-pins action and docker_lint.py read, never a moving tag."""
-        image = repo_gate.shellcheck_image()
+        image = repo_gate.shellcheck_image(repo_gate.hub_docker_lint())
         self.assertRegex(image, r"^\S+/koalaman/shellcheck:v\d[^@]*@sha256:[0-9a-f]{64}$")
         self.assertEqual(REPO, repo_gate.gate_hub_root())
         self.assertTrue((REPO / repo_gate.PIN_MANIFEST).is_file())
 
     def test_an_unreadable_pin_is_one_finding_and_no_docker_call(self) -> None:
+        """The pin is read through docker_lint.read_pins, so the gate refuses what the action refuses."""
+        pin = "FROM r/s:v1@sha256:" + "a" * 64 + " AS shellcheck\n"
         cases = {
-            "missing": None,
-            "named twice": "FROM r/s:v1@sha256:" + "a" * 64 + " AS shellcheck\n",
+            "missing": (None, "from a hub checkout or through the repo-gate action"),
+            "named twice": (pin * 2, "names the shellcheck stage twice"),
+            "an empty tag": (pin.replace(":v1@", ":@"), "pins no shellcheck stage"),
         }
-        for label, text in cases.items():
+        for label, (text, expected) in cases.items():
             with self.subTest(label):
                 hub = None
                 if text is not None:
                     hub = self.tmp / label
                     manifest = hub / repo_gate.PIN_MANIFEST
                     manifest.parent.mkdir(parents=True)
-                    manifest.write_text(text * 2, encoding="utf-8")
+                    manifest.write_text(text, encoding="utf-8")
+                    (hub / "scripts").mkdir()
+                    shutil.copyfile(REPO / "scripts/docker_lint.py", hub / "scripts/docker_lint.py")
                 with (
                     mock.patch.object(repo_gate, "gate_hub_root", return_value=hub),
                     mock.patch.object(repo_gate.subprocess, "run") as run,
                 ):
                     reason = repo_gate.docker_unreachable() or ""
                 self.assertIn("the shellcheck pin could not be read", reason)
-                if text is None:
-                    self.assertIn("from a hub checkout or through the repo-gate action", reason)
-                else:
-                    self.assertIn("names the shellcheck image on 2 lines", reason)
+                self.assertIn(expected, reason)
                 run.assert_not_called()
+
+    def test_the_gate_carries_no_pin_manifest_parser_of_its_own(self) -> None:
+        source = Path(repo_gate.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("0-9a-f]{64}", source)
+        self.assertIn("docker_lint.read_pins(", source)
 
     def test_an_empty_action_file_is_a_finding_naming_the_file(self) -> None:
         hits = self.shell_hits(self.raw(""))

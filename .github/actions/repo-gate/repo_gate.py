@@ -62,6 +62,7 @@ HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 # Reading any of those as absence fails a correct pin, which is the direction that costs most.
 ABSENT = {"404", "422"}
 GH_TIMEOUT = 20
+GITHUB_HOST = "github.com"
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 COMMAND_LEAD = re.compile(r"\A(\s*):(?=:)")
 LEGACY_COMMAND = "##["
@@ -95,6 +96,21 @@ def origin_owner(root: Path) -> str | None:
     return m.group(1).lower() if m else None
 
 
+def gh_env() -> dict[str, str]:
+    """This process's environment with `GH_HOST` naming github.com, for the `gh` child a read runs in.
+
+    An exported `GH_HOST` would move a read to a host that may lack the path. Its 404 would then
+    read as absent, and a correct pin as unresolvable. Where a hub tree is beside this gate, the
+    hub's `gh_graphql.pinned_env` sets the pin. A single-file fetch, as `hub_fetch_run.py` makes,
+    has no hub tree, so the same pin is set here. The catch is broad because that script runs under
+    whatever `python3` the host has, and the pin holds either way.
+    """
+    try:
+        return hub_script(gate_hub_root(), "gh_graphql").pinned_env()
+    except Exception:  # noqa: BLE001
+        return {**os.environ, "GH_HOST": GITHUB_HOST}
+
+
 def gh_read(path: str, *flags: str) -> tuple[bool | None, str]:
     """GitHub's answer for `path` and the body it printed, which is empty unless the answer is True.
 
@@ -112,6 +128,7 @@ def gh_read(path: str, *flags: str) -> tuple[bool | None, str]:
             errors="replace",
             timeout=GH_TIMEOUT,
             check=False,
+            env=gh_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None, ""
@@ -433,7 +450,6 @@ ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
 # A GitHub expression is not shell, so shellcheck would read its braces as syntax.
 EXPRESSION_START = "${{"
 PIN_MANIFEST = ".github/actions/docker-lint-pins/Dockerfile"
-SHELLCHECK_PIN = re.compile(r"(?m)^FROM (\S+:[^\s@/]+@sha256:[0-9a-f]{64}) AS shellcheck[ \t]*$")
 SHELLCHECK_TIMEOUT = 300
 SCHEMA_TIMEOUT = 300
 YAML_TIMEOUT = 60
@@ -656,12 +672,13 @@ def substitute_expressions(body: str) -> str:
     return "\n".join(out)
 
 
-def shellcheck_image() -> str:
-    """The shellcheck image reference the pin manifest names, a tag with its digest.
+def hub_docker_lint() -> ModuleType:
+    """The hub's `scripts/docker_lint.py`, which parses the pin manifest and holds the pull retry.
 
-    It is read from the hub tree this gate sits in, at the commit that tree holds.
-    Raises ValueError where the manifest names it on no line or on more than one.
+    It is loaded from the hub tree this gate sits in, at the commit that tree holds.
+    Raises ValueError where none is beside this gate, or where the script fails to load.
     A copy fetched alone has no hub tree, so that error names where the check can run.
+    The script runs under whatever `python3` the host has, so any failure to load it is a reason.
     """
     hub = gate_hub_root()
     if hub is None:
@@ -669,15 +686,36 @@ def shellcheck_image() -> str:
             f"{PIN_MANIFEST} is not beside this script, so run this check from a hub checkout "
             "or through the repo-gate action"
         )
-    manifest = hub / PIN_MANIFEST
-    pins = SHELLCHECK_PIN.findall(manifest.read_text(encoding="utf-8"))
-    if len(pins) != 1:
-        raise ValueError(f"{manifest} names the shellcheck image on {len(pins)} lines, not 1")
-    return pins[0]
+    try:
+        return hub_script(hub, "docker_lint")
+    except Exception as error:
+        raise ValueError(
+            "the hub's scripts/docker_lint.py, which parses the pin manifest and holds the pull "
+            f"retry, failed to load: {error}"
+        ) from error
+
+
+def shellcheck_image(docker_lint: ModuleType) -> str:
+    """The shellcheck image reference the pin manifest names, a tag with its digest.
+
+    `docker_lint.read_pins` is the manifest's one parser, which the docker-lint-pins action also reads through.
+    Raises ValueError where the manifest cannot be read, names a stage twice, or pins no shellcheck stage.
+    """
+    manifest = docker_lint.manifest_path()
+    try:
+        pins = docker_lint.read_pins(manifest)
+    except docker_lint.CommandFailed as error:
+        raise ValueError(str(error)) from error
+    if "shellcheck" not in pins:
+        raise ValueError(
+            f"{manifest} pins no shellcheck stage on a "
+            "'FROM <image>:<tag>@sha256:<digest> AS shellcheck' line"
+        )
+    return pins["shellcheck"]
 
 
 def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
-    image = shellcheck_image()
+    image = shellcheck_image(hub_docker_lint())
     # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
     command = ["docker", "run", "--rm", "-i", "--network=none", image]
     command += ["-s", dialect, "-S", "warning", "-e", "SC2154", "-f", "gcc", "-"]
@@ -708,12 +746,13 @@ def docker_unreachable() -> str | None:
 
     The explicit pull makes a fetch failure one finding with its reason, rather than one per body.
     The image is pinned by digest, so a locally cached copy is the one CI pulls.
-    The pull runs through the hub's `docker_lint.py`, whose bounded retry every Docker lint pull shares.
-    That script runs under whatever `python3` the host has, so any failure to load it is a reason.
+    The pin is read, and the pull runs, through the hub's `docker_lint.py`.
+    Its bounded retry is the one every Docker lint pull shares.
     """
     try:
-        image = shellcheck_image()
-    except (OSError, ValueError) as error:
+        docker_lint = hub_docker_lint()
+        image = shellcheck_image(docker_lint)
+    except ValueError as error:
         return f"the shellcheck pin could not be read: {error}"
     try:
         result = subprocess.run(
@@ -738,12 +777,6 @@ def docker_unreachable() -> str | None:
         return f"docker image inspect could not start: {error}"
     if present.returncode == 0:
         return None
-    try:
-        docker_lint = hub_script(gate_hub_root(), "docker_lint")
-    except Exception as error:  # noqa: BLE001
-        return (
-            f"the hub's scripts/docker_lint.py, which holds the pull retry, failed to load: {error}"
-        )
     try:
         docker_lint.pull_image("shellcheck", image, SHELLCHECK_TIMEOUT, docker_lint.run_command)
     except docker_lint.CommandFailed as error:
@@ -860,8 +893,8 @@ def gate_hub_root() -> Path | None:
 def hub_script(hub: Path | None, name: str) -> ModuleType:
     """The hub's own `scripts/<name>.py`, whose code a check here reuses rather than copies.
 
-    `carry.py` and `docker_lint.py` each import only the standard library at load, so plain
-    `python3` loads them. Raises ValueError where no hub tree is beside this gate.
+    `carry.py`, `docker_lint.py`, and `gh_graphql.py` each import only the standard library at
+    load, so plain `python3` loads them. Raises ValueError where no hub tree is beside this gate.
     A dataclass resolves its module through `sys.modules`, so the module is registered there.
     It takes a name of its own, which leaves another import of the same script as it was.
     """
