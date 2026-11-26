@@ -1737,8 +1737,10 @@ gh() {
             with self.subTest(label):
                 code, stdout, stderr, written = self.run_docker_pins_step(text)
                 self.assertEqual((1, ""), (code, written))
-                self.assertIn("::error::", stdout)
-                self.assertIn("on exactly one 'FROM <image>:<tag>@sha256:<digest>", stdout)
+                errors = [line for line in stdout.splitlines() if line.startswith("::error::")]
+                self.assertEqual(1, len(errors), stdout)
+                self.assertIn("could not be read for its lint pins: RESULT failed: ", errors[0])
+                self.assertIn(reason, errors[0])
                 self.assertIn(reason, stderr)
 
     def test_docker_pins_reads_the_manifest_through_docker_lint_alone(self) -> None:

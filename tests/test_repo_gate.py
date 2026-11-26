@@ -360,25 +360,16 @@ class TestGitHubRead(unittest.TestCase):
             self.assertIsNone(repo_gate.gh_exists("repos/o/r"))
 
     def test_the_child_reads_github_com_whatever_gh_host_names(self) -> None:
-        """An exported host that lacks the path would answer 404, and a correct pin would read as absent.
-
-        A hub tree beside the gate pins through gh_graphql, and a single-file fetch with none pins here.
-        """
+        """An exported host that lacks the path would answer 404, and a correct pin would read as absent."""
         proc = subprocess.CompletedProcess([], 0, "", "")
-        loads = mock.Mock(wraps=repo_gate.hub_script)
-        for hub in (REPO, None):
-            with (
-                self.subTest(hub=hub),
-                mock.patch.dict(os.environ, {"GH_HOST": "other.example", "GATE_PROBE": "kept"}),
-                mock.patch.object(repo_gate, "gate_hub_root", return_value=hub),
-                mock.patch.object(repo_gate, "hub_script", loads),
-                mock.patch.object(repo_gate.subprocess, "run", return_value=proc) as run,
-            ):
-                self.assertIs(True, repo_gate.gh_exists("repos/o/r/commits/deadbeef"))
-                env = run.call_args.kwargs["env"]
-                self.assertEqual(("github.com", "kept"), (env["GH_HOST"], env["GATE_PROBE"]))
-                self.assertEqual("other.example", os.environ["GH_HOST"])
-        loads.assert_any_call(REPO, "gh_graphql")
+        with (
+            mock.patch.dict(os.environ, {"GH_HOST": "other.example", "GATE_PROBE": "kept"}),
+            mock.patch.object(repo_gate.subprocess, "run", return_value=proc) as run,
+        ):
+            self.assertIs(True, repo_gate.gh_exists("repos/o/r/commits/deadbeef"))
+            env = run.call_args.kwargs["env"]
+            self.assertEqual(("github.com", "kept"), (env["GH_HOST"], env["GATE_PROBE"]))
+            self.assertEqual("other.example", os.environ["GH_HOST"])
 
     def test_the_gate_s_own_pin_names_the_host_gh_graphql_names(self) -> None:
         gh_graphql = repo_gate.hub_script(REPO, "gh_graphql")
@@ -386,7 +377,8 @@ class TestGitHubRead(unittest.TestCase):
 
     def test_the_read_is_a_get_and_carries_no_state_changing_verb(self) -> None:
         """A gate is read-only, so the one network call it makes is held to that."""
-        source = (REPO / "scripts" / "repo_gate.py").read_text(encoding="utf-8")
+        source = Path(repo_gate.__file__).read_text(encoding="utf-8")
+        self.assertIn('["gh", "api", path, *flags]', source)
         for verb in ("-X POST", "-X PATCH", "-X PUT", "-X DELETE", "--method", "mutation"):
             with self.subTest(verb=verb):
                 self.assertNotIn(verb, source)

@@ -100,15 +100,11 @@ def gh_env() -> dict[str, str]:
     """This process's environment with `GH_HOST` naming github.com, for the `gh` child a read runs in.
 
     An exported `GH_HOST` would move a read to a host that may lack the path. Its 404 would then
-    read as absent, and a correct pin as unresolvable. Where a hub tree is beside this gate, the
-    hub's `gh_graphql.pinned_env` sets the pin. A single-file fetch, as `hub_fetch_run.py` makes,
-    has no hub tree, so the same pin is set here. The catch is broad because that script runs under
-    whatever `python3` the host has, and the pin holds either way.
+    read as absent, and a correct pin as unresolvable. This is the pin `gh_graphql.pinned_env` sets.
+    It is set here rather than loaded from there, since a single-file fetch, as `hub_fetch_run.py`
+    makes, has no hub tree to load it from.
     """
-    try:
-        return hub_script(gate_hub_root(), "gh_graphql").pinned_env()
-    except Exception:  # noqa: BLE001
-        return {**os.environ, "GH_HOST": GITHUB_HOST}
+    return {**os.environ, "GH_HOST": GITHUB_HOST}
 
 
 def gh_read(path: str, *flags: str) -> tuple[bool | None, str]:

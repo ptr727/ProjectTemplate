@@ -40,8 +40,11 @@ runs:
         for stage in "${stages[@]}"; do
           args+=(--pin "$stage")
         done
-        if ! pins=$(python3 "$DOCKER_LINT" "${args[@]}"); then
-          echo "::error::$GITHUB_ACTION_PATH/Dockerfile must pin each of ${stages[*]} on exactly one 'FROM <image>:<tag>@sha256:<digest> AS <stage>' line."
+        errors=$(mktemp)
+        if ! pins=$(python3 "$DOCKER_LINT" "${args[@]}" 2> "$errors"); then
+          cat "$errors" >&2
+          echo "::error::$GITHUB_ACTION_PATH/Dockerfile could not be read for its lint pins: $(tail -n 1 "$errors")"
           exit 1
         fi
+        rm -f "$errors"
         echo "$pins" >> "$GITHUB_OUTPUT"
