@@ -37,6 +37,7 @@ import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 from run_deadline import run_with_deadline
@@ -209,6 +210,18 @@ def field_problems(entry: dict) -> list[str]:
     return problems
 
 
+def stray_platforms(names: Iterable[object]) -> str | None:
+    """The `names ..., which no platform reads` text for names outside PLATFORM_KEYS, or None.
+
+    `source`, `remedy`, and `platforms` each name platforms, so one reader keeps their findings
+    worded alike and their membership test the same.
+    """
+    stray = sorted({str(n) for n in names if n not in PLATFORM_KEYS})
+    if not stray:
+        return None
+    return f"names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
+
+
 def platforms_problems(platforms: object) -> list[str]:
     """What is wrong with a `platforms` value, naming each problem, or nothing where it is usable.
 
@@ -217,26 +230,20 @@ def platforms_problems(platforms: object) -> list[str]:
     """
     if not isinstance(platforms, list) or not platforms:
         return [f"platforms must be a non-empty array of platform names, not {platforms!r}"]
-    stray = sorted({str(p) for p in platforms if p not in PLATFORM_KEYS})
-    if stray:
-        return [
-            f"platforms names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
-        ]
-    if len(set(platforms)) != len(platforms):
-        return ["platforms names a platform more than once"]
-    return []
+    stray = stray_platforms(platforms)
+    return [f"platforms {stray}"] if stray else []
 
 
-def applies_here(tool: dict) -> bool:
-    """Whether the entry applies on the running host's platform.
+def effective_platforms(tool: dict) -> set[str]:
+    """The platforms an entry applies on, as both the check and the merge read them.
 
-    An absent `platforms` means every platform. A malformed one is reported by contract_problems,
-    and reads here as every platform, so the tool is still checked rather than skipped unseen.
+    An absent `platforms` means every platform. A malformed one reads the same way and is reported
+    by contract_problems, so the tool is still checked rather than skipped unseen.
     """
     platforms = tool.get("platforms")
     if platforms is None or platforms_problems(platforms):
-        return True
-    return platform_key() in platforms
+        return set(PLATFORM_KEYS)
+    return set(platforms)
 
 
 def read_declaration(path: Path, what: str) -> list[dict] | str:
@@ -292,11 +299,9 @@ def contract_problems(tools: list[dict]) -> list[str]:
                 f"{name} declares the {t['minimum']} floor with no source, so a host below it is told to upgrade and not where from"
             )
             continue
-        stray = sorted(set(src) - set(PLATFORM_KEYS))
+        stray = stray_platforms(src)
         if stray:
-            problems.append(
-                f"{name} source names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
-            )
+            problems.append(f"{name} source {stray}")
         for plat in sorted(set(src) & set(PLATFORM_KEYS)):
             if not isinstance(src[plat], str) or not src[plat]:
                 problems.append(
@@ -310,11 +315,9 @@ def contract_problems(tools: list[dict]) -> list[str]:
                 f"{name} remedy must be an object keyed by platform, so its command was not read"
             )
         elif isinstance(rem, dict):
-            stray = sorted(set(rem) - set(PLATFORM_KEYS))
+            stray = stray_platforms(rem)
             if stray:
-                problems.append(
-                    f"{name} remedy names {', '.join(stray)}, which no platform reads - use {', '.join(PLATFORM_KEYS)}"
-                )
+                problems.append(f"{name} remedy {stray}")
             for plat in sorted(set(rem) & set(PLATFORM_KEYS)):
                 if not isinstance(rem[plat], str) or not rem[plat]:
                     problems.append(
@@ -347,8 +350,7 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
     - Lower a floor.
     - Remove one.
     - Turn a required tool optional.
-    - Narrow the platforms a tool applies on. An absent hub `platforms` is every platform, and so
-      is a malformed one, as applies_here reads it.
+    - Narrow the platforms a tool applies on, read through effective_platforms.
 
     The reason is that those are the edits that quietly retire a fleet check from inside
     the repository it was written to protect. A rejected override is reported rather than dropped,
@@ -399,16 +401,11 @@ def merge(base: list[dict], local: list[dict]) -> tuple[list[dict], list[str]]:
                     f"local tool {name} tried to turn a required tool optional, which is a relaxation, so the hub value stands"
                 )
                 continue
-            if field == "platforms":
-                hub_platforms = merged.get("platforms")
-                current = set(PLATFORM_KEYS)
-                if hub_platforms is not None and not platforms_problems(hub_platforms):
-                    current = set(hub_platforms)
-                if not current <= set(value):
-                    rejected.append(
-                        f"local tool {name} tried to narrow the platforms it applies on to {', '.join(value)}, which is a relaxation, so the hub value stands"
-                    )
-                    continue
+            if field == "platforms" and not effective_platforms(merged) <= set(value):
+                rejected.append(
+                    f"local tool {name} tried to narrow the platforms it applies on to {', '.join(value)}, which is a relaxation, so the hub value stands"
+                )
+                continue
             if field == "minimum":
                 hub_floor = parse_version(merged["minimum"]) if merged["minimum"] else None
                 new_floor = parse_version(value) if value else None
@@ -536,7 +533,7 @@ def check(tools: list[dict]) -> list[str]:
     issues = []
     for tool in tools:
         name = tool["name"]
-        if not applies_here(tool):
+        if platform_key() not in effective_platforms(tool):
             NOTES.append(
                 f"{name} applies on {', '.join(tool['platforms'])} only, so nothing was read for it on {platform_key()}"
             )

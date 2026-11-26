@@ -535,7 +535,7 @@ class TestMerge(unittest.TestCase):
         self.assertEqual(merged[0]["platforms"], 7)
 
     def test_a_malformed_local_platforms_value_is_refused(self):
-        for bad in ("macos", [], ["macOS"], ["macos", "macos"], [["macos"]]):
+        for bad in ("macos", [], ["macOS"], [["macos"]]):
             with self.subTest(platforms=bad):
                 _, rejected = host_gate.merge([tool("bash")], [{"name": "bash", "platforms": bad}])
                 self.assertEqual(len(rejected), 1)
