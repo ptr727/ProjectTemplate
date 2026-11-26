@@ -161,8 +161,9 @@ Applies to code and workflow (`#`) comments alike.
 - **Never let a comment grow across edits.** Touching code near an existing comment means the
   comment comes out the same length or shorter, never one more clause of rationale appended.
 - **Leave a human-authored comment exactly as written.** Never reword, trim, reflow, or clean
-  one, even where a rule above would shape it differently. The exception is a comment the
-  agent's own change makes false, which the agent corrects.
+  one, even where another rule would shape it differently. Where authorship cannot be told,
+  treat the comment as human-authored. The exception is a comment the agent's own change makes
+  false, which the agent corrects.
 
 A continuation stays unindented, one sentence per line:
 

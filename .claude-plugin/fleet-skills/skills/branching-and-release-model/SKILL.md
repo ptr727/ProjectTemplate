@@ -52,8 +52,9 @@ rather than guessing from the repo's contents.
   commits in `git log` predate this rule and must not be repeated. A change such as a hotfix can land on `main`
   outside the feature -> `develop` -> `main` flow. Such a change reaches `develop` by a feature
   pull request of its own. To catch one before starting work, run
-  `git diff origin/develop origin/main` after `git fetch origin`. Read each hunk that only adds
-  lines, since that is content `main` holds and `develop` lacks.
+  `git diff origin/develop origin/main` after `git fetch origin`. Its `+` lines are content `main`
+  holds and `develop` lacks. Each is either such a change or a line `develop` has changed or
+  removed since the last promotion.
   `git log origin/develop..origin/main` is no substitute, because every promotion merge and every
   `main`-direct bot commit lists there too.
 - **Never delete `develop`, and take the EOL-only conflict by taking develop's side.** A
