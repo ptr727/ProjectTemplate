@@ -207,7 +207,7 @@ def gh_json(command: list[str], slug: str) -> Any:
 def read_names(path: str, key: str) -> list[str]:
     """The `name` of each element of `key` across every page of one REST path, or raise when gh fails.
 
-    The one names reader, for a repository store here and an environment store in spec/audit_environments.py.
+    The one names reader, for a repository store here and in spec/audit.py, and an environment store in spec/audit_environments.py.
     Only names leave gh, since the projection runs inside it, and no value reaches this process.
     gh_run pins the host, because the registry names every repository on github.com, which GH_HOST would move.
     The repository is already explicit in `path`, so GH_REPO resolves nothing here.

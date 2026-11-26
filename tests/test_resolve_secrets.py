@@ -146,11 +146,14 @@ class AuditAgreementCase(unittest.TestCase):
             if "/git/blobs/sha-" in path:
                 text = (projects or {})[path.partition("/git/blobs/sha-")[2]]
                 return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
-            return {"secrets": []}
+            raise AssertionError(path)
 
         head = {"commit": {"sha": "c1", "commit": {"tree": {"sha": TREE_SHA}}}}
         run = audit.Run(e, {"secrets": SECRETS}, "owner/ExampleRepo", "main", {}, None, None, head)
-        with unittest.mock.patch.object(audit, "gh", answer):
+        with (
+            unittest.mock.patch.object(audit, "gh", answer),
+            unittest.mock.patch.object(resolve_secrets, "read_names", lambda *_: []),
+        ):
             findings = audit.check_secrets_names(run)
         missing: dict[str, set[str]] = {"actions": set(), "dependabot": set()}
         for severity, text in findings:
@@ -231,11 +234,11 @@ class AuditAgreementCase(unittest.TestCase):
             read_project=lambda path: None,
         )
 
-        def answer(path: str, ok404: bool = False) -> Any:
-            store = path.split("/")[-2].split("?")[0] if "/secrets" in path else ""
-            return {"secrets": [{"name": n} for n in sorted(live[store])]}
+        def answer(path: str, key: str) -> list[str]:
+            self.assertEqual((path.split("/")[-1], key), ("secrets", "secrets"))
+            return sorted(live[path.split("/")[-2]])
 
-        with unittest.mock.patch.object(audit, "gh", answer):
+        with unittest.mock.patch.object(resolve_secrets, "read_names", answer):
             from_audit = audit.check_secrets_names(run)
         plan = secret_names.secret_plan(SECRETS, e, TESTED, "ExampleRepo", live)
         from_cli = [tuple(f) for f in plan["findings"] if f[0] != "OK"]
