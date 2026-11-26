@@ -585,6 +585,10 @@ function Set-GhProtocol {
 # The checks that follow report any key still unregistered and print the paste.
 function Register-KeyThroughGh {
     param([ValidateSet('authentication', 'signing')][string]$Kind, [string]$Account)
+    if (-not (Test-Path "$($script:KEY).pub")) {
+        if ($script:DRY_RUN) { info "[dry run] gh ssh-key add $($script:KEY).pub --type $Kind" }
+        return
+    }
     $script:GITHUB_USER = $Account
     $state = Test-KeyRegistered -Kind $(if ($Kind -eq 'authentication') { 'auth' } else { 'signing' })
     if ($state -eq 'registered') {
@@ -592,11 +596,7 @@ function Register-KeyThroughGh {
         return
     }
     if ($state -eq 'unknown') {
-        if ($script:DRY_RUN -and -not (Test-Path "$($script:KEY).pub")) {
-            info "[dry run] gh ssh-key add $($script:KEY).pub --type $Kind"
-        } else {
-            warn "GitHub could not be reached, or there is no key yet, so whether the $Kind key is registered is unknown"
-        }
+        warn "GitHub could not be reached, so whether the $Kind key is registered is unknown"
         return
     }
 
@@ -616,6 +616,13 @@ function Register-KeysThroughGh {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
     $account = Get-GhAccount
     if (-not $account) { return }
+
+    # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
+    $managed = Get-GreetingUser (Get-SshGreeting -ManagedKeyOnly)
+    if ($managed -and $managed -ne $account) {
+        warn "gh is logged in as $account, while the managed key belongs to $managed, so the key was not registered through gh"
+        return
+    }
 
     step "Registering the key through gh, logged in as $account"
     Register-KeyThroughGh -Kind 'authentication' -Account $account

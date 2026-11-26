@@ -391,6 +391,11 @@ registration_needed() {
 # A refused registration, such as a token without the scope, is a warning that names the remedy and never ends the run.
 register_through_gh() {
     local kind="$1" account="$2" registered_rc=0 title
+    # A dry run before the key exists has nothing to read or register, so it says what a real run would do.
+    if [[ ! -f $KEY.pub ]]; then
+        [[ $DRY_RUN == true ]] && info "[dry run] gh ssh-key add $KEY.pub --type $kind"
+        return 0
+    fi
     GITHUB_USER="$account"
     if [[ $kind == "authentication" ]]; then
         github_auth_key_registered || registered_rc=$?
@@ -408,9 +413,6 @@ register_through_gh() {
         ;;
     esac
 
-    if [[ $DRY_RUN == false && ! -f $KEY.pub ]]; then
-        return 0
-    fi
     title=$(hostname)
     if run gh ssh-key add "$KEY.pub" --title "$title" --type "$kind"; then
         [[ $DRY_RUN == true ]] || info "Registered as the $kind key through gh, titled $title"
@@ -428,6 +430,14 @@ register_keys_through_gh() {
     local account
     account=$(gh_account)
     [[ -n $account ]] || return 0
+
+    # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
+    local managed
+    managed=$(github_auth_user_managed || true)
+    if [[ -n $managed && $managed != "$account" ]]; then
+        warn "gh is logged in as $account, while the managed key belongs to $managed, so the key was not registered through gh"
+        return 0
+    fi
 
     step "Registering the key through gh, logged in as $account"
     register_through_gh authentication "$account"

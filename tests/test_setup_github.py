@@ -717,6 +717,9 @@ gh() {
     *) return 9 ;;
     esac
 }
+ssh() {
+    [[ -z $MANAGED ]] || printf 'Hi %s! You have successfully authenticated.\n' "$MANAGED"
+}
 fetch() {
     case "$1" in
     */ssh_signing_keys)
@@ -741,13 +744,19 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         registered: str = "",
         add_rc: int = 0,
         dry_run: bool = False,
+        managed: str = "",
+        key: bool = True,
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
         functions = directory / "functions.sh"
         functions.write_text(linux_functions(), encoding="utf-8")
         home = directory / "home"
         (home / ".ssh").mkdir(parents=True)
-        (home / ".ssh" / "id_ed25519.pub").write_text(PUBLIC_KEY + " comment\n", encoding="ascii")
+        if key:
+            (home / ".ssh" / "id_ed25519").write_text("", encoding="ascii")
+            (home / ".ssh" / "id_ed25519.pub").write_text(
+                PUBLIC_KEY + " comment\n", encoding="ascii"
+            )
         calls = directory / "calls"
         env = {
             "PATH": "/usr/bin:/bin",
@@ -757,6 +766,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
             "REGISTERED": registered,
             "ADD_RC": str(add_rc),
             "PUB": PUBLIC_KEY,
+            "MANAGED": managed,
         }
         dry = "DRY_RUN=true\n" if dry_run else ""
         script = f'source "{functions}"\n{LINUX_REGISTER_BODY}\n{dry}register_keys_through_gh\n'
@@ -818,6 +828,24 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(adds, [])
         self.assertIn("[dry run] gh ssh-key add", result.stdout)
 
+    def test_a_dry_run_without_a_key_says_what_it_would_do_without_warning(self) -> None:
+        result, adds = self.register(dry_run=True, key=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertIn("[dry run] gh ssh-key add", result.stdout)
+        self.assertEqual(result.stderr, "")
+
+    def test_a_key_belonging_to_another_account_is_not_registered_through_gh(self) -> None:
+        result, adds = self.register(managed=SECOND)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertIn(f"the managed key belongs to {SECOND}", result.stderr)
+
+    def test_a_key_authenticating_as_the_gh_account_is_registered(self) -> None:
+        result, adds = self.register(managed=ACCOUNT, registered="auth")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 1, adds)
+
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         text = LINUX_SCRIPT.read_text(encoding="utf-8")
         self.assertNotIn("cannot be automated", text)
@@ -836,6 +864,8 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "run",
     "Get-KeyBody",
     "Get-GhAccount",
+    "Get-SshGreeting",
+    "Get-GreetingUser",
     "Test-KeyRegistered",
     "Register-KeyThroughGh",
     "Register-KeysThroughGh",
@@ -866,6 +896,8 @@ $GhStub = {
     }
 }
 Set-Item function:script:gh $GhStub
+function ssh { if ($script:Case.managed) { return "Hi $($script:Case.managed)! You have successfully authenticated." } }
+$script:MODE = 'configure'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $directory | Out-Null
 $script:KEY = Join-Path $directory 'id_ed25519'
@@ -875,7 +907,11 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $script:Calls = @()
     $script:DRY_RUN = [bool]$case.dryRun
     $script:GITHUB_USER = ''
-    Set-Content -Path "$($script:KEY).pub" -Value "$($case.pub) comment"
+    Remove-Item "$($script:KEY)*" -ErrorAction SilentlyContinue
+    if (-not $case.noKey) {
+        Set-Content -Path $script:KEY -Value ''
+        Set-Content -Path "$($script:KEY).pub" -Value "$($case.pub) comment"
+    }
     $output = & { Register-KeysThroughGh } 6>&1 | ForEach-Object { "$_" }
     $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key*' }) }
 }
@@ -891,6 +927,8 @@ def windows_register_case(
     registered: list[str] | None = None,
     add_rc: int = 0,
     dry_run: bool = False,
+    managed: str = "",
+    no_key: bool = False,
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -898,6 +936,8 @@ def windows_register_case(
         "registered": registered or [],
         "addRc": add_rc,
         "dryRun": dry_run,
+        "managed": managed,
+        "noKey": no_key,
         "pub": PUBLIC_KEY,
     }
 
@@ -926,6 +966,8 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                         windows_register_case("logged-out", account=""),
                         windows_register_case("refused", add_rc=1),
                         windows_register_case("dry-run", dry_run=True),
+                        windows_register_case("dry-run-no-key", dry_run=True, no_key=True),
+                        windows_register_case("other-account", managed=SECOND),
                     ]
                 ),
                 encoding="utf-8",
@@ -972,6 +1014,16 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     def test_a_dry_run_prints_the_commands_and_registers_nothing(self) -> None:
         self.assertEqual(self.adds("dry-run"), [])
         self.assertIn("[dry run] gh ssh-key add", self.output("dry-run"))
+
+    def test_a_dry_run_without_a_key_says_what_it_would_do_without_warning(self) -> None:
+        self.assertEqual(self.adds("dry-run-no-key"), [])
+        output = self.output("dry-run-no-key")
+        self.assertIn("[dry run] gh ssh-key add", output)
+        self.assertNotIn("WARNING", output)
+
+    def test_a_key_belonging_to_another_account_is_not_registered_through_gh(self) -> None:
+        self.assertEqual(self.adds("other-account"), [])
+        self.assertIn(f"the managed key belongs to {SECOND}", self.output("other-account"))
 
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         result = run_pwsh(["-File", str(WINDOWS_SCRIPT), "-Help"])
