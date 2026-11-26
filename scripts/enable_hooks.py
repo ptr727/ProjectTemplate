@@ -83,16 +83,13 @@ def git(git_exe: str, top: Path, *args: str) -> subprocess.CompletedProcess[str]
 
 
 def locate(git_exe: str) -> Path:
-    """The top level of the clone holding the current directory, refusing a linked worktree."""
+    """The top level of the clone holding the current directory, refusing a linked worktree.
+
+    `--path-format=absolute` would need Git 2.31, so `--git-common-dir` is joined onto the current
+    directory instead, which leaves an absolute answer unchanged.
+    """
     result = subprocess.run(
-        [
-            git_exe,
-            "rev-parse",
-            "--path-format=absolute",
-            "--show-toplevel",
-            "--git-dir",
-            "--git-common-dir",
-        ],
+        [git_exe, "rev-parse", "--show-toplevel", "--absolute-git-dir", "--git-common-dir"],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -101,7 +98,8 @@ def locate(git_exe: str) -> Path:
     lines = result.stdout.splitlines()
     if result.returncode != 0 or len(lines) != 3:
         raise Refusal(f"found no Git work tree here: {result.stderr.strip() or result.stdout}")
-    top, git_dir, common_dir = (Path(line) for line in lines)
+    top, git_dir = Path(lines[0]), Path(lines[1])
+    common_dir = Path.cwd() / lines[2]
     if git_dir.resolve() != common_dir.resolve():
         raise Refusal(
             f"{top} is a linked worktree. Its Git config is shared with the clone whose Git"
@@ -202,11 +200,14 @@ def enable_husky_net(git_exe: str, top: Path) -> None:
     say(f"changed: core.hooksPath reads {after}, and {runtime} exists.")
 
 
+def carries_pre_commit_header(hook: Path) -> bool:
+    """Whether a line of `hook` opens on the pre-commit framework's own header."""
+    return any(line.startswith(PRE_COMMIT_HEADER) for line in hook.read_bytes().splitlines())
+
+
 def generated_by_pre_commit(hook: Path) -> bool:
     """Whether `hook` is an executable carrying the pre-commit framework's own header."""
-    if not hook.is_file() or not os.access(hook, os.X_OK):
-        return False
-    return any(line.startswith(PRE_COMMIT_HEADER) for line in hook.read_bytes().splitlines())
+    return hook.is_file() and os.access(hook, os.X_OK) and carries_pre_commit_header(hook)
 
 
 def enable_pre_commit(git_exe: str, top: Path) -> None:
@@ -216,14 +217,14 @@ def enable_pre_commit(git_exe: str, top: Path) -> None:
             f"core.hooksPath reads {current!r}, and pre-commit installs no hook while it is set,"
             " so nothing was changed. Unset it by hand if pre-commit is meant to run."
         )
-    result = git(git_exe, top, "rev-parse", "--path-format=absolute", "--git-path", "hooks")
+    result = git(git_exe, top, "rev-parse", "--git-path", "hooks")
     if result.returncode != 0:
         raise Refusal(f"could not find the hooks directory: {result.stderr.strip()}")
-    hook = Path(result.stdout.strip()) / "pre-commit"
+    hook = top / result.stdout.strip() / "pre-commit"
     if generated_by_pre_commit(hook):
         say(f"unchanged: {hook} is already pre-commit's own hook.")
         return
-    if hook.exists() and PRE_COMMIT_HEADER not in hook.read_bytes():
+    if hook.exists() and not carries_pre_commit_header(hook):
         raise Refusal(
             f"{hook} is a hook pre-commit did not write, and pre-commit install would move it"
             " aside and chain to it, so nothing was changed. Move it by hand if pre-commit is"
