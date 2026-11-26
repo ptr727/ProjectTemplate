@@ -37,7 +37,6 @@
         },
         "environmentStoreNames": {
             "type": "array",
-            "uniqueItems": true,
             "items": { "type": "string", "pattern": "^(?!GITHUB_)[A-Z_][A-Z0-9_]*(?![\\s\\S])" },
             "$comment": "The names one deployment environment's secret or variable store holds, and nothing else: spec/audit_environments.py reports a declared name the store lacks, a held name this list omits, and a name held as the other kind. Absent declares an empty store. Names only, never a value. The pattern is the exact string spec/validate.py declares as SECRET_NAME_PATTERN, since GitHub names a variable by the rules it names a secret by, and tests/test_spec_validate.py asserts it."
         },

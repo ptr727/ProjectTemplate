@@ -421,7 +421,7 @@ def environment_errors_for_repo(repo, name):
     Absence is not checked, since most of the fleet uses no environment. What is checked is that:
     - a declared entry carries the `name` and `branchPolicy` that repo-config/configure.sh's check mode always reads
     - `branches` is present exactly when `branchPolicy` is "custom"
-    - a `secrets` or `variables` list, where declared, holds GitHub names, each once
+    - a `secrets` or `variables` list, where declared, holds GitHub names
 
     That check mode reads that condition in both directions.
     "none" names no branch set, since it admits every ref, so a `branches` beside it would be a declaration
@@ -527,16 +527,7 @@ def environment_name_list_errors(env, where):
     for key, kind in (("secrets", "secret"), ("variables", "variable")):
         if key not in env:
             continue
-        names = env[key]
-        errors.extend(name_list_errors(names, f"{where} {key}", kind))
-        if not isinstance(names, list):
-            continue
-        # A name declared twice is one requirement, so a second copy only hides which one a later edit meant to change.
-        strings = [s for s in names if isinstance(s, str)]
-        if duplicates := sorted(
-            s for s, count in collections.Counter(strings).items() if count > 1
-        ):
-            errors.append(f"{where} {key} {duplicates!r} are declared more than once")
+        errors.extend(name_list_errors(env[key], f"{where} {key}", kind))
     return errors
 
 

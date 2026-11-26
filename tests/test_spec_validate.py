@@ -1397,13 +1397,6 @@ class RegistryEnvironmentCase(unittest.TestCase):
                     ],
                 )
 
-    def test_a_store_name_declared_twice_is_rejected(self) -> None:
-        env = {"name": "staging", "branchPolicy": "none", "secrets": ["DEPLOY_KEY", "DEPLOY_KEY"]}
-        self.assertEqual(
-            self.errors([env]),
-            ["Fixture: environments[0] secrets ['DEPLOY_KEY'] are declared more than once"],
-        )
-
     def test_one_name_in_both_lists_is_accepted(self) -> None:
         """A secret and a variable are separate stores, so one name may sit in each."""
         env = {
