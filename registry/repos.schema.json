@@ -35,6 +35,12 @@
             "pattern": "^[!-~](?:[ -~]*[!-~])?(?![\\s\\S])",
             "$comment": "The exact string spec/validate.py declares as ENVIRONMENT_NAME_PATTERN, which tests/test_spec_validate.py asserts. repo-config/configure.sh resolves the name with select(.name == $n) and then percent-encodes it into one path segment. Printable ASCII, per GOVERNANCE.md 'Documentation Style Conventions' and its 'Character Set' rule, rather than any non-blank string, and a grammar rather than a padding test because str.strip() does not remove a zero-width space, so a name ending in one survives a padding test and then matches no live environment."
         },
+        "environmentStoreNames": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "type": "string", "pattern": "^(?!GITHUB_)[A-Z_][A-Z0-9_]*(?![\\s\\S])" },
+            "$comment": "The names one deployment environment's secret or variable store holds, and nothing else: spec/audit_environments.py reports a declared name the store lacks, a held name this list omits, and a name held as the other kind. Absent declares an empty store. Names only, never a value. The pattern is the exact string spec/validate.py declares as SECRET_NAME_PATTERN, since GitHub names a variable by the rules it names a secret by, and tests/test_spec_validate.py asserts it."
+        },
         "groundTruthBranch": {
             "type": "string",
             "pattern": "^(?![\\s\\S]*\\.\\.)[A-Za-z0-9_-](?:[A-Za-z0-9._/-]*[A-Za-z0-9_-])?(?![\\s\\S])",
@@ -164,7 +170,9 @@
                         "properties": {
                             "name": { "$ref": "#/$defs/environmentName" },
                             "branchPolicy": { "$ref": "#/$defs/branchPolicy" },
-                            "branches": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^[!-~]+(?![\\s\\S])" } }
+                            "branches": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^[!-~]+(?![\\s\\S])" } },
+                            "secrets": { "$ref": "#/$defs/environmentStoreNames" },
+                            "variables": { "$ref": "#/$defs/environmentStoreNames" }
                         }
                     }
                 },

@@ -1366,6 +1366,53 @@ class RegistryEnvironmentCase(unittest.TestCase):
             ["Fixture: environments[1] duplicate environment 'pypi'"],
         )
 
+    def test_declared_store_names_are_clean(self) -> None:
+        env = {
+            "name": "staging",
+            "branchPolicy": "none",
+            "secrets": ["DEPLOY_KEY"],
+            "variables": [],
+        }
+        self.assertEqual(self.errors([env]), [])
+
+    def test_a_store_name_list_must_be_an_array(self) -> None:
+        env = {"name": "staging", "branchPolicy": "none", "variables": "SITE_URL"}
+        self.assertEqual(
+            self.errors([env]), ["Fixture: environments[0] variables must be an array of names"]
+        )
+
+    def test_a_store_name_of_the_wrong_shape_is_rejected(self) -> None:
+        """Each would be compared exactly against an upper-case stored name, so it reports missing forever."""
+        for bad in ("site_url", "SITE_URL ", "GITHUB_TOKEN", "1KEY", 7):
+            with self.subTest(name=bad):
+                env = {"name": "staging", "branchPolicy": "none", "secrets": [bad]}
+                self.assertEqual(
+                    self.errors([env]),
+                    [
+                        (
+                            f"Fixture: environments[0] secrets entry {bad!r} is not a GitHub name "
+                            f"({validate.SECRET_NAME_SHAPE})"
+                        )
+                    ],
+                )
+
+    def test_a_store_name_declared_twice_is_rejected(self) -> None:
+        env = {"name": "staging", "branchPolicy": "none", "secrets": ["DEPLOY_KEY", "DEPLOY_KEY"]}
+        self.assertEqual(
+            self.errors([env]),
+            ["Fixture: environments[0] secrets ['DEPLOY_KEY'] are declared more than once"],
+        )
+
+    def test_one_name_in_both_lists_is_accepted(self) -> None:
+        """A secret and a variable are separate stores, so one name may sit in each."""
+        env = {
+            "name": "staging",
+            "branchPolicy": "none",
+            "secrets": ["SITE"],
+            "variables": ["SITE"],
+        }
+        self.assertEqual(self.errors([env]), [])
+
     def test_a_non_list_and_a_non_object_entry_are_rejected(self) -> None:
         self.assertEqual(self.errors({"name": "e"}), ["Fixture: environments must be a list"])
         self.assertEqual(self.errors(["pypi"]), ["Fixture: environments[0] must be an object"])
@@ -2191,6 +2238,10 @@ class RegistrySchemaMirrorCase(unittest.TestCase):
             ),
             (
                 self.props["requiredSecrets"]["items"]["pattern"],
+                validate.SECRET_NAME_PATTERN,
+            ),
+            (
+                self.schema["$defs"]["environmentStoreNames"]["items"]["pattern"],
                 validate.SECRET_NAME_PATTERN,
             ),
             (self.props["shortName"]["pattern"], validate.SHORT_NAME_PATTERN),

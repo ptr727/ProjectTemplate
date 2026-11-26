@@ -421,6 +421,7 @@ def environment_errors_for_repo(repo, name):
     Absence is not checked, since most of the fleet uses no environment. What is checked is that:
     - a declared entry carries the `name` and `branchPolicy` that repo-config/configure.sh's check mode always reads
     - `branches` is present exactly when `branchPolicy` is "custom"
+    - a `secrets` or `variables` list, where declared, holds GitHub names, each once
 
     That check mode reads that condition in both directions.
     "none" names no branch set, since it admits every ref, so a `branches` beside it would be a declaration
@@ -463,6 +464,7 @@ def environment_errors_for_repo(repo, name):
             errors.append(f"{where} duplicate environment '{env_name}'")
         else:
             seen.add(env_name)
+        errors.extend(environment_name_list_errors(env, where))
         # Absence is reported as absence rather than through the value branch.
         # That branch's repr of a missing field differs from the valid value "none" by case alone.
         if "branchPolicy" not in env:
@@ -499,6 +501,36 @@ def environment_errors_for_repo(repo, name):
             errors.append(
                 f"{where} branchPolicy {policy} names no branch set, so it must not declare 'branches'"
             )
+    return errors
+
+
+def environment_name_list_errors(env, where):
+    """Shape errors for one environment entry's optional `secrets` and `variables` name lists.
+
+    spec/audit_environments.py compares each list exactly against the names the environment's store holds.
+    So a padded or lower-case name would be reported missing on every run, as a requiredSecrets one would be.
+    GitHub names a variable by the rules it names a secret by, so SECRET_NAME_PATTERN shapes both lists.
+    Presence is the test, for the reason requiredSecrets gives: absence declares that the store holds nothing.
+    """
+    errors = []
+    for key in ("secrets", "variables"):
+        if key not in env:
+            continue
+        names = env[key]
+        if not isinstance(names, list):
+            errors.append(f"{where} {key} must be an array of names")
+            continue
+        for s in names:
+            if not isinstance(s, str) or not SECRET_NAME_RE.search(s):
+                errors.append(
+                    f"{where} {key} entry {s!r} is not a GitHub name ({SECRET_NAME_SHAPE})"
+                )
+        # A name declared twice is one requirement, so a second copy only hides which one a later edit meant to change.
+        strings = [s for s in names if isinstance(s, str)]
+        if duplicates := sorted(
+            s for s, count in collections.Counter(strings).items() if count > 1
+        ):
+            errors.append(f"{where} {key} {duplicates!r} are declared more than once")
     return errors
 
 
