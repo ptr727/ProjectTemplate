@@ -2,6 +2,7 @@
 #
 # The github-actions ecosystem covers every workflow and composite action this repo ships.
 # The pip pair covers the ruff version the validator runs, pinned in .github/actions/python-tool-pins/requirements.txt.
+# The docker pair covers the lint images, each a version tag with its digest, pinned in .github/actions/docker-lint-pins/Dockerfile.
 # Both main and develop are targeted so each stays current independently of the develop to main release cadence.
 # The merge-bot auto-merges each base with its per-base method.
 # See catalog/snippets/configs/dependabot.yml for the multi-ecosystem reference, covering nuget, uv, and pip, that a code-shipping repo uses.
@@ -43,3 +44,23 @@ updates:
     directory: "/.github/actions/python-tool-pins"
     schedule:
       interval: "daily"
+
+  - package-ecosystem: "docker"
+    target-branch: "main"
+    directory: "/.github/actions/docker-lint-pins"
+    schedule:
+      interval: "daily"
+    groups:
+      docker-lint:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    target-branch: "develop"
+    directory: "/.github/actions/docker-lint-pins"
+    schedule:
+      interval: "daily"
+    groups:
+      docker-lint:
+        patterns:
+          - "*"

@@ -52,7 +52,7 @@ re-source the shell, or add the directory `uv tool dir --bin` prints directly.
 Full linting (workflow YAML, Markdown,
 spelling, EditorConfig) stays out of the hook. It runs in CI as pinned action wrappers, and on
 demand via the VS Code **Lint** tasks. A Python repo takes those from
-`catalog/snippets/configs/vscode-tasks-python.json` (Docker at `:latest`).
+`catalog/snippets/configs/vscode-tasks-python.json` (Docker at pinned digests).
 A repo with no
 Python takes the Lint group alone rather than that file's Python tasks. Either way they carry
 the prose gate in whole-repo mode, for on-demand full-tree validation beyond the diff-scoped

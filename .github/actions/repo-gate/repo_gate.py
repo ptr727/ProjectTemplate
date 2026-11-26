@@ -45,6 +45,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from types import ModuleType
 from urllib.parse import quote
@@ -432,8 +433,11 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
 # A GitHub expression is not shell, so shellcheck would read its braces as syntax.
 EXPRESSION_START = "${{"
-SHELLCHECK_IMAGE = "mirror.gcr.io/koalaman/shellcheck:stable"
+PIN_MANIFEST = ".github/actions/docker-lint-pins/Dockerfile"
+SHELLCHECK_PIN = re.compile(r"(?m)^FROM (\S+:[^\s@/]+@sha256:[0-9a-f]{64}) AS shellcheck[ \t]*$")
 SHELLCHECK_TIMEOUT = 300
+PULL_ATTEMPTS = 3
+PULL_BACKOFF = 5
 SCHEMA_TIMEOUT = 300
 YAML_TIMEOUT = 60
 DOCKER_TIMEOUT = 30
@@ -655,9 +659,30 @@ def substitute_expressions(body: str) -> str:
     return "\n".join(out)
 
 
+def shellcheck_image() -> str:
+    """The shellcheck image reference the pin manifest names, a tag with its digest.
+
+    It is read from the hub tree this gate sits in, at the commit that tree holds.
+    Raises ValueError where the manifest names it on no line or on more than one.
+    A copy fetched alone has no hub tree, so that error names where the check can run.
+    """
+    hub = gate_hub_root()
+    if hub is None:
+        raise ValueError(
+            f"{PIN_MANIFEST} is not beside this script, so run this check from a hub checkout "
+            "or through the repo-gate action"
+        )
+    manifest = hub / PIN_MANIFEST
+    pins = SHELLCHECK_PIN.findall(manifest.read_text(encoding="utf-8"))
+    if len(pins) != 1:
+        raise ValueError(f"{manifest} names the shellcheck image on {len(pins)} lines, not 1")
+    return pins[0]
+
+
 def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
+    image = shellcheck_image()
     # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
-    command = ["docker", "run", "--rm", "-i", "--network=none", SHELLCHECK_IMAGE]
+    command = ["docker", "run", "--rm", "-i", "--network=none", image]
     command += ["-s", dialect, "-S", "warning", "-e", "SC2154", "-f", "gcc", "-"]
     try:
         result = subprocess.run(
@@ -685,8 +710,13 @@ def docker_unreachable() -> str | None:
     """The reason no docker daemon answers or the image cannot be pulled, or None where both work.
 
     The explicit pull makes a fetch failure one finding with its reason, rather than one per body.
-    A locally cached image is reused, so a local run may lag CI, which always pulls fresh.
+    The image is pinned by digest, so a locally cached copy is the one CI pulls.
+    A pull exiting non-zero is retried a bounded number of times, as a registry error is often transient.
     """
+    try:
+        image = shellcheck_image()
+    except (OSError, ValueError) as error:
+        return f"the shellcheck pin could not be read: {error}"
     try:
         result = subprocess.run(
             ["docker", "info"], capture_output=True, check=False, timeout=DOCKER_TIMEOUT
@@ -699,7 +729,7 @@ def docker_unreachable() -> str | None:
         return f"docker info exited {result.returncode}"
     try:
         present = subprocess.run(
-            ["docker", "image", "inspect", SHELLCHECK_IMAGE],
+            ["docker", "image", "inspect", image],
             capture_output=True,
             check=False,
             timeout=DOCKER_TIMEOUT,
@@ -710,21 +740,26 @@ def docker_unreachable() -> str | None:
         return f"docker image inspect could not start: {error}"
     if present.returncode == 0:
         return None
-    try:
-        pull = subprocess.run(
-            ["docker", "pull", "--quiet", SHELLCHECK_IMAGE],
-            capture_output=True,
-            check=False,
-            timeout=SHELLCHECK_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        return f"docker pull did not finish within {SHELLCHECK_TIMEOUT}s"
-    except OSError as error:
-        return f"docker pull could not start: {error}"
-    if pull.returncode != 0:
+    failure = ""
+    for attempt in range(PULL_ATTEMPTS):
+        if attempt:
+            time.sleep(PULL_BACKOFF * attempt)
+        try:
+            pull = subprocess.run(
+                ["docker", "pull", "--quiet", image],
+                capture_output=True,
+                check=False,
+                timeout=SHELLCHECK_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            return f"docker pull did not finish within {SHELLCHECK_TIMEOUT}s"
+        except OSError as error:
+            return f"docker pull could not start: {error}"
+        if pull.returncode == 0:
+            return None
         detail = pull.stderr.decode("utf-8", errors="replace").strip()
-        return f"docker pull of {SHELLCHECK_IMAGE} exited {pull.returncode}: {detail}"
-    return None
+        failure = f"docker pull of {image} exited {pull.returncode}: {detail}"
+    return f"{failure} (attempt {PULL_ATTEMPTS} of {PULL_ATTEMPTS})"
 
 
 def check_composite_shell(root: Path, path: str) -> list[str]:
