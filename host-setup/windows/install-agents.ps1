@@ -4,13 +4,13 @@
 # An upgrade touches only a tool already present, so a host where nobody installed codex never gets codex from a scheduled run.
 #
 # A tool installed through a package manager is never given its own updater, which would fight the manager for the same files.
-# An upgrade runs that manager's own upgrade for that one package instead: npm, bun, and scoop.
+# An upgrade runs that manager's own upgrade for that one package instead: npm and scoop.
 # The winget packages are already upgraded by upgrade-host.ps1, so winget is not repeated here.
 # A choco package needs an elevated shell and this script never elevates, so it is reported with its command and nothing is run.
 # The same holds for an npm prefix under Program Files or ProgramData that a normal user cannot write, once a link there is followed.
 # The npm on PATH owns a tool only where the prefix it reports holds it, rather than where a path merely looks like npm's.
 # The package name is a per-tool record in this file (Get-NpmPackage), because a manager's shim does not always carry it.
-# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced.
+# An npm or bun package must own the tool's files, so a fork providing the same command is reported and not replaced or removed.
 # A herdr upgraded by a manager gets the same integration and restart step the self-updater path runs.
 # The scoop roots come from SCOOP and SCOOP_GLOBAL, else from scoop's own config.json, else from the defaults.
 # A Node runtime is never upgraded for an agent inside it, and a global scoop app needs an elevated shell, so each is reported.
@@ -121,7 +121,7 @@ none, so an install always names what it installs, or says -All.
 
 A tool reads as "self" when no package manager owns it, so this script runs its update, and as
 the name of a package manager when one owns it. -Upgrade then runs that manager's upgrade for
-that one package: npm or bun install the latest tag, and scoop updates the app. An npm install
+that one package: npm installs the latest tag, and scoop updates the app. bun is not run, since no tool's managed copy comes from it. An npm install
 also allows that one package's install scripts, which npm 12 otherwise skips. winget is
 upgraded by upgrade-host.ps1. choco needs an elevated shell and an npm directory under Program
 Files or ProgramData needs one too, so each is reported with its command and nothing is run. herdr's
@@ -345,7 +345,7 @@ function Test-Floor {
     }
 }
 
-# The npm registry name of a tool, which npm and bun both install from, or nothing where none is recorded.
+# The npm registry name of a tool, which npm installs and which a stray bun copy's removal names, or nothing where none is recorded.
 # These are the names each tool's own documentation gives, and herdr and cswap are not published there.
 function Get-NpmPackage {
     param([string]$Tool)
@@ -593,9 +593,9 @@ function Get-NamedNpmPackage {
     return $null
 }
 
-# What an npm or bun step, upgrade or remove, runs for the package owning a tool's files, as Command and Arguments, or Why none runs.
+# What an npm step or a bun removal runs for the package owning a tool's files, as Command and Arguments, or Why none runs.
 # An upgrade and a stray's removal share it.
-# An upgrade matches only the recorded package, while a removal also matches a name the tool shipped under earlier.
+# An npm upgrade matches only the recorded package, while a removal also matches a name the tool shipped under earlier.
 # The matched name must own the files, so a fork providing the same command is never replaced or removed.
 function Get-PackageStep {
     param([string]$Step, [string]$Tool, [string]$Path, [string]$Manager)
@@ -613,7 +613,7 @@ function Get-PackageStep {
     $name = if ($pkg) { $pkg } elseif ($Step -eq 'remove') { Get-NamedNpmPackage -Tool $Tool -Path $Path } else { $null }
     if (-not $name) { $name = $recorded }
     # Installing the latest tag rather than npm update, which keeps a global package inside the range it was installed at.
-    $arguments = if ($Step -eq 'upgrade' -and $Manager -eq 'npm') { Get-NpmInstallArgument -Package $name -Spec "$name@latest" } elseif ($Step -eq 'upgrade') { @('install', '-g', "$name@latest") } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
+    $arguments = if ($Step -eq 'upgrade') { Get-NpmInstallArgument -Package $name -Spec "$name@latest" } elseif ($Manager -eq 'bun') { @('remove', '-g', $name) } else { @('uninstall', '-g', $name) }
     $shown = "$Manager $($arguments -join ' ')"
     if (-not (Get-Command $Manager -CommandType Application -ErrorAction SilentlyContinue)) {
         $plan.Why = "$Manager is not on PATH, so run: $shown"
@@ -677,7 +677,8 @@ function Get-ManagerPlan {
     $plan = [pscustomobject]@{ Command = $null; Arguments = @(); Why = '' }
     switch ($Manager) {
         'winget' { $plan.Why = 'winget owns it and upgrade-host upgrades it' }
-        { $_ -in 'npm', 'bun' } { $plan = Get-PackageStep -Step 'upgrade' -Tool $Tool -Path $Path -Manager $Manager }
+        'npm' { $plan = Get-PackageStep -Step 'upgrade' -Tool $Tool -Path $Path -Manager $Manager }
+        'bun' { $plan.Why = "no managed tool is upgraded through bun, so upgrade $Tool with bun by hand" }
         'scoop' { $plan = Get-ScoopStep -Tool $Tool -Verb 'update' }
         'choco' { $plan.Why = "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade $(Get-ChocoPackage -Tool $Tool) -y" }
     }
