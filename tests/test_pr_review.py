@@ -2811,8 +2811,11 @@ class TestReadingsThroughTheAdapter(GqlCase):
         """An in-place edit can rewrite a permalink's commit, so a key leaves links and hashes out."""
 
         def keys(sha: str, heading: str = "Bad naming", says: str = "misleads") -> list[str]:
-            link = f'<a href="https://github.com/o/r/blob/{sha}/a.py#L12">a.py[12]</a> at {sha[:7]}'
-            body = qodo_review_body(heading=f"{heading} since {sha[:7]}")
+            link = (
+                f'<a href="https://github.com/o/r/blob/{sha}/a.py#L12">a.py[12]</a> at commit '
+                f'<a href="https://github.com/o/r/commit/{sha}">{sha[:7]}</a>'
+            )
+            body = qodo_review_body(heading=f"{heading} since commit `{sha[:7]}`")
             body = body.replace("a.py[12]", link).replace("does not describe", says)
             pr = payload(
                 [review()], comments=[comment(login=pr_review_rounds.QODO_LOGIN, body=body)]
@@ -2823,6 +2826,25 @@ class TestReadingsThroughTheAdapter(GqlCase):
         self.assertEqual(keys(HEAD), keys(OLD))
         self.assertNotEqual(keys(HEAD), keys(HEAD, heading="Wrong bound"))
         self.assertNotEqual(keys(HEAD), keys(HEAD, says="hides"))
+
+    def test_a_qodo_finding_differing_only_in_a_hex_like_run_keeps_a_distinct_key(self) -> None:
+        """Only a link or a hash after the word commit is volatile, so one answer clears one finding."""
+
+        def key(says: str) -> str:
+            body = qodo_review_body().replace("does not describe", says)
+            pr = payload(
+                [review()], comments=[comment(login=pr_review_rounds.QODO_LOGIN, body=body)]
+            )
+            (found,) = [i.key for i in pr_review_answers.items(pr) if i.kind == "qodo_open"]
+            return found
+
+        for one, other in (
+            ("is capped at 1048576 bytes and", "is capped at 2097152 bytes and"),
+            ("reads abcdef0.py and", "reads abcdef1.py and"),
+        ):
+            with self.subTest(one=one):
+                self.assertNotEqual(key(one), key(other))
+        self.assertEqual(key("at commit 1234abc"), key("at Commit: 5678def"))
 
     def test_each_finding_no_thread_carries_prints_the_key_that_answers_it(self) -> None:
         missed = (
