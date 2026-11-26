@@ -377,6 +377,8 @@ class TestInterrupt(EnableHooksCase):
                         with contextlib.suppress(ProcessLookupError):
                             os.killpg(proc.pid, signal.SIGKILL)
 
+
+class TestFirstSignal(unittest.TestCase):
     def test_a_signal_handled_as_the_first_handler_starts_is_passed_over(self) -> None:
         """A SIGTERM handled as the SIGINT's handler starts leaves the SIGINT first.
 
