@@ -1664,22 +1664,34 @@ gh() {
         self.assertNotIn("ruff@latest", workflow)
         self.assertIn("uses: $/.github/actions/python-tool-pins\n", workflow)
 
-    def run_docker_pins_step(self, manifest: str | None) -> tuple[int, str, str]:
-        """Run the docker-lint-pins action's step over a constructed manifest, or the hub's own where None."""
-        action = REPO / ".github/actions/docker-lint-pins"
-        definition = action / "action.yml"
+    def run_docker_pins_step(self, manifest: str | None) -> tuple[int, str, str, str]:
+        """Run the docker-lint-pins action's step over a constructed manifest, or the hub's own where None.
+
+        A constructed manifest sits in a hub-shaped tree beside a copy of docker_lint.py, which the step reads it through.
+        """
+        definition = REPO / ".github/actions/docker-lint-pins/action.yml"
+        hub = REPO
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         if manifest is not None:
-            action = root / "action"
-            action.mkdir()
-            (action / "Dockerfile").write_text(manifest, encoding="utf-8")
-        code, stdout, _, written = run_step_script(
+            hub = root / "hub"
+            pins = hub / ".github/actions/docker-lint-pins/Dockerfile"
+            pins.parent.mkdir(parents=True)
+            pins.write_text(manifest, encoding="utf-8")
+            (hub / "scripts").mkdir()
+            shutil.copyfile(REPO / "scripts/docker_lint.py", hub / "scripts/docker_lint.py")
+        return run_step_script(
             step_script(definition, "Read Docker lint pins step"),
             root,
-            {"GITHUB_ACTION_PATH": str(action)},
+            {
+                "GITHUB_ACTION_PATH": str(hub / ".github/actions/docker-lint-pins"),
+                "DOCKER_LINT": str(hub / "scripts/docker_lint.py"),
+            },
         )
-        return code, stdout, written
 
+    @unittest.skipUnless(
+        shutil.which("python3") and os.name == "posix",
+        "the step runs a Linux runner's python3, which a Windows host may not have on PATH",
+    )
     def test_docker_pins_output_one_digest_pinned_reference_per_stage(self) -> None:
         """Each lint step runs the image the hub's Dependabot-tracked Dockerfile pins, never a moving tag."""
         stages = ["editorconfig-checker", "actionlint", "markdownlint", "cspell"]
@@ -1690,25 +1702,59 @@ gh() {
             lines = [f"FROM r.io/{s}:1.0{digest} AS {s}" for s in stages if s != skip]
             return "# A comment.\n" + "\n".join(lines) + "\n" + extra
 
-        code, _, written = self.run_docker_pins_step(None)
+        code, _, _, written = self.run_docker_pins_step(None)
         hub = dict(line.split("=", 1) for line in written.splitlines())
         self.assertEqual((0, stages), (code, list(hub)))
         for stage, image in hub.items():
             with self.subTest(stage=stage):
                 self.assertRegex(image, r"^\S+:v?\d[^@/]*@sha256:[0-9a-f]{64}$")
-        code, _, written = self.run_docker_pins_step(manifest())
+        code, _, _, written = self.run_docker_pins_step(manifest())
         expected = "".join(f"{s}=r.io/{s}:1.0{digest}\n" for s in stages)
         self.assertEqual((0, expected), (code, written))
-        for label, text in (
-            ("a stage missing", manifest(skip="shfmt")),
-            ("a stage named twice", manifest(extra=f"FROM r.io/x:2.0{digest} AS shfmt\n")),
-            ("a moving tag", manifest(skip="shfmt", extra="FROM r.io/shfmt:latest AS shfmt\n")),
-            ("no tag", manifest(skip="shfmt", extra=f"FROM r.io/shfmt{digest} AS shfmt\n")),
+        for label, text, reason in (
+            ("a stage missing", manifest(skip="shfmt"), "pins shfmt on no"),
+            (
+                "a stage named twice",
+                manifest(extra=f"FROM r.io/x:2.0{digest} AS shfmt\n"),
+                "names the shfmt stage twice",
+            ),
+            (
+                "a moving tag",
+                manifest(skip="shfmt", extra="FROM r.io/shfmt:latest AS shfmt\n"),
+                "pins shfmt on no",
+            ),
+            (
+                "no tag",
+                manifest(skip="shfmt", extra=f"FROM r.io/shfmt{digest} AS shfmt\n"),
+                "pins shfmt on no",
+            ),
+            (
+                "an empty tag",
+                manifest(skip="shfmt", extra=f"FROM r.io/shfmt:{digest} AS shfmt\n"),
+                "pins shfmt on no",
+            ),
         ):
             with self.subTest(label):
-                code, stdout, _ = self.run_docker_pins_step(text)
-                self.assertEqual(1, code)
-                self.assertIn("must pin shfmt on exactly one", stdout)
+                code, stdout, stderr, written = self.run_docker_pins_step(text)
+                self.assertEqual((1, ""), (code, written))
+                errors = [line for line in stdout.splitlines() if line.startswith("::error::")]
+                self.assertEqual(1, len(errors), stdout)
+                self.assertIn("could not be read for its lint pins: RESULT failed: ", errors[0])
+                self.assertIn(reason, errors[0])
+                self.assertIn(reason, stderr)
+
+    def test_docker_pins_reads_the_manifest_through_docker_lint_alone(self) -> None:
+        """The action, the repo gate, and docker_lint.py share one parser, so they cannot disagree on a line."""
+        definition = REPO / ".github/actions/docker-lint-pins/action.yml"
+        script = step_script(definition, "Read Docker lint pins step")
+        self.assertIn('python3 "$DOCKER_LINT"', script)
+        self.assertNotRegex(script, r"\b(sed|grep|awk)\b|0-9a-f")
+        text = definition.read_text(encoding="utf-8")
+        self.assertIn("DOCKER_LINT: ${{ steps.locate.outputs.docker-lint }}\n", text)
+        self.assertLess(
+            text.index("- name: Locate Docker lint script step"),
+            text.index("- name: Read Docker lint pins step"),
+        )
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",

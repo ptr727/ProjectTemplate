@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
@@ -127,7 +127,8 @@ class CommandExited(CommandFailed):
 def read_pins(path: Path) -> dict[str, str]:
     """Return each image reference the pin manifest names, keyed by its stage.
 
-    A line that pins no tag and digest is skipped, as the action and the repo gate skip it.
+    This is the manifest's one parser: the docker-lint-pins action and the repo gate read through it.
+    A line that pins no tag and digest is skipped, so a stage it alone names is not pinned.
 
     A carrier's `hub_fetch_run.py` older than the manifest fetches this script alone.
     A missing manifest therefore names the resync rather than falling back to a moving tag.
@@ -151,6 +152,37 @@ def read_pins(path: Path) -> dict[str, str]:
             raise CommandFailed(f"the pin manifest {path} names the {match.group(2)} stage twice")
         pins[match.group(2)] = match.group(1)
     return pins
+
+
+def require_stages(pins: Mapping[str, str], stages: Iterable[str]) -> None:
+    """Raise CommandFailed naming each of `stages` that `pins` lacks."""
+    missing = sorted(set(stages) - set(pins))
+    if missing:
+        raise CommandFailed(
+            f"the pin manifest pins {', '.join(missing)} on no "
+            "'FROM <image>:<tag>@sha256:<digest> AS <stage>' line"
+        )
+
+
+def manifest_path() -> Path:
+    """The pin manifest at its hub-relative path from this script."""
+    return Path(__file__).resolve().parents[1] / PIN_MANIFEST
+
+
+def print_pins(stages: Sequence[str], path: Path | None = None) -> int:
+    """Print `<stage>=<image reference>` for each stage, one line each, and lint nothing.
+
+    The docker-lint-pins action appends this to its step outputs.
+    Nothing reaches stdout unless every stage is pinned, so a failure leaves no partial output.
+    """
+    try:
+        pins = read_pins(path or manifest_path())
+        require_stages(pins, stages)
+    except CommandFailed as error:
+        print(f"RESULT failed: {error}", file=sys.stderr, flush=True)
+        return 1
+    print("".join(f"{stage}={pins[stage]}\n" for stage in stages), end="", flush=True)
+    return 0
 
 
 def container_name(command: Sequence[str]) -> str | None:
@@ -796,10 +828,8 @@ def lint(
     """
     try:
         if pins is None:
-            pins = read_pins(Path(__file__).resolve().parents[1] / PIN_MANIFEST)
-        missing = sorted({linter.stage for linter in LINTERS} - set(pins))
-        if missing:
-            raise CommandFailed(f"the pin manifest names no {', '.join(missing)} stage")
+            pins = read_pins(manifest_path())
+        require_stages(pins, (linter.stage for linter in LINTERS))
         applicable: list[tuple[Linter, list[str]]] = []
         for linter in LINTERS:
             if linter.name not in selected:
@@ -874,6 +904,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="IMAGE",
         help="only pull IMAGE with the bounded retry, repeat to pull several, and lint nothing",
     )
+    mode.add_argument(
+        "--pin",
+        action="append",
+        metavar="STAGE",
+        help="only print STAGE=<image reference> from the pin manifest, repeat for several, "
+        "and lint nothing",
+    )
     return parser.parse_args(argv)
 
 
@@ -894,6 +931,8 @@ def main(argv: Sequence[str] | None = None) -> int | signal.Signals:
     root = args.root.resolve()
     selected = set(args.linter or (linter.name for linter in LINTERS))
     try:
+        if args.pin:
+            return print_pins(args.pin)
         if args.pull:
             return pull(args.pull, args.timeout)
         return lint(root, args.timeout, selected)

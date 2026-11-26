@@ -247,6 +247,62 @@ class DockerLintCase(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             docker_lint.parse_args(["--pull", "a", "--linter", "markdownlint"])
 
+    def test_pin_mode_prints_every_stage_or_nothing(self) -> None:
+        """The docker-lint-pins action appends this output to its step outputs, so a failure writes none."""
+        path = self.outside / "Dockerfile"
+        image = "r/{stage}:1.0@sha256:" + "a" * 64
+        lines = [f"FROM {image.format(stage=s)} AS {s}" for s in ("cspell", "shfmt")]
+        path.write_text("# A comment.\n" + "\n".join(lines) + "\n", encoding="utf-8")
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(0, docker_lint.print_pins(["shfmt", "cspell"], path))
+        expected = f"shfmt={image.format(stage='shfmt')}\ncspell={image.format(stage='cspell')}\n"
+        self.assertEqual((expected, ""), (out.getvalue(), err.getvalue()))
+        twice = path.read_text(encoding="utf-8") + lines[1] + "\n"
+        for label, text, stages, reason in (
+            ("a stage missing", None, ["cspell", "markdownlint"], "pins markdownlint on no"),
+            ("a stage named twice", twice, ["cspell"], "names the shfmt stage twice"),
+        ):
+            with self.subTest(label):
+                if text is not None:
+                    path.write_text(text, encoding="utf-8")
+                with (
+                    contextlib.redirect_stdout(io.StringIO()) as out,
+                    contextlib.redirect_stderr(io.StringIO()) as err,
+                ):
+                    self.assertEqual(1, docker_lint.print_pins(stages, path))
+                self.assertEqual("", out.getvalue())
+                self.assertTrue(err.getvalue().startswith("RESULT failed: "), err.getvalue())
+                self.assertIn(reason, err.getvalue())
+
+    def test_pin_mode_reads_the_manifest_beside_the_script(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, docker_lint.print_pins(["shellcheck"]))
+        self.assertEqual(
+            f"shellcheck={docker_lint.read_pins(MANIFEST)['shellcheck']}\n", out.getvalue()
+        )
+
+    def test_main_routes_pin_to_the_pin_mode_and_refuses_it_beside_another_mode(self) -> None:
+        self.restore_handlers()
+        with (
+            mock.patch.object(docker_lint, "print_pins", return_value=0) as print_pins,
+            mock.patch.object(docker_lint, "lint") as lint,
+            mock.patch.object(docker_lint, "pull") as pull,
+        ):
+            self.assertEqual(0, docker_lint.main(["--pin", "a", "--pin", "b"]))
+        print_pins.assert_called_once_with(["a", "b"])
+        lint.assert_not_called()
+        pull.assert_not_called()
+        for other in (["--pull", "a"], ["--linter", "markdownlint"]):
+            with (
+                self.subTest(other=other),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                docker_lint.parse_args(["--pin", "a", *other])
+
     @requires_python_3_12
     @unittest.skipUnless(os.name == "posix", "runs a stand-in docker only a POSIX host can execute")
     def test_pull_mode_runs_under_the_runners_python_3_12(self) -> None:
@@ -294,6 +350,7 @@ class DockerLintCase(unittest.TestCase):
         for label, text in {
             "a moving tag with no digest": "FROM r/a:latest AS markdownlint",
             "a digest with no tag": "FROM r/a@sha256:" + "a" * 64 + " AS markdownlint",
+            "an empty tag": "FROM r/a:@sha256:" + "a" * 64 + " AS markdownlint",
         }.items():
             with self.subTest(label):
                 path.write_text(f"# A comment.\n\n{text}\n", encoding="utf-8")
@@ -305,9 +362,7 @@ class DockerLintCase(unittest.TestCase):
         with self.assertRaisesRegex(docker_lint.CommandFailed, "names the cspell stage twice"):
             docker_lint.read_pins(path)
 
-    def test_a_line_that_is_no_from_instruction_is_skipped_as_the_other_readers_skip_it(
-        self,
-    ) -> None:
+    def test_a_line_that_is_no_from_instruction_is_skipped(self) -> None:
         path = self.outside / "Dockerfile"
         image = "r/a:1.0@sha256:" + "a" * 64
         path.write_text(f"ARG unused=1\nFROM {image} AS cspell\n", encoding="utf-8")
@@ -322,7 +377,7 @@ class DockerLintCase(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             result = docker_lint.lint(self.root, 17, {"markdownlint"}, runner, pins)
         self.assertEqual(1, result)
-        self.assertIn("RESULT failed: the pin manifest names no shfmt stage", output.getvalue())
+        self.assertIn("RESULT failed: the pin manifest pins shfmt on no", output.getvalue())
         self.assertEqual([], runner.commands)
 
     def test_zero_targets_skips_pull_and_execution(self) -> None:
