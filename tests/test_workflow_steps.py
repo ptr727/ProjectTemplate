@@ -95,10 +95,8 @@ def hook_input_violations(text: str, route: HookRoute) -> list[str]:
     """What keeps `route`'s task from handing hook-input to its hook only when the caller set it."""
     found = []
     inputs = ("on", "workflow_call", "inputs", "hook-input")
-    if (
-        yaml_value(text, *inputs, "type") != "string"
-        or yaml_value(text, *inputs, "default") != "''"
-    ):
+    declared = tuple(yaml_value(text, *inputs, key) for key in ("required", "type", "default"))
+    if declared != ("false", "string", "''"):
         found.append("hook-input is not an optional string input defaulting to empty")
     present = f"hashFiles('{route.hook.removeprefix('./')}/action.yml') != ''"
     for name, guard in ((route.plain_step, "== ''"), (route.input_step, "!= ''")):
@@ -152,6 +150,14 @@ class HookInputCase(unittest.TestCase):
                     f"{route.plain_step} passes the hook an input",
                 ),
                 "input required": (
+                    text.replace(
+                        "        required: false\n        type: string\n        default: ''\n    secrets:",
+                        "        required: true\n        type: string\n        default: ''\n    secrets:",
+                        1,
+                    ),
+                    "hook-input is not an optional string input",
+                ),
+                "default dropped": (
                     text.replace("        default: ''\n    secrets:", "    secrets:", 1),
                     "hook-input is not an optional string input",
                 ),
