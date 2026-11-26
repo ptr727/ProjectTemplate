@@ -1615,25 +1615,16 @@ gh() {
     def run_tool_pins_step(self, manifest: str | None) -> tuple[int, str, str]:
         """Run the python-tool-pins action's step over a constructed manifest, or the hub's own where None."""
         action = REPO / ".github/actions/python-tool-pins"
-        script = step_script(action / "action.yml", "Read tool pins step")
+        definition = action / "action.yml"
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         if manifest is not None:
             action = root / "action"
             action.mkdir()
             (action / "requirements.txt").write_text(manifest, encoding="utf-8")
-        output = root / "output"
-        output.write_text("", encoding="utf-8")
-        result = run(
-            [bash_or_skip(), "-c", script],
-            cwd=root,
-            env={**os.environ, "GITHUB_ACTION_PATH": str(action), "GITHUB_OUTPUT": str(output)},
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-            check=False,
+        code, stdout, _, written = run_action_step(
+            definition, "Read tool pins step", root, {"GITHUB_ACTION_PATH": str(action)}
         )
-        return result.returncode, result.stdout, output.read_text(encoding="utf-8")
+        return code, stdout, written
 
     def test_tool_pins_read_exactly_one_ruff_pin(self) -> None:
         """The validator's uvx ruff runs the version the hub's Dependabot-tracked manifest pins."""
@@ -1674,25 +1665,16 @@ gh() {
     def run_docker_pins_step(self, manifest: str | None) -> tuple[int, str, str]:
         """Run the docker-lint-pins action's step over a constructed manifest, or the hub's own where None."""
         action = REPO / ".github/actions/docker-lint-pins"
-        script = step_script(action / "action.yml", "Read Docker lint pins step")
+        definition = action / "action.yml"
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         if manifest is not None:
             action = root / "action"
             action.mkdir()
             (action / "Dockerfile").write_text(manifest, encoding="utf-8")
-        output = root / "output"
-        output.write_text("", encoding="utf-8")
-        result = run(
-            [bash_or_skip(), "-c", script],
-            cwd=root,
-            env={**os.environ, "GITHUB_ACTION_PATH": str(action), "GITHUB_OUTPUT": str(output)},
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            timeout=60,
-            check=False,
+        code, stdout, _, written = run_action_step(
+            definition, "Read Docker lint pins step", root, {"GITHUB_ACTION_PATH": str(action)}
         )
-        return result.returncode, result.stdout, output.read_text(encoding="utf-8")
+        return code, stdout, written
 
     def test_docker_pins_output_one_digest_pinned_reference_per_stage(self) -> None:
         """Each lint step runs the image the hub's Dependabot-tracked Dockerfile pins, never a moving tag."""
@@ -2585,35 +2567,45 @@ gh() {
                     )
 
 
+def run_action_step(
+    action: Path, name: str, workspace: Path, env: dict[str, str]
+) -> tuple[int, str, str, str]:
+    """Run the step `name` of the action file `action` in `workspace`, with `env` added.
+
+    Returns the exit status, the step's stdout where its workflow commands go, its stderr, and
+    the text it wrote to GITHUB_OUTPUT.
+    """
+    output = workspace / "github-output"
+    output.write_text("", encoding="utf-8")
+    # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
+    step = workspace / "step.sh"
+    step.write_text(step_script(action, name), encoding="utf-8", newline="\n")
+    result = run(
+        [bash_or_skip(), str(step)],
+        cwd=workspace,
+        env={**os.environ, "GITHUB_OUTPUT": str(output), **env},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=60,
+    )
+    return result.returncode, result.stdout, result.stderr, output.read_text(encoding="utf-8")
+
+
 def run_selection_step(
     action: Path, name: str, selector: str, content: bytes | None, env: dict[str, str]
-) -> tuple[int, str, list[str]]:
+) -> tuple[int, str, str, list[str]]:
     """Run an action's selection step where `selector` holds `content`, or is absent where it is None.
 
-    Returns the exit status, the step's stdout where its workflow commands go, and its outputs.
+    Returns the exit status, the step's stdout and stderr, and its output lines.
     """
-    bash = bash_or_skip()
-    script = step_script(action, name)
     with tempfile.TemporaryDirectory() as directory:
         workspace = Path(directory)
         if content is not None:
             (workspace / selector).write_bytes(content)
-        output = workspace / "github-output"
-        output.write_text("", encoding="utf-8")
-        # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
-        step = workspace / "select.sh"
-        step.write_text(script, encoding="utf-8", newline="\n")
-        result = run(
-            [bash, str(step)],
-            cwd=workspace,
-            env={**os.environ, "GITHUB_OUTPUT": str(output), **env},
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=30,
-        )
-        return result.returncode, result.stdout, output.read_text(encoding="utf-8").splitlines()
+        code, stdout, stderr, written = run_action_step(action, name, workspace, env)
+        return code, stdout, stderr, written.splitlines()
 
 
 class DotnetSdkLineCase(unittest.TestCase):
@@ -2637,10 +2629,10 @@ class DotnetSdkLineCase(unittest.TestCase):
             )
         if isinstance(global_json, str):
             global_json = global_json.encode("utf-8")
-        code, self.last_stdout, outputs = run_selection_step(
+        code, self.last_stdout, stderr, outputs = run_selection_step(
             self.ACTION, self.SELECT, "global.json", global_json, {}
         )
-        self.assertEqual(code, 0, self.last_stdout)
+        self.assertEqual(code, 0, stderr)
         return outputs
 
     def test_a_global_json_selecting_a_line_is_read(self) -> None:
@@ -2736,14 +2728,16 @@ class PythonVersionLineCase(unittest.TestCase):
     BASELINE = REPO / "catalog/snippets/devcontainer/python/devcontainer.json"
     SELECT = "Select Python version step"
     last_stdout = ""
+    last_stderr = ""
 
     def select(self, python_version: str | None, warn: str = "true") -> tuple[int, list[str]]:
         """The exit and outputs of the selection step in a workspace holding `python_version`, or none.
 
-        The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
+        The step's own stdout, where its workflow commands go, is kept in `last_stdout`, and its
+        stderr in `last_stderr`.
         """
         content = None if python_version is None else python_version.encode("utf-8")
-        code, self.last_stdout, outputs = run_selection_step(
+        code, self.last_stdout, self.last_stderr, outputs = run_selection_step(
             self.ACTION, self.SELECT, ".python-version", content, {"WARN": warn}
         )
         return code, outputs
@@ -2758,13 +2752,15 @@ class PythonVersionLineCase(unittest.TestCase):
         return line.group(1)
 
     def test_the_fallback_is_the_baseline_line(self) -> None:
-        self.assertEqual(self.select(None), (0, [f"version={self.baseline()}"]))
+        self.assertEqual(self.select(None), (0, [f"version={self.baseline()}"]), self.last_stderr)
         self.assertIn("::warning::No root .python-version selects a Python line", self.last_stdout)
 
     def test_the_first_request_line_is_read(self) -> None:
-        self.assertEqual(self.select("3.13\n"), (0, ["version=3.13"]))
-        self.assertEqual(self.select("# the line\n\n  3.15  \r\n3.13\n"), (0, ["version=3.15"]))
-        self.assertEqual(self.select("3.12"), (0, ["version=3.12"]))
+        self.assertEqual(self.select("3.13\n"), (0, ["selected=3.13", "version=3.13"]))
+        self.assertEqual(
+            self.select("# the line\n\n  3.15  \r\n3.13\n"), (0, ["selected=3.15", "version=3.15"])
+        )
+        self.assertEqual(self.select("3.12"), (0, ["selected=3.12", "version=3.12"]))
         self.assertEqual("", self.last_stdout)
 
     def test_a_file_naming_no_line_fails(self) -> None:
@@ -2831,9 +2827,10 @@ class PythonVersionLineCase(unittest.TestCase):
         self.assertEqual(yaml_value(select, "if"), yaml_value(yaml_step(pypi, default), "if"))
         self.assertLess(pypi.index(self.SELECT), pypi.index(default))
         self.assertEqual(
-            "${{ steps.python-version.outputs.version }}",
+            "${{ steps.python-version.outputs.selected }}",
             yaml_value(yaml_step(pypi, default), "with", "python-version"),
         )
+        self.assertEqual("'false'", yaml_value(select, "with", "warn"))
         build = (REPO / ".github/actions/pypi-build-default/action.yml").read_text(encoding="utf-8")
         self.assertEqual(
             "${{ inputs.python-version }}",

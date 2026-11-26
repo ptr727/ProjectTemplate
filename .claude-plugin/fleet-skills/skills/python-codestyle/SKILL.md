@@ -96,13 +96,13 @@ engine.
 and pyenv each read it, so uv fetches that interpreter on a developer host. The line is the
 repository's own choice, per `CODESTYLE.md` "Toolchain Versions", so a repository may lead or lag
 the hub's fallback line. The hub's validator runs its legs and its lint job on that line, unless the
-caller's `python-versions` input names others. The hub's PyPI build runs on it too. A caller
+caller's `python-versions` input names others. The hub's PyPI build runs on it too, and lets uv choose where the repository carries none. A caller
 carrying no `.python-version` gets the hub's fallback line and a warning. A file naming no `X.Y`
-line fails the validator rather than fall back. A build-profile directory's `requires-python` floor is that line. It
-leaves ruff `target-version`, mypy `python_version`, and pyright `pythonVersion` unset. Then ruff
-reads its target from `requires-python`, and each checker reads its target from the interpreter
-it runs under. A lint-only directory has no `[project]` table to read, so it sets all three to
-that line. A move edits `.python-version`, those settings, the devcontainer image tag, and any
+line fails the validator rather than fall back. A directory whose `pyproject.toml` has a `[project]` table sets its `requires-python` floor to
+that line. It leaves ruff `target-version`, mypy `python_version`, and pyright `pythonVersion`
+unset. Then ruff reads its target from `requires-python`, and each checker reads its target from
+the interpreter it runs under. A directory with no `[project]` table has nothing to read, so it
+sets each of the three it configures to that line. A move edits `.python-version`, those settings, the devcontainer image tag, and any
 explicit `python-versions` entry together.
 
 ## Local development loop

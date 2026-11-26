@@ -19,8 +19,9 @@ inputs:
     description: Repo-relative path of the file carrying the hardcoded __version__ hatchling reads.
     required: true
   python-version:
-    description: Python line the build runs under, the one the release task selects from the caller's root .python-version, so the build matches the line validate tested.
-    required: true
+    description: Python line the build runs under, the one the caller's root .python-version selects. Empty lets uv choose an interpreter the project's requires-python admits, for a caller carrying no selector.
+    required: false
+    default: ''
   uv-version:
     description: uv version, pinned in lockstep with the devcontainer's UV_VERSION.
     required: false

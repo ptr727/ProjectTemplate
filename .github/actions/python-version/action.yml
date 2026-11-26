@@ -14,8 +14,11 @@ inputs:
 
 outputs:
   version:
-    description: The selected X.Y line.
+    description: The selected X.Y line, or the fallback line where the caller carries no .python-version.
     value: ${{ steps.select.outputs.version }}
+  selected:
+    description: The X.Y line the caller's .python-version selects, or empty where it carries none.
+    value: ${{ steps.select.outputs.selected }}
 
 runs:
   using: composite
@@ -43,6 +46,7 @@ runs:
         fi
         if [[ "$selected" =~ ^[0-9]+\.[0-9]+$ ]]; then
           version=$selected
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
         elif [[ -f .python-version ]]; then
           echo "::error::The root .python-version names no X.Y line on its first line that is neither blank nor a comment."
           exit 1
