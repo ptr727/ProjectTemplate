@@ -43,7 +43,7 @@ An agent session is billed on the context it carries, not the work it does. Ever
 
 ### Reading
 
-- **Map a large file, then read one range.** For anything over about 200 lines, list the headings with `grep -nE '^#+ '` first and read only the range the task needs. Read the section, not the file that contains it.
+- **Map a large file, then read one range.** For anything over about 200 lines, list the headings with `grep -nE '^#+ ' "<file>"` first and read only the range the task needs. Read the section, not the file that contains it.
 - **Prefer an in-place edit to a whole-file rewrite.** Rewriting a file bills its full content again on top of what the read already cost.
 
 ### Commands
