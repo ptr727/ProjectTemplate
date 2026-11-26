@@ -1347,9 +1347,6 @@ gh() {
             yaml_value(yaml_step(job, "Resolve lint Python version step"), "if"),
         )
         script = step_script_text(job, "Resolve lint Python version step")
-        # A file rather than bash -c, since Git Bash collapses the filter's doubled backslash in a -c argument.
-        resolve_script = Path(self.enterContext(tempfile.TemporaryDirectory())) / "resolve.sh"
-        resolve_script.write_text(script, encoding="utf-8", newline="\n")
         cases = {
             '["3.14", "3.13"]': "version=3.14\n",
             '["3.13"]': "version=3.13\n",
@@ -1371,29 +1368,17 @@ gh() {
                 self.subTest(versions=versions, selected=line),
                 tempfile.TemporaryDirectory() as scratch,
             ):
-                output = Path(scratch) / "output"
-                output.write_text("", encoding="utf-8")
-                env = {**os.environ, "PYTHON_VERSIONS": versions, "GITHUB_OUTPUT": str(output)}
-                if line:
-                    env["SELECTED"] = line
-                result = run(
-                    [bash_or_skip(), str(resolve_script)],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    timeout=60,
-                    check=False,
-                )
+                env = {"PYTHON_VERSIONS": versions, "SELECTED": line}
+                code, stdout, stderr, written = run_step_script(script, Path(scratch), env)
                 if want is None:
-                    self.assertEqual(1, result.returncode)
+                    self.assertEqual(1, code)
                     refusal = "differs from the line" if line else "The python-versions input"
-                    self.assertIn("::error::", result.stdout)
-                    self.assertIn(refusal, result.stdout)
-                    self.assertEqual("", output.read_text(encoding="utf-8"))
+                    self.assertIn("::error::", stdout)
+                    self.assertIn(refusal, stdout)
+                    self.assertEqual("", written)
                 else:
-                    self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-                    self.assertEqual(want, output.read_text(encoding="utf-8"))
+                    self.assertEqual(0, code, stdout + stderr)
+                    self.assertEqual(want, written)
 
     @unittest.skipUnless(
         shutil.which("bash") and os.name == "posix",
@@ -1636,8 +1621,10 @@ gh() {
             action = root / "action"
             action.mkdir()
             (action / "requirements.txt").write_text(manifest, encoding="utf-8")
-        code, stdout, _, written = run_action_step(
-            definition, "Read tool pins step", root, {"GITHUB_ACTION_PATH": str(action)}
+        code, stdout, _, written = run_step_script(
+            step_script(definition, "Read tool pins step"),
+            root,
+            {"GITHUB_ACTION_PATH": str(action)},
         )
         return code, stdout, written
 
@@ -1686,8 +1673,10 @@ gh() {
             action = root / "action"
             action.mkdir()
             (action / "Dockerfile").write_text(manifest, encoding="utf-8")
-        code, stdout, _, written = run_action_step(
-            definition, "Read Docker lint pins step", root, {"GITHUB_ACTION_PATH": str(action)}
+        code, stdout, _, written = run_step_script(
+            step_script(definition, "Read Docker lint pins step"),
+            root,
+            {"GITHUB_ACTION_PATH": str(action)},
         )
         return code, stdout, written
 
@@ -2072,14 +2061,8 @@ gh() {
         )
 
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
-        check = root / "check.sh"
-        check.write_text(
-            step_script_text(job, "Validate test-matrix input step"), encoding="utf-8", newline="\n"
-        )
-        build = root / "build.sh"
-        build.write_text(
-            step_script_text(job, "Build unit-test matrix step"), encoding="utf-8", newline="\n"
-        )
+        check = step_script_text(job, "Validate test-matrix input step")
+        build = step_script_text(job, "Build unit-test matrix step")
         workspace = root / "workspace"
         (workspace / "ci").mkdir(parents=True)
         legs = [{"label": "minimum", "lib": "1.0.0"}, {"label": "latest", "lib": "2.0.0"}]
@@ -2091,28 +2074,20 @@ gh() {
         temp = root / "runner-temp"
         temp.mkdir()
 
-        def step(script: Path, **env: str) -> tuple[int, str, str]:
+        def step(script: str, **env: str) -> tuple[int, str, str]:
             """Run one step's script, keeping runner-temp, since the build step reads what the check left there."""
-            output = root / "output"
-            output.write_text("", encoding="utf-8")
-            result = run(
-                [bash_or_skip(), str(script)],
-                cwd=workspace,
-                env={
-                    **os.environ,
+            code, stdout, stderr, written = run_step_script(
+                script,
+                workspace,
+                {
                     "RUNNER_TEMP": str(temp),
-                    "GITHUB_OUTPUT": str(output),
                     "TEST_MATRIX": "",
                     "TEST_MATRIX_FILE": "",
                     "PYTHON_VERSIONS": '["3.13"]',
                     **env,
                 },
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
             )
-            return result.returncode, result.stdout + result.stderr, output.read_text("utf-8")
+            return code, stdout + stderr, written
 
         def built(**env: str) -> object:
             """The matrix the build step writes after a passing check, with the check's legs output."""
@@ -2582,10 +2557,8 @@ gh() {
                     )
 
 
-def run_action_step(
-    action: Path, name: str, workspace: Path, env: dict[str, str]
-) -> tuple[int, str, str, str]:
-    """Run the step `name` of the action file `action` in `workspace`, with `env` added.
+def run_step_script(script: str, workspace: Path, env: dict[str, str]) -> tuple[int, str, str, str]:
+    """Run a step's `script` in `workspace`, with `env` added.
 
     Returns the exit status, the step's stdout where its workflow commands go, its stderr, and
     the text it wrote to GITHUB_OUTPUT.
@@ -2594,7 +2567,7 @@ def run_action_step(
     output.write_text("", encoding="utf-8")
     # A file rather than bash -c, since Git Bash collapses the script's doubled backslashes in a -c argument.
     step = workspace / "step.sh"
-    step.write_text(step_script(action, name), encoding="utf-8", newline="\n")
+    step.write_text(script, encoding="utf-8", newline="\n")
     result = run(
         [bash_or_skip(), str(step)],
         cwd=workspace,
@@ -2619,7 +2592,7 @@ def run_selection_step(
         workspace = Path(directory)
         if content is not None:
             (workspace / selector).write_bytes(content)
-        code, stdout, stderr, written = run_action_step(action, name, workspace, env)
+        code, stdout, stderr, written = run_step_script(step_script(action, name), workspace, env)
         return code, stdout, stderr, written.splitlines()
 
 
