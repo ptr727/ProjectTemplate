@@ -930,13 +930,26 @@ class WorkflowPermissionsCase(unittest.TestCase):
         self.assertEqual(audit.check_interface("wf", contract, text), [])
 
     def test_every_entry_point_caller_carries_the_token(self) -> None:
-        for path in (
-            ".github/workflows/test-pull-request.yml",
-            ".github/workflows/publish-release.yml",
-            ".github/workflows/merge-bot-pull-request.yml",
-        ):
+        spec = json.loads((REPO_ROOT / "spec/files.json").read_text(encoding="utf-8"))
+        callers = [
+            unit["path"]
+            for unit in spec["baseline"]
+            if unit.get("fidelity") == "interface" and unit["path"].startswith(".github/workflows/")
+        ]
+        self.assertIn(".github/workflows/deploy-site.yml", callers)
+        for path in callers:
             with self.subTest(path):
                 self.assertIn(EMPTY_PERMISSIONS, carried_contract(path)["requireTokens"])
+
+    def test_a_job_token_reads_an_empty_block_the_same_way(self) -> None:
+        text = CALLER_STUB.format(top="", job="    permissions: {}\n")
+        required = {"requireTokensInJob": {"validate": ["permissions: {}"]}}
+        forbidden = {"forbidTokensInJob": {"validate": ["permissions: {}"]}}
+        self.assertEqual(audit.check_interface("wf", required, text), [])
+        self.assertEqual(len(audit.check_interface("wf", forbidden, text)), 1)
+        granted = CALLER_STUB.format(top="", job=JOB_GRANT)
+        self.assertEqual(len(audit.check_interface("wf", required, granted)), 1)
+        self.assertEqual(audit.check_interface("wf", forbidden, granted), [])
 
     def test_the_hub_callers_and_snippets_meet_the_carried_contract(self) -> None:
         snippets = REPO_ROOT / "catalog" / "snippets" / "workflows"
