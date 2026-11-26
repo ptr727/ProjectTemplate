@@ -1788,8 +1788,9 @@ gh() {
     def test_every_docker_step_carries_the_tested_pull_retry(self) -> None:
         """The steps share no shell function, so each copy is held to the one the retry test runs."""
         workflow = REPO / ".github/workflows/validate-task.yml"
+        text = workflow.read_text(encoding="utf-8")
         scripts = {}
-        for job in job_texts(workflow.read_text(encoding="utf-8")).values():
+        for job in job_texts(text).values():
             for name in re.findall(r"(?m)^ *- name: (.+)$", job):
                 if re.search(r"(?m)^ *run: \|", yaml_step(job, name)):
                     script = step_script_text(job, name)
@@ -1797,6 +1798,10 @@ gh() {
                         scripts[name] = script
         self.assertIn("Check EditorConfig step", scripts)
         self.assertGreaterEqual(len(scripts), 3, list(scripts))
+        # A one-line run: step is not collected above, so every container start in the file is counted.
+        command = re.compile(r"(?m)^\s*(?:run:\s*)?docker run\b")
+        collected = sum(len(command.findall(script)) for script in scripts.values())
+        self.assertEqual(len(command.findall(text)), collected)
         bodies = set()
         for name, script in scripts.items():
             with self.subTest(step=name):
