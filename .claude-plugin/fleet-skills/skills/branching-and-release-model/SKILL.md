@@ -53,10 +53,10 @@ rather than guessing from the repo's contents.
   outside the feature -> `develop` -> `main` flow. Such a change reaches `develop` by a feature
   pull request of its own. To catch one before starting work, run
   `git diff origin/develop origin/main` after `git fetch origin`. Its `+` lines are content `main`
-  holds and `develop` lacks. Each is either such a change or a line `develop` has changed or
-  removed since the last promotion.
-  `git log origin/develop..origin/main` is no substitute, because every promotion merge and every
-  `main`-direct bot commit lists there too.
+  holds and `develop` lacks, which a line `develop` changed since the last promotion also prints.
+  So mirror only lines a commit listed by `git log --no-merges -p origin/develop..origin/main`
+  wrote, leaving a bot bump to its own `develop` twin. Without `--no-merges` that log lists every
+  promotion merge too.
 - **Never delete `develop`, and take the EOL-only conflict by taking develop's side.** A
   promotion PR's head *is* `develop`, so `--delete-branch` deletes it. An EOL-only conflict on a
   workflow YAML file resolves on a throwaway branch off `main`, not on `develop`. Full recovery and
