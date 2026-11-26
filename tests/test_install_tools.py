@@ -766,6 +766,24 @@ printf '%s\\n' "${{NOTES[@]}}" """)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn(expected, result.stdout)
 
+    def test_the_powershell_note_checks_the_architecture_and_the_feed(self) -> None:
+        cases: tuple[tuple[str, list[str], str | None], ...] = (
+            ("arm64", [], "carries amd64 only"),
+            ("amd64", [], "Microsoft's repository is not configured"),
+            ("amd64", ["microsoft-prod.sources"], None),
+        )
+        for arch, files, expected in cases:
+            with self.subTest(arch=arch, files=files):
+                self.redirect_sources_dir(f"pwsh-note-{arch}-{'-'.join(files) or 'empty'}", files)
+                result = self.run_bash(f"""ARCH={arch}
+tool_note powershell
+printf '%s\\n' "${{NOTES[@]}}" """)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                if expected is None:
+                    self.assertEqual(result.stdout.strip(), "")
+                else:
+                    self.assertIn(expected, result.stdout)
+
     def test_each_host_state_reads_the_status_an_install_would_act_on(self) -> None:
         feed = ["microsoft-prod.sources"]
         cases: tuple[tuple[str, str, list[str], str, str, str], ...] = (
