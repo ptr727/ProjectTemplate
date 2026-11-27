@@ -92,6 +92,21 @@ its strict flags. Pylance's pyright diagnostics are then advisory, since CI neve
 pyright-only repo is the lightest and is inherently consistent, since the editor and CI run one
 engine.
 
+**The Python line comes from the root `.python-version`.** It names `X.Y`, and uv, setup-python,
+and pyenv each read it, so uv fetches that interpreter on a developer host. The line is the
+repository's own choice, per `CODESTYLE.md` "Toolchain Versions", so a repository may lead or lag
+the hub's fallback line. The hub's validator runs its legs and its lint job on that line, unless the
+caller's `python-versions` input names others. That input then names this line first, or the lint
+job refuses it. The hub's PyPI build runs on the line too, and lets uv choose where the repository
+carries none. A caller
+carrying no `.python-version` gets the hub's fallback line and a warning. A file naming no `X.Y`
+line fails the validator rather than fall back. A directory whose `pyproject.toml` has a `[project]` table sets its `requires-python` floor to
+that line. It leaves ruff `target-version`, mypy `python_version`, and pyright `pythonVersion`
+unset. Then ruff reads its target from `requires-python`, and each checker reads its target from
+the interpreter it runs under. A directory with no `[project]` table has nothing to read, so it
+sets each of the three it configures to that line. A move edits `.python-version`, those settings, the devcontainer image tag, and any
+explicit `python-versions` entry together.
+
 ## Local development loop
 
 From inside a **build**-profile Python project directory in its uv form. A pip-form directory runs
@@ -318,7 +333,7 @@ This applies to every shell and Python script. `CODESTYLE.md` "Interrupts in Pyt
 
 <!-- include: CODESTYLE.md > Interrupts in Python -->
 
-- **SIGINT and SIGTERM take one path.** The entry point installs one handler with `signal.signal` for both signals. The handler records the first signal and raises `KeyboardInterrupt`, and returns at once on any later one. A later signal would cut the cleanup short, such as the SIGTERM that `uv run` forwards to a process group a Ctrl-C already reached. The handler takes SIGINT only where `signal.getsignal(signal.SIGINT)` is still `signal.default_int_handler`, so a SIGINT inherited as ignored stays ignored.
+- **SIGINT and SIGTERM take one path.** The entry point installs one handler with `signal.signal` for both signals. The handler records the first signal and raises `KeyboardInterrupt`, and returns at once on any later one. A later signal would cut the cleanup short, such as the SIGTERM that `uv run` forwards to a process group a Ctrl-C already reached. Python can run the later signal's handler at the first instruction of the first one's, before it records anything. So the handler also returns at once when the frame it interrupted is its own: `if received or (frame is not None and frame.f_code is on_signal.__code__): return`. A test of the handler calls it from a `sys.setprofile` hook inside its own first call, and expects the first signal recorded. The handler takes SIGINT only where `signal.getsignal(signal.SIGINT)` is still `signal.default_int_handler`, so a SIGINT inherited as ignored stays ignored.
 - **The entry point catches `KeyboardInterrupt` once, and any handler below it that catches the exception re-raises it.** It prints the line `CODESTYLE.md` "Interrupts" requires, then re-raises the signal the handler recorded. To re-raise, it flushes standard output and standard error inside `contextlib.suppress(OSError)`, restores the default handler with `signal.signal(signum, signal.SIG_DFL)`, then re-sends the signal with `os.kill(os.getpid(), signum)`. The suppression covers a pipe whose reader the same Ctrl-C ended. The default action ends the process without Python's own exit handling. So the flush comes first, and no cleanup on this path relies on an `atexit` handler or a finalizer. The re-raise runs outside every `with` block and `finally` clause, such as at the `__main__` call site, since none of them runs after it. A process the re-sent signal does not end, such as PID 1 in a container, then exits 128 plus the signal number. On Windows, `os.kill` ends the process with the signal number as its status, so there the entry point skips it and exits 130.
 - **What the script holds is released by `with` blocks and `finally` clauses as the exception unwinds.** A `subprocess.Popen` child is stopped in a `finally` clause, since leaving its `with` block does not stop it. The clause calls `terminate()`, then `wait(timeout=...)`, such as 10 seconds. On `subprocess.TimeoutExpired`, it calls `kill()`, then `wait()`. The handler passes over a second Ctrl-C, so a child that ignores SIGTERM would otherwise hold the script. That child runs without `shell=True`, so `terminate()` reaches the command rather than a shell around it.
 - **The rename over persistent state uses `os.replace`.** `os.rename` and `Path.rename` fail on Windows when the target exists.

@@ -40,7 +40,7 @@ rather than silently skipping the gate.
 The unresolved-commit fallback reads the prose gate and its data from `main` twice.
 When the two reads differ, it refuses to run a mixed pair, and a re-run is the remedy.
 
-Install and enable with `uv tool install pre-commit` once, then `pre-commit install`.
+Install with `uv tool install pre-commit` once per host. Enable it once per clone with `python3 hub_fetch_run.py scripts/enable_hooks.py`, which runs `pre-commit install` in that clone.
 `pre-commit` itself is never added as a project dependency.
 The lint-only profile has no
 project environment to add it to, and `uv tool install` gives a persistent command independent

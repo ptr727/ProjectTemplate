@@ -10,6 +10,7 @@ import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import Any
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -165,6 +166,39 @@ class OriginSlugCase(unittest.TestCase):
             with self.subTest(url=url):
                 self.assertEqual(gh_graphql.origin_slug(url), "acme/widget")
         self.assertIsNone(gh_graphql.origin_slug("widget"))
+
+
+OTHER_HOST = "ghe.example.invalid"
+
+
+class HostPinCase(unittest.TestCase):
+    """An exported GH_HOST naming another host never reaches a child, since `gh` would follow it."""
+
+    def test_a_child_runs_on_github_com_whatever_host_the_caller_exported(self) -> None:
+        """A real child reads the GH_HOST it was given, which is the host `gh` would target."""
+        argv = [sys.executable, "-c", "import os; print(os.environ['GH_HOST'])"]
+        with unittest.mock.patch.dict(os.environ, {"GH_HOST": OTHER_HOST}):
+            code, out, err = gh_graphql.run_subprocess(argv)
+        self.assertEqual((code, out.strip()), (0, "github.com"), err)
+
+    def test_the_pin_keeps_the_rest_of_the_environment(self) -> None:
+        with unittest.mock.patch.dict(os.environ, {"GH_HOST": OTHER_HOST, "PIN_PROBE": "kept"}):
+            env = gh_graphql.pinned_env()
+        self.assertEqual((env["GH_HOST"], env["PIN_PROBE"]), ("github.com", "kept"))
+
+    def test_a_graphql_request_runs_on_github_com(self) -> None:
+        envs: list[dict[str, str]] = []
+
+        def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+            envs.append(kwargs["env"])
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"data": {}}), "")
+
+        with (
+            unittest.mock.patch.dict(os.environ, {"GH_HOST": OTHER_HOST}),
+            unittest.mock.patch("subprocess.run", run),
+        ):
+            gh_graphql.request("query { viewer { login } }", {})
+        self.assertEqual([env["GH_HOST"] for env in envs], ["github.com"])
 
 
 class SiblingImportCase(unittest.TestCase):

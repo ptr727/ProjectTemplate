@@ -661,6 +661,15 @@ class GhReaderCase(unittest.TestCase):
 
         return agent_policy.gh_reader("acme/widget", "main", run)
 
+    def test_a_read_runs_on_github_com_whatever_host_was_exported(self) -> None:
+        answered = subprocess.CompletedProcess(["gh"], 0, "widget", "")
+        with (
+            mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            mock.patch("subprocess.run", return_value=answered) as run,
+        ):
+            self.assertEqual(agent_policy.gh_rest("repos/acme/widget", ".name").stdout, "widget")
+        self.assertEqual(run.call_args.kwargs["env"]["GH_HOST"], "github.com")
+
     def test_content_absent_and_broken_reads(self) -> None:
         content = base64.encodebytes(b"hello\n").decode()
         ok = self.reader(0, json.dumps(content), "")

@@ -421,6 +421,7 @@ def environment_errors_for_repo(repo, name):
     Absence is not checked, since most of the fleet uses no environment. What is checked is that:
     - a declared entry carries the `name` and `branchPolicy` that repo-config/configure.sh's check mode always reads
     - `branches` is present exactly when `branchPolicy` is "custom"
+    - a `secrets` or `variables` list, where declared, holds GitHub names
 
     That check mode reads that condition in both directions.
     "none" names no branch set, since it admits every ref, so a `branches` beside it would be a declaration
@@ -463,6 +464,7 @@ def environment_errors_for_repo(repo, name):
             errors.append(f"{where} duplicate environment '{env_name}'")
         else:
             seen.add(env_name)
+        errors.extend(environment_name_list_errors(env, where))
         # Absence is reported as absence rather than through the value branch.
         # That branch's repr of a missing field differs from the valid value "none" by case alone.
         if "branchPolicy" not in env:
@@ -499,6 +501,52 @@ def environment_errors_for_repo(repo, name):
             errors.append(
                 f"{where} branchPolicy {policy} names no branch set, so it must not declare 'branches'"
             )
+    return errors
+
+
+def name_list_errors(names, label, kind):
+    """Shape errors for one declared list of GitHub secret or variable names, which `label` names."""
+    if not isinstance(names, list):
+        return [f"{label} must be an array of {kind} names"]
+    return [
+        f"{label} entry {s!r} is not a GitHub {kind} name ({SECRET_NAME_SHAPE})"
+        for s in names
+        if not isinstance(s, str) or not SECRET_NAME_RE.search(s)
+    ]
+
+
+def forbidden_environment_names(repo, forbids):
+    """Each forbidden name a registry entry's environment lists declare, sorted.
+
+    spec/audit_environments.py reports such a name missing until it is stored, and forbidden once it is.
+    A declaration naming one can never pass, so it is refused here, as a requiredSecrets one is.
+    """
+    envs = repo.get("environments")
+    declared = {
+        s
+        for env in (envs if isinstance(envs, list) else [])
+        if isinstance(env, dict)
+        for key in ("secrets", "variables")
+        if isinstance(env.get(key), list)
+        for s in env[key]
+        if isinstance(s, str)
+    }
+    return sorted(declared & set(forbids))
+
+
+def environment_name_list_errors(env, where):
+    """Shape errors for one environment entry's optional `secrets` and `variables` name lists.
+
+    spec/audit_environments.py compares each list exactly against the names the environment's store holds.
+    So a padded or lower-case name would be reported missing on every run, as a requiredSecrets one would be.
+    GitHub names a variable by the rules it names a secret by, so SECRET_NAME_PATTERN shapes both lists.
+    Presence is the test, for the reason requiredSecrets gives: absence declares that the store holds nothing.
+    """
+    errors = []
+    for key, kind in (("secrets", "secret"), ("variables", "variable")):
+        if key not in env:
+            continue
+        errors.extend(name_list_errors(env[key], f"{where} {key}", kind))
     return errors
 
 
@@ -1800,14 +1848,7 @@ def main(argv=()):
         # The key is read by spec/audit.py as `entry.get("requiredSecrets", [])`, which returns the null rather than the default, so a null reaches set() there and raises.
         secrets_decl = repo.get("requiredSecrets")
         if "requiredSecrets" in repo:
-            if not isinstance(secrets_decl, list):
-                errors.append(f"{name}: requiredSecrets must be an array of secret names")
-            else:
-                for s in secrets_decl:
-                    if not isinstance(s, str) or not SECRET_NAME_RE.search(s):
-                        errors.append(
-                            f"{name}: requiredSecrets entry {s!r} is not a GitHub secret name ({SECRET_NAME_SHAPE})"
-                        )
+            errors.extend(name_list_errors(secrets_decl, f"{name}: requiredSecrets", "secret"))
         # Each note is sliced and run through a regex by spec/audit.py to resolve the check ids it names.
         # So a non-string element raises there mid-run rather than reporting.
         # An audit that raises reports nothing at all, where the malformed note it choked on would have been one line.
@@ -1940,6 +1981,10 @@ def main(argv=()):
             for bad in spec_mech.get("forbids", []):
                 if bad in required:
                     errors.append(f"{name}: {target} forbids secret '{bad}' (present)")
+            for bad in forbidden_environment_names(repo, spec_mech.get("forbids", [])):
+                errors.append(
+                    f"{name}: {target} forbids secret '{bad}' (declared in an environment)"
+                )
             # The repo's mechanism label, oidc or static-secret, must match the target mechanism's kind.
             # An OIDC mechanism may still require a non-secret stored value, NUGET_USERNAME for a NuGet login being one.
             # So an empty requires list is not the signal.

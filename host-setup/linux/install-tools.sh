@@ -227,7 +227,7 @@ Versions read as apt versions for an apt-managed tool and as upstream versions f
 binary, so a column compares like with like. A report reads the apt cache as it stands and does
 not refresh it, so an available version is as current as the last apt update.
 
---json writes one object carrying the same rows: "schema" (1), "platform" ("linux"), "tools", one
+--json writes one object carrying the same rows: "schema" (2), "platform" ("linux"), "tools", one
 entry per tool with "tool", "installed", "available", "source", "mechanism", "status" and that
 tool's own "notes", and a top-level "notes" for what belongs to no tool. A version that was not
 read is null. Like "source", "mechanism" names how this script manages the tool rather than where
@@ -899,8 +899,24 @@ docker_install() {
 
 # --- dotnet ---
 
+microsoft_feed_configured() {
+    [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]
+}
+
+microsoft_feed_arch() { [[ $ARCH == "amd64" ]]; }
+
+microsoft_feed_pending() {
+    microsoft_feed_configured && return 1
+    microsoft_feed_arch || return 1
+    case "$1" in
+    powershell) return 0 ;;
+    dotnet) [[ -z $(dotnet_sdk_latest) ]] ;;
+    *) return 1 ;;
+    esac
+}
+
 dotnet_source() {
-    if [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+    if microsoft_feed_configured || microsoft_feed_pending dotnet; then
         printf 'packages.microsoft.com'
     else
         printf 'distro'
@@ -960,7 +976,7 @@ dotnet_feed() {
 
     [[ -n $(dotnet_sdk_latest) ]] && return 0
 
-    if [[ $ARCH != "amd64" ]]; then
+    if ! microsoft_feed_arch; then
         warn "No .NET SDK in the distro feed and Microsoft's feed carries amd64 only, skipping dotnet on $ARCH"
         return 1
     fi
@@ -975,7 +991,7 @@ microsoft_feed() {
     # The feed already configured is the fast path.
     # A repeat run, or a run selecting both dotnet and powershell, therefore does not re-install the deb.
     # Nor does it force the apt refresh this file reserves for a changed sources file.
-    if [[ -f "$SOURCES_DIR/microsoft-prod.sources" || -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
+    if microsoft_feed_configured; then
         return 0
     fi
 
@@ -1079,7 +1095,7 @@ powershell_target() { apt_candidate_version powershell; }
 
 # The distro never carries a powershell package, so Microsoft's feed is the only source, and there is no dotnet-style mixing concern to decide against.
 powershell_install() {
-    if [[ $ARCH != "amd64" ]]; then
+    if ! microsoft_feed_arch; then
         warn "Microsoft's feed carries amd64 only, skipping powershell on $ARCH"
         return 0
     fi
@@ -1213,6 +1229,7 @@ tool_configured() {
     gh | node) [[ -f "$SOURCES_DIR/$(tool_sources_stem "$1").sources" ]] ;;
     # No distro carries 1password-cli, so the cases this guards are the vendor's one-line source and a .deb installed by hand.
     op) [[ -f "$SOURCES_DIR/1password.sources" ]] ;;
+    powershell) microsoft_feed_configured || ! microsoft_feed_arch ;;
     *) return 0 ;;
     esac
 }
@@ -1229,6 +1246,8 @@ tool_effective_status() {
     local tool="$1" status
     status=$(tool_status "$2" "$3")
     if [[ $status == "current" || $status == "outdated" ]] && ! tool_configured "$tool"; then
+        status="unmanaged"
+    elif [[ $status == "unavailable" ]] && microsoft_feed_pending "$tool"; then
         status="unmanaged"
     fi
     printf '%s' "$status"
@@ -1326,7 +1345,13 @@ tool_note() {
         local -a sdks=()
         readarray -t sdks < <(dotnet_sdk_packages)
         if [[ ${#sdks[@]} -eq 0 ]]; then
-            note "dotnet" "no SDK package available, Microsoft's feed is not configured"
+            if ! microsoft_feed_arch; then
+                note "dotnet" "no SDK package available, and Microsoft's feed carries amd64 only"
+            elif microsoft_feed_configured; then
+                note "dotnet" "no SDK package available although Microsoft's feed is configured, so the apt lists may need a refresh"
+            else
+                note "dotnet" "no SDK package available, Microsoft's feed is not configured"
+            fi
         else
             local fleet latest
             fleet=$(dotnet_sdk_fleet)
@@ -1386,8 +1411,10 @@ tool_note() {
     powershell)
         # A host without the feed reads no candidate at all, since the distro never carries a powershell package.
         # So the note says why rather than reading as absent.
-        if [[ ! -f "$SOURCES_DIR/microsoft-prod.sources" && ! -f "$SOURCES_DIR/microsoft-prod.list" ]]; then
-            note "powershell" "Microsoft's repository is not configured, so no package is available yet"
+        if ! microsoft_feed_arch; then
+            note "powershell" "Microsoft's feed carries amd64 only, so no package is available on $ARCH"
+        elif ! microsoft_feed_configured; then
+            note "powershell" "Microsoft's repository is not configured, so apt reads no upstream version yet"
         fi
         ;;
     op)
@@ -1472,7 +1499,7 @@ report() {
 
     if [[ $JSON_OUTPUT == true ]]; then
         local i sep=""
-        printf '{\n  "schema": 1,\n  "platform": "linux",\n  "tools": ['
+        printf '{\n  "schema": 2,\n  "platform": "linux",\n  "tools": ['
         for ((i = 0; i < ${#rows[@]}; i++)); do
             printf '%s\n    %s' "$sep" "${rows[i]}"
             sep=","
@@ -1607,6 +1634,10 @@ apply_tool() {
 
     if [[ $status == "current" ]]; then
         log "$tool: current at ${installed}, checking the package set"
+    elif [[ $status == "unmanaged" && -z $installed && $tool == "dotnet" ]]; then
+        log "$tool: no apt package is installed and Microsoft's feed is not configured, so this install refreshes apt and adds the feed only where the refreshed lists show no distro SDK"
+    elif [[ $status == "unmanaged" && -z $installed ]]; then
+        log "$tool: no apt package is installed and Microsoft's feed is not configured, so this install adds it where Microsoft publishes one for this release"
     elif [[ $status == "unmanaged" ]]; then
         # The available version is whatever apt already has until the managed source is written, so quoting it here could name the wrong upstream.
         if [[ $tool == "node" || $MODE == "upgrade" ]]; then

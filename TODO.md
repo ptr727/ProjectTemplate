@@ -154,8 +154,7 @@ One pull request giving a repo a declared way to say what it needs at runtime, t
   - **Settled** - The committed file carries the required names with dummy values. So the shape of the requirement is in git while the values never are. That is the split the GitHub side already gets from `requiredSecrets`.
   - **Settled** - Blog needs it immediately. The reason is that it deploys on the proxmox host through HomeAutomation-Config's Docker Compose stack and carries the copy destinations and the internal URI.
   - **Settled** - Adopting it in the hub comes first, since the hub carries neither piece.
-  - **Settled** - The GitHub side has the same missing axis, surfaced by the `hugo` type. That is because a deploy's credentials are per-environment secrets and variables, while `stores` is a closed enum of `actions` and `dependabot`. [`spec/audit.py`][audit] seeds its map with those two keys and indexes it unguarded. Adding an `environments` value therefore raises a key error for every repo whose publish maps to that mechanism.
-  - **Settled** - An optional `environments` block is legal in [`spec/secrets.schema.json`][secrets-schema]. However, it has no per-repo dimension, and downstream copies of `spec/secrets.json` are retired. As a result, no repo declares its per-environment names there, and no tool would read one. That is honest and is not a gate, so a clean audit says nothing about whether an environment is configured.
+  - **Settled** - The GitHub side is closed by #2070. Each registry `environments[]` entry declares its `secrets` and `variables` names. The `secrets.environments` check in `spec/audit_environments.py` compares them with every live environment's stores, names only. The unread `environments` block left [`spec/secrets.schema.json`][secrets-schema].
 
 ### The Docker Image Freshness Rule
 
