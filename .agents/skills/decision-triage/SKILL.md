@@ -106,10 +106,11 @@ of its own.
    any child issues the issue tracks, and any later comment recording a decision. A fix merged
    into `develop` and not yet promoted makes the issue `HELD` awaiting promotion rather than
    `OVERTAKEN`. An `**Owed action:**` issue skips the `git log` reads, since git records no step taken.
-   A later comment recording the step done still makes it `OVERTAKEN`. Otherwise it
+   A later comment from an account with write access recording the step done still makes it `OVERTAKEN`. Otherwise it
    is `HELD` on the step it names, whoever's step it is, since a step is not a question. Such an issue is one an account with write access opened, its
    body opening with that marker.
-   The queued `decision` issues get the same check and no classification beyond it.
+   The queued `decision` issues get the same check and no classification beyond it. A queued
+   `**Owed action:**` issue is the exception, and is `HELD` or `OVERTAKEN` as above.
    The classifier returns one line per issue in the form "Return Lines" below.
    Each batch also carries the `deferred` issues to re-check, which get no classification. The
    classifier reads the comment stating the condition the work waits for, from an account with
