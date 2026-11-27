@@ -171,6 +171,7 @@ CARRIED_PATH_PINS = frozenset(
         ".github/workflows/validate-task.yml",
         ".gitignore",
         ".markdownlint-cli2.jsonc",
+        ".python-version",
         ".vscode/tasks.json",
         "AGENTS.md",
         "AUDIT.md",

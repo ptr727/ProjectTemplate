@@ -444,6 +444,39 @@ class CodecovEntryCase(unittest.TestCase):
         self.assertEqual([item["path"] for item in baseline if "alternatives" in item], [])
 
 
+class PythonVersionUnitCase(unittest.TestCase):
+    """The carried .python-version unit is a presence unit whose snippet names the fleet's default Python line.
+
+    Each repository's line is its own, so a fidelity that dates or hashes a copy would flag every other line.
+    The selection action's fallback is held to the devcontainer tag, so the snippet held to that tag keeps all three on one line.
+    """
+
+    SNIPPET = validate.ROOT / "catalog/snippets/configs/.python-version"
+    DEVCONTAINER = validate.ROOT / "catalog/snippets/devcontainer/python/devcontainer.json"
+
+    def test_the_unit_judges_presence_alone(self) -> None:
+        baseline = validate.load("spec/files.json")["baseline"]
+        units = [item for item in baseline if item["path"] == ".python-version"]
+        self.assertEqual(
+            units,
+            [
+                {
+                    "path": ".python-version",
+                    "reference": "catalog/snippets/configs/.python-version",
+                    "appliesTo": ["python"],
+                }
+            ],
+        )
+
+    def test_the_snippet_names_the_devcontainer_line(self) -> None:
+        tag = re.search(
+            r'"image": "mcr\.microsoft\.com/devcontainers/python:\d+-(\d+\.\d+)-\w+"',
+            self.DEVCONTAINER.read_text(encoding="utf-8"),
+        )
+        assert tag is not None, self.DEVCONTAINER
+        self.assertEqual(self.SNIPPET.read_bytes(), f"{tag.group(1)}\n".encode())
+
+
 class RepoOwnedKeysCase(unittest.TestCase):
     """A files.json unit's repoOwnedKeys name leaves of a JSON intent reference, and nothing else."""
 
