@@ -733,11 +733,18 @@ def shim_path(launcher):
     A shim, such as pyenv's, asdf's, or mise's, sits in a directory named `shims`.
     A bare name is resolved through PATH first, as a legacy shell-form entry names it.
     A `.exe` is not one, since Scoop's shims forward to one fixed interpreter.
+    A link is followed one step at a time, so an alias of a shim is one too, and `/usr/bin/python3` stays usable.
     """
-    path = pathlib.PurePath(shutil.which(launcher) or launcher)
-    if path.parent.name != "shims" or path.suffix.lower() == ".exe":
-        return None
-    return str(path)
+    found = shutil.which(launcher) or launcher
+    for _ in range(8):
+        path = pathlib.PurePath(found)
+        if path.parent.name == "shims" and path.suffix.lower() != ".exe":
+            return str(path)
+        try:
+            found = os.path.join(os.path.dirname(found), os.readlink(found))
+        except OSError:
+            return None
+    return None
 
 
 def shim_problem(launcher):
@@ -804,7 +811,7 @@ def hook_launcher():
     The path is absolute, so the hook does not depend on the session's own PATH.
     Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
     A version-manager shim, such as pyenv's, is passed over, since it picks its interpreter when the hook runs.
-    Where no candidate remains, the reasons end with the interpreter the shim runs, to run the installer under.
+    Where no candidate remains, the reasons end with the interpreter a shim runs, where that is usable and not this one.
     The `python3` on PATH is preferred, being unambiguously Python 3.
     A candidate inside a virtual environment yields first to the interpreters that venv was made from.
     Its path is kept as PATH resolves it, and its links are not followed.

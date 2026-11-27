@@ -3681,7 +3681,7 @@ class TestLauncher(StampCase):
 
     def test_the_interpreter_a_shim_names_must_be_usable_and_not_a_shim_or_this_one(self):
         old = self._stub("old-python", f"echo {install.LAUNCHER_TOKEN} 3 10")
-        other_shim = self._shim("exit 0", "mise")
+        other_shim = self._shim(f"echo {install.LAUNCHER_TOKEN} 3 12", "mise")
         good = self._stub("python3", f"echo {install.LAUNCHER_TOKEN} 3 12")
         for label, body in (
             ("below the floor", f'echo "{old}"'),
@@ -3692,6 +3692,23 @@ class TestLauncher(StampCase):
         ):
             with self.subTest(label):
                 self.assertIsNone(install.shim_target(str(self._shim(body, f"case-{label}"))))
+
+    def test_a_link_to_a_shim_is_a_shim_and_a_link_to_an_interpreter_is_not(self):
+        shim = self._shim(f'exec "{sys.executable}" "$@"', "asdf")
+        alias = pathlib.Path(self.tmp) / "bin" / "python3"
+        alias.parent.mkdir()
+        alias.symlink_to(shim)
+        self.assertIn("version-manager shim", install.shim_problem(str(alias)))
+        plain = pathlib.Path(self.tmp) / "bin" / "python"
+        plain.symlink_to(sys.executable)
+        self.assertIsNone(install.shim_problem(str(plain)))
+
+    def test_a_failing_shim_reports_its_own_failure_first(self):
+        shim = self._shim("exit 9", "pyenv")
+        self._path_first(shim.parent)
+        _, rejected = install.hook_launcher()
+        self.assertIn("did not run the version probe", rejected[0])
+        self.assertNotIn("version-manager shim", rejected[0])
 
     def test_an_unstartable_shim_has_no_target(self):
         missing = pathlib.Path(self.tmp) / "gone" / "shims" / "python3"
