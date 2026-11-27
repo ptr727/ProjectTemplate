@@ -2,16 +2,16 @@
 name: dotnet-codestyle
 description: >-
   Governs C#/.NET code style for ptr727/ProjectTemplate fleet repos: the zero-warnings build policy
-  and its clean-compile task chain, central Directory.Build.props and Directory.Packages.props, C#
-  language and naming conventions, XML documentation, analyzer suppression scope, the
-  library-versus-application logging split, async and error-handling patterns, xUnit v3 and
+  and its clean-compile task chain, central build and package props, C# language and naming
+  conventions, XML documentation, analyzer suppression scope, the library-versus-application
+  logging split, async and error-handling patterns, console-app interrupts, xUnit v3 and
   AwesomeAssertions testing, and AOT-compatible project configuration. Use this whenever writing,
-  reviewing, or editing a .cs file, a .csproj, Directory.Build.props, Directory.Packages.props, or global.json,
-  whenever choosing where to suppress an analyzer diagnostic, whenever a NuGet library needs to log
-  without depending on Serilog directly, or whenever writing or reviewing an xUnit test. Triggers
-  even when the task looks like a small local fix ("just silence this warning", "add a quick log
-  line"), because each of these rules erodes one file at a time and never as one obvious diff.
-  Applies only to a repo's .NET side.
+  reviewing, or editing a .cs file, a .csproj, Directory.*.props, or global.json, whenever
+  choosing where to suppress an analyzer diagnostic, whenever a NuGet library needs to log without
+  depending on Serilog directly, or whenever writing or reviewing an xUnit test or a console app's
+  entry point, signal handling, child-process execution, or exit status. Triggers even when the
+  task looks like a small local fix ("just silence this warning", "add a quick log line"), because
+  each of these rules erodes one file at a time. Applies only to a repo's .NET side.
 ---
 
 # .NET Codestyle
@@ -288,6 +288,58 @@ owns formatting and IDE0055 stays `none`.
 11. **Sealing classes**: seal classes that are not designed for inheritance.
 12. **Lazy initialization**: use `Lazy<T>` for static, thread-safe instantiation (e.g. a logger
     factory, an HTTP factory).
+
+## Console app lifetime
+
+A console app's entry point follows the sections below, carried from `CODESTYLE.md`.
+`references/console-lifetime.md` holds a reference skeleton of the lifetime owner, the `Main`
+shape, and the tool runner, with the stop matrix measured against it.
+
+## Interrupts
+
+<!-- include: CODESTYLE.md > Interrupts -->
+
+This applies to every shell and Python script and to every .NET console app, which the bullets below also call a script. `CODESTYLE.md` "Interrupts in Python", "Interrupts in Shell", and "Interrupts in .NET" state each language's mechanics.
+
+- **On SIGINT or SIGTERM, a script releases what it holds before it exits.** It removes the temporary paths it created, releases the locks it took, and stops the child processes it started. A path, lock, or child left behind can stop the next run from starting, or feed it a half-written input. A script started with SIGINT ignored keeps it ignored, so a stop meant to reach it sends SIGTERM. A non-interactive shell starts a background child that way.
+- **A write to persistent state goes to a temporary path beside the target, then is renamed over it.** An interrupt then leaves the old content or the new, never a mix of both. A store with transactions of its own, such as an SQLite database, is written through those instead. A rename over an open database can corrupt it.
+- **An interrupted script prints one line naming the signal, with no traceback, and ends by re-raising the signal.** The signal then ends the process, so a shell reports 130 for SIGINT or 143 for SIGTERM, 128 plus the signal number. At Ctrl-C, a calling shell's loop then stops rather than starting its next iteration. A script calling `exit 130` has not died by the signal, so that loop reads an ordinary non-zero exit and runs on. A launcher between them, such as `uv run`, exits with the status rather than dying by the signal, so that loop runs on there too.
+- **A script takes this rule when it is created or next edited.** An existing script is not edited for this rule alone.
+- **A script that holds a lock, temporary state, or a child process owes a test that signals it mid-run.** The test sends SIGINT or SIGTERM, then asserts that the script died by that signal and that nothing it held remains. It starts the script with its interpreter directly, since a launcher such as `uv run` hides the signal death. It is skipped on Windows, which cannot deliver either signal for a script to handle. A script holding none of these owes no such test.
+- **A script that ends by `exec`-ing its long-running process owes no interrupt handling for that process.** The `exec` replaces the script, so a signal reaches the process directly. A background child the script starts to outlive the `exec` is handed across it, and the script neither stops it nor waits for it. Such a child is handed across only where something else stops it, such as a container's teardown of its whole process tree. Anything else the script holds is released before the `exec`. A script that holds nothing else at any point before the `exec` owes no trap and no signal test. As PID 1, such as a container's entrypoint, it ignores a SIGTERM that arrives before the `exec`, so a stop waits for its timeout.
+
+<!-- /include -->
+
+## Interrupts in .NET
+
+<!-- include: CODESTYLE.md > Interrupts in .NET -->
+
+- **One lifetime owner handles every stop, and an asynchronous `Main` creates it before it parses arguments or creates the logger.** The owner registers `PosixSignalRegistration` for SIGINT, SIGTERM, and SIGHUP. A signal that lands before then takes its default action, and no summary is logged. SIGQUIT stays unhandled, so it remains the immediate exit. The owner holds a graceful stop token, a forceful kill token, and the recorded stop reason. Its token sources are never disposed, since a handler can still run after its registration is disposed.
+- **Stop requests escalate.** The first records the signal and sets `context.Cancel`. It cancels the stop token with `CancelAsync()` and arms the kill token with `CancelAfter` at the kill bound. The second cancels the kill token and sets `context.Cancel` too, so cleanup and the log flush still run. The third cancels the kill token synchronously and leaves `context.Cancel` unset, so the signal's default action ends the process. The handler does nothing else but log one line, and its body sits inside a catch-all. `Cancel()` runs a token's callbacks on the calling thread, which here is the signal thread. An exception that escapes a signal handler ends the process.
+- **The kill bound sits below the container stop grace, at a value such as 5 seconds.** That grace is 10 seconds by default. A bound below it leaves time for cleanup and the log flush before the container is killed.
+- **On Windows, the console close handler waits for cleanup, since the process ends when that handler returns.** A console close reaches the app as SIGHUP. The SIGHUP handler there cancels the stop token and the kill token. It then waits, for less than 5 seconds, until `Main` signals that cleanup finished.
+- **System.CommandLine handles neither signals nor exceptions.** The app sets `ProcessTerminationTimeout` to null and `EnableDefaultExceptionHandler` to false. Each action takes `(ParseResult, CancellationToken)`, and `InvokeAsync` receives the stop token. `Main` holds one `try`, and its `finally` flushes the log. The library's own handler exists only for an asynchronous action. It returns after its timeout while the action still runs, and it reports a cooperative cancel as exit 1.
+- **Cancellation is a parameter end to end.** Every call that can wait takes the token it honors as a parameter. No static accessor reads a token, and no call blocks on a task. A static accessor hides which token a call honors, and a blocked thread cannot see the stop.
+- **A fault is its own stop reason.** A callback off the main flow, such as a file watcher or a timer, catches its exception and reports a fault to the owner. An exception that escapes such a callback is unhandled, so the process aborts instead of cleaning up. Any stop, a fault included, arms the kill bound. The exit follows the recorded reason: a fault first, then a signal, then the result. A fault exits with the app's error status, never 0 and never a signal status.
+- **One function runs every child tool.** On Unix it starts the child in a session of its own with `ProcessStartInfo.StartDetached`, and every standard stream is redirected. A terminal's signal then reaches only the app, which stops the child once. A child left in the app's process group receives the signal twice, the terminal's and the app's. `KillOnParentExit` is set where the platform supports it, so a child does not outlive an app that is killed. The stop token is the graceful stop, and the kill token is the forceful one. Where a stop was requested, the tool run is cancelled, and any other signal death is a tool failure. These start options need the .NET 11 line, so an app that runs child tools selects that line or a later one. On Windows `StartDetached` stays unset, since the graceful stop attaches to the child's console.
+- **What a child starts and leaves behind, such as a container, is named and removed in the stop path.** Stopping the child does not stop what it started outside its own process tree.
+- **A child inherits an ignored SIGINT, so the kill bound is what ends it there.** A non-interactive shell starts a background job with SIGINT ignored, and the app's children inherit that. The app's SIGINT registration then never fires, and a SIGTERM still stops the app.
+- **One exit decision ends the app, and a signal stop ends it by re-sending the signal.** This is the .NET form of the re-raise in `CODESTYLE.md` "Interrupts". After the log is flushed, the app disposes its registrations and restores the signal's default action with libc `signal`. It then re-sends the signal to itself with libc `kill`, so a calling shell loop stops. Where that cannot end the process, as PID 1 in a container or on Windows, `Main` returns 128 plus the signal number. Nothing relies on `ProcessExit` or a finalizer, since the default action ends the process without running either.
+- **The rename over persistent state uses `File.Move` with overwrite.** The temporary file sits beside the target and is flushed to disk with `Flush(true)` before the move replaces the target. A rename of content that was never flushed can survive a power loss as an empty file.
+- **An app that runs children owes a test that signals the built app mid-run.** It signals the process group in one case and the app alone in another. It starts the app with default signal dispositions, as `env --default-signal=INT,QUIT` does. A calling shell loop that does not continue proves death by the signal, since an exit status alone cannot. The PID 1 path runs in the app's container image. The test asserts the logged summary and that no child remains. It is skipped on Windows.
+
+<!-- /include -->
+
+## Unhandled Exceptions in .NET
+
+<!-- include: CODESTYLE.md > Unhandled Exceptions in .NET -->
+
+- **The lifetime owner subscribes `AppDomain.CurrentDomain.UnhandledException` first in `Main`, and its handler logs the exception without surviving it.** The handler writes the exception to standard error and cancels the kill token synchronously, so the tools end. It flushes the log on another thread under a bound, such as 3 seconds, and then returns. The runtime then aborts, so the abort status and any crash dump remain. The handler does not call `Environment.Exit`, and the app does not use `ExceptionHandling.SetUnhandledExceptionHandler` to continue. Continuing would run on with whatever state the exception left broken.
+- **`TaskScheduler.UnobservedTaskException` is logged as an error.** A faulted task that nothing awaited raises it only when the task is collected, so the log is the one place its exception shows.
+- **A fatal runtime error is not a managed exception and reaches no handler, so a crash dump is its only capture.** The `DOTNET_DbgEnableMiniDump` setting enables that dump.
+- **As PID 1 the abort surfaces as another status, so after a logged unhandled exception a caller reads any status above 128 as the abort.** Elsewhere the process dies by SIGABRT. The kernel drops the abort signal's default action for PID 1, and the status measured there on x86-64 is 139.
+
+<!-- /include -->
 
 ## Testing conventions
 
