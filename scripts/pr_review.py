@@ -77,7 +77,8 @@ Subcommands
            table names a finding prints none, since `FINDINGS WITH NO THREAD` names those.
            50 is also a head round's part the adapter cannot place, `shapes=HELD` with an
            excerpt under `UNPLACED ON THE HEAD`. A trusted comment acknowledging its
-           fingerprint clears it, `shapes=ACKNOWLEDGED`.
+           fingerprint clears it, `shapes=ACKNOWLEDGED`. 50 is also a title over 72 characters, ending
+           in a period, or off the bind-word case where a Copilot round covers the head, `title=HELD` with each fix under `TITLE NOT CONVENTIONAL`. A retitle clears it, `merge` refuses it on any head, and Dependabot's reads `title=exempt`.
            `coverage=` names how the head's diff is shown read: `full` or `PARTIAL` as the round
            states it, `UNKNOWN` for a statement this cannot believe or a body the reader failed
            on (`PARTIAL` instead where an earlier round states partial coverage), `table` where a
@@ -401,7 +402,7 @@ mutation($pr:ID!,$bot:ID!){
 # The rollup rides this query and hangs off the last commit, which a case holds equal to `headRefOid`.
 HELD_FIELDS = """
     headRefOid baseRefName state mergeable mergeStateStatus mergedAt closedAt headRefName mergeCommit{ oid }
-    baseRepository{ defaultBranchRef{ name } } headRepository{ nameWithOwner }
+    baseRepository{ defaultBranchRef{ name } } headRepository{ nameWithOwner } title author{login}
     reviews(last:100){ nodes{ id author{login} state commit{oid} submittedAt body } pageInfo{ hasPreviousPage } }
     comments(last:100){ nodes{ author{login} authorAssociation createdAt body isMinimized updatedAt } pageInfo{ hasPreviousPage } }
     reviewRequests(first:10){ nodes{ requestedReviewer{ __typename ... on Bot{login} ... on User{login} } } }

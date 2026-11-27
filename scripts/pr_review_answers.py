@@ -50,6 +50,8 @@ from pr_review_rounds import (
     threads_truncated,
     uncounted_verdict,
 )
+from pr_review_title import STATUS as TITLE_HELD
+from pr_review_title import title_hold, title_status
 
 FINDING_ACK = "<!-- fleet-finding-ack: key={} outcome={} -->"
 ACK_LINE = re.compile(r"^<!-- fleet-finding-ack: key=([0-9a-f]{12}) outcome=([a-z]+) -->$")
@@ -250,6 +252,8 @@ def unmet(pr: dict, fields: dict, opened: list[dict]) -> list[tuple[str, str]]:
         found.append(
             ("OUTPUT_NOTED", f"the digest reads {notes[0]} with a part no acknowledgment answers")
         )
+    if fixes := title_hold(pr):
+        found.append((TITLE_HELD, f"the title owes a retitle: {'. '.join(fixes)}"))
     if drifted := reviewer_login_drift(pr):
         found.append(("REVIEWER_LOGIN_DRIFT", f"{drifted[0]}, which only a login change clears"))
     if (state := pr.get("mergeStateStatus")) not in MERGE_UNGATED:
@@ -336,8 +340,12 @@ def report_verdict(pr: dict) -> int:
 
     A missing head review has no verdict yet, which the wait path owns. Coverage shown nowhere is a
     note rather than an exit. A head round's unplaced part is an exit until it is acknowledged, and
-    a verdict naming no counted finding until its key is.
+    a verdict naming no counted finding until its key is. A title breaking its contract's mechanical
+    part prints its line on any head. It is an exit beside a head review, until a retitle. `merge`
+    refuses it on any head.
     """
+    if titled := title_status(pr):
+        print(titled)
     if not head_reviews(pr):
         return 0
     state, why = coverage(pr)
@@ -377,7 +385,7 @@ def report_verdict(pr: dict) -> int:
             f"reader cannot place, under UNPLACED ON THE HEAD. Acknowledging fingerprint {hold[0]} "
             "with `comment --fingerprint` and each item's outcome clears this code"
         )
-    if flagged or (hold and not hold[2]):
+    if flagged or (hold and not hold[2]) or titled:
         return 50
     if state in ("none", "unknown"):
         print(
@@ -399,7 +407,7 @@ NEXT = {
             *("REVIEW_PENDING", "UNTHREADED_FINDINGS", "OUTPUT_NOTED", "MERGE_NOT_CLEAN"),
             *("VERDICT_NAMES_UNCOUNTED_FINDINGS", "AWAITING_LOCAL_PASS", "PENDING"),
             *("CHECKS_PENDING", "CHECKS_NOT_MERGEABLE", "CHECKS_MISSING", "BAD_CHECKOUT"),
-            *("COPILOT_ERROR_TRANSIENT", "CHECKS_BEFORE_REVIEW"),
+            *("COPILOT_ERROR_TRANSIENT", "CHECKS_BEFORE_REVIEW", TITLE_HELD),
         ),
         "redrive",
     ),
