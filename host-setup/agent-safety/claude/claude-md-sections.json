@@ -9,7 +9,7 @@
         {
             "host": "host-setup/agent-safety/claude/claude-md-safety.md > Data in Agent-Authored Text (Any Project, Every Session)",
             "section": "GOVERNANCE.md > Representative Data in Agent-Authored Text",
-            "digest": "sha256:4bcd0beee56b51bbb7eb9db7b38933b0f0b93ae2a6682b2e7cf80fad2f6d3ba4"
+            "digest": "sha256:15fcca1d4f91d648ef640038dd605897035b985942540bf5c0f93f2ee3e817af"
         },
         {
             "host": "host-setup/agent-safety/claude/claude-md-fleet.md > Fleet Governance Entry Point (Any Project, Every Session)",
