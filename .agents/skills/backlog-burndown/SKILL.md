@@ -1133,7 +1133,8 @@ planner writes being unknown. Where its error left unclear whether the failed di
 marks that seat as one that may have. Where that seat was a planner, its claims are unknown too. The final message is the report "Ending the Run" describes, with every held-back issue under the
 reason that holds it back. **Only what needs the maintainer is reported as needing the
 maintainer.** That is an open `decision` issue, a group parked on one, and a parked dirty tree.
-It is also a worker named as uncollected, since no later run resumes its group. It is also a
+It is also a worker named as uncollected, since no later run resumes its group. Where such a worker
+merges later, its owed actions sit only under its pull request's `## Owed actions` heading, as the report says. It is also a
 missing or wrong shared git hook a worker reported, per `repo-worktree` "Preparing Git Hooks". It
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
