@@ -882,6 +882,8 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(adds, [])
         self.assertNotIn("Registering the key through gh", result.stdout)
+        calls = (self.tmp / "calls").read_text().splitlines()
+        self.assertFalse([c for c in calls if c.startswith(("auth login", "auth refresh"))], calls)
 
     def test_a_refused_authentication_add_skips_the_signing_add(self) -> None:
         result, adds = self.register(add_rc=1)
@@ -1178,7 +1180,7 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
             if ((Get-SigningRegistrationState) -ne 'registered') { Show-RegistrationNeeded -Kind 'signing' -Type 'Signing' }
         }
     } 6>&1 | ForEach-Object { "$_" }
-    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); lists = @($script:Calls | Where-Object { $_ -eq 'ssh-key list' }).Count; probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }); host = @($script:SshCalls | Where-Object { $_ -notlike '*IdentitiesOnly*' }) }
+    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); lists = @($script:Calls | Where-Object { $_ -eq 'ssh-key list' }).Count; logins = @($script:Calls | Where-Object { $_ -like 'auth login*' -or $_ -like 'auth refresh*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }); host = @($script:SshCalls | Where-Object { $_ -notlike '*IdentitiesOnly*' }) }
 }
 Remove-Item $directory -Recurse
 $results | ConvertTo-Json -Depth 4
@@ -1357,9 +1359,11 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertEqual(self.adds("both-done"), [])
         self.assertIn("Already registered as the signing key", self.output("both-done"))
 
-    def test_a_logged_out_gh_registers_nothing(self) -> None:
+    def test_a_logged_out_gh_registers_nothing_and_never_logs_in(self) -> None:
         self.assertEqual(self.adds("logged-out"), [])
         self.assertNotIn("Registering the key through gh", self.output("logged-out"))
+        logins = self.listed("logged-out", "logins")
+        self.assertEqual(logins, [], logins)
 
     def test_a_refused_authentication_add_skips_the_signing_add(self) -> None:
         adds = self.adds("refused")
