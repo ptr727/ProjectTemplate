@@ -28,7 +28,7 @@ maintainer is present. The run that follows then has the answers and meets fewer
 
 - **The triage seat** is the session this skill runs in. It reads the issue list, dispatches the
   classifiers and researchers, writes the `decision` issues, and asks the maintainer. It reads no
-  issue body itself beyond what a subagent returns.
+  issue body itself beyond what a subagent returns, save a maintainer's owed-action issue in step 8.
 - **A classifier** is a subagent given a batch of issue numbers. It returns one line per issue.
 - **A researcher** is a subagent given a cluster of questions that share a topic, five or six by
   default. It returns each question with its options and its evidence.
@@ -57,7 +57,8 @@ and a guess costs a revert and a review round.
 - **It waits on the maintainer already.** It carries the `decision` label, or a comment asks the
   maintainer something still unanswered.
 - **The fix reaches past the repository's tree.** It changes a repository setting, a ruleset,
-  visibility, a secret, or a release condition. Or it needs a credential, an account, or a host
+  visibility, a secret, or a release condition. Or its remaining work lies in a repository under
+  another owner, whose writes need the maintainer's permission. Or it needs a credential, an account, or a host
   the session lacks.
 - **The fix edits anything under the hub's `host-setup/agent-safety/`.** That tree is the agent's
   own guard, so a human approves every change to it. An approval on the issue lets an attended
@@ -78,10 +79,12 @@ issue for one undecided item is the failure this rule exists to prevent.
 
 These are not reasons an issue needs the maintainer, and a report never counts them as such. An
 issue that is `blocked` on another issue waits on that issue. One that needs a platform, by the
-test `session-handoff` "The Chain" states, waits on that platform's lane. One that another group
+test `session-handoff` "The Chain" states, waits on that platform's lane. One whose remaining work
+lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. An `**Owed action:**` issue is one an account with write
+access opened, its body opening with that marker. It waits on the step it names, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 ## The Procedure
@@ -102,7 +105,11 @@ of its own.
    `git log refs/remotes/origin/develop` on the files the issue names. It also reads the state of
    any child issues the issue tracks, and any later comment recording a decision. A fix merged
    into `develop` and not yet promoted makes the issue `HELD` awaiting promotion rather than
-   `OVERTAKEN`. The queued `decision` issues get the same check and no classification beyond it.
+   `OVERTAKEN`. An `**Owed action:**` issue, as "Needs the Maintainer" defines one, skips the
+   `git log` reads, since git records no step taken.
+   A later comment from an account with write access recording the step done still makes it `OVERTAKEN`. Otherwise it
+   is `HELD` on the step it names, whoever's step it is, unless it waits on the maintainer already.
+   The queued `decision` issues get the same check and no classification beyond it.
    The classifier returns one line per issue in the form "Return Lines" below.
    Each batch also carries the `deferred` issues to re-check, which get no classification. The
    classifier reads the comment stating the condition the work waits for, from an account with
@@ -166,7 +173,8 @@ of its own.
 8. **Report** the counts: issues an agent can fix alone, questions answered, questions deferred,
    questions still open, overtaken issues closed, and splits filed. Give the count of open
    `deferred` issues as well, after step 2's lifts, and how many it lifted. Also name each issue held back for any other reason "Needs the
-   Maintainer" does not count, under that reason. End with one line saying a `backlog-burndown` away-mode run
+   Maintainer" does not count, under that reason. List each `HELD` owed action that is the
+   maintainer's as a step to take. Read its issue body for each command it gives, and for any promotion or release it says the step waits on. End with one line saying a `backlog-burndown` away-mode run
    can now work the rest.
 
 ## Return Lines
@@ -176,7 +184,7 @@ of its own.
 | classifier | `AUTO #<n>` | an agent can fix it alone |
 | classifier | `ASK #<n> <the question in one sentence>` | the whole issue needs the maintainer |
 | classifier | `SPLIT #<n> <the undecided item in one sentence>` | part needs the maintainer, the rest does not |
-| classifier | `HELD #<n> <reason>` | waits on something other than a decision, such as a promotion or an attended run for an approved agent-safety edit |
+| classifier | `HELD #<n> <reason>`, the reason for an owed action reading `owed action, <whose step>` | waits on something other than a decision, such as a promotion, an attended run for an approved agent-safety edit, or an `**Owed action:**` issue's step |
 | classifier | `OVERTAKEN #<n> <what answered or overtook it>` | a later change already settled it, found by the history check |
 | classifier | `LIFT #<n> <open or settled> <the condition and the evidence that it holds>` | a `deferred` issue whose checkable condition now holds |
 | classifier | `KEEP #<n> <the condition it still waits on>` | a `deferred` issue that stays deferred |
@@ -189,7 +197,7 @@ reported as unclassified where it fails twice.
 ## Briefs
 
 Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape. A classifier's brief
-quotes "Needs the Maintainer" whole and states the history check and the `deferred` re-check in step 2. It lists its issue
+quotes "Needs the Maintainer" whole and states the history check, the owed-action `HELD` line, and the `deferred` re-check in step 2. It lists its issue
 numbers, marking the ones to re-check. It also states how step 6 says a kept-open comment reads. A researcher's brief names each issue in its cluster, its question, and the rule files
 it touches. It also states how to weigh what the issue holds:
 
