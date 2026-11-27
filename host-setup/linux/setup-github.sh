@@ -7,9 +7,11 @@
 # Both are gates rather than suggestions.
 # Where gh is already logged in with the admin:public_key and admin:ssh_signing_key scopes, the script registers each through gh ssh-key add.
 # That also needs GitHub to show the managed key as belonging to gh's account, or as unknown to it.
+# Where the host already has an ssh identity GitHub accepts, that identity must answer as gh's account too.
 # Logging gh in stays interactive and is never run from here.
 # Where gh cannot register the key, the script stops at each registration and prints the key to paste and where to paste it.
-# That covers no gh login, a login missing the scopes, a key that belongs to another account, and a key probe that could not tell.
+# That covers no gh login, a login missing the scopes, and a key that belongs to another account.
+# It also covers a host identity answering as another account, and a key probe that could not tell.
 # A probe that could not tell includes a host that reaches GitHub only through its ssh config.
 # The script checks afterwards that the registration took.
 # It reads gh's own key lists where this run's gh add of the signing key succeeded, and the keys GitHub publishes for the account otherwise.
@@ -138,11 +140,13 @@ The same key is registered twice, once as an authentication key and once as a si
 authentication reaches private repositories, signing is what marks a commit verified. Where gh is
 already logged in with the admin:public_key and admin:ssh_signing_key scopes, --configure registers
 whichever is missing through gh ssh-key add, provided GitHub shows the key as gh's account's or as
-unknown to it. Logging gh in is never run for you, and
+unknown to it, and any ssh identity the host already has answers as gh's account too. Logging gh
+in is never run for you, and
 gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes. Where gh
 cannot register the key, --configure stops at each registration and prints what to paste. That
-covers no login, missing scopes, a key on another account, and a key probe that could not tell,
-such as a host reaching GitHub only through its ssh config. Each registration is checked, so a run
+covers no login, missing scopes, a key on another account, a host identity answering as an
+account other than gh's, whose warning names both, and a key probe that could not tell, such as
+a host reaching GitHub only through its ssh config. Each registration is checked, so a run
 says whether it took rather than assuming it.
 
 Exit status 64 means an argument was refused, so nothing was changed. No other failure exits 64.
@@ -486,7 +490,6 @@ register_through_gh() {
             info "Registered as the $kind key through gh, titled $title"
             [[ $kind == "signing" ]] && GH_SIGNING_ADDED=true
         fi
-        # shellcheck disable=SC2034  # The signing call is the last, and no caller reads its answer.
         KEY_REGISTERED=true
         return 0
     fi
@@ -506,7 +509,7 @@ register_keys_through_gh() {
 
     # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
     # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
-    # Only the key's own account naming gh's, or ssh offering the key and GitHub refusing it, lets the registration run.
+    # Only the key's own account naming gh's, or ssh offering the key and GitHub refusing it, passes this part of the gate.
     if [[ -f $KEY ]]; then
         probe_managed_key
         if [[ -n $MANAGED_USER && $MANAGED_USER != "$account" ]]; then
@@ -517,6 +520,16 @@ register_keys_through_gh() {
             warn "Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. Register it with the paste below."
             return 0
         fi
+    fi
+
+    # The gh CLI can hold several accounts, so its active one is not proof of the account this host is meant for.
+    # A host whose existing ssh identity answers as another account is told so before anything is written, rather than after.
+    # A host with no identity GitHub accepts names no account here, so it is unaffected.
+    local general
+    general=$(github_auth_user)
+    if [[ -n $general && $general != "$account" ]]; then
+        warn "gh is logged in as $account, while this host's ssh identity answers as $general, so the key was not registered through gh. Register it with the paste below on the intended account, or log gh in as that account and re-run."
+        return 0
     fi
 
     step "Registering the key through gh, logged in as $account"

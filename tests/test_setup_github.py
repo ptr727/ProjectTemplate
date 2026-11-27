@@ -705,19 +705,19 @@ ADD_REFRESH = "gh auth refresh -h github.com -s admin:public_key,admin:ssh_signi
 # The ssh client sends the public half first, as an offer, and loads the private half only after the server says it accepts the key.
 # So only "offered" is positive evidence of a key registered nowhere: the offer, then the refusal, and no accept line.
 # A registered key whose private half then fails to load prints the offer, the accept line, the load failure and the same refusal.
+# Under BatchMode ssh never prompts for a passphrase, so such a key with no agent prints the offer, the accept line and the refusal.
 DENIAL = "git@github.com: Permission denied (publickey)."
 OFFER = f"debug1: Offering public key: KEYPATH ED25519 {FINGERPRINT} explicit"
 ACCEPT = f"debug1: Server accepts key: KEYPATH ED25519 {FINGERPRINT} explicit"
 SSH_STATES: dict[str, str] = {
     "offered": f"{OFFER}\n{DENIAL}",
     "wrong-offer": f"debug1: Offering public key: KEYPATH ED25519 SHA256:other explicit\n{DENIAL}",
-    "passphrase": f"{OFFER}\n{ACCEPT}\ndebug1: read_passphrase: can't open /dev/tty\n{DENIAL}",
-    "no-tty": f'{OFFER}\n{ACCEPT}\nLoad key "KEYPATH": incorrect passphrase supplied\n{DENIAL}',
+    "passphrase": f"{OFFER}\n{ACCEPT}\n{DENIAL}",
     "unprotected": f'{OFFER}\n{ACCEPT}\nLoad key "KEYPATH": bad permissions\n{DENIAL}',
     "silent": "",
 }
-CANNOT_TELL = ("wrong-offer", "passphrase", "no-tty", "unprotected", "silent")
-LIST_ROW = "example-host\t" + PUBLIC_KEY + "\t{kind}\t2024-01-01\t1"
+CANNOT_TELL = ("wrong-offer", "passphrase", "unprotected", "silent")
+HOST_MISMATCH = f"gh is logged in as {ACCOUNT}, while this host's ssh identity answers as {SECOND}"
 
 # A gh answering the calls the registration makes, recording each, and keeping the registered kinds in $STATE.
 # Both gh and ssh are shell functions, so nothing reaches a real account and no real host is read.
@@ -904,6 +904,28 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         result, adds = self.register(managed=ACCOUNT, registered="auth")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(adds), 1, adds)
+
+    def test_a_host_identity_answering_as_another_account_registers_nothing(self) -> None:
+        result, adds = self.register(general=SECOND)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertIn(HOST_MISMATCH, result.stderr)
+        self.assertIn("Register it with the paste below", result.stderr)
+        self.assertNotIn("Registering the key through gh", result.stdout)
+
+    def test_a_host_identity_answering_as_another_account_refuses_beside_a_key_on_gh_s(
+        self,
+    ) -> None:
+        result, adds = self.register(managed=ACCOUNT, registered="auth", general=SECOND)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertIn(HOST_MISMATCH, result.stderr)
+
+    def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
+        result, adds = self.register(general=ACCOUNT)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 2, adds)
+        self.assertNotIn("ssh identity answers as", result.stderr)
 
     def test_a_denial_without_an_offer_of_this_key_registers_nothing(self) -> None:
         for state in CANNOT_TELL:
@@ -1135,6 +1157,14 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             windows_register_case("dry-run-no-key", dry_run=True, no_key=True),
             windows_register_case("other-account", managed=SECOND, ssh_state="silent"),
             windows_register_case("same-account", managed=ACCOUNT, registered=["authentication"]),
+            windows_register_case("host-other", general=SECOND),
+            windows_register_case(
+                "host-other-key-on-gh",
+                managed=ACCOUNT,
+                registered=["authentication"],
+                general=SECOND,
+            ),
+            windows_register_case("host-same", general=ACCOUNT),
             windows_register_case(
                 "probe-once",
                 managed=ACCOUNT,
@@ -1227,6 +1257,23 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     def test_a_key_authenticating_as_the_gh_account_is_registered(self) -> None:
         adds = self.adds("same-account")
         self.assertEqual(len(adds), 1, adds)
+
+    def test_a_host_identity_answering_as_another_account_registers_nothing(self) -> None:
+        self.assertEqual(self.adds("host-other"), [])
+        output = self.output("host-other")
+        self.assertIn(HOST_MISMATCH, output)
+        self.assertIn("Register it with the paste below", output)
+        self.assertNotIn("Registering the key through gh", output)
+
+    def test_a_host_identity_answering_as_another_account_refuses_beside_a_key_on_gh_s(
+        self,
+    ) -> None:
+        self.assertEqual(self.adds("host-other-key-on-gh"), [])
+        self.assertIn(HOST_MISMATCH, self.output("host-other-key-on-gh"))
+
+    def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
+        self.assertEqual(len(self.adds("host-same")), 2)
+        self.assertNotIn("ssh identity answers as", self.output("host-same"))
 
     def test_a_denial_without_an_offer_of_this_key_registers_nothing(self) -> None:
         for state in CANNOT_TELL:
