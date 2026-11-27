@@ -24,6 +24,7 @@ CEILINGS = {
     "pr_review_promotion.py": 250,
     "pr_review_hold.py": 200,
     "pr_review_summary.py": 100,
+    "pr_review_title.py": 200,
 }
 
 

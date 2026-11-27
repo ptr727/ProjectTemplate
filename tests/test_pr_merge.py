@@ -869,6 +869,7 @@ ROUTED = {
             "CHECKS_MISSING",
             "COPILOT_ERROR_TRANSIENT",
             "CHECKS_BEFORE_REVIEW",
+            "TITLE_NOT_CONVENTIONAL",
         ),
         "redrive",
     ),
