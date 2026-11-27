@@ -297,6 +297,8 @@ The task's inputs are `app-login` (default `ptr727-codegen[bot]`), `rules`, and 
 
 GitHub can disable auto-merge with every check green, so the stub also triggers on `auto_merge_disabled`. The task then re-arms once the base branch has settled. Where every check is green, `gh` merges at once instead, so a refused merge fails the job. [WORKFLOW.md D8.1][workflow-d8] is the contract. A stub carrying the event under an older pin runs nothing on it, since every job of an older task skips that event. The App keeps its permissions for this. A merge it may not perform surfaces as that failed job rather than as a pull request left open and green.
 
+GitHub arms auto-merge only on a base whose rules require status checks. An operational repository's `develop` requires none. On such a base the merge job waits for every check run and commit status on the pinned head, apart from the merge-bot's own jobs. It merges directly once they pass, and fails on a failed check, a moved head, or its bound, per [WORKFLOW.md D8.1][workflow-d8]. That wait reads checks under the App token, so the App holds `checks: read` and `statuses: read`. A read refused there fails the job naming the permission, which means an installation has not accepted it yet.
+
 Two copies today filter Dependabot by ecosystem and semver tier before merging. [WORKFLOW.md D8.1][workflow-d8] says every Dependabot tier auto-merges and the required checks are the gate. Those two repos therefore drop the filter on adoption unless the [Open Decisions][open-decisions] below settle otherwise.
 
 ## Adopting the Gates

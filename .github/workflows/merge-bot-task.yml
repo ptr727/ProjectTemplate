@@ -55,6 +55,8 @@ jobs:
       (github.event.action == 'opened' || github.event.action == 'reopened') &&
       github.event.pull_request.user.login == 'dependabot[bot]' &&
       github.event.pull_request.head.repo.full_name == github.repository
+    # The check wait below is bounded well inside this.
+    timeout-minutes: 25
 
     steps:
 
@@ -66,18 +68,127 @@ jobs:
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
       # Auto-merge every tier, semver-major included: the required checks are the gate, not the bump magnitude.
+      # The merge-app job aliases this step's script and env, so both jobs run one step.
       - name: Merge pull request step
-        run: |
+        run: &merge-run |
           set -Eeuo pipefail
           if [[ -z "$MERGE_METHOD" ]]; then
             echo "::error::Unsupported base branch: $BASE_REF"
             exit 1
           fi
-          gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"
-        env:
+          # A read retries, so one transient API error does not fail the merge.
+          # A read the App token may not make fails at once, naming the permission its installation has not accepted.
+          read_api() {
+            local what=$1 permission=$2 attempt err
+            shift 2
+            err=$(mktemp)
+            for attempt in 1 2 3; do
+              if out=$("$@" 2>"$err"); then
+                return 0
+              fi
+              cat "$err" >&2
+              if [[ -n "$permission" ]] && grep -Fq 'Resource not accessible by integration' "$err"; then
+                echo "::error::Reading $what was refused, so an App installation has not accepted the $permission permission yet"
+                exit 1
+              fi
+              echo "::warning::Reading $what failed on attempt $attempt"
+              sleep "$POLL_SECONDS"
+            done
+            echo "::error::Reading $what failed three times, so the pull request is not merged"
+            exit 1
+          }
+
+          # A closed or merged pull request ends the step, and a moved head fails it, since the checks read belong to the pinned head.
+          read_pr() {
+            read_api "the pull request" "" gh api "repos/$REPO/pulls/$NUMBER" --jq '[.state, (.merged | tostring), .head.sha] | @tsv'
+            local state merged head
+            IFS=$'\t' read -r state merged head <<<"$out"
+            if [[ "$merged" == true ]]; then
+              echo "The pull request is merged, so there is nothing more to merge"
+              exit 0
+            fi
+            if [[ "$state" != open ]]; then
+              echo "::notice::The pull request was closed, so it is not merged"
+              exit 0
+            fi
+            if [[ "$head" != "$HEAD_SHA" ]]; then
+              echo "::error::The head moved from $HEAD_SHA to $head, so the pull request is not merged"
+              exit 1
+            fi
+          }
+
+          read_api "the base branch rules" "" gh api --paginate "repos/$REPO/rules/branches/$BASE_REF" --jq '.[].type'
+          if grep -Fxq required_status_checks <<<"$out"; then
+            gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"
+            exit 0
+          fi
+
+          # GitHub arms auto-merge only on a base with required checks, so here the step waits for the head's checks and merges itself, per D8.1.
+          echo "The $BASE_REF rules require no status checks, so the merge waits for every check on $HEAD_SHA"
+          deadline=$((SECONDS + WAIT_LIMIT_SECONDS))
+          passing=""
+          passing_since=0
+          while :; do
+            read_pr
+            read_api "the head's check runs" "checks: read" gh api --paginate "repos/$REPO/commits/$HEAD_SHA/check-runs?per_page=100" --jq '.check_runs[] | {id, name, status, conclusion}'
+            # A re-run leaves its earlier attempt on the head, so only the newest run of each name counts.
+            runs=$(jq -sc 'group_by(.name) | map(max_by(.id))[]' <<<"$out")
+            read_api "the head's commit statuses" "statuses: read" gh api --paginate "repos/$REPO/commits/$HEAD_SHA/status?per_page=100" --jq '.statuses[] | {name: .context, status: (if .state == "pending" then "pending" else "completed" end), conclusion: .state}'
+            # This workflow's own jobs post on the head too, as a caller job name, a slash, and the job name, so the wait leaves them out.
+            checks=$(jq -sc --argjson own "$OWN_JOBS" '
+              map(select(.name as $n | $own | any(. as $j | $n == $j or ($n | endswith(" / " + $j))) | not))
+              | sort_by(.name)' <<<"$runs"$'\n'"$out")
+            failed=$(jq -r '[.[] | select(.status == "completed" and (.conclusion | IN("success", "neutral", "skipped") | not))
+              | "\(.name) (\(.conclusion))"] | join(", ")' <<<"$checks")
+            if [[ -n "$failed" ]]; then
+              echo "::error::A check on the head failed, so the pull request is not merged: $failed"
+              exit 1
+            fi
+            if [[ $(jq -r 'all(.status == "completed")' <<<"$checks") == true ]]; then
+              # A check that has not posted yet reads as absent, so the passing set has to hold for the settle window.
+              if [[ "$checks" != "$passing" ]]; then
+                passing=$checks
+                passing_since=$SECONDS
+              fi
+              if ((SECONDS - passing_since >= SETTLE_SECONDS)); then
+                break
+              fi
+            else
+              passing=""
+            fi
+            if ((SECONDS >= deadline)); then
+              pending=$(jq -r '[.[] | select(.status != "completed") | .name] | join(", ")' <<<"$checks")
+              echo "::error::The head's checks did not all pass and settle within $WAIT_LIMIT_SECONDS seconds, so the pull request is not merged: ${pending:-none pending}"
+              exit 1
+            fi
+            sleep "$POLL_SECONDS"
+          done
+          # The head pin keeps a push landing after the last read from being merged in the bot's place.
+          # A sibling merging into the same base can refuse this one, so a refusal re-reads the pull request and tries again.
+          for attempt in 1 2 3; do
+            if gh pr merge "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"; then
+              exit 0
+            fi
+            read_pr
+            echo "::warning::Merging failed on attempt $attempt"
+            if ((attempt < 3)); then
+              sleep "$POLL_SECONDS"
+            fi
+          done
+          echo "::error::Merging failed three times with every check passed"
+          exit 1
+        env: &merge-env
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          OWN_JOBS: >-
+            ["Merge dependabot pull request job", "Merge App pull request job", "Re-arm auto-merge job",
+            "Disable auto-merge on maintainer push job", "Delete merged bot branch job"]
+          WAIT_LIMIT_SECONDS: 1200
+          SETTLE_SECONDS: 60
+          POLL_SECONDS: 15
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
 
   merge-app:
@@ -94,6 +205,8 @@ jobs:
       ) &&
       github.event.pull_request.user.login == inputs.app-login &&
       github.event.pull_request.head.repo.full_name == github.repository
+    # The check wait in the merge step is bounded well inside this.
+    timeout-minutes: 25
     outputs:
       matched: ${{ steps.rule.outputs.matched }}
 
@@ -145,20 +258,10 @@ jobs:
           client-id: ${{ secrets.CODEGEN_APP_CLIENT_ID }}
           private-key: ${{ secrets.CODEGEN_APP_PRIVATE_KEY }}
 
-      - name: Merge pull request step
+      - name: Merge App pull request step
         if: ${{ steps.rule.outputs.matched == 'true' && github.event.action != 'auto_merge_disabled' }}
-        run: |
-          set -Eeuo pipefail
-          if [[ -z "$MERGE_METHOD" ]]; then
-            echo "::error::Unsupported base branch: $BASE_REF"
-            exit 1
-          fi
-          gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: *merge-run
+        env: *merge-env
 
   rearm-auto-merge:
     name: Re-arm auto-merge job
