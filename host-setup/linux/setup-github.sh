@@ -483,11 +483,12 @@ signing_registration_state() {
 
 # Registers one kind of key through gh, for an account gh is already logged in as.
 # The kind is "authentication" or "signing", which is also gh's own --type value.
+# The second argument is gh_key_registered's answer for that kind, read once by the caller so the gate and the add act on one listing.
 # KEY_REGISTERED says whether the key is registered or now is, so the next kind may follow.
 # It always returns 0, since a caller under set -e would end the run on a refusal.
 # A refused registration, such as a token without the scope, is a warning that names the remedy and never ends the run.
 register_through_gh() {
-    local kind="$1" registered_rc=0 title
+    local kind="$1" registered_rc="$2" title
     KEY_REGISTERED=false
     # A dry run before the key exists has nothing to read or register, so it says what a real run would do.
     if [[ ! -f $KEY.pub ]]; then
@@ -495,7 +496,6 @@ register_through_gh() {
         KEY_REGISTERED=true
         return 0
     fi
-    gh_key_registered "$kind" || registered_rc=$?
     case "$registered_rc" in
     0)
         info "Already registered as the $kind key"
@@ -508,7 +508,8 @@ register_through_gh() {
         ;;
     esac
 
-    title=$(hostname)
+    # Bash sets this itself, so a host image without the hostname command still names its key.
+    title="$HOSTNAME"
     if run gh ssh-key add "$KEY.pub" --title "$title" --type "$kind"; then
         if [[ $DRY_RUN == false ]]; then
             info "Registered as the $kind key through gh, titled $title"
@@ -581,9 +582,9 @@ register_keys_through_gh() {
     fi
 
     step "Registering the key through gh, logged in as $account"
-    register_through_gh authentication
+    register_through_gh authentication "$auth_rc"
     if [[ $KEY_REGISTERED == true ]]; then
-        register_through_gh signing
+        register_through_gh signing "$signing_rc"
     fi
 }
 

@@ -664,16 +664,16 @@ function Get-SigningRegistrationState {
 
 # Registers one kind of key through gh, for an account gh is already logged in as.
 # The kind is 'authentication' or 'signing', which is also gh's own --type value.
+# The state is Get-GhKeyState's answer for that kind, read once by the caller so the gate and the add act on one listing.
 # Returns whether the key is registered or now is, so the next kind may follow.
 # A refused registration, such as a token without the scope, is a warning that names the remedy and never ends the run.
 # The checks that follow report any key still unregistered and print the paste.
 function Register-KeyThroughGh {
-    param([ValidateSet('authentication', 'signing')][string]$Kind)
+    param([ValidateSet('authentication', 'signing')][string]$Kind, [ValidateSet('registered', 'missing', 'unknown')][string]$State)
     if (-not (Test-Path "$($script:KEY).pub")) {
         if ($script:DRY_RUN) { info "[dry run] gh ssh-key add $($script:KEY).pub --type $Kind" }
         return $true
     }
-    $state = Get-GhKeyState -Kind $Kind
     if ($state -eq 'registered') {
         info "Already registered as the $Kind key"
         return $true
@@ -754,8 +754,8 @@ function Register-KeysThroughGh {
     }
 
     step "Registering the key through gh, logged in as $account"
-    if (Register-KeyThroughGh -Kind 'authentication') {
-        $null = Register-KeyThroughGh -Kind 'signing'
+    if (Register-KeyThroughGh -Kind 'authentication' -State $authState) {
+        $null = Register-KeyThroughGh -Kind 'signing' -State $signingState
     }
 }
 

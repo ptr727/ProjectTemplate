@@ -723,7 +723,6 @@ HOST_MISMATCH = f"gh is logged in as {ACCOUNT}, while this host's ssh identity a
 # Both gh and ssh are shell functions, so nothing reaches a real account and no real host is read.
 # The public key lists stay empty throughout, so a check that read them instead of gh's would report a missing key.
 LINUX_REGISTER_BODY = r"""
-hostname() { printf 'example-host\n'; }
 ssh-keygen() { printf '256 %s comment (ED25519)\n' "$FINGERPRINT"; }
 gh() {
     printf '%s\n' "$*" >>"$CALLS"
@@ -817,6 +816,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         env = {
             "PATH": "/usr/bin:/bin",
             "HOME": str(home),
+            "HOSTNAME": "example-host",
             "CALLS": str(calls),
             "STATE": str(state),
             "ACCOUNT": account,
@@ -865,6 +865,8 @@ class TestLinuxKeyRegistration(unittest.TestCase):
     def test_only_the_missing_kind_is_registered(self) -> None:
         result, adds = self.register(registered="auth")
         self.assertEqual(result.returncode, 0, result.stderr)
+        calls = (self.tmp / "calls").read_text().splitlines()
+        self.assertEqual(calls.count("ssh-key list"), 2, calls)
         self.assertEqual(len(adds), 1, adds)
         self.assertTrue(adds[0].endswith("--type signing"), adds)
 
@@ -1167,7 +1169,7 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
             if ((Get-SigningRegistrationState) -ne 'registered') { Show-RegistrationNeeded -Kind 'signing' -Type 'Signing' }
         }
     } 6>&1 | ForEach-Object { "$_" }
-    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }); host = @($script:SshCalls | Where-Object { $_ -notlike '*IdentitiesOnly*' }) }
+    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); lists = @($script:Calls | Where-Object { $_ -eq 'ssh-key list' }).Count; probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }); host = @($script:SshCalls | Where-Object { $_ -notlike '*IdentitiesOnly*' }) }
 }
 Remove-Item $directory -Recurse
 $results | ConvertTo-Json -Depth 4
@@ -1334,6 +1336,7 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertIn("--title", adds[0])
 
     def test_only_the_missing_kind_is_registered(self) -> None:
+        self.assertEqual(self.results["auth-done"]["lists"], 2)
         adds = self.adds("auth-done")
         self.assertEqual(len(adds), 1, adds)
         self.assertTrue(adds[0].endswith("--type signing"), adds)
