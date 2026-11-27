@@ -343,7 +343,7 @@ for, and it binds harder than any throughput target.
   A non-zero exit, or no ref to read, is a read that cannot be made. A read
   that cannot be made keeps the file with the parked group. Record the pass on the parked group's claim
   comment, keeping its `**Backlog burndown claim` opening. Add a line opening with
-  `**Passed (<date>):**` that names the file and the receiving group's issues and branch. A file
+  `**Passed (<date>):**` that names the file and the receiving group's issues. A file
   such a line names is no longer that claim's. When the parked group resumes, the seat running "The
   Round" steps 1 to 3 predicts its file set again. It verifies that set as any prediction is verified.
   Once it verifies, that seat rewrites
