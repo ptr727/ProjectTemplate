@@ -727,23 +727,38 @@ def base_interpreters(path):
     return [path]
 
 
-def shim_problem(launcher):
-    """Why `launcher` is a version-manager shim, naming the interpreter to pass instead, or None.
+def shim_path(launcher):
+    """The path of `launcher` where it is a version-manager shim, else None.
 
     A shim, such as pyenv's, asdf's, or mise's, sits in a directory named `shims`.
     A bare name is resolved through PATH first, as a legacy shell-form entry names it.
     A `.exe` is not one, since Scoop's shims forward to one fixed interpreter.
-    It picks its interpreter when the hook runs, from the session's directory.
-    So the interpreter the probe saw can differ from the one a hook gets. A hook that gets one below 3.11 fails open.
-    The shim is asked for the interpreter it runs, so the refusal can name the one to run the installer under.
-    That interpreter is named only where it passes the probe and is not the one already running.
-    A shim that cannot be started is left to `launcher_problem`, which says why.
     """
     path = pathlib.PurePath(shutil.which(launcher) or launcher)
     if path.parent.name != "shims" or path.suffix.lower() == ".exe":
         return None
-    launcher = str(path)
-    problem = f"{launcher!r} is a version-manager shim, which picks its interpreter per directory when the hook runs"
+    return str(path)
+
+
+def shim_problem(launcher):
+    """Why `launcher` is a version-manager shim, or None where it is not.
+
+    A shim picks its interpreter when the hook runs, from the session's directory.
+    So the interpreter the probe saw can differ from the one a hook gets.
+    A hook that gets one below 3.11 fails open.
+    """
+    path = shim_path(launcher)
+    if path is None:
+        return None
+    return f"{path!r} is a version-manager shim, which picks its interpreter per directory when the hook runs"
+
+
+def shim_target(launcher):
+    """The interpreter shim `launcher` runs here, or None where it names no usable other one.
+
+    The shim is asked for its `sys.executable`.
+    The answer must be no shim, not the interpreter already running, and pass the version probe.
+    """
     try:
         r = subprocess.run(
             [launcher, "-c", "import sys; print(sys.executable)"],
@@ -760,12 +775,12 @@ def shim_problem(launcher):
     if (
         r.returncode
         or not real
-        or pathlib.Path(real).parent.name == "shims"
+        or shim_path(real) is not None
         or os.path.abspath(real) == os.path.abspath(sys.executable)
         or launcher_problem(real) is not None
     ):
-        return problem
-    return f"{problem}; run the installer under {real!r} instead"
+        return None
+    return real
 
 
 def exec_spawn_problem(launcher, windows=None):
@@ -789,7 +804,7 @@ def hook_launcher():
     The path is absolute, so the hook does not depend on the session's own PATH.
     Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
     A version-manager shim, such as pyenv's, is passed over, since it picks its interpreter when the hook runs.
-    The reason names the real interpreter, which the installer run with it registers.
+    Where no candidate remains, the reasons end with the interpreter the shim runs, to run the installer under.
     The `python3` on PATH is preferred, being unambiguously Python 3.
     A candidate inside a virtual environment yields first to the interpreters that venv was made from.
     Its path is kept as PATH resolves it, and its links are not followed.
@@ -802,6 +817,7 @@ def hook_launcher():
     also proves the launcher runs the hook.
     """
     rejected = []
+    shims = []
     seen = set()
     for found in (shutil.which("python3"), sys.executable):
         if not found:
@@ -812,12 +828,18 @@ def hook_launcher():
             seen.add(candidate)
             problem = (
                 exec_spawn_problem(candidate)
-                or shim_problem(candidate)
                 or launcher_problem(candidate)
+                or shim_problem(candidate)
             )
             if problem is None:
                 return candidate, rejected
             rejected.append(problem)
+            if shim_path(candidate):
+                shims.append(candidate)
+    for shim in shims:
+        target = shim_target(shim)
+        if target:
+            rejected.append(f"run the installer under {target!r} instead")
     return None, rejected
 
 
@@ -1632,7 +1654,7 @@ def registration_problems(claude_home):
                 key = (launcher, exec_form(hook))
                 if launcher is not None and key not in probed:
                     spawn = exec_spawn_problem(launcher) if key[1] else None
-                    probed[key] = spawn or shim_problem(launcher) or launcher_problem(launcher)
+                    probed[key] = spawn or launcher_problem(launcher) or shim_problem(launcher)
                 if launcher is not None and probed[key]:
                     if "version-manager shim" in probed[key]:
                         out.append(
