@@ -28,7 +28,7 @@ maintainer is present. The run that follows then has the answers and meets fewer
 
 - **The triage seat** is the session this skill runs in. It reads the issue list, dispatches the
   classifiers and researchers, writes the `decision` issues, and asks the maintainer. It reads no
-  issue body itself beyond what a subagent returns.
+  issue body itself beyond what a subagent returns, save a maintainer's owed-action issue in step 8.
 - **A classifier** is a subagent given a batch of issue numbers. It returns one line per issue.
 - **A researcher** is a subagent given a cluster of questions that share a topic, five or six by
   default. It returns each question with its options and its evidence.
@@ -174,7 +174,7 @@ of its own.
    questions still open, overtaken issues closed, and splits filed. Give the count of open
    `deferred` issues as well, after step 2's lifts, and how many it lifted. Also name each issue held back for any other reason "Needs the
    Maintainer" does not count, under that reason. List each `HELD` owed action that is the
-   maintainer's as a step to take, with each command its issue gives. Name any promotion or release it still waits on. End with one line saying a `backlog-burndown` away-mode run
+   maintainer's as a step to take. Read its issue body for each command it gives, and for any promotion or release it says the step waits on. End with one line saying a `backlog-burndown` away-mode run
    can now work the rest.
 
 ## Return Lines
@@ -184,7 +184,7 @@ of its own.
 | classifier | `AUTO #<n>` | an agent can fix it alone |
 | classifier | `ASK #<n> <the question in one sentence>` | the whole issue needs the maintainer |
 | classifier | `SPLIT #<n> <the undecided item in one sentence>` | part needs the maintainer, the rest does not |
-| classifier | `HELD #<n> <reason>`, the reason for an owed action reading `owed action, <whose step>, <the promotion or release it waits on, or none>, <each step's command in order, or none>` | waits on something other than a decision, such as a promotion, an attended run for an approved agent-safety edit, or an `**Owed action:**` issue's step |
+| classifier | `HELD #<n> <reason>`, the reason for an owed action reading `owed action, <whose step>` | waits on something other than a decision, such as a promotion, an attended run for an approved agent-safety edit, or an `**Owed action:**` issue's step |
 | classifier | `OVERTAKEN #<n> <what answered or overtook it>` | a later change already settled it, found by the history check |
 | classifier | `LIFT #<n> <open or settled> <the condition and the evidence that it holds>` | a `deferred` issue whose checkable condition now holds |
 | classifier | `KEEP #<n> <the condition it still waits on>` | a `deferred` issue that stays deferred |
