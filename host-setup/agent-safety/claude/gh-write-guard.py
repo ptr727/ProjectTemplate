@@ -1258,7 +1258,8 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
 
 
 _ORIGIN_URL = ["remote", "get-url", "origin"]
-_NOT_EXPLICIT = re.compile(r"[*?\[$`]|^:|^\.\.?/?$")
+_DIR_SPELLING = re.compile(r"(^|[/\\])\.\.?[/\\]?$|[/\\]$")
+_NOT_EXPLICIT = re.compile(r"[*?\[$`]|^:|^\.$")
 
 
 def _explicit_paths(paths: list[str], target: str, no_dirs: bool) -> bool:
@@ -1278,23 +1279,21 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     if _base(cmd.argv[0]) != "git":
         return None
     git = _git(cmd.argv)
-    sub = git.sub
     target = _moved(cmd.cwd, git.c_dirs)
-    if sub not in ("add", "commit"):
+    if git.sub not in ("add", "commit"):
         return None
-    words = _flags(sub, git.args)
+    words = _flags(git.sub, git.args)
     cut = words.index("--") if "--" in words else len(words)
     flags = [w for w in words[:cut] if w.startswith("-")]
     paths = [w for w in words[:cut] if not w.startswith("-")] + words[cut + 1 :]
-    if "--dry-run" in flags or (sub == "add" and _short_has(flags, "n")):
+    if "--dry-run" in flags or (git.sub == "add" and _short_has(flags, "n")):
         return None
-    sweeps = any(a.startswith("--pathspec") for a in flags) or any(p.endswith("/") for p in paths)
-    if sub == "commit":
-        sweeps = sweeps or "--all" in flags or _short_has(flags, "a")
-        sweeps = (
-            sweeps or bool(paths) and not _explicit_paths(paths, target or "", target is not None)
-        )
-    else:
+    sweeps = any(a.startswith("--pathspec") for a in flags) or any(
+        _DIR_SPELLING.search(p) for p in paths
+    )
+    if git.sub == "commit" and ("--all" in flags or _short_has(flags, "a")):
+        sweeps = True
+    if paths or git.sub == "add":
         sweeps = sweeps or not _explicit_paths(paths, target or "", target is not None)
     named = _named_git_dir(cmd, git)
     where = None if named is None else _join_dir(target, named)
@@ -2065,7 +2064,7 @@ _BLANKET = (
     "|allow:git add -n .|allow:git add --dry-run -A|allow:git commit --dry-run -a|allow:git add -N -- a.txt"
     "|allow:git commit -m x a.txt|allow:git commit -m '--pathspec topic'|deny:git --attr-source HEAD add -A"
     '|deny:cd "$X" && git add "$F"|allow:cd "$X" && git add a.txt'
-    '|deny:cd "$X" && git add ./|deny:git -C "$D" add src/|deny:git -C "$D" add ..'
+    '|deny:cd "$X" && git add ./|deny:git -C "$D" add src/|deny:git -C "$D" add ..|deny:cd "$X" && git add ./.'
     '|allow:cd "$X" && git add ./a.txt'
 )
 
