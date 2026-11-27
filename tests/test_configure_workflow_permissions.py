@@ -229,9 +229,10 @@ class ApplyCase(unittest.TestCase):
 
     def test_a_write_that_does_not_read_back_is_unconfirmed(self) -> None:
         """A policy above the repository can hold a value, so a success status alone is not proof."""
-        out, err, status, _ = self.apply(LOOSE, [json.dumps(LOOSE)])
+        out, err, status, _ = self.apply(LOOSE, [json.dumps(LOOSE)] * ATTEMPTS)
         self.assertNotEqual(status, 0)
         self.assertIn("unconfirmed", err)
+        self.assertIn(f"read back as {compact(LOOSE)}", err)
         self.assertNotIn("Set the workflow token defaults", out)
 
     def test_a_stale_read_back_that_converges_is_confirmed(self) -> None:
