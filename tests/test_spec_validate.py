@@ -448,11 +448,11 @@ class PythonVersionUnitCase(unittest.TestCase):
     """The carried .python-version unit is a presence unit whose snippet names the fleet's default Python line.
 
     Each repository's line is its own, so a fidelity that dates or hashes a copy would flag every other line.
-    The selection action's fallback is held to the devcontainer tag, so the snippet held to that tag keeps all three on one line.
+    The hub's tests hold the selection action's fallback to the devcontainer tag, so the snippet held to that fallback keeps all three on one line.
     """
 
     SNIPPET = validate.ROOT / "catalog/snippets/configs/.python-version"
-    DEVCONTAINER = validate.ROOT / "catalog/snippets/devcontainer/python/devcontainer.json"
+    ACTION = validate.ROOT / ".github/actions/python-version/action.yml"
 
     def test_the_unit_judges_presence_alone(self) -> None:
         baseline = validate.load("spec/files.json")["baseline"]
@@ -468,13 +468,10 @@ class PythonVersionUnitCase(unittest.TestCase):
             ],
         )
 
-    def test_the_snippet_names_the_devcontainer_line(self) -> None:
-        tag = re.search(
-            r'"image": "mcr\.microsoft\.com/devcontainers/python:\d+-(\d+\.\d+)-\w+"',
-            self.DEVCONTAINER.read_text(encoding="utf-8"),
-        )
-        assert tag is not None, self.DEVCONTAINER
-        self.assertEqual(self.SNIPPET.read_bytes(), f"{tag.group(1)}\n".encode())
+    def test_the_snippet_names_the_fallback_line(self) -> None:
+        line = self.SNIPPET.read_text(encoding="utf-8")
+        self.assertRegex(line, r"\A\d+\.\d+\n\Z")
+        self.assertIn(f"        fallback={line}", self.ACTION.read_text(encoding="utf-8"))
 
 
 class RepoOwnedKeysCase(unittest.TestCase):
