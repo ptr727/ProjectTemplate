@@ -128,7 +128,8 @@ def stop(child: subprocess.Popen[bytes]) -> None:
     """Stop `child`, killing it if it outlasts SIGTERM, so a stop always ends.
 
     The handler passes over a second Ctrl-C.
-    So a script ignoring SIGTERM would otherwise hold this process and its fetched tree forever.
+    So a child ignoring SIGTERM would otherwise hold this process and its fetched tree forever.
+    The kill reaches `child` alone, which is `uv run` rather than the script it started.
     """
     child.terminate()
     try:

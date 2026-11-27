@@ -425,8 +425,8 @@ class InterruptTests(unittest.TestCase):
                     self.assertNotIn("Traceback", stderr)
                     self.assertEqual([], left)
 
-    def test_a_script_ignoring_sigterm_is_killed_once_the_stop_times_out(self) -> None:
-        """The stub ignores SIGTERM and outlives TIMEOUT, so an unbounded wait fails the case."""
+    def test_a_uv_ignoring_sigterm_is_killed_once_the_stop_times_out(self) -> None:
+        """The stub uv ignores SIGTERM and outlives TIMEOUT, so an unbounded wait fails the case."""
         self.assertLess(hub.STOP_TIMEOUT, TIMEOUT)
         status, stderr, left = self.interrupt(
             (signal.SIGTERM,), False, "trap '' TERM\n", sleep=TIMEOUT * 4
@@ -449,7 +449,7 @@ time.sleep(float(sys.argv[2]))
 class StopTests(unittest.TestCase):
     """The stop terminates a child, and kills one that outlasts SIGTERM, so it always ends."""
 
-    def stopped(self, ignore_term: bool) -> tuple[int, float]:
+    def stopped(self, ignore_term: bool, bound: float) -> tuple[int, float]:
         outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
         ready = outside / "started"
         mode = "ignore" if ignore_term else "honor"
@@ -461,7 +461,7 @@ class StopTests(unittest.TestCase):
         try:
             wait_until_started(child, ready)
             started = time.monotonic()
-            with mock.patch.object(hub, "STOP_TIMEOUT", 0.5):
+            with mock.patch.object(hub, "STOP_TIMEOUT", bound):
                 hub.stop(child)
             elapsed = time.monotonic() - started
             assert_group_ended(child.pid)
@@ -471,11 +471,11 @@ class StopTests(unittest.TestCase):
         return child.returncode, elapsed
 
     def test_a_child_that_honors_sigterm_ends_by_it(self) -> None:
-        status, _ = self.stopped(ignore_term=False)
+        status, _ = self.stopped(ignore_term=False, bound=hub.STOP_TIMEOUT)
         self.assertEqual(-signal.SIGTERM, status)
 
     def test_a_child_ignoring_sigterm_is_killed_after_the_timeout(self) -> None:
-        status, elapsed = self.stopped(ignore_term=True)
+        status, elapsed = self.stopped(ignore_term=True, bound=0.5)
         self.assertEqual(-signal.SIGKILL, status)
         self.assertGreaterEqual(elapsed, 0.5)
         self.assertLess(elapsed, TIMEOUT)
