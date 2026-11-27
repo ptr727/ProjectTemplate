@@ -91,8 +91,8 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
    **Each owed action a merged group reports is held by an open issue before the round promotes
-   or ends**, per "Dispatching a Worker". Only an open issue an account with write access opened,
-   whose body opens with `**Owed action:**` and names the action, holds it. That is an `**Owed action:**` issue.
+   or ends**, per "Dispatching a Worker". Only an open `**Owed action:**` issue that names the action
+   holds it. "Needs the Maintainer" under "Away Mode" defines such an issue.
    "Ranking" never ranks one, so no `Closes on promotion:` line closes it. The orchestrator files one where none holds it, saying
    whose step it is and giving each step's command in order. Attended, where the step is the maintainer's, it first offers the maintainer a
    walk-through instead. It gives one step at a time, each confirmed done before the next. An action that needs a promotion or a release first is filed
@@ -182,7 +182,7 @@ Authorizes". So this run gives it no group, no worker, and no claim. The round's
 such issue, its repository, and what would move it, such as a tracking issue or a session there. It names the issue as needing the maintainer only where that repository is under
 another owner, since a write there needs the maintainer's permission.
 
-An `**Owed action:**` issue, as "The Round" step 5 defines one, is counted and is not
+An `**Owed action:**` issue, as "Needs the Maintainer" under "Away Mode" defines one, is counted and is not
 ranked, since no diff takes the step. The round's report names each one and whose step it is.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
@@ -923,8 +923,8 @@ test `session-handoff` "The Chain" states, waits on that platform's lane. One wh
 lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. One an account with write access opened, whose body opens with
-`**Owed action:**`, waits on that step, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. An `**Owed action:**` issue is one an account with write
+access opened, its body opening with that marker. It waits on the step it names, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 <!-- /include -->

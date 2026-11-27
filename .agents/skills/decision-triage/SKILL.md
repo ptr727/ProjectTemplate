@@ -83,8 +83,8 @@ test `session-handoff` "The Chain" states, waits on that platform's lane. One wh
 lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. One an account with write access opened, whose body opens with
-`**Owed action:**`, waits on that step, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. An `**Owed action:**` issue is one an account with write
+access opened, its body opening with that marker. It waits on the step it names, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 ## The Procedure
@@ -105,12 +105,11 @@ of its own.
    `git log refs/remotes/origin/develop` on the files the issue names. It also reads the state of
    any child issues the issue tracks, and any later comment recording a decision. A fix merged
    into `develop` and not yet promoted makes the issue `HELD` awaiting promotion rather than
-   `OVERTAKEN`. An `**Owed action:**` issue skips the `git log` reads, since git records no step taken.
+   `OVERTAKEN`. An `**Owed action:**` issue, as "Needs the Maintainer" defines one, skips the
+   `git log` reads, since git records no step taken.
    A later comment from an account with write access recording the step done still makes it `OVERTAKEN`. Otherwise it
-   is `HELD` on the step it names, whoever's step it is, since a step is not a question. Such an issue is one an account with write access opened, its
-   body opening with that marker.
-   The queued `decision` issues get the same check and no classification beyond it. A queued
-   `**Owed action:**` issue is the exception, and is `HELD` or `OVERTAKEN` as above.
+   is `HELD` on the step it names, whoever's step it is, unless it waits on the maintainer already.
+   The queued `decision` issues get the same check and no classification beyond it.
    The classifier returns one line per issue in the form "Return Lines" below.
    Each batch also carries the `deferred` issues to re-check, which get no classification. The
    classifier reads the comment stating the condition the work waits for, from an account with
@@ -143,8 +142,7 @@ of its own.
      the User" below states, recording the reason. It is not asked. Do the same for a queued
      `decision` issue the history check returned as `HELD` awaiting promotion. That issue skips
      step 6 and stays open until a promotion lands. The first triage after it then returns the
-     issue as `OVERTAKEN`. A queued `**Owed action:**` issue returned as `HELD` leaves the queue
-     the same way, its `decision` label removed, and stays open on its step.
+     issue as `OVERTAKEN`.
 
    The comment states the question, then the options, the recommended one first, each with its
    reason. It names the evidence and what each option does to any work in flight.
