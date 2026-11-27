@@ -91,10 +91,11 @@ class TestTrailingPeriod(unittest.TestCase):
 
 class TestTitleCase(unittest.TestCase):
     def test_a_capitalized_bind_word_inside_the_title_is_lowered(self) -> None:
-        self.assertEqual(
-            ["write `From` as `from`, since a bind word stays lower case"],
-            title.problems("Read the Value From the Header"),
+        (fix,) = title.problems("Read the Value From the Header")
+        self.assertTrue(
+            fix.startswith("write `From` as `from`, since a bind word stays lower case")
         )
+        self.assertIn("or put it in a code span", fix)
 
     def test_a_lower_case_word_is_raised_or_marked_as_a_name(self) -> None:
         (fix,) = title.problems("Read the value")
@@ -111,10 +112,8 @@ class TestTitleCase(unittest.TestCase):
 
     def test_a_hyphenated_word_capitalizes_each_part_but_a_bind_word(self) -> None:
         self.assertEqual([], title.problems("Add Built-in Multi-Targeting"))
-        self.assertEqual(
-            ["write `Built-In` as `Built-in`, since a bind word stays lower case"],
-            title.problems("Add Built-In Support"),
-        )
+        (fix,) = title.problems("Add Built-In Support")
+        self.assertTrue(fix.startswith("write `Built-In` as `Built-in`, since a bind word stays"))
         self.assertEqual([], title.problems("Use an In-Memory Cache and an On-Demand Scan"))
         (fix,) = title.problems("Add Read-only Mounts")
         self.assertTrue(fix.startswith("write `Read-only` as `Read-Only`"))
@@ -183,8 +182,7 @@ class TestHold(unittest.TestCase):
         for name in ("Q_HELD", "Q_FULL"):
             with self.subTest(name):
                 query = getattr(pr_review, name)
-                self.assertIn(" title ", query)
-                self.assertIn(" author{login}", query)
+                self.assertIn(" title author{login}\n", query)
 
 
 class TestGate(fixtures.GqlCase):

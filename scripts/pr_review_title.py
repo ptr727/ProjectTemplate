@@ -88,7 +88,10 @@ def word_fix(word: str, first: bool, opens: bool) -> str:
             f"write `{core}` as `{fixed}`, or put it in a code span where it is a name that "
             "keeps its own casing"
         )
-    return f"write `{core}` as `{fixed}`, since a bind word stays lower case"
+    return (
+        f"write `{core}` as `{fixed}`, since a bind word stays lower case, or put it in a code "
+        "span where it is a name or a label that keeps its own casing"
+    )
 
 
 def problems(title: str) -> list[str]:
