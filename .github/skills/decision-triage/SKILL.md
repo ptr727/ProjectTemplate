@@ -105,8 +105,8 @@ of its own.
    `git log refs/remotes/origin/develop` on the files the issue names. It also reads the state of
    any child issues the issue tracks, and any later comment recording a decision. A fix merged
    into `develop` and not yet promoted makes the issue `HELD` awaiting promotion rather than
-   `OVERTAKEN`. An `**Owed action:**` issue is `HELD` on the step it names, whoever's step it is,
-   since a step is not a question. Such an issue is one an account with write access opened, its
+   `OVERTAKEN`. An `**Owed action:**` issue skips that check, since git records no step taken. It
+   is `HELD` on the step it names, whoever's step it is, since a step is not a question. Such an issue is one an account with write access opened, its
    body opening with that marker.
    The queued `decision` issues get the same check and no classification beyond it.
    The classifier returns one line per issue in the form "Return Lines" below.
@@ -173,7 +173,7 @@ of its own.
    questions still open, overtaken issues closed, and splits filed. Give the count of open
    `deferred` issues as well, after step 2's lifts, and how many it lifted. Also name each issue held back for any other reason "Needs the
    Maintainer" does not count, under that reason. List each `HELD` owed action that is the
-   maintainer's as a step to take, with its command where its issue gives one. End with one line saying a `backlog-burndown` away-mode run
+   maintainer's as a step to take, with each command its issue gives. End with one line saying a `backlog-burndown` away-mode run
    can now work the rest.
 
 ## Return Lines
@@ -183,7 +183,7 @@ of its own.
 | classifier | `AUTO #<n>` | an agent can fix it alone |
 | classifier | `ASK #<n> <the question in one sentence>` | the whole issue needs the maintainer |
 | classifier | `SPLIT #<n> <the undecided item in one sentence>` | part needs the maintainer, the rest does not |
-| classifier | `HELD #<n> <reason>`, the reason for an owed action reading `owed action, <whose step>, <command or none>` | waits on something other than a decision, such as a promotion, an attended run for an approved agent-safety edit, or an `**Owed action:**` issue's step |
+| classifier | `HELD #<n> <reason>`, the reason for an owed action reading `owed action, <whose step>, <each step's command in order, or none>` | waits on something other than a decision, such as a promotion, an attended run for an approved agent-safety edit, or an `**Owed action:**` issue's step |
 | classifier | `OVERTAKEN #<n> <what answered or overtook it>` | a later change already settled it, found by the history check |
 | classifier | `LIFT #<n> <open or settled> <the condition and the evidence that it holds>` | a `deferred` issue whose checkable condition now holds |
 | classifier | `KEEP #<n> <the condition it still waits on>` | a `deferred` issue that stays deferred |
