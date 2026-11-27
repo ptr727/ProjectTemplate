@@ -12,7 +12,7 @@
 # It also covers a host identity answering as another account, and a key probe that could not tell.
 # A probe that could not tell includes a host that reaches GitHub only through its ssh config.
 # The script checks afterwards that the registration took.
-# It reads gh's own key lists where this run's gh add of the signing key succeeded, and the keys GitHub publishes for the account otherwise.
+# It reads gh's own key lists where gh listed or added the signing key this run, and the keys GitHub publishes for the account otherwise.
 #
 # The path settings are written in the tilde form the Linux peer writes, because of the following.
 #   - Git expands it on Windows too.
@@ -77,7 +77,7 @@ $SHARED = $SharedCheckout
 $GH_SSH_PROTOCOL = [bool]$GhSshProtocol
 $GITHUB_USER = ''
 $MANAGED_KEY_AUTHENTICATES = $false
-$GH_SIGNING_ADDED = $false
+$GH_SIGNING_LISTED = $false
 $GH_ACCOUNT = ''
 $GENERAL_USER = ''
 $GENERAL_PROBED = $false
@@ -667,10 +667,11 @@ function Get-GhKeyState {
     return 'missing'
 }
 
-# Where this run's gh add of the signing key succeeded, gh's lists are the check, since the public lists may lag the add.
+# Where gh's own list showed the signing key this run, or this run's gh add of it succeeded, gh's lists are the check.
+# The public lists may lag either one.
 # Everywhere else the public lists are the check, so a login missing scopes or a gh listing that fails cannot hide a registered key.
 function Get-SigningRegistrationState {
-    if ($script:GH_SIGNING_ADDED) { return Get-GhKeyState -Kind 'signing' }
+    if ($script:GH_SIGNING_LISTED) { return Get-GhKeyState -Kind 'signing' }
     return Test-KeyRegistered -Kind 'signing'
 }
 
@@ -688,6 +689,7 @@ function Register-KeyThroughGh {
     }
     if ($state -eq 'registered') {
         info "Already registered as the $Kind key"
+        if ($Kind -eq 'signing') { $script:GH_SIGNING_LISTED = $true }
         return $true
     }
     if ($state -eq 'unknown') {
@@ -703,7 +705,7 @@ function Register-KeyThroughGh {
     }
     if (-not $script:DRY_RUN) {
         info "Registered as the $Kind key through gh, titled $title"
-        if ($Kind -eq 'signing') { $script:GH_SIGNING_ADDED = $true }
+        if ($Kind -eq 'signing') { $script:GH_SIGNING_LISTED = $true }
         # The host's own answer may now be this key, so the next probe asks again.
         if ($Kind -eq 'authentication') { $script:GENERAL_PROBED = $false }
     }

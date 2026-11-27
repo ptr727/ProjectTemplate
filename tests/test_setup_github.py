@@ -1062,10 +1062,13 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertIn("rc=0", result.stdout)
 
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
-        result, adds = self.register(then='signing_registration_state && echo "state=registered"')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(adds), 2, adds)
-        self.assertIn("state=registered", result.stdout)
+        check = 'signing_registration_state && echo "state=registered"'
+        for registered, add_count in (("", 2), ("auth signing", 0)):
+            with self.subTest(registered=registered):
+                result, adds = self.register(registered=registered, then=check)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(adds), add_count, adds)
+                self.assertIn("state=registered", result.stdout)
 
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         text = LINUX_SCRIPT.read_text(encoding="utf-8")
@@ -1173,7 +1176,7 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $script:Reg = @($case.registered | ForEach-Object { $_ })
     $script:DRY_RUN = [bool]$case.dryRun
     $script:GITHUB_USER = ''
-    $script:GH_SIGNING_ADDED = $false
+    $script:GH_SIGNING_LISTED = $false
     $script:GH_ACCOUNT = ''
     $script:GENERAL_USER = ''
     $script:GENERAL_PROBED = $false
@@ -1339,6 +1342,9 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                 "auth-scope-only-listed", add_signing_rc=1, public_signing=True, check=True
             ),
             windows_register_case("lag", check=True),
+            windows_register_case(
+                "listed-lag", registered=["authentication", "signing"], check=True
+            ),
             *(windows_register_case(f"tell-{state}", ssh_state=state) for state in CANNOT_TELL),
         ]
         with tempfile.TemporaryDirectory() as directory:
@@ -1526,6 +1532,8 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
         self.assertEqual(len(self.adds("lag")), 2)
         self.assertIn("state=registered", self.output("lag"))
+        self.assertEqual(self.adds("listed-lag"), [])
+        self.assertIn("state=registered", self.output("listed-lag"))
 
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         result = run_pwsh(["-File", str(WINDOWS_SCRIPT), "-Help"])

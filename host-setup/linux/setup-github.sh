@@ -14,7 +14,7 @@
 # It also covers a host identity answering as another account, and a key probe that could not tell.
 # A probe that could not tell includes a host that reaches GitHub only through its ssh config.
 # The script checks afterwards that the registration took.
-# It reads gh's own key lists where this run's gh add of the signing key succeeded, and the keys GitHub publishes for the account otherwise.
+# It reads gh's own key lists where gh listed or added the signing key this run, and the keys GitHub publishes for the account otherwise.
 
 set -Eeuo pipefail
 
@@ -52,7 +52,7 @@ GITHUB_USER=""
 MANAGED_KEY_AUTHENTICATES=false
 MANAGED_USER=""
 MANAGED_DENIED=false
-GH_SIGNING_ADDED=false
+GH_SIGNING_LISTED=false
 GH_ACCOUNT=""
 GENERAL_USER=""
 GENERAL_PROBED=false
@@ -452,7 +452,7 @@ registration_needed() {
 # The lists gh itself returns show both kinds for the logged in account, and are not the cached public lists.
 # So they answer right after a registration, and a lagging public list cannot cause a second add or a false paste.
 # Each returns 0 registered, 1 not registered, and 2 when the answer could not be read.
-# A line holds the key body and its kind, so a title that happens to name a kind is the only false match.
+# A row holds the title, the key and then the kind, and only the fields after the key are read for the kind.
 gh_key_registered() {
     local kind="$1" body key listing
     # The ssh-key commands take no host flag and act on gh's default host, so GH_HOST pins them to the github.com account checked above.
@@ -475,10 +475,11 @@ gh_key_registered() {
     return 1
 }
 
-# Where this run's gh add of the signing key succeeded, gh's lists are the check, since the public lists may lag the add.
+# Where gh's own list showed the signing key this run, or this run's gh add of it succeeded, gh's lists are the check.
+# The public lists may lag either one.
 # Everywhere else the public lists are the check, so a login missing scopes or a gh listing that fails cannot hide a registered key.
 signing_registration_state() {
-    if [[ $GH_SIGNING_ADDED == true ]]; then
+    if [[ $GH_SIGNING_LISTED == true ]]; then
         gh_key_registered signing
     else
         github_signing_key_registered
@@ -506,6 +507,7 @@ register_through_gh() {
     0)
         info "Already registered as the $kind key"
         KEY_REGISTERED=true
+        [[ $kind == "signing" ]] && GH_SIGNING_LISTED=true
         return 0
         ;;
     2)
@@ -519,7 +521,7 @@ register_through_gh() {
     if run gh ssh-key add "$KEY.pub" --title "$title" --type "$kind"; then
         if [[ $DRY_RUN == false ]]; then
             info "Registered as the $kind key through gh, titled $title"
-            [[ $kind == "signing" ]] && GH_SIGNING_ADDED=true
+            [[ $kind == "signing" ]] && GH_SIGNING_LISTED=true
             # The host's own answer may now be this key, so the next probe asks again.
             [[ $kind == "authentication" ]] && GENERAL_PROBED=false
         fi
