@@ -96,7 +96,19 @@ _GH_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field"})
 _PROTECTED_DEFAULT = ("main", "master", "develop")
 
 _ALWAYS_DENY_SUBS = frozenset(
-    {"reset", "rebase", "cherry-pick", "revert", "restore", "add", "commit", "rm", "mv", "apply"}
+    {
+        "reset",
+        "rebase",
+        "cherry-pick",
+        "revert",
+        "restore",
+        "add",
+        "stage",
+        "commit",
+        "rm",
+        "mv",
+        "apply",
+    }
     | {"am", "push"}
 )
 _VERDICT_SUBS = (
@@ -124,6 +136,7 @@ _OPTION_VALUES = {
     "branch": ("u", "t", frozenset({"--set-upstream-to", "--points-at", "--sort", "--format"})),
     "rebase": ("xsXC", "S", frozenset({"--onto", "--exec", "--strategy", "--strategy-option"})),
     "symbolic-ref": ("m", "", frozenset()),
+    "add": ("", "", frozenset({"--chmod", "--pathspec-from-file"})),
 }
 _COMMIT_SWEEPS = frozenset({"--all", "--amend", "--patch", "--interactive", "--include", "--only"})
 _IN_PLACE_PUSH_FLAGS = frozenset({"-q", "--quiet", "-v", "--verbose", "-u", "--set-upstream"})
@@ -760,7 +773,7 @@ def _git_stdout(cwd: str | None, args: list[str]) -> str | None:
 
 def _origin_owner_repo(cwd: str | None) -> tuple[str, str] | None:
     """The (owner, repo) of the checkout's origin, lowercased, or None."""
-    url = _git_stdout(cwd, ["remote", "get-url", "origin"])
+    url = _git_stdout(cwd, _ORIGIN_URL)
     m = _URL_OWNER_REPO.search(url or "")
     return (m.group(1).lower(), m.group(2).lower()) if m else None
 
@@ -1246,6 +1259,7 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
     return _explicit_paths(paths, target, sub == "add")
 
 
+_ORIGIN_URL = ["remote", "get-url", "origin"]
 _NOT_EXPLICIT = re.compile(r"[*?\[]|^:|^\.$")
 
 
@@ -1262,17 +1276,27 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     if _base(cmd.argv[0]) != "git":
         return None
     git = _git(cmd.argv)
+    sub = "add" if git.sub == "stage" else git.sub
     target = _moved(cmd.cwd, git.c_dirs)
-    if git.sub not in ("add", "commit") or target is None:
+    if sub not in ("add", "commit") or target is None:
         return None
-    if git.sub == "commit":
-        flags = _before_dashes("commit", git.args)
-        sweeps = "--all" in flags or _short_has(flags, "a")
+    words = _flags(sub, git.args)
+    cut = words.index("--") if "--" in words else len(words)
+    flags = [w for w in words[:cut] if w.startswith("-")]
+    paths = [w for w in words[:cut] if not w.startswith("-")] + words[cut + 1 :]
+    if "--dry-run" in flags or (sub == "add" and _short_has(flags, "n")):
+        return None
+    sweeps = any(a.startswith("--pathspec-from-file") for a in git.args)
+    if sub == "commit":
+        sweeps = sweeps or "--all" in flags or _short_has(flags, "a")
+        sweeps = sweeps or bool(paths) and not _explicit_paths(paths, target, True)
     else:
-        cut = git.args.index("--") if "--" in git.args else len(git.args)
-        paths = [a for a in git.args[:cut] if not a.startswith("-")] + git.args[cut + 1 :]
-        sweeps = not _explicit_paths(paths, target, True)
-    if not sweeps or not (known_origin or _git_stdout(target, ["remote", "get-url", "origin"])):
+        sweeps = sweeps or not _explicit_paths(paths, target, True)
+    named = _named_git_dir(cmd, git)
+    where = None if named is None else _join_dir(target, named)
+    query = ["--git-dir", where] if where else []
+    unread = named is not None and where is None
+    if not sweeps or not (known_origin or unread or _git_stdout(target, [*query, *_ORIGIN_URL])):
         return None
     return (
         f"This stages by sweep (`git {git.sub}`) in a checkout with an origin ({target}), taking every "
@@ -1665,24 +1689,116 @@ _COMMIT_THEN_PUSH = (
 
 # (command, want, source), run in the worktree with no rules on any branch.
 # A source names the requirement whose plain shape a case is, the incident behind it, or the issue recording a shape a session hit.
+_CASES_PACKED = (
+    "allow:R4:git commit -m x -- -n|deny:R1:gh pr comment 5 --body ok >/dev/null"
+    "|deny:R1:gh pr comment 5 --body ok 2>/dev/null"
+    "|deny:R1:gh pr comment 5 --body ok &>/dev/null"
+    "|deny:R1:gh pr create --title x --body y >/dev/null 2>&1"
+    "|deny:R1:git commit -m x && git push origin feature/x >/dev/null 2>&1"
+    "|deny:R1:gh api repos/example/repo/issues/1/comments -f body=x 2>/dev/null"
+    "|deny:R1:bash -c 'gh pr comment 5 --body ok' >/dev/null"
+    "|allow:R1:gh pr view 5 --json state >/dev/null|allow:R1:gh pr comment 5 --body ok 2>&1"
+    '|allow:R1:gh pr comment 5 --body ">/dev/null hides output"'
+    "|allow:1628:git commit -F - <<'EOF'\nsay 2>/dev/null\nEOF\ngit push origin feature/x"
+    "|allow:R1:git fetch origin >/dev/null 2>&1"
+    "|allow:R2:gh api graphql -f query='{node(id:\"PR_kwDOExample12345\"){id}}'"
+    "|allow:R2:gh api repos/example/repo/actions/variables -f name=AWS_SECRET_ACCESS_KEY"
+    "|allow:R2:gh api graphql -f query='mutation($b:String!){x(b:$b)}' -f b=fixed_the_thing"
+    "|deny:incident:gh issue comment 5 -R stranger/x --body hi"
+    "|deny:R3:gh issue comment 5 --repo=stranger/x --body hi"
+    "|deny:R3:gh issue comment 5 -Rstranger/x --body hi"
+    "|deny:R3:gh -R stranger/x issue comment 5 --body hi"
+    '|deny:R3:gh issue comment 5 --repo "stranger/x" --body hi'
+    "|deny:R3:gh issue comment 5 --repo github.com/stranger/x --body hi"
+    "|allow:R3:gh issue comment 5 --repo example/other --body hi"
+    "|deny:R3:gh pr create -f -R stranger/x"
+    '|allow:R3:gh repo edit --description "CI/CD helpers"'
+    "|allow:R3:gh project item-add 3 --owner @me --url https://github.com/example/repo/issues/5"
+    "|allow:R3:gh issue comment 5 --repo Example/Repo --body hi"
+    "|deny:R3:gh api repos/stranger/x/issues/1/comments -f body=hi"
+    "|deny:R3:gh api /repos/stranger/x/issues/1/comments -f body=hi"
+    "|allow:R3:gh api repos/stranger/x/issues/1"
+    "|allow:R3:gh api repos/{owner}/{repo}/issues/1/comments -f body=hi"
+    "|allow:R3:gh api repos/example/other/issues/1/comments -f body=hi"
+    "|deny:R3:GH_REPO=stranger/x gh issue comment 5 --body hi"
+    "|deny:R3:export GH_REPO=stranger/x && gh issue comment 5 --body hi"
+    "|deny:R3:GH_REPO=stranger/x; gh issue comment 5 --body hi"
+    "|deny:R3:env GH_REPO=stranger/x gh issue comment 5 --body hi"
+    "|deny:R3:gh pr comment https://github.com/stranger/x/pull/5 --body hi"
+    "|deny:R3:gh issue comment https://github.com/stranger/x/issues/5 --body hi"
+    "|allow:R3:gh pr comment https://github.com/example/other/pull/5 --body hi"
+    "|deny:R3:gh repo edit stranger/x --description y|deny:R3:gh repo delete stranger/x --yes"
+    "|deny:R3:gh issue transfer 5 stranger/x"
+    "|deny:R3:gh project create --owner stranger --title y"
+    "|deny:R3:gh secret set TOKEN --org stranger --body x"
+    "|deny:R3:gh variable set NAME -o stranger --body x"
+    '|allow:R3:gh repo edit -d "CI/CD helpers"'
+    "|allow:R3:gh issue close 5 --comment https://github.com/stranger/x/pull/9"
+    '|deny:R3:gh issue close --comment "x" https://github.com/stranger/x/issues/5'
+    '|deny:R3:gh pr close -c "x" https://github.com/stranger/x/pull/5'
+    "|allow:R3:gh pr review 5 --comment -b looks-good"
+    "|deny:R3:gh pr review --comment https://github.com/stranger/x/pull/5 -b ok"
+    "|allow:R3:gh issue close 5 -c https://github.com/stranger/x/pull/9"
+    '|allow:R3 run-time target:gh issue comment 5 --repo "$TARGET" --body hi'
+    "|allow:R3:gh issue comment 5 --body 'see --repo stranger/x'"
+    "|allow:R3:gh issue view 5 --repo stranger/x|allow:R3:gh repo clone stranger/x"
+    "|deny:R3:bash -c 'gh issue comment 5 --repo stranger/x --body hi'"
+    "|deny:R3:eval gh issue comment 5 --repo stranger/x --body hi"
+    "|deny:R3:gh issue comment 1 --repo stranger/x --body hi  # it's"
+    "|allow:R3:cat <<'EOF'\ngh issue comment 5 --repo stranger/x --body hi\nEOF"
+    '|allow:R3:echo "gh issue comment 5 --repo stranger/x"'
+    "|deny:R3 inline grant:GH_WRITE_GUARD_ALLOW=stranger/x gh issue comment 5 -R stranger/x --body hi"
+    "|deny:R4:gh pr merge 5 --admin --squash|allow:R4:gh pr merge 5 --squash"
+    "|deny:R4:gh pr merge 5 -m --admin|deny:R4:git commit --no-verify -m x"
+    "|deny:R4:git commit -n -m x|deny:R4:git commit -an -m x|allow:R4:git commit -mn"
+    "|deny:3783:git commit -mtest --no-verify|deny:3783:git commit -mtest -n"
+    "|allow:3783:git commit -Snkey -m x|allow:3783:git commit -uno -m x"
+    "|allow:3783:git push -o --no-verify origin feature/x"
+    "|deny:R4:git push --no-verify origin feature/x|allow:R4:git push -n origin feature/x"
+    "|deny:1127:git -c core.hooksPath=/dev/null commit -m x"
+    "|deny:1127:git -c core.hooksPath=/tmp/none push origin feature/x"
+    "|deny:R4:git -c include.path=/tmp/x.cfg commit -m x"
+    "|allow:R4:git -c core.hooksPath=/dev/null status|allow:R4:git -c user.name=x commit -m y"
+    "|deny:R4:bash -c 'git commit --no-verify -m x'"
+    '|allow:R4:git commit -m "skip --no-verify next time"'
+    "|deny:R5:gh api repos/example/repo/pulls/5/comments/123/replies -f body=x"
+    "|allow:R5:gh api repos/example/repo/pulls/5/comments/123/replies"
+    "|allow:R5:scripts/pr_review.py reply 5 --repo example/repo --match x --body y --resolve"
+    "|deny:incident:until gh pr checks 5; do sleep 30; done"
+    "|deny:R7:while true; do sleep 5; done"
+    "|deny:R7:while sleep 30; do gh pr checks 5 && break; done"
+    "|deny:R7:for ((;;)); do sleep 1; done"
+    "|deny:R7:bash -c 'until gh pr checks 5; do sleep 30; done'"
+    "|deny:R7:eval 'while true; do sleep 1; done'"
+    "|deny:R7:nohup bash -c 'while true; do sleep 60; done' &"
+    "|deny:R7:timeout 600 bash -c 'until x; do sleep 30; done &'"
+    '|deny:R7:while [ "$i" -lt 20 ]; do while true; do sleep 1; done; done'
+    "|deny:R7:while true; do for i in 1 2; do sleep 1; done; done"
+    "|allow:R7:timeout 600 bash -c 'until gh pr checks 5; do sleep 30; done'"
+    "|allow:R7:timeout 600 bash -c 'while true; do sleep 60; done' &"
+    '|allow:R7:i=0; while [ "$i" -lt 20 ]; do sleep 5; i=$((i+1)); done'
+    "|allow:R7:while (( SECONDS < 600 )); do sleep 5; done"
+    "|allow:R7:while read -r line; do sleep 1; done < list.txt"
+    "|allow:R7:for i in 1 2 3; do sleep 1; done"
+    "|allow:R7:for ((i=0; i<5; i++)); do sleep 1; done"
+    "|allow:R7:while true; do gh pr checks 5 && break; done"
+    "|allow:R7:cat <<'EOF' > notes.md\nuntil x; do sleep 30; done\nEOF"
+    '|allow:R7:echo "while true; do sleep 1; done"'
+    "|allow:3380:cat > /example/notes.md <<'EOF'\nas in `NAME=value git ...`\nEOF"
+    "|deny:3716:env -S 'gh issue comment 5 -R stranger/x --body hi'"
+    "|deny:3716:env --split-string='gh issue comment 5 -R stranger/x' -b hi"
+    "|deny:3716:env -iS'gh issue comment 5 -R stranger/x --body hi'"
+    "|deny:3716:env -a x gh issue comment 5 -R stranger/x --body hi"
+    "|deny:3716:env -S 'gh issue comment 5 --body fix#1 -R stranger/x'"
+)
 _CASES: list[tuple[str, str, str]] = [
-    ("git commit -m x -- -n", "allow", "R4"),
-    ("gh pr comment 5 --body ok >/dev/null", "deny", "R1"),
-    ("gh pr comment 5 --body ok 2>/dev/null", "deny", "R1"),
-    ("gh pr comment 5 --body ok &>/dev/null", "deny", "R1"),
+    *((c, w, s) for w, s, c in (x.split(":", 2) for x in "".join(_CASES_PACKED).split("|"))),
     ("gh issue close 5 || true", "deny", "R1"),
     ("gh issue close 5 || :", "deny", "R1"),
     ("gh issue close 5 || echo failed", "deny", "R1"),
-    ("gh pr create --title x --body y >/dev/null 2>&1", "deny", "R1"),
-    ("git commit -m x && git push origin feature/x >/dev/null 2>&1", "deny", "R1"),
-    ("gh api repos/example/repo/issues/1/comments -f body=x 2>/dev/null", "deny", "R1"),
-    ("bash -c 'gh pr comment 5 --body ok' >/dev/null", "deny", "R1"),
-    ("gh pr view 5 --json state >/dev/null", "allow", "R1"),
     ("gh pr comment 5 --body ok 2>&1 | tee out.log", "allow", "R1"),
-    ("gh pr comment 5 --body ok 2>&1", "allow", "R1"),
     ("return 1 2>/dev/null || exit 1", "allow", "R1"),
     ("gh pr comment 5 --body 'add || true to the script'", "allow", "R1"),
-    ('gh pr comment 5 --body ">/dev/null hides output"', "allow", "R1"),
     ('git push origin feature/x || { echo "push failed" >&2; exit 1; }', "allow", "R1"),
     (
         (
@@ -1693,136 +1809,23 @@ _CASES: list[tuple[str, str, str]] = [
         "1628",
     ),
     ("gh pr edit 5 --body-file - <<'EOF'\nthe || echo form\nEOF", "allow", "1628"),
-    ("git commit -F - <<'EOF'\nsay 2>/dev/null\nEOF\ngit push origin feature/x", "allow", "1628"),
     (
         "cat > /example/b.md <<'EOF'\nx\nEOF\ngh pr edit 5 --body-file /example/b.md || :",
         "deny",
         "1628",
     ),
-    ("git fetch origin >/dev/null 2>&1", "allow", "R1"),
     (_STRANGER_REPLY + ' -F t="PRRT_kwDOExample12345" >/dev/null 2>&1 || true', "deny", "incident"),
     (_STRANGER_REPLY + ' -F t="PRRT_kwDOExample12345"', "deny", "R2"),
     (_STRANGER_REPLY + ' -F t="$TID"', "allow", "R2"),
     (_ID_IN_QUERY, "deny", "R2"),
-    ("gh api graphql -f query='{node(id:\"PR_kwDOExample12345\"){id}}'", "allow", "R2"),
-    ("gh api repos/example/repo/actions/variables -f name=AWS_SECRET_ACCESS_KEY", "allow", "R2"),
-    ("gh api graphql -f query='mutation($b:String!){x(b:$b)}' -f b=fixed_the_thing", "allow", "R2"),
-    ("gh issue comment 5 -R stranger/x --body hi", "deny", "incident"),
-    ("gh issue comment 5 --repo=stranger/x --body hi", "deny", "R3"),
-    ("gh issue comment 5 -Rstranger/x --body hi", "deny", "R3"),
-    ("gh -R stranger/x issue comment 5 --body hi", "deny", "R3"),
-    ('gh issue comment 5 --repo "stranger/x" --body hi', "deny", "R3"),
-    ("gh issue comment 5 --repo github.com/stranger/x --body hi", "deny", "R3"),
-    ("gh issue comment 5 --repo example/other --body hi", "allow", "R3"),
-    ("gh pr create -f -R stranger/x", "deny", "R3"),
-    ('gh repo edit --description "CI/CD helpers"', "allow", "R3"),
-    (
-        "gh project item-add 3 --owner @me --url https://github.com/example/repo/issues/5",
-        "allow",
-        "R3",
-    ),
-    ("gh issue comment 5 --repo Example/Repo --body hi", "allow", "R3"),
-    ("gh api repos/stranger/x/issues/1/comments -f body=hi", "deny", "R3"),
-    ("gh api /repos/stranger/x/issues/1/comments -f body=hi", "deny", "R3"),
-    ("gh api repos/stranger/x/issues/1", "allow", "R3"),
-    ("gh api repos/{owner}/{repo}/issues/1/comments -f body=hi", "allow", "R3"),
-    ("gh api repos/example/other/issues/1/comments -f body=hi", "allow", "R3"),
-    ("GH_REPO=stranger/x gh issue comment 5 --body hi", "deny", "R3"),
-    ("export GH_REPO=stranger/x && gh issue comment 5 --body hi", "deny", "R3"),
-    ("GH_REPO=stranger/x; gh issue comment 5 --body hi", "deny", "R3"),
-    ("env GH_REPO=stranger/x gh issue comment 5 --body hi", "deny", "R3"),
-    ("gh pr comment https://github.com/stranger/x/pull/5 --body hi", "deny", "R3"),
-    ("gh issue comment https://github.com/stranger/x/issues/5 --body hi", "deny", "R3"),
-    ("gh pr comment https://github.com/example/other/pull/5 --body hi", "allow", "R3"),
-    ("gh repo edit stranger/x --description y", "deny", "R3"),
-    ("gh repo delete stranger/x --yes", "deny", "R3"),
-    ("gh issue transfer 5 stranger/x", "deny", "R3"),
-    ("gh project create --owner stranger --title y", "deny", "R3"),
-    ("gh secret set TOKEN --org stranger --body x", "deny", "R3"),
-    ("gh variable set NAME -o stranger --body x", "deny", "R3"),
-    ('gh repo edit -d "CI/CD helpers"', "allow", "R3"),
-    ("gh issue close 5 --comment https://github.com/stranger/x/pull/9", "allow", "R3"),
-    ('gh issue close --comment "x" https://github.com/stranger/x/issues/5', "deny", "R3"),
-    ('gh pr close -c "x" https://github.com/stranger/x/pull/5', "deny", "R3"),
-    ("gh pr review 5 --comment -b looks-good", "allow", "R3"),
-    ("gh pr review --comment https://github.com/stranger/x/pull/5 -b ok", "deny", "R3"),
-    ("gh issue close 5 -c https://github.com/stranger/x/pull/9", "allow", "R3"),
-    ('gh issue comment 5 --repo "$TARGET" --body hi', "allow", "R3 run-time target"),
-    ("gh issue comment 5 --body 'see --repo stranger/x'", "allow", "R3"),
-    ("gh issue view 5 --repo stranger/x", "allow", "R3"),
-    ("gh repo clone stranger/x", "allow", "R3"),
-    ("bash -c 'gh issue comment 5 --repo stranger/x --body hi'", "deny", "R3"),
-    ("eval gh issue comment 5 --repo stranger/x --body hi", "deny", "R3"),
-    ("gh issue comment 1 --repo stranger/x --body hi  # it's", "deny", "R3"),
-    ("cat <<'EOF'\ngh issue comment 5 --repo stranger/x --body hi\nEOF", "allow", "R3"),
-    ('echo "gh issue comment 5 --repo stranger/x"', "allow", "R3"),
-    (
-        "GH_WRITE_GUARD_ALLOW=stranger/x gh issue comment 5 -R stranger/x --body hi",
-        "deny",
-        "R3 inline grant",
-    ),
-    ("gh pr merge 5 --admin --squash", "deny", "R4"),
-    ("gh pr merge 5 --squash", "allow", "R4"),
-    ("gh pr merge 5 -m --admin", "deny", "R4"),
-    ("git commit --no-verify -m x", "deny", "R4"),
-    ("git commit -n -m x", "deny", "R4"),
-    ("git commit -an -m x", "deny", "R4"),
-    ("git commit -mn", "allow", "R4"),
-    ("git commit -mtest --no-verify", "deny", "3783"),
-    ("git commit -mtest -n", "deny", "3783"),
-    ("git commit -Snkey -m x", "allow", "3783"),
-    ("git commit -uno -m x", "allow", "3783"),
-    ("git push -o --no-verify origin feature/x", "allow", "3783"),
-    ("git push --no-verify origin feature/x", "deny", "R4"),
-    ("git push -n origin feature/x", "allow", "R4"),
-    ("git -c core.hooksPath=/dev/null commit -m x", "deny", "1127"),
-    ("git -c core.hooksPath=/tmp/none push origin feature/x", "deny", "1127"),
-    ("git -c include.path=/tmp/x.cfg commit -m x", "deny", "R4"),
-    ("git -c core.hooksPath=/dev/null status", "allow", "R4"),
-    ("git -c user.name=x commit -m y", "allow", "R4"),
-    ("bash -c 'git commit --no-verify -m x'", "deny", "R4"),
-    ('git commit -m "skip --no-verify next time"', "allow", "R4"),
     (_RESOLVE, "deny", "R5"),
-    ("gh api repos/example/repo/pulls/5/comments/123/replies -f body=x", "deny", "R5"),
-    ("gh api repos/example/repo/pulls/5/comments/123/replies", "allow", "R5"),
-    (
-        "scripts/pr_review.py reply 5 --repo example/repo --match x --body y --resolve",
-        "allow",
-        "R5",
-    ),
-    ("until gh pr checks 5; do sleep 30; done", "deny", "incident"),
-    ("while true; do sleep 5; done", "deny", "R7"),
     (
         "while ! gh pr view 5 --json state | grep -q MERGED\ndo\n  sleep 30\ndone",
         "deny",
         "R7",
     ),
-    ("while sleep 30; do gh pr checks 5 && break; done", "deny", "R7"),
-    ("for ((;;)); do sleep 1; done", "deny", "R7"),
-    ("bash -c 'until gh pr checks 5; do sleep 30; done'", "deny", "R7"),
-    ("eval 'while true; do sleep 1; done'", "deny", "R7"),
-    ("nohup bash -c 'while true; do sleep 60; done' &", "deny", "R7"),
-    ("timeout 600 bash -c 'until x; do sleep 30; done &'", "deny", "R7"),
-    ('while [ "$i" -lt 20 ]; do while true; do sleep 1; done; done', "deny", "R7"),
-    ("while true; do for i in 1 2; do sleep 1; done; done", "deny", "R7"),
-    ("timeout 600 bash -c 'until gh pr checks 5; do sleep 30; done'", "allow", "R7"),
-    ("timeout 600 bash -c 'while true; do sleep 60; done' &", "allow", "R7"),
-    ('i=0; while [ "$i" -lt 20 ]; do sleep 5; i=$((i+1)); done', "allow", "R7"),
-    ("while (( SECONDS < 600 )); do sleep 5; done", "allow", "R7"),
-    ("while read -r line; do sleep 1; done < list.txt", "allow", "R7"),
-    ("for i in 1 2 3; do sleep 1; done", "allow", "R7"),
-    ("for ((i=0; i<5; i++)); do sleep 1; done", "allow", "R7"),
-    ("while true; do gh pr checks 5 && break; done", "allow", "R7"),
-    ("cat <<'EOF' > notes.md\nuntil x; do sleep 30; done\nEOF", "allow", "R7"),
-    ('echo "while true; do sleep 1; done"', "allow", "R7"),
-    ("cat > /example/notes.md <<'EOF'\nas in `NAME=value git ...`\nEOF", "allow", "3380"),
     ("find . -name '*.txt' | xargs -I{} sh -c '{}'", "allow", "3385"),
     ("printf 5 | xargs gh pr comment --body x", "allow", "R3"),
-    ("env -S 'gh issue comment 5 -R stranger/x --body hi'", "deny", "3716"),
-    ("env --split-string='gh issue comment 5 -R stranger/x' -b hi", "deny", "3716"),
-    ("env -iS'gh issue comment 5 -R stranger/x --body hi'", "deny", "3716"),
-    ("env -a x gh issue comment 5 -R stranger/x --body hi", "deny", "3716"),
-    ("env -S 'gh issue comment 5 --body fix#1 -R stranger/x'", "deny", "3716"),
 ]
 
 _ENV_CASES: list[tuple[str, dict[str, str], str, str]] = [
@@ -1939,145 +1942,107 @@ _PUSH_CASES: list[tuple[str, dict[str, set[str] | None], str, str, str]] = [
     (_COMMIT_THEN_PUSH, _RULES, "feature/x", "deny", "R4"),
 ]
 
+_IN_PLACE_GROUPS: list[tuple[str | None, str | tuple[str, ...]]] = [
+    (
+        "develop",
+        (
+            "allow:git add automations.yaml|allow:git add automations.yaml scripts.yaml"
+            '|allow:git add -- automations.yaml|allow:git commit -m "Record live change"'
+            "|allow:git commit -S -m x|allow:git commit -Sa -m x|deny:git commit -aS -m x"
+            "|deny:git commit -S -m x automations.yaml|allow:git rm old.yaml"
+            "|allow:git mv a.yaml b.yaml|allow:git push origin develop|deny:git push"
+            "|deny:git push origin|deny:git commit -m x -- -n|allow:git push origin HEAD"
+            "|allow:git add automations.yaml && git commit -m x && git push origin develop"
+            "|deny:git add -A|deny:git add .|deny:git add -u|deny:git add 'automations/*.yaml'"
+            "|deny:git add :/|deny:git add|deny:git commit -am x|deny:git commit -a -m x"
+            "|deny:git commit --amend --no-edit|deny:git commit -p"
+            "|deny:git -c user.name=x commit -m x|deny:git commit -m x ."
+            "|deny:git commit -m x -- automations|deny:git commit -o -m x automations.yaml"
+            '|deny:git commit --pathspec-from-file=list -m x|allow:git commit -m "-p fix"'
+            "|deny:git commit -nm x|deny:git commit -minit .|deny:git commit -minit -n"
+            '|allow:git commit -m"Fix a typo"'
+            "|deny:git checkout main && git add a.yaml && git commit -m x"
+            '|deny:git push origin develop --tags|deny:git push origin develop "$B"'
+            "|deny:git push origin develop refs/tags/v1|allow:git push -u origin develop"
+            '|allow:git mv old.yaml automations/|deny:git add "$F"|deny:git rm -r automations'
+            "|deny:git mv -f a.yaml b.yaml|deny:git mv a.yaml|deny:git push origin main"
+            "|deny:git push origin develop:main|deny:git push origin develop feature/x"
+            "|deny:git push --force origin develop|deny:git push fork develop|deny:git push --tags"
+            "|deny:git push --all|deny:git reset --hard|deny:git stash"
+            "|deny:git checkout -- automations.yaml|deny:git restore automations.yaml"
+            "|deny:git cherry-pick abc123"
+        ),
+    ),
+    (
+        None,
+        (
+            'deny:git add automations.yaml|deny:git commit -m "Record live change"'
+            "|deny:git push origin develop"
+        ),
+    ),
+]
 _IN_PLACE_CASES: list[tuple[str, str | None, str]] = [
-    ("git add automations.yaml", "develop", "allow"),
-    ("git add automations.yaml", None, "deny"),
-    ("git add automations.yaml scripts.yaml", "develop", "allow"),
-    ("git add -- automations.yaml", "develop", "allow"),
-    ('git commit -m "Record live change"', "develop", "allow"),
-    ('git commit -m "Record live change"', None, "deny"),
-    ("git commit -S -m x", "develop", "allow"),
-    ("git commit -Sa -m x", "develop", "allow"),
-    ("git commit -aS -m x", "develop", "deny"),
-    ("git commit -S -m x automations.yaml", "develop", "deny"),
-    ("git rm old.yaml", "develop", "allow"),
-    ("git mv a.yaml b.yaml", "develop", "allow"),
-    ("git push origin develop", "develop", "allow"),
-    ("git push", "develop", "deny"),
-    ("git push origin", "develop", "deny"),
-    ("git commit -m x -- -n", "develop", "deny"),
-    ("git push origin HEAD", "develop", "allow"),
-    ("git push origin develop", None, "deny"),
-    ("git add automations.yaml && git commit -m x && git push origin develop", "develop", "allow"),
-    ("git add -A", "develop", "deny"),
-    ("git add .", "develop", "deny"),
-    ("git add -u", "develop", "deny"),
-    ("git add 'automations/*.yaml'", "develop", "deny"),
-    ("git add :/", "develop", "deny"),
-    ("git add", "develop", "deny"),
-    ("git commit -am x", "develop", "deny"),
-    ("git commit -a -m x", "develop", "deny"),
-    ("git commit --amend --no-edit", "develop", "deny"),
-    ("git commit -p", "develop", "deny"),
-    ("git -c user.name=x commit -m x", "develop", "deny"),
-    ("git commit -m x .", "develop", "deny"),
-    ("git commit -m x -- automations", "develop", "deny"),
-    ("git commit -o -m x automations.yaml", "develop", "deny"),
-    ("git commit --pathspec-from-file=list -m x", "develop", "deny"),
-    ('git commit -m "-p fix"', "develop", "allow"),
-    ("git commit -nm x", "develop", "deny"),
-    ("git commit -minit .", "develop", "deny"),
-    ("git commit -minit -n", "develop", "deny"),
-    ('git commit -m"Fix a typo"', "develop", "allow"),
-    ("git checkout main && git add a.yaml && git commit -m x", "develop", "deny"),
-    ("git push origin develop --tags", "develop", "deny"),
-    ('git push origin develop "$B"', "develop", "deny"),
-    ("git push origin develop refs/tags/v1", "develop", "deny"),
-    ("git push -u origin develop", "develop", "allow"),
-    ("git mv old.yaml automations/", "develop", "allow"),
-    ('git add "$F"', "develop", "deny"),
-    ("git rm -r automations", "develop", "deny"),
-    ("git mv -f a.yaml b.yaml", "develop", "deny"),
-    ("git mv a.yaml", "develop", "deny"),
-    ("git push origin main", "develop", "deny"),
-    ("git push origin develop:main", "develop", "deny"),
-    ("git push origin develop feature/x", "develop", "deny"),
-    ("git push --force origin develop", "develop", "deny"),
-    ("git push fork develop", "develop", "deny"),
-    ("git push --tags", "develop", "deny"),
-    ("git push --all", "develop", "deny"),
-    ("git reset --hard", "develop", "deny"),
-    ("git stash", "develop", "deny"),
-    ("git checkout -- automations.yaml", "develop", "deny"),
-    ("git restore automations.yaml", "develop", "deny"),
-    ("git cherry-pick abc123", "develop", "deny"),
+    (c, b, w)
+    for b, g in _IN_PLACE_GROUPS
+    for w, c in (x.split(":", 1) for x in "".join(g).split("|"))
 ]
 
-_CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
-    ("git commit -m x", _PRIMARY, {}, "deny", "incident"),
-    ("git add automations.yaml", _PRIMARY, {}, "deny", "3200"),
-    ("git commit -m x", _PRIMARY, {_ALLOW_PRIMARY_ENV: "1"}, "allow", "R6"),
-    ("git commit -m x", _PRIMARY, {_ALLOW_PRIMARY_ENV: "false"}, "deny", "R6"),
-    ("git reset --hard", _PRIMARY, {}, "deny", "R6"),
-    ("git stash", _PRIMARY, {}, "deny", "R6"),
-    ("git stash list", _PRIMARY, {}, "allow", "R6"),
-    ("git clean -fd", _PRIMARY, {}, "deny", "R6"),
-    ("git clean -nfd", _PRIMARY, {}, "allow", "R6"),
-    ("git clean -fen", _PRIMARY, {}, "deny", "3783"),
-    ("git clean -fe.env", _PRIMARY, {}, "deny", "3783"),
-    ("git clean -f -e -n", _PRIMARY, {}, "deny", "3783"),
-    ("git clean -f --exclude -n", _PRIMARY, {}, "deny", "3783"),
-    ("git clean -f -e x -n", _PRIMARY, {}, "allow", "3783"),
-    ("git checkout develop", _PRIMARY, {}, "allow", "R6"),
-    ("git checkout -", _PRIMARY, {}, "allow", "R6"),
-    ("git checkout .", _PRIMARY, {}, "deny", "R6"),
-    ("git checkout -- README.md", _PRIMARY, {}, "deny", "R6"),
-    ("git checkout -b topic", _PRIMARY, {}, "deny", "R6"),
-    ("git switch -C develop", _PRIMARY, {}, "deny", "R6"),
-    ("git merge --ff-only origin/develop", _PRIMARY, {}, "allow", "R6"),
-    ("git pull --ff-only", _PRIMARY, {}, "allow", "R6"),
-    ("git pull", _PRIMARY, {}, "deny", "R6"),
-    ("git worktree add ../wt-x -b x origin/develop", _PRIMARY, {}, "allow", "R6"),
-    ("git worktree remove ../wt-x", _PRIMARY, {}, "allow", "R6"),
-    ("git worktree remove -f ../wt-x", _PRIMARY, {}, "deny", "R6"),
-    ("git fetch origin", _PRIMARY, {}, "allow", "R6"),
-    ("git status", _PRIMARY, {}, "allow", "R6"),
-    ("git push origin feature/x", _PRIMARY, {}, "deny", "R6"),
-    ("git push origin --delete feature/x", _PRIMARY, {}, "allow", "1642"),
-    ("git push origin :feature/x", _PRIMARY, {}, "allow", "1642"),
-    ("git push my_fork-2 :feature/x", _PRIMARY, {}, "allow", "1642"),
-    ("git push -dq origin feature/x feature/y", _PRIMARY, {}, "allow", "1642"),
-    ("git push --dry-run origin :refs/heads/feature/x", _PRIMARY, {}, "allow", "1642"),
+_CHECKOUT_GROUPS: list[tuple[str, dict[str, str], str | tuple[str, ...]]] = [
     (
-        (
-            "git ls-remote --heads --exit-code -- origin refs/heads/feature/x "
-            "&& git push origin --delete -- feature/x"
-        ),
         _PRIMARY,
         {},
-        "allow",
-        "1642",
+        (
+            "deny:incident:git commit -m x|deny:3200:git add automations.yaml"
+            "|deny:R6:git reset --hard|deny:R6:git stash|allow:R6:git stash list"
+            "|deny:R6:git clean -fd|allow:R6:git clean -nfd|deny:3783:git clean -fen"
+            "|deny:3783:git clean -fe.env|deny:3783:git clean -f -e -n"
+            "|deny:3783:git clean -f --exclude -n|allow:3783:git clean -f -e x -n"
+            "|allow:R6:git checkout develop|allow:R6:git checkout -|deny:R6:git checkout ."
+            "|deny:R6:git checkout -- README.md|deny:R6:git checkout -b topic"
+            "|deny:R6:git switch -C develop|allow:R6:git merge --ff-only origin/develop"
+            "|allow:R6:git pull --ff-only|deny:R6:git pull"
+            "|allow:R6:git worktree add ../wt-x -b x origin/develop"
+            "|allow:R6:git worktree remove ../wt-x|deny:R6:git worktree remove -f ../wt-x"
+            "|allow:R6:git fetch origin|allow:R6:git status|deny:R6:git push origin feature/x"
+            "|allow:1642:git push origin --delete feature/x|allow:1642:git push origin :feature/x"
+            "|allow:1642:git push my_fork-2 :feature/x"
+            "|allow:1642:git push -dq origin feature/x feature/y"
+            "|allow:1642:git push --dry-run origin :refs/heads/feature/x"
+            "|allow:1642:git ls-remote --heads --exit-code -- origin refs/heads/feature/x && git push origin --delete -- feature/x"
+            "|deny:1642:git push origin --delete develop|deny:1642:git push origin :refs/heads/main"
+            "|deny:1642:git push origin --delete feature/x develop"
+            "|deny:1642:git push origin :feature/x feature/y|deny:1642:git push origin +:feature/x"
+            "|deny:1642:git push -f origin :feature/x|deny:1642:git push -u origin --delete feature/x"
+            "|deny:1642:git push --prune origin :feature/x|deny:1642:git push origin :"
+            "|deny:1642:git push origin :refs/tags/v1|deny:1642:git push origin --delete :feature/x"
+            "|deny:1642:git push --delete origin|deny:1642:git push . --delete feature/x"
+            '|deny:1642:git push ../other :feature/x|deny:1642:git push origin --delete "$BRANCH"'
+            "|deny:1642:git -c core.sshCommand=ssh push origin :feature/x"
+            "|allow:R6:cd /c/work/wt && git commit -m x"
+            "|allow:3716:env --chdir /c/work/wt git commit -m x"
+        ),
     ),
-    ("git push origin --delete develop", _PRIMARY, {}, "deny", "1642"),
-    ("git push origin :refs/heads/main", _PRIMARY, {}, "deny", "1642"),
-    ("git push origin --delete feature/x develop", _PRIMARY, {}, "deny", "1642"),
-    ("git push origin :feature/x feature/y", _PRIMARY, {}, "deny", "1642"),
-    ("git push origin +:feature/x", _PRIMARY, {}, "deny", "1642"),
-    ("git push -f origin :feature/x", _PRIMARY, {}, "deny", "1642"),
-    ("git push -u origin --delete feature/x", _PRIMARY, {}, "deny", "1642"),
-    ("git push --prune origin :feature/x", _PRIMARY, {}, "deny", "1642"),
-    ("git push origin :", _PRIMARY, {}, "deny", "1642"),
-    ("git push origin :refs/tags/v1", _PRIMARY, {}, "deny", "1642"),
-    ("git push origin --delete :feature/x", _PRIMARY, {}, "deny", "1642"),
-    ("git push --delete origin", _PRIMARY, {}, "deny", "1642"),
-    ("git push . --delete feature/x", _PRIMARY, {}, "deny", "1642"),
-    ("git push ../other :feature/x", _PRIMARY, {}, "deny", "1642"),
-    ('git push origin --delete "$BRANCH"', _PRIMARY, {}, "deny", "1642"),
-    ("git -c core.sshCommand=ssh push origin :feature/x", _PRIMARY, {}, "deny", "1642"),
-    ("cd /c/work/wt && git commit -m x", _PRIMARY, {}, "allow", "R6"),
-    ("git commit -m x", _WORKTREE, {}, "allow", "R6"),
-    ("cd /c/work/primary && git commit -m x", _WORKTREE, {}, "deny", "incident"),
-    ("cd /c/work/primary/sub && git add f", _WORKTREE, {}, "deny", "R6"),
-    ("cd /c/work/primary && git status", _WORKTREE, {}, "allow", "R6"),
-    ("(cd /c/work/primary && git log -1) && git commit -m x", _WORKTREE, {}, "allow", "R6"),
-    ("git -C /c/work/primary commit -m x", _WORKTREE, {}, "deny", "R6"),
-    ("pushd /c/work/primary; git add f", _WORKTREE, {}, "deny", "R6"),
-    ("bash -c 'cd /c/work/primary && git reset --hard'", _WORKTREE, {}, "deny", "R6"),
-    ('git -C "$D" commit -m x', _WORKTREE, {}, "allow", "3382"),
-    ("git -C /elsewhere commit -m x", _WORKTREE, {}, "allow", "R6"),
-    ("env -C /c/work/primary git commit -m x", _WORKTREE, {}, "deny", "3716"),
-    ("env --chdir=/c/work/primary sh -c 'git add f'", _WORKTREE, {}, "deny", "3716"),
-    ("env --chdir /c/work/wt git commit -m x", _PRIMARY, {}, "allow", "3716"),
+    (_PRIMARY, {_ALLOW_PRIMARY_ENV: "1"}, ("allow:R6:git commit -m x")),
+    (_PRIMARY, {_ALLOW_PRIMARY_ENV: "false"}, ("deny:R6:git commit -m x")),
+    (
+        _WORKTREE,
+        {},
+        (
+            "allow:R6:git commit -m x|deny:incident:cd /c/work/primary && git commit -m x"
+            "|deny:R6:cd /c/work/primary/sub && git add f|allow:R6:cd /c/work/primary && git status"
+            "|allow:R6:(cd /c/work/primary && git log -1) && git commit -m x"
+            "|deny:R6:git -C /c/work/primary commit -m x|deny:R6:pushd /c/work/primary; git add f"
+            "|deny:R6:bash -c 'cd /c/work/primary && git reset --hard'"
+            '|allow:3382:git -C "$D" commit -m x|allow:R6:git -C /elsewhere commit -m x'
+            "|deny:3716:env -C /c/work/primary git commit -m x"
+            "|deny:3716:env --chdir=/c/work/primary sh -c 'git add f'"
+        ),
+    ),
+]
+_CHECKOUT_CASES: list[tuple[str, str, dict[str, str], str, str]] = [
+    (c, d, e, w, s)
+    for d, e, g in _CHECKOUT_GROUPS
+    for w, s, c in (x.split(":", 2) for x in "".join(g).split("|"))
 ]
 
 # A directory that does not exist, so no origin and no branch rules resolve there.
@@ -2091,7 +2056,10 @@ _NO_ORIGIN_CASES: list[tuple[str, str, str]] = [
 _BLANKET = (
     "deny:git add -N .|deny:git add -A|deny:git add -u|deny:git add .|deny:git add 'src/*.py'|deny:git add"
     '|deny:git add "$F"|deny:git commit -am x|allow:git add -N a.txt|allow:git add -p a.txt'
-    "|allow:git add -v -- a.txt|allow:git commit -m '-a fix'"
+    "|allow:git add -v -- a.txt|allow:git commit -m '-a fix'|deny:git stage -A|deny:git commit -m x ."
+    "|deny:git add --pathspec-from-file list.txt|deny:git add -A --chmod +x|deny:git commit -m x -- ."
+    "|allow:git add -n .|allow:git add --dry-run -A|allow:git commit --dry-run -a|allow:git add -N -- a.txt"
+    "|allow:git commit -m x a.txt"
 )
 
 
@@ -2105,6 +2073,23 @@ def _host_pin_selftest() -> bool:
     ):
         _live_branch_rules("example", "repo", "develop")
     return run.call_args.kwargs["env"]["GH_HOST"] == "github.com"
+
+
+def _blanket_live_selftest() -> bool | str:
+    """Judge a blanket add against a real origin, a real linked worktree, and a real repository with none."""
+    with tempfile.TemporaryDirectory() as tmp:
+        live, bare, linked = (os.path.join(tmp, n) for n in ("live", "bare", "linked"))
+        url = "https://github.com/example/repo.git"
+        steps = [["remote", "add", "origin", url], ["worktree", "add", "-q", linked, "-b", "x"]]
+        if not (_build_selftest_repo(live, steps) and _build_selftest_repo(bare, [])):
+            return "skip"
+
+        def verdict(cmd: str, cwd: str) -> str:
+            return classify(cmd, cwd, environ={}, primary_checkout_lookup=lambda _d: None)[0]
+
+        got = [verdict("git add -A", d) for d in (live, linked, bare)]
+        got += [verdict(f"git --git-dir={live}/.git add -A", bare), verdict("git add -N f", linked)]
+        return got == ["deny", "deny", "allow", "deny", "allow"]
 
 
 def _fixture_lookup(directory: str) -> bool | None:
@@ -2436,7 +2421,8 @@ def _selftest_cases() -> int:
         check(case.split(":", 1)[1], case.split(":", 1)[0], "4462")
     for cmd in ("git add -A", "git commit -am x"):
         check(cmd, "allow", "4462", origin=None)
-    ok = ok and (pinned := _host_pin_selftest())
+    pinned = _host_pin_selftest()
+    ok = ok and pinned
     print(f"  {'ok  ' if pinned else 'FAIL'} [pin  ] the branch-rules read pins GH_HOST")
     with tempfile.TemporaryDirectory() as tmp:
         absent = os.path.join(tmp, "absent")
@@ -2450,6 +2436,11 @@ def _selftest_cases() -> int:
     ok = ok and live in (True, "skip")
     print(
         f"  {'FAIL' if live is False else 'ok  '} [live ] a real checkout reads as primary: {live}"
+    )
+    blanket = _blanket_live_selftest()
+    ok = ok and blanket in (True, "skip")
+    print(
+        f"  {'FAIL' if blanket is False else 'ok  '} [live ] a real origin decides a blanket stage: {blanket}"
     )
     policy = _in_place_selftest()
     ok = ok and policy in (True, "skip")
