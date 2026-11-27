@@ -735,7 +735,8 @@ def shim_problem(launcher):
     A `.exe` is not one, since Scoop's shims forward to one fixed interpreter.
     It picks its interpreter when the hook runs, from the session's directory.
     So the interpreter the probe saw can differ from the one a hook gets. A hook that gets one below 3.11 fails open.
-    The shim is asked for the interpreter it runs, so the refusal can name the path to pass instead.
+    The shim is asked for the interpreter it runs, so the refusal can name the one to run the installer under.
+    A shim that cannot be started is left to `launcher_problem`, which says why.
     """
     path = pathlib.PurePath(shutil.which(launcher) or launcher)
     if path.parent.name != "shims" or path.suffix.lower() == ".exe":
@@ -753,11 +754,11 @@ def shim_problem(launcher):
             check=False,
         )
     except (OSError, ValueError, subprocess.TimeoutExpired):
-        return problem
+        return None
     real = r.stdout.strip()
     if r.returncode or not real or pathlib.Path(real).parent.name == "shims":
         return problem
-    return f"{problem}; pass {real!r} instead"
+    return f"{problem}; run the installer under {real!r} instead"
 
 
 def exec_spawn_problem(launcher, windows=None):
@@ -1626,15 +1627,16 @@ def registration_problems(claude_home):
                     spawn = exec_spawn_problem(launcher) if key[1] else None
                     probed[key] = spawn or shim_problem(launcher) or launcher_problem(launcher)
                 if launcher is not None and probed[key]:
-                    out.append(
-                        f"a {event} entry names a launcher that cannot run the {label} "
-                        f"({probed[key]}), so the {label} "
-                        + (
-                            "can fail to run"
-                            if "version-manager shim" in probed[key]
-                            else "never runs"
+                    if "version-manager shim" in probed[key]:
+                        out.append(
+                            f"a {event} entry names a launcher that can fail to run the {label} "
+                            f"({probed[key]})"
                         )
-                    )
+                    else:
+                        out.append(
+                            f"a {event} entry names a launcher that cannot run the {label} "
+                            f"({probed[key]}), so the {label} never runs"
+                        )
                     continue
                 if judge(group, hook):
                     registered += 1

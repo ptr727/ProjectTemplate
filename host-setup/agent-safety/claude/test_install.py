@@ -3657,7 +3657,7 @@ class TestLauncher(StampCase):
         shim.chmod(0o755)
         problem = install.shim_problem(str(shim))
         self.assertIn("version-manager shim", problem)
-        self.assertIn(f"pass {sys.executable!r} instead", problem)
+        self.assertIn(f"run the installer under {sys.executable!r} instead", problem)
         self._path_first(shim_dir)
         launcher, rejected = install.hook_launcher()
         self.assertNotEqual(launcher, str(shim))
@@ -3671,7 +3671,23 @@ class TestLauncher(StampCase):
         shim.chmod(0o755)
         self._path_first(shim_dir)
         self.assertIn("version-manager shim", install.shim_problem("python3"))
-        self.assertIsNone(install.shim_problem("C:\\Users\\x\\scoop\\shims\\python3.exe"))
+        scoop = pathlib.Path(self.tmp) / "scoop" / "shims"
+        scoop.mkdir(parents=True)
+        (scoop / "python3.exe").write_text(
+            f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8"
+        )
+        (scoop / "python3.exe").chmod(0o755)
+        self.assertIsNone(install.shim_problem(str(scoop / "python3.exe")))
+
+    def test_a_shim_naming_itself_or_failing_to_start_gets_no_path_to_pass(self):
+        shim_dir = pathlib.Path(self.tmp) / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        shim.write_text('#!/bin/sh\necho "$0"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        self.assertNotIn("instead", install.shim_problem(str(shim)))
+        shim.unlink()
+        self.assertIsNone(install.shim_problem(str(shim)))
 
     def test_a_shim_that_names_no_interpreter_is_still_refused(self):
         shim_dir = pathlib.Path(self.tmp) / "asdf" / "shims"
@@ -3783,7 +3799,7 @@ class TestLauncher(StampCase):
         r = run(self.home, "--report")
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertIn("version-manager shim", r.stdout)
-        self.assertIn("can fail to run", r.stdout)
+        self.assertIn("can fail to run the write guard", r.stdout)
 
     def test_a_registration_in_another_shape_is_not_run(self):
         """What a composed command executes is not decidable from its string, so nothing in it is run."""
