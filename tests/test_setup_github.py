@@ -733,14 +733,16 @@ gh() {
         printf 'github.com\n  \xe2\x9c\x93 Logged in to github.com account %s (keyring)\n  - Active account: true\n' "$ACCOUNT"
         ;;
     "ssh-key list")
+        [[ ${GH_HOST:-} == github.com ]] || return 9
         [[ ${LIST_RC:-0} == 0 ]] || return "$LIST_RC"
         local kind
         for kind in $(<"$STATE"); do
             [[ $kind == signing && ${HIDE_SIGNING:-no} == yes ]] && continue
-            printf 'example-host\t%s\t%s\t2024-01-01\t1\n' "$PUB" "$kind"
+            printf '%s\t%s\t%s\t2024-01-01\t1\n' "${LIST_TITLE:-example-host}" "$PUB" "$kind"
         done
         ;;
     "ssh-key add "*)
+        [[ ${GH_HOST:-} == github.com ]] || return 9
         [[ ${ADD_RC:-0} == 0 && ( $* != *"--type signing" || ${ADD_SIGNING_RC:-0} == 0 ) ]] || return "${ADD_SIGNING_RC:-$ADD_RC}"
         printf '%s\n' "${*##* }" >>"$STATE"
         ;;
@@ -797,6 +799,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         public_signing: bool = False,
         hide_signing: bool = False,
         public_error: bool = False,
+        list_title: str = "",
         then: str = "",
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -831,6 +834,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
             "PUBLIC_SIGNING": "yes" if public_signing else "no",
             "HIDE_SIGNING": "yes" if hide_signing else "no",
             "PUBLIC_ERROR": "yes" if public_error else "no",
+            "LIST_TITLE": list_title,
             "SSH_OUTPUT": SSH_STATES[ssh_state].replace(
                 "KEYPATH", str(home / ".ssh" / "id_ed25519")
             ),
@@ -867,6 +871,12 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = (self.tmp / "calls").read_text().splitlines()
         self.assertEqual(calls.count("ssh-key list"), 2, calls)
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
+
+    def test_a_host_titled_after_a_kind_does_not_pass_for_it(self) -> None:
+        result, adds = self.register(registered="auth", list_title="signing")
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(adds), 1, adds)
         self.assertTrue(adds[0].endswith("--type signing"), adds)
 
@@ -1080,6 +1090,7 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "Get-GeneralUser",
     "Resolve-GitHubUser",
     "Test-ManagedKeyDenied",
+    "Invoke-GhOnGitHubCom",
     "Get-GhKeyState",
     "Test-KeyRegistered",
     "Get-SigningRegistrationState",
@@ -1125,14 +1136,16 @@ $GhStub = {
             return @("github.com", "  Logged in to github.com account $($script:Case.account) (keyring)", "  - Active account: true")
         }
         'ssh-key list' {
+            if ($env:GH_HOST -ne 'github.com') { $global:LASTEXITCODE = 9; return }
             if ($script:Case.listRc) { $global:LASTEXITCODE = [int]$script:Case.listRc; return }
             foreach ($kind in $script:Reg) {
                 if ($kind -eq 'signing' -and $script:Case.hideSigning) { continue }
-                "example-host`t$($script:Case.pub)`t$kind`t2024-01-01`t1"
+                "$(if ($script:Case.listTitle) { $script:Case.listTitle } else { 'example-host' })`t$($script:Case.pub)`t$kind`t2024-01-01`t1"
             }
             return
         }
         'ssh-key add *' {
+            if ($env:GH_HOST -ne 'github.com') { $global:LASTEXITCODE = 9; return }
             $global:LASTEXITCODE = if ($args[-1] -eq 'signing') { [int]$script:Case.addSigningRc } else { [int]$script:Case.addRc }
             if ($global:LASTEXITCODE -eq 0) { $script:Reg += $args[-1] }
             return
@@ -1208,6 +1221,7 @@ def windows_register_case(
     hide_signing: bool = False,
     auth: bool = False,
     public_error: bool = False,
+    list_title: str = "",
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -1230,6 +1244,7 @@ def windows_register_case(
         "hideSigning": hide_signing,
         "auth": auth,
         "publicError": public_error,
+        "listTitle": list_title,
         "pub": PUBLIC_KEY,
     }
 
@@ -1245,6 +1260,9 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         cases = [
             windows_register_case("none"),
             windows_register_case("auth-done", registered=["authentication"]),
+            windows_register_case(
+                "titled-signing", registered=["authentication"], list_title="signing"
+            ),
             windows_register_case("both-done", registered=["authentication", "signing"]),
             windows_register_case("logged-out", account=""),
             windows_register_case("refused", add_rc=1),
@@ -1348,6 +1366,11 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertTrue(adds[0].endswith("--type authentication"), adds)
         self.assertTrue(adds[1].endswith("--type signing"), adds)
         self.assertIn("--title", adds[0])
+
+    def test_a_host_titled_after_a_kind_does_not_pass_for_it(self) -> None:
+        adds = self.adds("titled-signing")
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
 
     def test_only_the_missing_kind_is_registered(self) -> None:
         self.assertEqual(self.results["auth-done"]["lists"], 2)

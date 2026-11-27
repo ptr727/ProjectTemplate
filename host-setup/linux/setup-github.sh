@@ -454,13 +454,17 @@ registration_needed() {
 # Each returns 0 registered, 1 not registered, and 2 when the answer could not be read.
 # A line holds the key body and its kind, so a title that happens to name a kind is the only false match.
 gh_key_registered() {
-    local kind="$1" body key listing matches rc=0
+    local kind="$1" body key listing
+    # The ssh-key commands take no host flag and act on gh's default host, so GH_HOST pins them to the github.com account checked above.
+    local -x GH_HOST=github.com
     body=$(key_body) || return 2
     key=$(awk '{ print $2 }' <<<"$body")
     listing=$(gh ssh-key list) || return 2
-    matches=$(grep -F -- "$key" <<<"$listing") || rc=$?
-    ((rc <= 1)) || return 2
-    grep -qE "(^|[[:space:]])$kind([[:space:]]|$)" <<<"$matches" && return 0
+    # A row starts with its title and then the key, so the kind is looked for only in the fields after those.
+    # A host titled after a kind then cannot pass for that kind's registration.
+    awk -F '\t' -v key="$key" -v kind="$kind" '
+        index($2, key) { for (i = 3; i <= NF; i++) if ($i == kind) found = 1 }
+        END { exit !found }' <<<"$listing" && return 0
 
     # A token without admin:ssh_signing_key still lists the authentication keys and exits 0, leaving the signing rows out.
     # So a signing row missing from gh's list is asked of the list GitHub publishes for gh's account before it reads as missing.
@@ -489,6 +493,8 @@ signing_registration_state() {
 # A refused registration, such as a token without the scope, is a warning that names the remedy and never ends the run.
 register_through_gh() {
     local kind="$1" registered_rc="$2" title
+    # The ssh-key commands take no host flag and act on gh's default host, so GH_HOST pins them to the github.com account checked above.
+    local -x GH_HOST=github.com
     KEY_REGISTERED=false
     # A dry run before the key exists has nothing to read or register, so it says what a real run would do.
     if [[ ! -f $KEY.pub ]]; then

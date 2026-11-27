@@ -633,16 +633,28 @@ function Test-ManagedKeyDenied {
 # The lists gh itself returns show both kinds for the logged in account, and are not the cached public lists.
 # So they answer right after a registration, and a lagging public list cannot cause a second add or a false paste.
 # Each returns registered, missing, or unknown, and the third is not the second.
+# The ssh-key commands take no host flag and act on gh's default host, so GH_HOST pins them to the github.com account Get-GhAccount checks.
+# The variable is put back afterwards, since a script run from an interactive session shares that session's environment.
+function Invoke-GhOnGitHubCom {
+    param([scriptblock]$Call)
+    $saved = $env:GH_HOST
+    $env:GH_HOST = 'github.com'
+    try { & $Call } finally { $env:GH_HOST = $saved }
+}
+
 function Get-GhKeyState {
     param([ValidateSet('authentication', 'signing')][string]$Kind)
     $body = Get-KeyBody
     if (-not $body) { return 'unknown' }
     $key = ($body -split '\s+')[1]
     # The stderr gh writes names a missing scope, so it is left on the console rather than captured.
-    $listing = (& gh ssh-key list | Out-String)
+    $listing = Invoke-GhOnGitHubCom { & gh ssh-key list | Out-String }
     if ($LASTEXITCODE -ne 0) { return 'unknown' }
+    # A row starts with its title and then the key, so the kind is looked for only in the fields after those.
+    # A host titled after a kind then cannot pass for that kind's registration.
     foreach ($line in ($listing -split '\r?\n')) {
-        if ($line.Contains($key) -and $line -match "(^|\s)$Kind(\s|$)") { return 'registered' }
+        $fields = $line -split "`t"
+        if ($fields.Count -ge 3 -and $fields[1].Contains($key) -and ($fields[2..($fields.Count - 1)] -contains $Kind)) { return 'registered' }
     }
     # A token without admin:ssh_signing_key still lists the authentication keys and exits 0, leaving the signing rows out.
     # So a signing row missing from gh's list is asked of the list GitHub publishes for gh's account before it reads as missing.
@@ -684,7 +696,7 @@ function Register-KeyThroughGh {
     }
 
     $title = [System.Net.Dns]::GetHostName()
-    $code = run -Command 'gh' -Arguments @('ssh-key', 'add', "$($script:KEY).pub", '--title', $title, '--type', $Kind)
+    $code = Invoke-GhOnGitHubCom { run -Command 'gh' -Arguments @('ssh-key', 'add', "$($script:KEY).pub", '--title', $title, '--type', $Kind) }
     if ($code -ne 0) {
         warn "gh could not register the $Kind key. A missing scope is one cause, and $($script:GH_SCOPE_COMMAND) adds the scopes it needs. The key being in use on another account is the other."
         return $false
