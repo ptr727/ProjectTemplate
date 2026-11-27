@@ -836,6 +836,7 @@ def _live_branch_rules(owner: str, repo: str, branch: str) -> set[str] | None:
             encoding="utf-8",
             timeout=10,
             check=False,
+            env={**os.environ, "GH_HOST": "github.com"},
         )
         return set(json.loads(r.stdout or "[]")) if r.returncode == 0 else None
     # Any failure means unknown, so a protected-by-default branch fails closed.
@@ -1240,14 +1241,44 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
         )
     paths = args[args.index("--") + 1 :] if "--" in args else args
     flags = args[: args.index("--")] if "--" in args else args
-    if not paths or len(paths) < (2 if sub == "mv" else 1) or any(a.startswith("-") for a in flags):
+    if len(paths) < (2 if sub == "mv" else 1) or any(a.startswith("-") for a in flags):
         return False
-    if any(p in (".", "*") or p.startswith(":") or re.search(r"[*?\[]", p) for p in paths):
+    return _explicit_paths(paths, target, sub == "add")
+
+
+_NOT_EXPLICIT = re.compile(r"[*?\[]|^:|^\.$")
+
+
+def _explicit_paths(paths: list[str], target: str, no_dirs: bool) -> bool:
+    """Whether `paths` names files only, the one meaning of "explicit path" for requirements 6 and 11."""
+    if not paths or any(_NOT_EXPLICIT.search(p) for p in paths):
         return False
-    if sub != "add":
-        return True
     joined = [_join_dir(target, p) for p in paths]
-    return all(j is not None and not os.path.isdir(j) for j in joined)
+    return not no_dirs or all(j and not os.path.isdir(j) for j in joined)
+
+
+def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
+    """Requirement 11: why this `git add` naming no explicit file, or `commit -a`, runs in a checkout with an `origin`."""
+    if _base(cmd.argv[0]) != "git":
+        return None
+    git = _git(cmd.argv)
+    target = _moved(cmd.cwd, git.c_dirs)
+    if git.sub not in ("add", "commit") or target is None:
+        return None
+    if git.sub == "commit":
+        flags = _before_dashes("commit", git.args)
+        sweeps = "--all" in flags or _short_has(flags, "a")
+    else:
+        cut = git.args.index("--") if "--" in git.args else len(git.args)
+        paths = [a for a in git.args[:cut] if not a.startswith("-")] + git.args[cut + 1 :]
+        sweeps = not _explicit_paths(paths, target, True)
+    if not sweeps or not (known_origin or _git_stdout(target, ["remote", "get-url", "origin"])):
+        return None
+    return (
+        f"This stages by sweep (`git {git.sub}`) in a checkout with an origin ({target}), taking every "
+        "stray or secret-bearing file into the commit. Name each file in a `git add`, with no "
+        "`.`, glob, directory, `-A`, or `-u`, and commit with no `-a`. See GOVERNANCE.md 'Git and Commit Rules'."
+    )
 
 
 def _primary_denial(
@@ -1561,6 +1592,9 @@ def classify(
             return "deny", reason
     for c in reading.cmds:
         if reason := _primary_denial(c, env_in, lookup, resolver, in_place, switched):
+            return "deny", reason
+    for c in reading.cmds:
+        if reason := _blanket_denial(c, origin is not None):
             return "deny", reason
     if any(_unbounded_wait(segs, timed) for segs, timed in reading.texts):
         return "deny", _WAIT_REASON
@@ -2054,6 +2088,25 @@ _NO_ORIGIN_CASES: list[tuple[str, str, str]] = [
 ]
 
 
+_BLANKET = (
+    "deny:git add -N .|deny:git add -A|deny:git add -u|deny:git add .|deny:git add 'src/*.py'|deny:git add"
+    '|deny:git add "$F"|deny:git commit -am x|allow:git add -N a.txt|allow:git add -p a.txt'
+    "|allow:git add -v -- a.txt|allow:git commit -m '-a fix'"
+)
+
+
+def _host_pin_selftest() -> bool:
+    """Whether the branch-rules read hands its child `GH_HOST=github.com` under a constructed `GH_HOST`."""
+    from unittest import mock
+
+    with (
+        mock.patch.dict(os.environ, {"GH_HOST": "other.example"}),
+        mock.patch.object(subprocess, "run") as run,
+    ):
+        _live_branch_rules("example", "repo", "develop")
+    return run.call_args.kwargs["env"]["GH_HOST"] == "github.com"
+
+
 def _fixture_lookup(directory: str) -> bool | None:
     """The fixture's primary-checkout answer for a directory under one of its checkouts."""
     d = directory.replace("\\", "/")
@@ -2378,7 +2431,13 @@ def _selftest_cases() -> int:
         check(cmd, want, source, cwd=cwd, environ=environ)
     for cmd, listed, want in _IN_PLACE_CASES:
         seams = {"cwd": _PRIMARY, "current_branch": listed or "develop"}
-        check(cmd, want, "3200", in_place_lookup=lambda _d, b=listed: b, **seams)
+        check(cmd, want, "3200", in_place_lookup=lambda _d, b=listed: b, origin=None, **seams)
+    for case in _BLANKET.split("|"):
+        check(case.split(":", 1)[1], case.split(":", 1)[0], "4462")
+    for cmd in ("git add -A", "git commit -am x"):
+        check(cmd, "allow", "4462", origin=None)
+    ok = ok and (pinned := _host_pin_selftest())
+    print(f"  {'ok  ' if pinned else 'FAIL'} [pin  ] the branch-rules read pins GH_HOST")
     with tempfile.TemporaryDirectory() as tmp:
         absent = os.path.join(tmp, "absent")
         for cmd, want, source in _NO_ORIGIN_CASES:
