@@ -906,12 +906,14 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(len(adds), 1, adds)
 
     def test_a_host_identity_answering_as_another_account_registers_nothing(self) -> None:
-        result, adds = self.register(general=SECOND)
+        paste = "GITHUB_USER=x\nsigning_registration_state || registration_needed signing Signing"
+        result, adds = self.register(general=SECOND, then=paste)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(adds, [])
         self.assertIn(HOST_MISMATCH, result.stderr)
-        self.assertIn("Register it with the paste below", result.stderr)
         self.assertNotIn("Registering the key through gh", result.stdout)
+        self.assertIn('Set the key type to "Signing key"', result.stdout)
+        self.assertIn(PUBLIC_KEY, result.stdout)
 
     def test_a_host_identity_answering_as_another_account_refuses_beside_a_key_on_gh_s(
         self,
@@ -1029,6 +1031,7 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "Register-KeyThroughGh",
     "Test-GhRegistrationAllowed",
     "Register-KeysThroughGh",
+    "Show-RegistrationNeeded",
 ]
 WINDOWS_REGISTER_BODY = r"""
 function warn { param([string]$Message) Write-Host "WARNING: $Message" }
@@ -1107,6 +1110,10 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
             $script:GITHUB_USER = 'x'
             "state=$(Get-SigningRegistrationState)"
         }
+        if ($case.paste) {
+            $script:GITHUB_USER = 'x'
+            if ((Get-SigningRegistrationState) -ne 'registered') { Show-RegistrationNeeded -Kind 'signing' -Type 'Signing' }
+        }
     } 6>&1 | ForEach-Object { "$_" }
     $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }) }
 }
@@ -1132,6 +1139,7 @@ def windows_register_case(
     public_signing: bool = False,
     resolve: bool = False,
     check: bool = False,
+    paste: bool = False,
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -1150,6 +1158,7 @@ def windows_register_case(
         "fingerprint": FINGERPRINT,
         "resolve": resolve,
         "check": check,
+        "paste": paste,
         "pub": PUBLIC_KEY,
     }
 
@@ -1172,7 +1181,7 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             windows_register_case("dry-run-no-key", dry_run=True, no_key=True),
             windows_register_case("other-account", managed=SECOND, ssh_state="silent"),
             windows_register_case("same-account", managed=ACCOUNT, registered=["authentication"]),
-            windows_register_case("host-other", general=SECOND),
+            windows_register_case("host-other", general=SECOND, paste=True),
             windows_register_case(
                 "host-other-key-on-gh",
                 managed=ACCOUNT,
@@ -1285,8 +1294,9 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertEqual(self.adds("host-other"), [])
         output = self.output("host-other")
         self.assertIn(HOST_MISMATCH, output)
-        self.assertIn("Register it with the paste below", output)
         self.assertNotIn("Registering the key through gh", output)
+        self.assertIn('Set the key type to "Signing key"', output)
+        self.assertIn(PUBLIC_KEY, output)
 
     def test_a_host_identity_answering_as_another_account_refuses_beside_a_key_on_gh_s(
         self,

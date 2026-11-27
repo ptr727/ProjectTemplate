@@ -498,7 +498,8 @@ register_through_gh() {
 }
 
 # Whether gh may register the key for its account, warning with the reason and returning 1 where it may not.
-# A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
+# A key already authenticating as another account belongs there.
+# GitHub would refuse the authentication add as well, and this names the account before any write is tried.
 # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
 # Three things pass that part.
 #   - gh's own list showing the key as an authentication key.
@@ -510,11 +511,11 @@ gh_registration_allowed() {
     if ((auth_rc != 0)) && [[ -f $KEY ]]; then
         probe_managed_key
         if [[ -n $MANAGED_USER && $MANAGED_USER != "$account" ]]; then
-            warn "gh is logged in as $account, while the managed key belongs to $MANAGED_USER, so the key was not registered through gh. Register it with the paste below."
+            warn "gh is logged in as $account, while the managed key belongs to $MANAGED_USER, so the key was not registered through gh. The checks below print the paste for any registration still missing."
             return 1
         fi
         if [[ -z $MANAGED_USER && $MANAGED_DENIED == false ]]; then
-            warn "Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. Register it with the paste below."
+            warn "Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. The checks below print the paste for any registration still missing."
             return 1
         fi
     fi
@@ -525,7 +526,7 @@ gh_registration_allowed() {
     local general
     general=$(github_auth_user)
     if [[ -n $general && $general != "$account" ]]; then
-        warn "gh is logged in as $account, while this host's ssh identity answers as $general, so the key was not registered through gh. Register it with the paste below on the intended account, or log gh in as that account and re-run."
+        warn "gh is logged in as $account, while this host's ssh identity answers as $general, so the key was not registered through gh. Log gh in as the intended account and re-run, or use the paste the checks below print for any registration still missing."
         return 1
     fi
     return 0

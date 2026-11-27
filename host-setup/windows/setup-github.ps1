@@ -623,7 +623,8 @@ function Get-GhKeyState {
     $body = Get-KeyBody
     if (-not $body) { return 'unknown' }
     $key = ($body -split '\s+')[1]
-    $listing = (& gh ssh-key list 2>&1 | Out-String)
+    # The stderr gh writes names a missing scope, so it is left on the console rather than captured.
+    $listing = (& gh ssh-key list | Out-String)
     if ($LASTEXITCODE -ne 0) { return 'unknown' }
     foreach ($line in ($listing -split '\r?\n')) {
         if ($line.Contains($key) -and $line -match "(^|\s)$Kind(\s|$)") { return 'registered' }
@@ -673,7 +674,8 @@ function Register-KeyThroughGh {
 }
 
 # Whether gh may register the key for its account, warning with the reason where it may not.
-# A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
+# A key already authenticating as another account belongs there.
+# GitHub would refuse the authentication add as well, and this names the account before any write is tried.
 # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
 # Three things pass that part.
 #   - gh's own list showing the key as an authentication key.
@@ -686,11 +688,11 @@ function Test-GhRegistrationAllowed {
         $greeting = Get-SshGreeting -ManagedKeyOnly -Evidence
         $managed = Get-GreetingUser $greeting
         if ($managed -and $managed -ne $Account) {
-            warn "gh is logged in as $Account, while the managed key belongs to $managed, so the key was not registered through gh. Register it with the paste below."
+            warn "gh is logged in as $Account, while the managed key belongs to $managed, so the key was not registered through gh. The checks below print the paste for any registration still missing."
             return $false
         }
         if (-not $managed -and -not (Test-ManagedKeyDenied -Greeting $greeting)) {
-            warn 'Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. Register it with the paste below.'
+            warn 'Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. The checks below print the paste for any registration still missing.'
             return $false
         }
     }
@@ -700,7 +702,7 @@ function Test-GhRegistrationAllowed {
     # A host with no identity GitHub accepts names no account here, so it is unaffected.
     $general = Get-GreetingUser (Get-SshGreeting)
     if ($general -and $general -ne $Account) {
-        warn "gh is logged in as $Account, while this host's ssh identity answers as $general, so the key was not registered through gh. Register it with the paste below on the intended account, or log gh in as that account and re-run."
+        warn "gh is logged in as $Account, while this host's ssh identity answers as $general, so the key was not registered through gh. Log gh in as the intended account and re-run, or use the paste the checks below print for any registration still missing."
         return $false
     }
     return $true
