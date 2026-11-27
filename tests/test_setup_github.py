@@ -924,6 +924,27 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(adds, [])
         self.assertIn(f"the managed key belongs to {SECOND}", result.stderr)
 
+    def test_the_final_check_trusts_gh_s_listing_of_the_authentication_key(self) -> None:
+        check = "rc=0\nreport_authentication || rc=$?\necho rc=$rc"
+        for registered, general in (("auth", ACCOUNT), ("auth signing", SECOND)):
+            with self.subTest(registered=registered, general=general):
+                result, _ = self.register(registered=registered, general=general, then=check)
+                self.assertIn("rc=0", result.stdout)
+                self.assertIn(
+                    f"gh lists the managed key as {ACCOUNT}'s authentication key", result.stdout
+                )
+                self.assertNotIn("registered nowhere", result.stderr)
+                self.assertNotIn('Set the key type to "Authentication key"', result.stdout)
+
+    def test_a_key_neither_authenticating_nor_listed_gets_the_authentication_paste(self) -> None:
+        check = "rc=0\nreport_authentication || rc=$?\necho rc=$rc"
+        result, _ = self.register(account="", general=SECOND, then=check)
+        self.assertIn("rc=0", result.stdout)
+        self.assertIn("registered nowhere", result.stderr)
+        self.assertIn('Set the key type to "Authentication key"', result.stdout)
+        result, _ = self.register(account="", then=check)
+        self.assertIn("rc=1", result.stdout)
+
     def test_a_probe_naming_gh_s_account_lets_both_keys_through(self) -> None:
         result, adds = self.register(managed=ACCOUNT)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1099,7 +1120,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
     def test_configure_registers_before_it_checks_authentication(self) -> None:
         body = function_body(LINUX_SCRIPT.read_text(encoding="utf-8"), "\nconfigure() {")
         self.assertIn("\n    register_keys_through_gh\n", body)
-        self.assertLess(body.index("register_keys_through_gh"), body.index("resolve_github_user"))
+        self.assertLess(body.index("register_keys_through_gh"), body.index("report_authentication"))
 
 
 WINDOWS_REGISTER_FUNCTIONS = [
@@ -1184,8 +1205,12 @@ $GhStub = {
     }
 }
 Set-Item function:script:gh $GhStub
-$script:KEY_SETTINGS_URL = 'https://github.com/settings/ssh/new'
-$script:GH_SCOPE_COMMAND = 'gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key'
+# The constants the output names are read from the script itself rather than restated, so the two cannot drift apart.
+foreach ($statement in $ast.EndBlock.Statements) {
+    if ($statement -is [System.Management.Automation.Language.AssignmentStatementAst] -and $statement.Left.Extent.Text -in '$KEY_SETTINGS_URL', '$GH_SCOPE_COMMAND') {
+        . ([scriptblock]::Create($statement.Extent.Text))
+    }
+}
 $script:MODE = 'configure'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $directory | Out-Null
@@ -1310,6 +1335,12 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             ),
             windows_register_case(
                 "config-only-listed", registered=["authentication"], general=ACCOUNT, auth=True
+            ),
+            windows_register_case(
+                "config-only-other-identity",
+                registered=["authentication", "signing"],
+                general=SECOND,
+                auth=True,
             ),
             windows_register_case("probe-names-gh", managed=ACCOUNT),
             windows_register_case(
@@ -1475,11 +1506,17 @@ class TestWindowsKeyRegistration(unittest.TestCase):
 
     def test_a_key_gh_lists_on_the_host_s_account_prints_no_authentication_paste(self) -> None:
         output = self.output("config-only-listed")
-        self.assertIn("gh lists the managed key as that account's authentication key", output)
+        self.assertIn(f"gh lists the managed key as {ACCOUNT}'s authentication key", output)
         self.assertNotIn('Set the key type to "Authentication key"', output)
 
     def test_a_probe_naming_gh_s_account_lets_both_keys_through(self) -> None:
         self.assertEqual(len(self.adds("probe-names-gh")), 2)
+
+    def test_a_listed_key_is_not_called_registered_nowhere_beside_another_identity(self) -> None:
+        output = self.output("config-only-other-identity")
+        self.assertIn(f"gh lists the managed key as {ACCOUNT}'s authentication key", output)
+        self.assertNotIn("registered nowhere", output)
+        self.assertNotIn('Set the key type to "Authentication key"', output)
 
     def test_a_host_the_managed_key_authenticates_prints_no_authentication_paste(self) -> None:
         output = self.output("managed-auth")

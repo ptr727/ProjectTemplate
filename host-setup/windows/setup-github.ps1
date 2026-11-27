@@ -790,7 +790,7 @@ function Register-KeysThroughGh {
     }
 }
 
-# Reports which account this host authenticates as, and prints the authentication paste wherever the managed key is not what authenticates.
+# Reports which account this host authenticates as, and prints the authentication paste wherever the managed key is not shown registered.
 # Returns whether anything reaches GitHub, since without that the signing check has no account to read.
 function Test-Authentication {
     Resolve-GitHubUser
@@ -803,9 +803,10 @@ function Test-Authentication {
         info "Authenticated as $($script:GITHUB_USER), with the managed key"
         return $true
     }
-    if ($script:GH_AUTH_LISTED -and $script:GITHUB_USER -eq $script:GH_ACCOUNT) {
-        # The isolated probe cannot reach GitHub on a host that needs its ssh config, while gh's own list already shows the key on this account.
-        info "Authenticated as $($script:GITHUB_USER), and gh lists the managed key as that account's authentication key"
+    if ($script:GH_AUTH_LISTED) {
+        # The isolated probe cannot reach GitHub on a host that needs its ssh config.
+        # The list gh returns already shows the key on gh's account, whichever account the host's other identity answers as.
+        info "Authenticated as $($script:GITHUB_USER), and gh lists the managed key as $($script:GH_ACCOUNT)'s authentication key"
         return $true
     }
     # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.

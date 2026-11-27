@@ -923,6 +923,30 @@ status() {
     fi
 }
 
+# Reports which account this host authenticates as, and prints the authentication paste wherever the managed key is not shown registered.
+# Returns 1 where nothing reaches GitHub, since without that the signing check has no account to read.
+report_authentication() {
+    resolve_github_user
+    if [[ -z $GITHUB_USER ]]; then
+        registration_needed "authentication" "Authentication"
+        return 1
+    fi
+    if [[ $MANAGED_KEY_AUTHENTICATES == true ]]; then
+        info "Authenticated as $GITHUB_USER, with the managed key"
+    elif [[ $GH_AUTH_LISTED == true ]]; then
+        # The isolated probe cannot reach GitHub on a host that needs its ssh config.
+        # The list gh returns already shows the key on gh's account, whichever account the host's other identity answers as.
+        info "Authenticated as $GITHUB_USER, and gh lists the managed key as $GH_ACCOUNT's authentication key"
+    else
+        # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.
+        # Reporting it as an ordinary line let a run end in "Done" on a host whose managed key was registered nowhere.
+        # A host whose managed key is registered nowhere is the state this script exists to leave behind.
+        registration_needed "authentication" "Authentication"
+        warn "This host authenticates with a key other than the managed one, so the managed key is registered nowhere and revoking this host alone would not cut its access"
+    fi
+    return 0
+}
+
 configure() {
     ensure_prerequisites
     ensure_key
@@ -952,22 +976,8 @@ configure() {
     # Authentication is the gate for everything GitHub answers.
     # Without it this host reaches no private repository, and the registration check below has no account to read.
     step "Checking SSH authentication to GitHub"
-    resolve_github_user
-    if [[ -z $GITHUB_USER ]]; then
-        registration_needed "authentication" "Authentication"
+    if ! report_authentication; then
         die "SSH authentication to GitHub failed. Nothing that reaches GitHub works until the key is registered."
-    fi
-    if [[ $MANAGED_KEY_AUTHENTICATES == true ]]; then
-        info "Authenticated as $GITHUB_USER, with the managed key"
-    elif [[ $GH_AUTH_LISTED == true && $GITHUB_USER == "$GH_ACCOUNT" ]]; then
-        # The isolated probe cannot reach GitHub on a host that needs its ssh config, while gh's own list already shows the key on this account.
-        info "Authenticated as $GITHUB_USER, and gh lists the managed key as that account's authentication key"
-    else
-        # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.
-        # Reporting it as an ordinary line let a run end in "Done" on a host whose managed key was registered nowhere.
-        # A host whose managed key is registered nowhere is the state this script exists to leave behind.
-        registration_needed "authentication" "Authentication"
-        warn "This host authenticates with a key other than the managed one, so the managed key is registered nowhere and revoking this host alone would not cut its access"
     fi
 
     # Signing is the second gate.
