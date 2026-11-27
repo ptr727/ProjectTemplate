@@ -83,8 +83,8 @@ test `session-handoff` "The Chain" states, waits on that platform's lane. One wh
 lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. One whose body opens with `**Owed action:**` for a step that is
-not the maintainer's waits on that step, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. One whose body opens with `**Owed action:**` waits on that step,
+per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 ## The Procedure
@@ -105,7 +105,9 @@ of its own.
    `git log refs/remotes/origin/develop` on the files the issue names. It also reads the state of
    any child issues the issue tracks, and any later comment recording a decision. A fix merged
    into `develop` and not yet promoted makes the issue `HELD` awaiting promotion rather than
-   `OVERTAKEN`. The queued `decision` issues get the same check and no classification beyond it.
+   `OVERTAKEN`. An issue whose body opens with `**Owed action:**` is `HELD` on the step it names,
+   whoever's step it is, since a step is not a question.
+   The queued `decision` issues get the same check and no classification beyond it.
    The classifier returns one line per issue in the form "Return Lines" below.
    Each batch also carries the `deferred` issues to re-check, which get no classification. The
    classifier reads the comment stating the condition the work waits for, from an account with
@@ -169,7 +171,8 @@ of its own.
 8. **Report** the counts: issues an agent can fix alone, questions answered, questions deferred,
    questions still open, overtaken issues closed, and splits filed. Give the count of open
    `deferred` issues as well, after step 2's lifts, and how many it lifted. Also name each issue held back for any other reason "Needs the
-   Maintainer" does not count, under that reason. End with one line saying a `backlog-burndown` away-mode run
+   Maintainer" does not count, under that reason. List each `HELD` owed action that is the
+   maintainer's as a step to take, with its command where its issue gives one. End with one line saying a `backlog-burndown` away-mode run
    can now work the rest.
 
 ## Return Lines
@@ -179,7 +182,7 @@ of its own.
 | classifier | `AUTO #<n>` | an agent can fix it alone |
 | classifier | `ASK #<n> <the question in one sentence>` | the whole issue needs the maintainer |
 | classifier | `SPLIT #<n> <the undecided item in one sentence>` | part needs the maintainer, the rest does not |
-| classifier | `HELD #<n> <reason>` | waits on something other than a decision, such as a promotion or an attended run for an approved agent-safety edit |
+| classifier | `HELD #<n> <reason>` | waits on something other than a decision, such as a promotion, an attended run for an approved agent-safety edit, or an `**Owed action:**` issue's step |
 | classifier | `OVERTAKEN #<n> <what answered or overtook it>` | a later change already settled it, found by the history check |
 | classifier | `LIFT #<n> <open or settled> <the condition and the evidence that it holds>` | a `deferred` issue whose checkable condition now holds |
 | classifier | `KEEP #<n> <the condition it still waits on>` | a `deferred` issue that stays deferred |

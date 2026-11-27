@@ -184,7 +184,6 @@ another owner, since a write there needs the maintainer's permission.
 
 An issue whose body opens with `**Owed action:**`, per "The Round" step 5, is counted and is not
 ranked, since no diff takes the step. The round's report names each one and whose step it is.
-An away run reports a maintainer's one as needing the maintainer.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
@@ -337,6 +336,8 @@ for, and it binds harder than any throughput target.
   fetch above, run `git log --format=%H "origin/<base>..<ref>" -- "<file>"`, with `<base>` as the
   bullet above gives it. Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it with `git -C "<clone>"`
   for `<branch>` in a standalone clone the claim comment names, too. Each exiting 0 and printing nothing is that read.
+  Every checkout the claim names, worktree or standalone clone, must also hold no uncommitted change to the file.
+  So `git -C "<checkout>" status --porcelain --untracked-files=all -- "<file>"` exits 0 and prints nothing in each.
   A non-zero exit, or no ref to read, is a read that cannot be made. A read
   that cannot be made keeps the file with the parked group. Record the pass on the parked group's claim
   comment, keeping its `**Backlog burndown claim` opening. Add a line opening with
@@ -472,9 +473,10 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   review findings. An owed action is a step outside the diff, usually the maintainer's, without
   which a machine or the fleet stays inconsistent once the change merges. Examples are a migration
   script, a live `configure.sh apply`, a first live run, and a fleet resync. The worker names,
-  for each, whose step it is. An action recorded only in a pull request body is
-  lost once a `Closes on promotion:` line closes its source issue. "The Round" step 5 says how
-  each one is held. Review findings stay `pr-review-conduct` outcome 4's, and this changes
+  for each, whose step it is. It also writes each under a fixed `## Owed actions` heading in its
+  pull request body before merging, which "Bounding the Wait on a Worker" reads back. That heading
+  only carries an action, since a `Closes on promotion:` line still closes its source issue. "The
+  Round" step 5 says how each one is held. Review findings stay `pr-review-conduct` outcome 4's, and this changes
   nothing about them.
 - **The brief names the files this group owns and the files it must not touch.** A subagent never
   reads this skill, so a claim it was never given is a claim it cannot respect. State this group's
@@ -646,7 +648,8 @@ read the silent worker's branch and pull request directly, with `git log` on tha
 `gh pr view "<branch>"`. Pass the branch as that command's positional argument, since a
 bare `gh pr view` resolves the pull request of whatever branch the caller is standing on. It never
 resolves the worker's. Let what they show decide. A pull request that is merged means the worker
-died after doing the work. The group is then finished.
+died after doing the work. The group is then finished. Finishing it includes reading that pull
+request's `## Owed actions` heading and holding each action listed there per "The Round" step 5.
 
 Anything else needs one thing established before anything is touched: whether that worker is gone
 or merely slow. No git read answers that, and the two call for opposite actions. So the answer
@@ -918,8 +921,8 @@ test `session-handoff` "The Chain" states, waits on that platform's lane. One wh
 lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. One whose body opens with `**Owed action:**` for a step that is
-not the maintainer's waits on that step, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. One whose body opens with `**Owed action:**` waits on that step,
+per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 <!-- /include -->
@@ -1134,10 +1137,9 @@ missing or wrong shared git hook a worker reported, per `repo-worktree` "Prepari
 also covers an issue held back for a setting, a credential, a host, or the agent-safety tree,
 reported as needing the maintainer present. An outsider's issue awaiting acceptance is reported
 as needing the maintainer to accept it. Work in a repository under another owner is reported as
-needing the maintainer's permission for the write there. An owed action that is the maintainer's
-is reported as needing the maintainer to take it. Each other reason is named as itself, never as a
+needing the maintainer's permission for the write there. Each other reason is named as itself, never as a
 decision. Those are `blocked` on another issue, needs a platform, any other work in another
-repository, and any other owed action. They are also held by an open group or pull request, awaiting promotion, and
+repository, and an owed action. They are also held by an open group or pull request, awaiting promotion, and
 `deferred`, given by count. A held promotion is named too, with each `decision` issue holding
 it. An ending that cannot dispatch a promotion worker the run owes is named too. A run ended by a dispatch failure does not attempt one, since the same harness error would meet it. A session ending on a context limit has no room to run one. The final message says that worker did not run, and names any open promotion pull request. The report gives the count of open `decision` issues and names each by number. It names `decision-triage` as where they get answered. It asks nothing.
 
