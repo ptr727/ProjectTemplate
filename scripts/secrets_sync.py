@@ -1658,9 +1658,12 @@ def run(argv: Sequence[str]) -> int | signal.Signals:
     """`main`, or the signal that interrupted it once every `finally` has released what it held."""
     received: list[int] = []
 
-    def on_signal(signum: int, _frame: FrameType | None) -> None:
-        """Unwind on the first signal, passing over a later one that would cut the cleanup short."""
-        if received:
+    def on_signal(signum: int, frame: FrameType | None) -> None:
+        """Unwind on the first signal, passing over a later one that would cut the cleanup short.
+
+        A later signal can start inside this handler, so a call from this frame returns too.
+        """
+        if received or (frame is not None and frame.f_code is on_signal.__code__):
             return
         received.append(signum)
         raise KeyboardInterrupt

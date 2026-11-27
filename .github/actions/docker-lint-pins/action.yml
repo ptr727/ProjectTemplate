@@ -14,22 +14,37 @@ outputs:
   powershell:
     description: The PowerShell image reference the Dockerfile pins.
     value: ${{ steps.read.outputs.powershell }}
+  docker-lint:
+    description: The absolute path of scripts/docker_lint.py in the hub tree this action runs from, so at the calling workflow's own ref, never another. Its --pull mode is the lint steps' one pull retry.
+    value: ${{ steps.locate.outputs.docker-lint }}
 
 runs:
   using: composite
   steps:
-    # The manifest is read from the action's own path, so a caller reaching this action at a hub pin runs that pin's images.
-    - name: Read Docker lint pins step
-      id: read
+    - name: Locate Docker lint script step
+      id: locate
       shell: bash
       run: |
         set -Eeuo pipefail
-        manifest="$GITHUB_ACTION_PATH/Dockerfile"
-        for stage in editorconfig-checker actionlint markdownlint cspell shellcheck shfmt powershell; do
-          ref=$(sed -n "s/^FROM \([^[:space:]@]*:[^[:space:]@/]*@sha256:[0-9a-f]\{64\}\) AS ${stage}[[:space:]]*\$/\1/p" "$manifest")
-          if [ -z "$ref" ] || [ "$ref" != "${ref%%$'\n'*}" ]; then
-            echo "::error::$manifest must pin $stage on exactly one 'FROM <image>:<tag>@sha256:<digest> AS $stage' line."
-            exit 1
-          fi
-          echo "$stage=$ref" >> "$GITHUB_OUTPUT"
+        echo "docker-lint=$(cd "$GITHUB_ACTION_PATH/../../.." && pwd)/scripts/docker_lint.py" >> "$GITHUB_OUTPUT"
+
+    - name: Read Docker lint pins step
+      id: read
+      shell: bash
+      env:
+        DOCKER_LINT: ${{ steps.locate.outputs.docker-lint }}
+      run: |
+        set -Eeuo pipefail
+        stages=(editorconfig-checker actionlint markdownlint cspell shellcheck shfmt powershell)
+        args=()
+        for stage in "${stages[@]}"; do
+          args+=(--pin "$stage")
         done
+        errors=$(mktemp)
+        if ! pins=$(python3 "$DOCKER_LINT" "${args[@]}" 2> "$errors"); then
+          cat "$errors" >&2
+          echo "::error::$GITHUB_ACTION_PATH/Dockerfile could not be read for its lint pins: $(tail -n 1 "$errors")"
+          exit 1
+        fi
+        rm -f "$errors"
+        echo "$pins" >> "$GITHUB_OUTPUT"

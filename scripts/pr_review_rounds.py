@@ -14,7 +14,7 @@ from collections.abc import Iterator
 
 import pr_review_copilot as adapter
 from pr_review_copilot import first_comment
-from pr_review_payload import FILES_UNREAD, bot_entry, default_branch
+from pr_review_payload import FILES_UNREAD, bot_entry, default_branch, trusted_comment_nodes
 
 # Read from the vocabulary, so a login rename is one edit that the reader and the queries share.
 REVIEWER = adapter.VOCABULARIES["copilot"]["login"]
@@ -30,7 +30,6 @@ ATTESTATION = re.compile(
     r"^<!-- fleet-local-review: head=([0-9a-f]{40}) base=(\S+) findings=(\d+|unknown) -->$",
     re.MULTILINE,
 )
-TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 ACK_MARKER = "<!-- fleet-shape-ack: fingerprint={} -->"
 CARRIED_PARTIAL = "an earlier round states partial coverage"
 
@@ -374,12 +373,9 @@ def answering_comments(pr: dict) -> Iterator[list[str]]:
 
 def trusted_comments(pr: dict) -> Iterator[tuple[str, list[str]]]:
     """Each owner's, member's, or collaborator's shown comment body, with its HTML lines outside code."""
-    for node in (pr.get("comments") or {}).get("nodes") or []:
-        if (node.get("authorAssociation") or "") in TRUSTED_ASSOCIATIONS and not node.get(
-            "isMinimized"
-        ):
-            body = node.get("body") or ""
-            yield body, adapter.html_lines(body)
+    for node in trusted_comment_nodes(pr):
+        body = node.get("body") or ""
+        yield body, adapter.html_lines(body)
 
 
 def partial_on_record(pr: dict) -> bool:

@@ -416,6 +416,15 @@ class RunGhTests(unittest.TestCase):
         with unittest.mock.patch.object(bm, "run_subprocess", return_value=(0, '[{"a": 1}]', "")):
             self.assertEqual(bm.run_gh(["x"]), [{"a": 1}])
 
+    def test_a_read_runs_on_github_com_whatever_host_was_exported(self) -> None:
+        answered = subprocess.CompletedProcess(["gh"], 0, "[]", "")
+        with (
+            unittest.mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            unittest.mock.patch("subprocess.run", return_value=answered) as run,
+        ):
+            self.assertEqual(bm.run_gh(["api", "repos/acme/widget/issues"]), [])
+        self.assertEqual(run.call_args.kwargs["env"]["GH_HOST"], "github.com")
+
     def test_non_zero_exit_raises_with_stderr(self) -> None:
         with (
             unittest.mock.patch.object(bm, "run_subprocess", return_value=(1, "", "boom")),

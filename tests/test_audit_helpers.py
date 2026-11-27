@@ -5931,6 +5931,16 @@ class GhAbsenceCase(unittest.TestCase):
         with mock.patch.object(audit.subprocess, "run", return_value=failed):
             return audit.gh("repos/example/widget/contents/README.md", ok404=ok404)
 
+    def test_the_read_runs_on_github_com_whatever_host_was_exported(self) -> None:
+        """GH_HOST would move the read to a host the registry never named."""
+        answered = subprocess.CompletedProcess(["gh"], 0, "{}", "")
+        with (
+            mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            mock.patch.object(audit.subprocess, "run", return_value=answered) as run,
+        ):
+            self.assertEqual(audit.gh("repos/example/widget"), {})
+        self.assertEqual(run.call_args.kwargs["env"]["GH_HOST"], "github.com")
+
     def test_a_printed_404_reads_as_absence(self) -> None:
         self.assertIsNone(self.call("gh: Not Found (HTTP 404)"))
         self.assertIsNone(self.call("gh: something reworded (HTTP 404)"))

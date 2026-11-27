@@ -12,6 +12,7 @@ import argparse
 import contextlib
 import inspect
 import io
+import os
 import re
 import subprocess
 import sys
@@ -127,6 +128,24 @@ class MergeCase(unittest.TestCase):
     def assert_not_merged(self) -> None:
         self.assertEqual([], self.calls)
         self.cleanup.assert_not_called()
+
+
+class TestMergeCallHost(unittest.TestCase):
+    def test_the_merge_runs_on_github_com_whatever_host_was_exported(self) -> None:
+        """`--repo OWNER/REPO` names no host, so `gh` would take GH_HOST's for the write."""
+        hosts: list[str] = []
+
+        def run(argv: list[str], timeout: float, **options: Any) -> subprocess.CompletedProcess:
+            hosts.append(options["env"]["GH_HOST"])
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with (
+            mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            mock.patch.object(pr_review, "run_with_deadline", run),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(pr_merge.merge_call("example/repo", 123, HEAD), 0)
+        self.assertEqual(hosts, ["github.com"])
 
 
 class TestRefusals(MergeCase):

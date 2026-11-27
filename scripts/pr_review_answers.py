@@ -57,7 +57,9 @@ OUTCOMES = ("fixed", "declined", "filed", "listed", "dropped")
 NO_THREAD, NOTED, VERDICT = "FINDINGS WITH NO THREAD", "REVIEWER OUTPUT NOTED", "verdict"
 DRIFT = "login drift"
 # An in-place Qodo edit can rewrite a link or a commit hash, so a Qodo key omits both.
-VOLATILE = re.compile(r"https?://[^\s\"'<>)\]]+|\b[0-9a-f]{7,40}\b")
+VOLATILE = re.compile(
+    r"https?://[^\s\"'<>)\]]+|\b(?i:commits?)\b(?:<[^<>]*>|[\s`'\"\[(:])*[0-9a-f]{7,40}\b"
+)
 QODO_WHERE = re.compile(r"^[^\s\[\]]+\[[\d ,-]+\]$", re.MULTILINE)
 # A digest count and the reviewer's sections it is read from, so an answer clears what it counts.
 SOURCES = {

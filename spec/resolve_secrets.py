@@ -176,9 +176,9 @@ def read_tree(slug: str, branch: str) -> ListedTree:
 
 
 def gh_run(command: list[str], slug: str) -> str:
-    """The stdout of a read-only gh call, raising with the repo named on any failure.
+    """The stdout of a read-only gh call on github.com, raising with the repo named on any failure.
 
-    The subprocess helper is the one scripts/gh_graphql.py gives the other scripts reading through gh.
+    The subprocess helper is the one scripts/gh_graphql.py gives the other scripts reading through gh, and it pins the host.
     Its refusal to run gh at all, such as no gh on PATH, becomes the same loud failure as a failed read.
     """
     module = gh_graphql_module()
@@ -204,22 +204,22 @@ def gh_json(command: list[str], slug: str) -> Any:
         raise ResolveError(f"{slug}: {' '.join(command)} printed no JSON: {e}") from e
 
 
+def read_names(path: str, key: str) -> list[str]:
+    """The `name` of each element of `key` across every page of one REST path, or raise when gh fails.
+
+    The one names reader, for a repository store here and in spec/audit.py, and an environment store in spec/audit_environments.py.
+    Only names leave gh, since the projection runs inside it, and no value reaches this process.
+    gh_run pins the host, because the registry names every repository on github.com, which GH_HOST would move.
+    The repository is already explicit in `path`, so GH_REPO resolves nothing here.
+    """
+    command = ["gh", "api", "--paginate", path, "--jq", f".{key}[].name"]
+    return gh_run(command, "/".join(path.split("/")[1:3])).splitlines()
+
+
 def read_live_names(slug: str) -> dict[str, set[str]]:
     """The secret names each store holds, paginated, never a value."""
     return {
-        store: set(
-            gh_run(
-                [
-                    "gh",
-                    "api",
-                    "--paginate",
-                    f"repos/{slug}/{store}/secrets",
-                    "--jq",
-                    ".secrets[].name",
-                ],
-                slug,
-            ).split()
-        )
+        store: set(read_names(f"repos/{slug}/{store}/secrets", "secrets"))
         for store in secret_names.STORES
     }
 

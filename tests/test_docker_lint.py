@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from host_capability import requires_symlink
+from host_capability import requires_python_3_12, requires_symlink
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
@@ -73,7 +73,9 @@ class FakeRunner:
                 raise docker_lint.CommandTimedOut(f"timed out after {timeout}s")
             if self.pull_failures:
                 self.pull_failures -= 1
-                return subprocess.CompletedProcess(command, 1, "", "")
+                return subprocess.CompletedProcess(
+                    command, 1, "", "connection reset\n::error::by peer\n"
+                )
         if command[:3] == ["docker", "image", "inspect"]:
             return subprocess.CompletedProcess(command, 0, "example@sha256:123\n", "")
         returncode = (
@@ -148,8 +150,8 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(0, result, output)
         pins = docker_lint.read_pins(MANIFEST)
         expected = [
-            ["docker", "pull", pins["markdownlint"]],
-            ["docker", "pull", pins["shellcheck"]],
+            ["docker", "pull", "--quiet", pins["markdownlint"]],
+            ["docker", "pull", "--quiet", pins["shellcheck"]],
         ]
         self.assertEqual(expected, self.pulls(runner))
 
@@ -168,8 +170,8 @@ class DockerLintCase(unittest.TestCase):
         result, output = self.invoke({"markdownlint"}, runner)
         self.assertEqual(0, result, output)
         self.assertEqual(3, len(self.pulls(runner)))
-        self.assertEqual([10, 20], self.sleeps)
-        self.assertIn("RETRY pull markdownlint in 10s", output)
+        self.assertEqual([15, 30], self.sleeps)
+        self.assertIn("RETRY pull markdownlint in 15s", output)
         self.assertIn("COMPLETE pull markdownlint attempt 3/3", output)
 
     def test_a_pull_failing_every_attempt_fails_the_run(self) -> None:
@@ -179,8 +181,149 @@ class DockerLintCase(unittest.TestCase):
         self.assertEqual(1, result, output)
         self.assertEqual(docker_lint.PULL_ATTEMPTS, len(self.pulls(runner)))
         self.assertEqual(docker_lint.PULL_ATTEMPTS - 1, len(self.sleeps))
-        self.assertIn("RESULT failed: container failure (exit 1)", output)
+        self.assertIn(
+            "RESULT failed: container failure (exit 1): connection reset ::error::by peer", output
+        )
         self.assertNotIn("PHASE execution", output)
+
+    def test_pull_mode_pulls_each_image_with_the_retry_and_lints_nothing(self) -> None:
+        """validate-task.yml's lint steps and the repo gate pull through this one loop."""
+        images = ["r.io/a:1.0@sha256:" + "a" * 64, "r.io/b:1.0@sha256:" + "b" * 64]
+        runner = FakeRunner(pull_failures=1)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = docker_lint.pull(images, 17, runner)
+        self.assertEqual(0, result, output.getvalue())
+        expected = [["docker", "pull", "--quiet", images[0]]] * 2
+        expected.append(["docker", "pull", "--quiet", images[1]])
+        self.assertEqual(expected, self.pulls(runner))
+        self.assertEqual([15], self.sleeps)
+        self.assertEqual(expected, [command for command, _ in runner.commands])
+        self.assertIn("RESULT success: 2 image(s) pulled", output.getvalue())
+        runner = FakeRunner(pull_failures=docker_lint.PULL_ATTEMPTS)
+        with contextlib.redirect_stdout(io.StringIO()) as failed:
+            self.assertEqual(1, docker_lint.pull(images, 17, runner))
+        self.assertEqual(docker_lint.PULL_ATTEMPTS, len(self.pulls(runner)))
+        self.assertIn(
+            "RESULT failed: container failure (exit 1): connection reset ::error::by peer",
+            failed.getvalue(),
+        )
+
+    def test_a_retried_or_failed_pull_is_annotated_only_under_actions(self) -> None:
+        """A plain log line never reaches the run summary, so a rescued pull would leave no trace there."""
+        image = "r.io/a:1.0@sha256:" + "a" * 64
+        for actions, expected in (
+            ("true", ["::warning::", "::warning::", "::error::"]),
+            ("", []),
+        ):
+            with self.subTest(actions=actions):
+                runner = FakeRunner(pull_failures=docker_lint.PULL_ATTEMPTS)
+                with (
+                    mock.patch.dict(os.environ, {"GITHUB_ACTIONS": actions}),
+                    contextlib.redirect_stdout(io.StringIO()) as output,
+                ):
+                    self.assertEqual(1, docker_lint.pull([image], 17, runner))
+                lines = [line for line in output.getvalue().splitlines() if line.startswith("::")]
+                self.assertEqual(expected, [line[: line.index("::", 2) + 2] for line in lines])
+                self.assertTrue(all(image in line for line in lines), lines)
+                self.assertFalse(any("connection reset" in line for line in lines), lines)
+        runner = FakeRunner(pull_timeout=True)
+        with (
+            mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(1, docker_lint.pull([image], 17, runner))
+        self.assertIn(f"::error::docker pull of {image} timed out", output.getvalue())
+
+    def test_main_routes_pull_to_the_pull_mode_and_refuses_it_beside_linter(self) -> None:
+        self.restore_handlers()
+        with (
+            mock.patch.object(docker_lint, "pull", return_value=0) as pull,
+            mock.patch.object(docker_lint, "lint") as lint,
+        ):
+            self.assertEqual(0, docker_lint.main(["--pull", "a", "--pull", "b", "--timeout", "9"]))
+        pull.assert_called_once_with(["a", "b"], 9)
+        lint.assert_not_called()
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            docker_lint.parse_args(["--pull", "a", "--linter", "markdownlint"])
+
+    def test_pin_mode_prints_every_stage_or_nothing(self) -> None:
+        """The docker-lint-pins action appends this output to its step outputs, so a failure writes none."""
+        path = self.outside / "Dockerfile"
+        image = "r/{stage}:1.0@sha256:" + "a" * 64
+        lines = [f"FROM {image.format(stage=s)} AS {s}" for s in ("cspell", "shfmt")]
+        path.write_text("# A comment.\n" + "\n".join(lines) + "\n", encoding="utf-8")
+        with (
+            contextlib.redirect_stdout(io.StringIO()) as out,
+            contextlib.redirect_stderr(io.StringIO()) as err,
+        ):
+            self.assertEqual(0, docker_lint.print_pins(["shfmt", "cspell"], path))
+        expected = f"shfmt={image.format(stage='shfmt')}\ncspell={image.format(stage='cspell')}\n"
+        self.assertEqual((expected, ""), (out.getvalue(), err.getvalue()))
+        twice = path.read_text(encoding="utf-8") + lines[1] + "\n"
+        for label, text, stages, reason in (
+            ("a stage missing", None, ["cspell", "markdownlint"], "pins markdownlint on no"),
+            ("a stage named twice", twice, ["cspell"], "names the shfmt stage twice"),
+        ):
+            with self.subTest(label):
+                if text is not None:
+                    path.write_text(text, encoding="utf-8")
+                with (
+                    contextlib.redirect_stdout(io.StringIO()) as out,
+                    contextlib.redirect_stderr(io.StringIO()) as err,
+                ):
+                    self.assertEqual(1, docker_lint.print_pins(stages, path))
+                self.assertEqual("", out.getvalue())
+                self.assertTrue(err.getvalue().startswith("RESULT failed: "), err.getvalue())
+                self.assertIn(reason, err.getvalue())
+
+    def test_pin_mode_reads_the_manifest_beside_the_script(self) -> None:
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(0, docker_lint.print_pins(["shellcheck"]))
+        self.assertEqual(
+            f"shellcheck={docker_lint.read_pins(MANIFEST)['shellcheck']}\n", out.getvalue()
+        )
+
+    def test_main_routes_pin_to_the_pin_mode_and_refuses_it_beside_another_mode(self) -> None:
+        self.restore_handlers()
+        with (
+            mock.patch.object(docker_lint, "print_pins", return_value=0) as print_pins,
+            mock.patch.object(docker_lint, "lint") as lint,
+            mock.patch.object(docker_lint, "pull") as pull,
+        ):
+            self.assertEqual(0, docker_lint.main(["--pin", "a", "--pin", "b"]))
+        print_pins.assert_called_once_with(["a", "b"])
+        lint.assert_not_called()
+        pull.assert_not_called()
+        for other in (["--pull", "a"], ["--linter", "markdownlint"]):
+            with (
+                self.subTest(other=other),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                docker_lint.parse_args(["--pin", "a", *other])
+
+    @requires_python_3_12
+    @unittest.skipUnless(os.name == "posix", "runs a stand-in docker only a POSIX host can execute")
+    def test_pull_mode_runs_under_the_runners_python_3_12(self) -> None:
+        """The lint steps run this script under a CI runner's system python3, which is 3.12."""
+        tools = self.outside / "bin"
+        tools.mkdir()
+        stub = tools / "docker"
+        stub.write_text('#!/bin/sh\necho "$*" >> "$0.log"\n', encoding="utf-8")
+        stub.chmod(0o755)
+        result = subprocess.run(
+            ["uv", "run", "--no-project", "--no-python-downloads", "--python", "3.12"]
+            + ["python", "-I", str(REPO / "scripts/docker_lint.py"), "--pull", "r.io/a:1.0"],
+            env={**os.environ, "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}"},
+            capture_output=True,
+            encoding="utf-8",
+            timeout=300,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        log = (tools / "docker.log").read_text(encoding="utf-8")
+        self.assertEqual("pull --quiet r.io/a:1.0\n", log)
 
     def test_a_timed_out_pull_is_not_retried(self) -> None:
         self.track("README.md")
@@ -207,6 +350,7 @@ class DockerLintCase(unittest.TestCase):
         for label, text in {
             "a moving tag with no digest": "FROM r/a:latest AS markdownlint",
             "a digest with no tag": "FROM r/a@sha256:" + "a" * 64 + " AS markdownlint",
+            "an empty tag": "FROM r/a:@sha256:" + "a" * 64 + " AS markdownlint",
         }.items():
             with self.subTest(label):
                 path.write_text(f"# A comment.\n\n{text}\n", encoding="utf-8")
@@ -218,9 +362,7 @@ class DockerLintCase(unittest.TestCase):
         with self.assertRaisesRegex(docker_lint.CommandFailed, "names the cspell stage twice"):
             docker_lint.read_pins(path)
 
-    def test_a_line_that_is_no_from_instruction_is_skipped_as_the_other_readers_skip_it(
-        self,
-    ) -> None:
+    def test_a_line_that_is_no_from_instruction_is_skipped(self) -> None:
         path = self.outside / "Dockerfile"
         image = "r/a:1.0@sha256:" + "a" * 64
         path.write_text(f"ARG unused=1\nFROM {image} AS cspell\n", encoding="utf-8")
@@ -235,7 +377,7 @@ class DockerLintCase(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             result = docker_lint.lint(self.root, 17, {"markdownlint"}, runner, pins)
         self.assertEqual(1, result)
-        self.assertIn("RESULT failed: the pin manifest names no shfmt stage", output.getvalue())
+        self.assertIn("RESULT failed: the pin manifest pins shfmt on no", output.getvalue())
         self.assertEqual([], runner.commands)
 
     def test_zero_targets_skips_pull_and_execution(self) -> None:

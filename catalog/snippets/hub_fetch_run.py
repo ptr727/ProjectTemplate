@@ -22,6 +22,7 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
+from types import FrameType
 
 HUB_REPO = "ptr727/ProjectTemplate"
 HUB_RAW_BASE = f"https://raw.githubusercontent.com/{HUB_REPO}"
@@ -184,13 +185,14 @@ def main(argv: list[str]) -> int:
 received: list[int] = []
 
 
-def on_signal(signum: int, _frame: object) -> None:
+def on_signal(signum: int, frame: FrameType | None) -> None:
     """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
 
     A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
     `uv run` forwards to a process group the terminal's SIGINT already reached.
+    A later signal can start inside this handler, so a call from this frame returns too.
     """
-    if received:
+    if received or (frame is not None and frame.f_code is on_signal.__code__):
         return
     received.append(signum)
     raise KeyboardInterrupt

@@ -119,6 +119,7 @@ def run_audit(
     with (
         mock.patch.object(audit, "gh", fake),
         mock.patch.object(audit, "hub_tracked", lambda rev=None: hub),
+        mock.patch.object(audit.audit_environments.resolve_secrets, "read_names", lambda *_: []),
     ):
         findings, _ = audit.audit_repo(ENTRY, spec)
     return findings, fake

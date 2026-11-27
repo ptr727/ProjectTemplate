@@ -28,7 +28,8 @@ from pr_review_checks import (
     runs_open,
     utc_instant,
 )
-from pr_review_rounds import READS_AS_REVIEWER, TRUSTED_ASSOCIATIONS
+from pr_review_payload import trusted_comment_nodes
+from pr_review_rounds import READS_AS_REVIEWER
 
 
 def side_command(name: str, command: str = "review") -> str:
@@ -38,14 +39,7 @@ def side_command(name: str, command: str = "review") -> str:
 
 def side_asks(pr: dict, body: str) -> list[dict]:
     """Each trusted, shown comment whose whole body is the request `body`, oldest first."""
-    nodes = (pr.get("comments") or {}).get("nodes") or []
-    asks = [
-        n
-        for n in nodes
-        if (n.get("authorAssociation") or "") in TRUSTED_ASSOCIATIONS
-        and not n.get("isMinimized")
-        and (n.get("body") or "").strip() == body
-    ]
+    asks = [n for n in trusted_comment_nodes(pr) if (n.get("body") or "").strip() == body]
     return sorted(asks, key=lambda n: n.get("createdAt") or "")
 
 

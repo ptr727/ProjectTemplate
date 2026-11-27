@@ -217,21 +217,10 @@ jobs:
       - name: Check EditorConfig step
         env:
           EDITORCONFIG_IMAGE: ${{ steps.docker-pins.outputs.editorconfig-checker }}
+          DOCKER_LINT: ${{ steps.docker-pins.outputs.docker-lint }}
         run: |
           set -Eeuo pipefail
-          pull() {
-            local attempt status
-            for attempt in 1 2 3; do
-              status=0
-              timeout 300 docker pull --quiet "$1" || status=$?
-              [ "$status" -ne 0 ] || return 0
-              [ "$status" -ne 124 ] || { echo "::error::docker pull of $1 timed out after 300s."; return 1; }
-              echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
-              [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
-            done
-            return 1
-          }
-          pull "$EDITORCONFIG_IMAGE"
+          python3 "$DOCKER_LINT" --pull "$EDITORCONFIG_IMAGE"
           docker run --rm -v "$PWD":/check --workdir /check "$EDITORCONFIG_IMAGE"
 
       # The file list comes from git rather than a glob, and the docker run is skipped rather than invoked on an empty argument list.
@@ -241,20 +230,9 @@ jobs:
         env:
           SHELLCHECK_IMAGE: ${{ steps.docker-pins.outputs.shellcheck }}
           SHFMT_IMAGE: ${{ steps.docker-pins.outputs.shfmt }}
+          DOCKER_LINT: ${{ steps.docker-pins.outputs.docker-lint }}
         run: |
           set -Eeuo pipefail
-          pull() {
-            local attempt status
-            for attempt in 1 2 3; do
-              status=0
-              timeout 300 docker pull --quiet "$1" || status=$?
-              [ "$status" -ne 0 ] || return 0
-              [ "$status" -ne 124 ] || { echo "::error::docker pull of $1 timed out after 300s."; return 1; }
-              echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
-              [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
-            done
-            return 1
-          }
           # Tokenizes rather than substring-matches, so `#!/usr/bin/python bash` is not mistaken for a shell script.
           # `docker_lint.py`'s shell_shebang_interpreter is the same logic; keep both in sync on a change here.
           is_shell_shebang() {
@@ -315,8 +293,7 @@ jobs:
             fi
           done
           if [ "${#scripts[@]}" -gt 0 ]; then
-            pull "$SHELLCHECK_IMAGE"
-            pull "$SHFMT_IMAGE"
+            python3 "$DOCKER_LINT" --pull "$SHELLCHECK_IMAGE" --pull "$SHFMT_IMAGE"
             docker run --rm -v "$PWD":/mnt --workdir /mnt "$SHELLCHECK_IMAGE" -- "${scripts[@]}"
             docker run --rm -v "$PWD":/mnt --workdir /mnt "$SHFMT_IMAGE" -d -- "${scripts[@]}"
           else
@@ -329,23 +306,12 @@ jobs:
       - name: Check PowerShell scripts step
         env:
           POWERSHELL_IMAGE: ${{ steps.docker-pins.outputs.powershell }}
+          DOCKER_LINT: ${{ steps.docker-pins.outputs.docker-lint }}
         run: |
           set -Eeuo pipefail
-          pull() {
-            local attempt status
-            for attempt in 1 2 3; do
-              status=0
-              timeout 300 docker pull --quiet "$1" || status=$?
-              [ "$status" -ne 0 ] || return 0
-              [ "$status" -ne 124 ] || { echo "::error::docker pull of $1 timed out after 300s."; return 1; }
-              echo "::warning::docker pull of $1 failed on attempt $attempt of 3."
-              [ "$attempt" -eq 3 ] || sleep $((attempt * 15))
-            done
-            return 1
-          }
           mapfile -t ps_scripts < <(git ls-files '*.ps1')
           if [ "${#ps_scripts[@]}" -gt 0 ]; then
-            pull "$POWERSHELL_IMAGE"
+            python3 "$DOCKER_LINT" --pull "$POWERSHELL_IMAGE"
             docker run --rm -e PS_SCRIPTS="$(git ls-files '*.ps1')" -v "$PWD":/mnt --workdir /mnt "$POWERSHELL_IMAGE" \
               pwsh -NoProfile -Command '
                 Set-PSRepository PSGallery -InstallationPolicy Trusted
