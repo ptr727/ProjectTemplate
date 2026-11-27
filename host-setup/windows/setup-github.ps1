@@ -12,7 +12,8 @@
 # It also covers a host identity answering as another account, and a key probe that could not tell.
 # A probe that could not tell includes a host that reaches GitHub only through its ssh config.
 # The script checks afterwards that the registration took.
-# It reads gh's own key lists where gh listed or added the signing key this run, and the keys GitHub publishes for the account otherwise.
+# It reads gh's own key lists where gh listed or added the signing key this run and the host also answers as gh's account.
+# It reads the keys GitHub publishes for the account otherwise.
 #
 # The path settings are written in the tilde form the Linux peer writes, because of the following.
 #   - Git expands it on Windows too.
@@ -796,6 +797,11 @@ function Register-KeysThroughGh {
 # Returns whether anything reaches GitHub, since without that the signing check has no account to read.
 function Test-Authentication {
     Resolve-GitHubUser
+    # Where ssh reached nothing but gh lists the key, a paste would only send the reader to register it again.
+    if (-not $script:GITHUB_USER -and $script:GH_AUTH_LISTED) {
+        warn "ssh could not reach GitHub, so this host's authentication was not checked. gh lists the managed key as $($script:GH_ACCOUNT)'s authentication key, so nothing needs pasting. Check this host's network or ssh config, then run again."
+        return $false
+    }
     if (-not $script:GITHUB_USER) {
         Show-RegistrationNeeded -Kind 'authentication' -Type 'Authentication'
         warn 'Authentication does not work yet, so nothing that reaches GitHub will work until the key above is registered'

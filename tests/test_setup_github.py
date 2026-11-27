@@ -944,6 +944,13 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertIn(f"gh lists the managed key as {ACCOUNT}'s authentication key", result.stdout)
         self.assertNotIn("registered nowhere", result.stderr)
 
+    def test_an_unreachable_github_with_a_listed_key_prints_no_paste(self) -> None:
+        check = "rc=0\nreport_authentication || rc=$?\necho rc=$rc"
+        result, _ = self.register(registered="auth signing", then=check)
+        self.assertIn("rc=2", result.stdout)
+        self.assertIn("ssh could not reach GitHub", result.stderr)
+        self.assertNotIn('Set the key type to "Authentication key"', result.stdout)
+
     def test_a_key_neither_authenticating_nor_listed_gets_the_authentication_paste(self) -> None:
         check = "rc=0\nreport_authentication || rc=$?\necho rc=$rc"
         result, _ = self.register(account="", general=SECOND, then=check)
@@ -1360,6 +1367,9 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             ),
             windows_register_case("probe-names-gh", managed=ACCOUNT),
             windows_register_case(
+                "unreachable-listed", registered=["authentication", "signing"], auth=True
+            ),
+            windows_register_case(
                 "refused-listed-auth", registered=["authentication"], general=SECOND, auth=True
             ),
             windows_register_case(
@@ -1536,6 +1546,11 @@ class TestWindowsKeyRegistration(unittest.TestCase):
 
     def test_a_probe_naming_gh_s_account_lets_both_keys_through(self) -> None:
         self.assertEqual(len(self.adds("probe-names-gh")), 2)
+
+    def test_an_unreachable_github_with_a_listed_key_prints_no_paste(self) -> None:
+        output = self.output("unreachable-listed")
+        self.assertIn("ssh could not reach GitHub", output)
+        self.assertNotIn('Set the key type to "Authentication key"', output)
 
     def test_a_refused_gate_keeps_what_gh_listed_for_the_final_check(self) -> None:
         self.assertEqual(self.adds("refused-listed-auth"), [])
