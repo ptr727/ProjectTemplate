@@ -797,7 +797,8 @@ read_back_settles() { # read-function want
     settled=""
     while :; do
         # A failed read counts as an attempt rather than ending the run, since the endpoint can fail transiently too.
-        if ! settled="$("$1")"; then settled=""; fi
+        # Its own error text is dropped because it blames the token, which the pre-flight read already proved, and the caller's report names the outcome.
+        if ! settled="$("$1" 2>/dev/null)"; then settled=""; fi
         if [ "$settled" = "$2" ]; then return 0; fi
         if [ "$attempt" -ge "$readback_attempts" ]; then return 1; fi
         attempt=$((attempt + 1))
