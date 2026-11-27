@@ -444,6 +444,27 @@ class CodecovEntryCase(unittest.TestCase):
         self.assertEqual([item["path"] for item in baseline if "alternatives" in item], [])
 
 
+class PythonVersionUnitCase(unittest.TestCase):
+    """The carried .python-version unit is a presence unit.
+
+    Each repository's line is its own, so a fidelity that dates or hashes a copy would flag every other line.
+    """
+
+    def test_the_unit_judges_presence_alone(self) -> None:
+        baseline = validate.load("spec/files.json")["baseline"]
+        units = [item for item in baseline if item["path"] == ".python-version"]
+        self.assertEqual(
+            units,
+            [
+                {
+                    "path": ".python-version",
+                    "reference": "catalog/snippets/configs/.python-version",
+                    "appliesTo": ["python"],
+                }
+            ],
+        )
+
+
 class RepoOwnedKeysCase(unittest.TestCase):
     """A files.json unit's repoOwnedKeys name leaves of a JSON intent reference, and nothing else."""
 

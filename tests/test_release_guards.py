@@ -2755,6 +2755,7 @@ class PythonVersionLineCase(unittest.TestCase):
 
     ACTION = REPO / ".github/actions/python-version/action.yml"
     BASELINE = REPO / "catalog/snippets/devcontainer/python/devcontainer.json"
+    CARRIED = REPO / "catalog/snippets/configs/.python-version"
     SELECT = "Select Python version step"
     last_stdout = ""
     last_stderr = ""
@@ -2781,8 +2782,12 @@ class PythonVersionLineCase(unittest.TestCase):
         return line.group(1)
 
     def test_the_fallback_is_the_baseline_line(self) -> None:
-        self.assertEqual(self.select(None), (0, [f"version={self.baseline()}"]), self.last_stderr)
+        code, outputs = self.select(None)
+        self.assertEqual((code, outputs), (0, [f"version={self.baseline()}"]), self.last_stderr)
         self.assertIn("::warning::No root .python-version selects a Python line", self.last_stdout)
+        self.assertEqual(
+            f"{outputs[0].removeprefix('version=')}\n", self.CARRIED.read_text(encoding="utf-8")
+        )
 
     def test_the_first_request_line_is_read(self) -> None:
         self.assertEqual(self.select("3.13\n"), (0, ["selected=3.13", "version=3.13"]))
