@@ -184,6 +184,8 @@ another owner, since a write there needs the maintainer's permission.
 
 An `**Owed action:**` issue, as "Needs the Maintainer" under "Away Mode" defines one, is counted and is not
 ranked, since no diff takes the step. The round's report names each one and whose step it is.
+It is held back under that reason alone, never as needing the maintainer, unless it waits on the
+maintainer already as "Needs the Maintainer" states.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
 It has no group, no worker, and no claim, so nothing in "Raising a Blocked Question" applies to it
