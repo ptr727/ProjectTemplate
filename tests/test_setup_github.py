@@ -736,7 +736,10 @@ gh() {
     "ssh-key list")
         [[ ${LIST_RC:-0} == 0 ]] || return "$LIST_RC"
         local kind
-        for kind in $(<"$STATE"); do printf 'example-host\t%s\t%s\t2024-01-01\t1\n' "$PUB" "$kind"; done
+        for kind in $(<"$STATE"); do
+            [[ $kind == signing && ${HIDE_SIGNING:-no} == yes ]] && continue
+            printf 'example-host\t%s\t%s\t2024-01-01\t1\n' "$PUB" "$kind"
+        done
         ;;
     "ssh-key add "*)
         [[ ${ADD_RC:-0} == 0 && ( $* != *"--type signing" || ${ADD_SIGNING_RC:-0} == 0 ) ]] || return "${ADD_SIGNING_RC:-$ADD_RC}"
@@ -792,6 +795,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         list_rc: int = 0,
         add_signing_rc: int | None = None,
         public_signing: bool = False,
+        hide_signing: bool = False,
         then: str = "",
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -823,6 +827,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
             "LIST_RC": str(list_rc),
             "ADD_SIGNING_RC": str(add_rc if add_signing_rc is None else add_signing_rc),
             "PUBLIC_SIGNING": "yes" if public_signing else "no",
+            "HIDE_SIGNING": "yes" if hide_signing else "no",
             "SSH_OUTPUT": SSH_STATES[ssh_state].replace(
                 "KEYPATH", str(home / ".ssh" / "id_ed25519")
             ),
@@ -938,6 +943,30 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(adds, [])
         self.assertNotIn("paste", result.stderr)
 
+    def test_a_listing_without_the_signing_scope_asks_the_public_list(self) -> None:
+        result, adds = self.register(
+            registered="auth signing", hide_signing=True, public_signing=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertEqual(result.stderr, "")
+        self.assertIn("Already registered as the signing key", result.stdout)
+
+    def test_the_host_s_own_probe_is_asked_again_only_after_an_authentication_add(self) -> None:
+        for general, registered, probes in (
+            (SECOND, "", 1),
+            (ACCOUNT, "", 2),
+            (ACCOUNT, "auth", 1),
+        ):
+            with self.subTest(general=general, registered=registered):
+                result, _ = self.register(
+                    general=general, registered=registered, then="resolve_github_user"
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                calls = (self.tmp / "calls").read_text().splitlines()
+                host = [c for c in calls if c.startswith("ssh ") and "IdentitiesOnly" not in c]
+                self.assertEqual(len(host), probes, calls)
+
     def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
         result, adds = self.register(general=ACCOUNT)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1023,6 +1052,7 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "Get-GhAccount",
     "Get-SshGreeting",
     "Get-GreetingUser",
+    "Get-GeneralUser",
     "Resolve-GitHubUser",
     "Test-ManagedKeyDenied",
     "Get-GhKeyState",
@@ -1069,7 +1099,10 @@ $GhStub = {
         }
         'ssh-key list' {
             if ($script:Case.listRc) { $global:LASTEXITCODE = [int]$script:Case.listRc; return }
-            foreach ($kind in $script:Reg) { "example-host`t$($script:Case.pub)`t$kind`t2024-01-01`t1" }
+            foreach ($kind in $script:Reg) {
+                if ($kind -eq 'signing' -and $script:Case.hideSigning) { continue }
+                "example-host`t$($script:Case.pub)`t$kind`t2024-01-01`t1"
+            }
             return
         }
         'ssh-key add *' {
@@ -1094,6 +1127,9 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
     $script:DRY_RUN = [bool]$case.dryRun
     $script:GITHUB_USER = ''
     $script:GH_SIGNING_ADDED = $false
+    $script:GH_ACCOUNT = ''
+    $script:GENERAL_USER = ''
+    $script:GENERAL_PROBED = $false
     $script:SshCalls = @()
     Remove-Item "$($script:KEY)*" -ErrorAction SilentlyContinue
     if (-not $case.noKey) {
@@ -1115,7 +1151,7 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
             if ((Get-SigningRegistrationState) -ne 'registered') { Show-RegistrationNeeded -Kind 'signing' -Type 'Signing' }
         }
     } 6>&1 | ForEach-Object { "$_" }
-    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }) }
+    $results[$case.name] = [ordered]@{ output = @($output); calls = @($script:Calls | Where-Object { $_ -like 'ssh-key add*' }); probes = @($script:SshCalls | Where-Object { $_ -like '*IdentitiesOnly*' }); host = @($script:SshCalls | Where-Object { $_ -notlike '*IdentitiesOnly*' }) }
 }
 Remove-Item $directory -Recurse
 $results | ConvertTo-Json -Depth 4
@@ -1140,6 +1176,7 @@ def windows_register_case(
     resolve: bool = False,
     check: bool = False,
     paste: bool = False,
+    hide_signing: bool = False,
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -1159,6 +1196,7 @@ def windows_register_case(
         "resolve": resolve,
         "check": check,
         "paste": paste,
+        "hideSigning": hide_signing,
         "pub": PUBLIC_KEY,
     }
 
@@ -1189,6 +1227,20 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                 general=SECOND,
             ),
             windows_register_case("host-same", general=ACCOUNT),
+            windows_register_case(
+                "signing-scope-missing",
+                registered=["authentication", "signing"],
+                hide_signing=True,
+                public_signing=True,
+            ),
+            windows_register_case("host-refused-resolve", general=SECOND, resolve=True),
+            windows_register_case("host-added-resolve", general=ACCOUNT, resolve=True),
+            windows_register_case(
+                "host-auth-done-resolve",
+                general=ACCOUNT,
+                registered=["authentication"],
+                resolve=True,
+            ),
             windows_register_case("probe-once", managed=ACCOUNT, resolve=True),
             windows_register_case(
                 "listed-auth-passphrase",
@@ -1313,6 +1365,21 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     def test_a_configured_host_is_not_told_to_paste(self) -> None:
         self.assertEqual(self.adds("configured-host"), [])
         self.assertNotIn("paste", self.output("configured-host"))
+
+    def test_the_host_s_own_probe_is_asked_again_only_after_an_authentication_add(self) -> None:
+        for name, probes in (
+            ("host-refused-resolve", 1),
+            ("host-added-resolve", 2),
+            ("host-auth-done-resolve", 1),
+        ):
+            with self.subTest(name=name):
+                self.assertEqual(len(self.listed(name, "host")), probes, self.results[name])
+
+    def test_a_listing_without_the_signing_scope_asks_the_public_list(self) -> None:
+        self.assertEqual(self.adds("signing-scope-missing"), [])
+        output = self.output("signing-scope-missing")
+        self.assertNotIn("WARNING", output)
+        self.assertIn("Already registered as the signing key", output)
 
     def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
         self.assertEqual(len(self.adds("host-same")), 2)

@@ -76,6 +76,9 @@ $GH_SSH_PROTOCOL = [bool]$GhSshProtocol
 $GITHUB_USER = ''
 $MANAGED_KEY_AUTHENTICATES = $false
 $GH_SIGNING_ADDED = $false
+$GH_ACCOUNT = ''
+$GENERAL_USER = ''
+$GENERAL_PROBED = $false
 
 # --- Output ---
 
@@ -316,10 +319,20 @@ function Get-GreetingUser {
     return ''
 }
 
+# The account the host's own ssh identity answers as, kept for the run since in configure mode the probe may prompt for a passphrase.
+# Only an authentication add can change it, and Register-KeyThroughGh clears GENERAL_PROBED after one.
+function Get-GeneralUser {
+    if (-not $script:GENERAL_PROBED) {
+        $script:GENERAL_USER = Get-GreetingUser (Get-SshGreeting)
+        $script:GENERAL_PROBED = $true
+    }
+    return $script:GENERAL_USER
+}
+
 # Prefer the account the managed key belongs to, since that is the one the registration checks are about.
 # Say so when the host answers as somebody else.
 function Resolve-GitHubUser {
-    $general = Get-GreetingUser (Get-SshGreeting)
+    $general = Get-GeneralUser
     $managed = Get-GreetingUser (Get-SshGreeting -ManagedKeyOnly)
 
     $script:MANAGED_KEY_AUTHENTICATES = [bool]$managed
@@ -629,6 +642,13 @@ function Get-GhKeyState {
     foreach ($line in ($listing -split '\r?\n')) {
         if ($line.Contains($key) -and $line -match "(^|\s)$Kind(\s|$)") { return 'registered' }
     }
+    # A token without admin:ssh_signing_key still lists the authentication keys and exits 0, leaving the signing rows out.
+    # So a signing row missing from gh's list is asked of the list GitHub publishes for gh's account before it reads as missing.
+    if ($Kind -eq 'signing' -and $script:GH_ACCOUNT) {
+        $user = $script:GITHUB_USER
+        $script:GITHUB_USER = $script:GH_ACCOUNT
+        try { return Test-KeyRegistered -Kind 'signing' } finally { $script:GITHUB_USER = $user }
+    }
     return 'missing'
 }
 
@@ -669,6 +689,8 @@ function Register-KeyThroughGh {
     if (-not $script:DRY_RUN) {
         info "Registered as the $Kind key through gh, titled $title"
         if ($Kind -eq 'signing') { $script:GH_SIGNING_ADDED = $true }
+        # The host's own answer may now be this key, so the next probe asks again.
+        if ($Kind -eq 'authentication') { $script:GENERAL_PROBED = $false }
     }
     return $true
 }
@@ -700,7 +722,7 @@ function Test-GhRegistrationAllowed {
     # The gh CLI can hold several accounts, so its active one is not proof of the account this host is meant for.
     # A host whose existing ssh identity answers as another account is told so before anything is written, rather than after.
     # A host with no identity GitHub accepts names no account here, so it is unaffected.
-    $general = Get-GreetingUser (Get-SshGreeting)
+    $general = Get-GeneralUser
     if ($general -and $general -ne $Account) {
         warn "gh is logged in as $Account, while this host's ssh identity answers as $general, so the key was not registered through gh. Log gh in as the intended account and re-run, or use the paste the checks below print for any registration still missing."
         return $false
@@ -718,6 +740,7 @@ function Register-KeysThroughGh {
     if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
     $account = Get-GhAccount
     if (-not $account) { return }
+    $script:GH_ACCOUNT = $account
 
     $authState = Get-GhKeyState -Kind 'authentication'
     $signingState = Get-GhKeyState -Kind 'signing'

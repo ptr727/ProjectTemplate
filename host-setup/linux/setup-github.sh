@@ -50,6 +50,9 @@ MANAGED_KEY_AUTHENTICATES=false
 MANAGED_USER=""
 MANAGED_DENIED=false
 GH_SIGNING_ADDED=false
+GH_ACCOUNT=""
+GENERAL_USER=""
+GENERAL_PROBED=false
 KEY_REGISTERED=false
 SHARED_CHECKOUT=""
 GH_SSH_PROTOCOL=false
@@ -306,6 +309,15 @@ github_auth_user() {
     greeting_user "$(ssh_probe -T git@github.com 2>&1 || true)"
 }
 
+# The same answer kept for the run in GENERAL_USER, since in configure mode the probe may prompt for a passphrase.
+# Only an authentication add can change it, and register_through_gh clears GENERAL_PROBED after one.
+probe_general_user() {
+    if [[ $GENERAL_PROBED == false ]]; then
+        GENERAL_USER=$(github_auth_user)
+        GENERAL_PROBED=true
+    fi
+}
+
 # The account a greeting names, empty where it names none.
 greeting_user() {
     printf '%s' "$1" | sed -n 's/^Hi \([^!]*\)!.*/\1/p'
@@ -362,7 +374,8 @@ probe_managed_key() {
 # Say so when the host answers as somebody else.
 resolve_github_user() {
     local general managed
-    general=$(github_auth_user)
+    probe_general_user
+    general="$GENERAL_USER"
     managed=$(github_auth_user_managed || true)
 
     MANAGED_KEY_AUTHENTICATES=false
@@ -444,7 +457,15 @@ gh_key_registered() {
     listing=$(gh ssh-key list) || return 2
     matches=$(grep -F -- "$key" <<<"$listing") || rc=$?
     ((rc <= 1)) || return 2
-    grep -qE "(^|[[:space:]])$kind([[:space:]]|$)" <<<"$matches"
+    grep -qE "(^|[[:space:]])$kind([[:space:]]|$)" <<<"$matches" && return 0
+
+    # A token without admin:ssh_signing_key still lists the authentication keys and exits 0, leaving the signing rows out.
+    # So a signing row missing from gh's list is asked of the list GitHub publishes for gh's account before it reads as missing.
+    if [[ $kind == "signing" && -n $GH_ACCOUNT ]]; then
+        GITHUB_USER="$GH_ACCOUNT" github_signing_key_registered
+        return
+    fi
+    return 1
 }
 
 # Where this run's gh add of the signing key succeeded, gh's lists are the check, since the public lists may lag the add.
@@ -489,6 +510,8 @@ register_through_gh() {
         if [[ $DRY_RUN == false ]]; then
             info "Registered as the $kind key through gh, titled $title"
             [[ $kind == "signing" ]] && GH_SIGNING_ADDED=true
+            # The host's own answer may now be this key, so the next probe asks again.
+            [[ $kind == "authentication" ]] && GENERAL_PROBED=false
         fi
         KEY_REGISTERED=true
         return 0
@@ -524,7 +547,8 @@ gh_registration_allowed() {
     # A host whose existing ssh identity answers as another account is told so before anything is written, rather than after.
     # A host with no identity GitHub accepts names no account here, so it is unaffected.
     local general
-    general=$(github_auth_user)
+    probe_general_user
+    general="$GENERAL_USER"
     if [[ -n $general && $general != "$account" ]]; then
         warn "gh is logged in as $account, while this host's ssh identity answers as $general, so the key was not registered through gh. Log gh in as the intended account and re-run, or use the paste the checks below print for any registration still missing."
         return 1
@@ -543,6 +567,7 @@ register_keys_through_gh() {
     local account auth_rc=0 signing_rc=0
     account=$(gh_account)
     [[ -n $account ]] || return 0
+    GH_ACCOUNT="$account"
 
     gh_key_registered authentication || auth_rc=$?
     gh_key_registered signing || signing_rc=$?
