@@ -1118,7 +1118,13 @@ function ssh {
     $script:SshCalls += $line
     if ($line -like '*BatchMode=yes*') {
         if ($script:Case.batchUser) { return "Hi $($script:Case.batchUser)! You have successfully authenticated." }
-        return $script:Case.sshOutput
+        # Real ssh writes its verbose lines to stderr, which reach the script's 2>&1 as error records rather than strings.
+        # So a native process writes them here, and the script's own rendering of those records is what the evidence check reads.
+        if ($script:Case.sshOutput) {
+            $env:SETUP_GITHUB_FAKE_SSH = $script:Case.sshOutput
+            & (Get-Process -Id $PID).Path -NoProfile -NonInteractive -Command '[Console]::Error.Write($env:SETUP_GITHUB_FAKE_SSH)'
+        }
+        return
     }
     if ($line -like '*-i *') {
         if ($script:Case.managed) { return "Hi $($script:Case.managed)! You have successfully authenticated." }
