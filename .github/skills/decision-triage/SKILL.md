@@ -143,7 +143,8 @@ of its own.
      the User" below states, recording the reason. It is not asked. Do the same for a queued
      `decision` issue the history check returned as `HELD` awaiting promotion. That issue skips
      step 6 and stays open until a promotion lands. The first triage after it then returns the
-     issue as `OVERTAKEN`.
+     issue as `OVERTAKEN`. A queued `**Owed action:**` issue returned as `HELD` leaves the queue
+     the same way, its `decision` label removed, and stays open on its step.
 
    The comment states the question, then the options, the recommended one first, each with its
    reason. It names the evidence and what each option does to any work in flight.
