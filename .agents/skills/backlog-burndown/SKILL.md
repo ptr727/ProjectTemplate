@@ -91,9 +91,9 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    The adjudication in "Grouping and File Claims" and a confirmed-gone worker each produce that outcome. Bound this wait per "Bounding the Wait on a Worker".
    The orchestrator records a handed-back pass and continues the same worker.
    **Each owed action a merged group reports is held by an open issue before the round promotes
-   or ends**, per "Dispatching a Worker". Only an open issue whose body opens with
-   `**Owed action:**` and names the action holds it, since "Ranking" never ranks one. So no
-   `Closes on promotion:` line closes it. The orchestrator files one where none holds it, saying
+   or ends**, per "Dispatching a Worker". Only an open issue an account with write access opened,
+   whose body opens with `**Owed action:**` and names the action, holds it. That is an `**Owed action:**` issue.
+   "Ranking" never ranks one, so no `Closes on promotion:` line closes it. The orchestrator files one where none holds it, saying
    whose step it is. Attended, where the step is the maintainer's, it first offers the maintainer a
    walk-through instead. It gives one step at a time, each confirmed done before the next. An action that needs a promotion or a release first is filed
    rather than offered. An action walked through to done needs no issue. The orchestrator closes
@@ -182,7 +182,7 @@ Authorizes". So this run gives it no group, no worker, and no claim. The round's
 such issue, its repository, and what would move it, such as a tracking issue or a session there. It names the issue as needing the maintainer only where that repository is under
 another owner, since a write there needs the maintainer's permission.
 
-An issue whose body opens with `**Owed action:**`, per "The Round" step 5, is counted and is not
+An `**Owed action:**` issue, as "The Round" step 5 defines one, is counted and is not
 ranked, since no diff takes the step. The round's report names each one and whose step it is.
 
 An issue that asks a question rather than states a defect is not ranked and is never guessed at.
@@ -336,7 +336,8 @@ for, and it binds harder than any throughput target.
   fetch above, run `git log --format=%H "origin/<base>..<ref>" -- "<file>"`, with `<base>` as the
   bullet above gives it. Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it with `git -C "<clone>"`
   for `<branch>` in a standalone clone the claim comment names, too. Each exiting 0 and printing nothing is that read.
-  Every checkout the claim names, worktree or standalone clone, must also hold no uncommitted change to the file.
+  The parked branch's checkouts must also hold no uncommitted change to the file. They are the worktree
+  `git worktree list --porcelain` shows holding `<branch>`, and any standalone clone the claim comment names.
   So `git -C "<checkout>" status --porcelain --untracked-files=all -- "<file>"` exits 0 and prints nothing in each.
   A non-zero exit, or no ref to read, is a read that cannot be made. A read
   that cannot be made keeps the file with the parked group. Record the pass on the parked group's claim
@@ -921,8 +922,8 @@ test `session-handoff` "The Chain" states, waits on that platform's lane. One wh
 lies wholly in another repository under the same owner waits on work there. One that another group
 or pull request holds waits on that work. One carrying `canonical-sweep` belongs to the workflow
 that owns it. One carrying `deferred` has its answer already, which is "not yet", and waits on the
-condition its answer comment states. One whose body opens with `**Owed action:**` waits on that step,
-per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
+condition its answer comment states. One an account with write access opened, whose body opens with
+`**Owed action:**`, waits on that step, per `backlog-burndown` "Ranking". A handoff link carrying the `handoff` label is not an issue
 of its own.
 
 <!-- /include -->
