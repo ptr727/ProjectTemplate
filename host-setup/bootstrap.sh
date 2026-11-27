@@ -372,7 +372,8 @@ restore_secrets() {
 # The order is fixed rather than chosen.
 # The sudo step comes first, so the one credential it caches covers every step after it.
 # Packages come before the tools, so a keyring or a repository is added against a current apt state.
-# GitHub comes after the tools, because it is the only step that can wait on a person in a browser.
+# GitHub comes after the tools, because install-tools.sh provides the gh it registers the key through.
+# It is also the only step that can wait on a person in a browser.
 # It waits only where gh cannot register the key, which includes no gh login.
 # The agent setup comes last, and after the tools in particular, because install-tools.sh provides the interpreter it needs.
 stand_up() {

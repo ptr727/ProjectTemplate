@@ -936,6 +936,14 @@ class TestLinuxKeyRegistration(unittest.TestCase):
                 self.assertNotIn("registered nowhere", result.stderr)
                 self.assertNotIn('Set the key type to "Authentication key"', result.stdout)
 
+    def test_a_refused_gate_keeps_what_gh_listed_for_the_final_check(self) -> None:
+        check = "rc=0\nreport_authentication || rc=$?\necho rc=$rc"
+        result, adds = self.register(registered="auth", general=SECOND, then=check)
+        self.assertEqual(adds, [])
+        self.assertIn(HOST_MISMATCH, result.stderr)
+        self.assertIn(f"gh lists the managed key as {ACCOUNT}'s authentication key", result.stdout)
+        self.assertNotIn("registered nowhere", result.stderr)
+
     def test_a_key_neither_authenticating_nor_listed_gets_the_authentication_paste(self) -> None:
         check = "rc=0\nreport_authentication || rc=$?\necho rc=$rc"
         result, _ = self.register(account="", general=SECOND, then=check)
@@ -1344,6 +1352,9 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             ),
             windows_register_case("probe-names-gh", managed=ACCOUNT),
             windows_register_case(
+                "refused-listed-auth", registered=["authentication"], general=SECOND, auth=True
+            ),
+            windows_register_case(
                 "signing-public-unreadable",
                 registered=["authentication", "signing"],
                 hide_signing=True,
@@ -1511,6 +1522,13 @@ class TestWindowsKeyRegistration(unittest.TestCase):
 
     def test_a_probe_naming_gh_s_account_lets_both_keys_through(self) -> None:
         self.assertEqual(len(self.adds("probe-names-gh")), 2)
+
+    def test_a_refused_gate_keeps_what_gh_listed_for_the_final_check(self) -> None:
+        self.assertEqual(self.adds("refused-listed-auth"), [])
+        output = self.output("refused-listed-auth")
+        self.assertIn(HOST_MISMATCH, output)
+        self.assertIn(f"gh lists the managed key as {ACCOUNT}'s authentication key", output)
+        self.assertNotIn("registered nowhere", output)
 
     def test_a_listed_key_is_not_called_registered_nowhere_beside_another_identity(self) -> None:
         output = self.output("config-only-other-identity")

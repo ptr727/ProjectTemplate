@@ -509,8 +509,6 @@ register_through_gh() {
     0)
         info "Already registered as the $kind key"
         KEY_REGISTERED=true
-        [[ $kind == "signing" ]] && GH_SIGNING_LISTED=true
-        [[ $kind == "authentication" ]] && GH_AUTH_LISTED=true
         return 0
         ;;
     2)
@@ -590,6 +588,9 @@ register_keys_through_gh() {
 
     gh_key_registered authentication || auth_rc=$?
     gh_key_registered signing || signing_rc=$?
+    # What gh's list shows is kept before the gate, so a refusal below does not throw it away for the checks after it.
+    ((auth_rc == 0)) && GH_AUTH_LISTED=true
+    ((signing_rc == 0)) && GH_SIGNING_LISTED=true
     # A listing gh cannot read is most often a login without the key scopes.
     # So the scope remedy is the answer here, rather than the ssh probe's.
     # A dry run before the key exists has no key to list, which is a different case.

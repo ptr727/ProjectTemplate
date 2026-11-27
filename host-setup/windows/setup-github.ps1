@@ -692,8 +692,6 @@ function Register-KeyThroughGh {
     }
     if ($state -eq 'registered') {
         info "Already registered as the $Kind key"
-        if ($Kind -eq 'signing') { $script:GH_SIGNING_LISTED = $true }
-        if ($Kind -eq 'authentication') { $script:GH_AUTH_LISTED = $true }
         return $true
     }
     if ($state -eq 'unknown') {
@@ -772,6 +770,9 @@ function Register-KeysThroughGh {
 
     $authState = Get-GhKeyState -Kind 'authentication'
     $signingState = Get-GhKeyState -Kind 'signing'
+    # What gh's list shows is kept before the gate, so a refusal below does not throw it away for the checks after it.
+    if ($authState -eq 'registered') { $script:GH_AUTH_LISTED = $true }
+    if ($signingState -eq 'registered') { $script:GH_SIGNING_LISTED = $true }
     # A listing gh cannot read is most often a login without the key scopes.
     # So the scope remedy is the answer here, rather than the ssh probe's.
     # A dry run before the key exists has no key to list, which is a different case.
