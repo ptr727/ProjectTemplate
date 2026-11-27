@@ -78,6 +78,7 @@ $GH_SSH_PROTOCOL = [bool]$GhSshProtocol
 $GITHUB_USER = ''
 $MANAGED_KEY_AUTHENTICATES = $false
 $GH_SIGNING_LISTED = $false
+$GH_AUTH_LISTED = $false
 $GH_ACCOUNT = ''
 $GENERAL_USER = ''
 $GENERAL_PROBED = $false
@@ -692,6 +693,7 @@ function Register-KeyThroughGh {
     if ($state -eq 'registered') {
         info "Already registered as the $Kind key"
         if ($Kind -eq 'signing') { $script:GH_SIGNING_LISTED = $true }
+        if ($Kind -eq 'authentication') { $script:GH_AUTH_LISTED = $true }
         return $true
     }
     if ($state -eq 'unknown') {
@@ -709,7 +711,10 @@ function Register-KeyThroughGh {
         info "Registered as the $Kind key through gh, titled $title"
         if ($Kind -eq 'signing') { $script:GH_SIGNING_LISTED = $true }
         # The host's own answer may now be this key, so the next probe asks again.
-        if ($Kind -eq 'authentication') { $script:GENERAL_PROBED = $false }
+        if ($Kind -eq 'authentication') {
+            $script:GENERAL_PROBED = $false
+            $script:GH_AUTH_LISTED = $true
+        }
     }
     return $true
 }
@@ -796,6 +801,11 @@ function Test-Authentication {
     }
     if ($script:MANAGED_KEY_AUTHENTICATES) {
         info "Authenticated as $($script:GITHUB_USER), with the managed key"
+        return $true
+    }
+    if ($script:GH_AUTH_LISTED -and $script:GITHUB_USER -eq $script:GH_ACCOUNT) {
+        # The isolated probe cannot reach GitHub on a host that needs its ssh config, while gh's own list already shows the key on this account.
+        info "Authenticated as $($script:GITHUB_USER), and gh lists the managed key as that account's authentication key"
         return $true
     }
     # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.

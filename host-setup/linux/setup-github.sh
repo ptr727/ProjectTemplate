@@ -53,6 +53,7 @@ MANAGED_KEY_AUTHENTICATES=false
 MANAGED_USER=""
 MANAGED_DENIED=false
 GH_SIGNING_LISTED=false
+GH_AUTH_LISTED=false
 GH_ACCOUNT=""
 GENERAL_USER=""
 GENERAL_PROBED=false
@@ -509,6 +510,7 @@ register_through_gh() {
         info "Already registered as the $kind key"
         KEY_REGISTERED=true
         [[ $kind == "signing" ]] && GH_SIGNING_LISTED=true
+        [[ $kind == "authentication" ]] && GH_AUTH_LISTED=true
         return 0
         ;;
     2)
@@ -524,7 +526,7 @@ register_through_gh() {
             info "Registered as the $kind key through gh, titled $title"
             [[ $kind == "signing" ]] && GH_SIGNING_LISTED=true
             # The host's own answer may now be this key, so the next probe asks again.
-            [[ $kind == "authentication" ]] && GENERAL_PROBED=false
+            [[ $kind == "authentication" ]] && GENERAL_PROBED=false && GH_AUTH_LISTED=true
         fi
         KEY_REGISTERED=true
         return 0
@@ -957,6 +959,9 @@ configure() {
     fi
     if [[ $MANAGED_KEY_AUTHENTICATES == true ]]; then
         info "Authenticated as $GITHUB_USER, with the managed key"
+    elif [[ $GH_AUTH_LISTED == true && $GITHUB_USER == "$GH_ACCOUNT" ]]; then
+        # The isolated probe cannot reach GitHub on a host that needs its ssh config, while gh's own list already shows the key on this account.
+        info "Authenticated as $GITHUB_USER, and gh lists the managed key as that account's authentication key"
     else
         # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.
         # Reporting it as an ordinary line let a run end in "Done" on a host whose managed key was registered nowhere.
