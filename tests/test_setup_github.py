@@ -718,6 +718,7 @@ SSH_STATES: dict[str, str] = {
 }
 CANNOT_TELL = ("wrong-offer", "passphrase", "unprotected", "silent")
 HOST_MISMATCH = f"gh is logged in as {ACCOUNT}, while this host's ssh identity answers as {SECOND}"
+DEPLOY_KEY = "example-owner/example-repo"
 
 # A gh answering the calls the registration makes, recording each, and keeping the registered kinds in $STATE.
 # Both gh and ssh are shell functions, so nothing reaches a real account and no real host is read.
@@ -993,6 +994,12 @@ class TestLinuxKeyRegistration(unittest.TestCase):
                 calls = (self.tmp / "calls").read_text().splitlines()
                 host = [c for c in calls if c.startswith("ssh ") and "IdentitiesOnly" not in c]
                 self.assertEqual(len(host), probes, calls)
+
+    def test_a_deploy_key_greeting_is_not_an_identity_to_compare(self) -> None:
+        result, adds = self.register(general=DEPLOY_KEY)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 2, adds)
+        self.assertNotIn("ssh identity answers as", result.stderr)
 
     def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
         result, adds = self.register(general=ACCOUNT)
@@ -1308,6 +1315,7 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                 general=SECOND,
             ),
             windows_register_case("host-same", general=ACCOUNT),
+            windows_register_case("host-deploy-key", general=DEPLOY_KEY),
             windows_register_case(
                 "signing-scope-missing",
                 registered=["authentication", "signing"],
@@ -1496,6 +1504,10 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         output = self.output("signing-scope-missing")
         self.assertNotIn("WARNING", output)
         self.assertIn("Already registered as the signing key", output)
+
+    def test_a_deploy_key_greeting_is_not_an_identity_to_compare(self) -> None:
+        self.assertEqual(len(self.adds("host-deploy-key")), 2)
+        self.assertNotIn("ssh identity answers as", self.output("host-deploy-key"))
 
     def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
         self.assertEqual(len(self.adds("host-same")), 2)

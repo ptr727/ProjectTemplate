@@ -672,7 +672,7 @@ function Get-GhKeyState {
 # Everywhere else the public lists are the check, so a login missing scopes or a gh listing that fails cannot hide a registered key.
 function Get-SigningRegistrationState {
     # Anything short of gh's yes is the public check's to answer.
-# So a GitHub that cannot be reached still reads as unknown rather than as missing.
+    # So a GitHub that cannot be reached still reads as unknown rather than as missing.
     if ($script:GH_SIGNING_LISTED -and (Get-GhKeyState -Kind 'signing') -eq 'registered') { return 'registered' }
     return Test-KeyRegistered -Kind 'signing'
 }
@@ -744,6 +744,8 @@ function Test-GhRegistrationAllowed {
     # A host whose existing ssh identity answers as another account is told so before anything is written, rather than after.
     # A host with no identity GitHub accepts names no account here, so it is unaffected.
     $general = Get-GeneralUser
+    # A deploy key greets as owner/repository, which names no account, so it is not an identity to compare.
+    if ($general -like '*/*') { $general = '' }
     if ($general -and $general -ne $Account) {
         warn "gh is logged in as $Account, while this host's ssh identity answers as $general, so the key was not registered through gh. Log gh in as the intended account and re-run, or use the paste the checks below print for any registration still missing."
         return $false

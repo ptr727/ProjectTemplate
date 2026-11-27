@@ -564,6 +564,8 @@ gh_registration_allowed() {
     local general
     probe_general_user
     general="$GENERAL_USER"
+    # A deploy key greets as owner/repository, which names no account, so it is not an identity to compare.
+    [[ $general == */* ]] && general=""
     if [[ -n $general && $general != "$account" ]]; then
         warn "gh is logged in as $account, while this host's ssh identity answers as $general, so the key was not registered through gh. Log gh in as the intended account and re-run, or use the paste the checks below print for any registration still missing."
         return 1
