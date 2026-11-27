@@ -98,6 +98,25 @@ jobs:
             exit 1
           }
 
+          # A closed or merged pull request ends the step, and a moved head fails it, since the checks read belong to the pinned head.
+          read_pr() {
+            read_api "the pull request" "" gh api "repos/$REPO/pulls/$NUMBER" --jq '[.state, (.merged | tostring), .head.sha] | @tsv'
+            local state merged head
+            IFS=$'\t' read -r state merged head <<<"$out"
+            if [[ "$merged" == true ]]; then
+              echo "The pull request is merged, so there is nothing more to merge"
+              exit 0
+            fi
+            if [[ "$state" != open ]]; then
+              echo "::notice::The pull request was closed, so it is not merged"
+              exit 0
+            fi
+            if [[ "$head" != "$HEAD_SHA" ]]; then
+              echo "::error::The head moved from $HEAD_SHA to $head, so the pull request is not merged"
+              exit 1
+            fi
+          }
+
           read_api "the base branch rules" "" gh api --paginate "repos/$REPO/rules/branches/$BASE_REF" --jq '.[].type'
           if grep -Fxq required_status_checks <<<"$out"; then
             gh pr merge --auto "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"
@@ -110,22 +129,10 @@ jobs:
           passing=""
           passing_since=0
           while :; do
-            read_api "the pull request" "" gh api "repos/$REPO/pulls/$NUMBER" --jq '[.state, (.merged | tostring), .head.sha] | @tsv'
-            IFS=$'\t' read -r state merged head <<<"$out"
-            if [[ "$merged" == true ]]; then
-              echo "The pull request is already merged, so there is nothing to merge"
-              exit 0
-            fi
-            if [[ "$state" != open ]]; then
-              echo "::notice::The pull request was closed, so it is not merged"
-              exit 0
-            fi
-            if [[ "$head" != "$HEAD_SHA" ]]; then
-              echo "::error::The head moved from $HEAD_SHA to $head, so the pull request is not merged"
-              exit 1
-            fi
-            read_api "the head's check runs" "checks: read" gh api --paginate "repos/$REPO/commits/$HEAD_SHA/check-runs?per_page=100" --jq '.check_runs[] | {name, status, conclusion}'
-            runs=$out
+            read_pr
+            read_api "the head's check runs" "checks: read" gh api --paginate "repos/$REPO/commits/$HEAD_SHA/check-runs?per_page=100" --jq '.check_runs[] | {id, name, status, conclusion}'
+            # A re-run leaves its earlier attempt on the head, so only the newest run of each name counts.
+            runs=$(jq -sc 'group_by(.name) | map(max_by(.id))[]' <<<"$out")
             read_api "the head's commit statuses" "statuses: read" gh api --paginate "repos/$REPO/commits/$HEAD_SHA/status?per_page=100" --jq '.statuses[] | {name: .context, status: (if .state == "pending" then "pending" else "completed" end), conclusion: .state}'
             # This workflow's own jobs post on the head too, as a caller job name, a slash, and the job name, so the wait leaves them out.
             checks=$(jq -sc --argjson own "$OWN_JOBS" '
@@ -162,18 +169,11 @@ jobs:
             if gh pr merge "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"; then
               exit 0
             fi
-            read_api "the pull request" "" gh api "repos/$REPO/pulls/$NUMBER" --jq '[.state, (.merged | tostring), .head.sha] | @tsv'
-            IFS=$'\t' read -r state merged head <<<"$out"
-            if [[ "$merged" == true ]]; then
-              echo "The pull request merged, so the refusal was not final"
-              exit 0
-            fi
-            if [[ "$state" != open || "$head" != "$HEAD_SHA" ]]; then
-              echo "::error::The pull request is $state at $head, so the refused merge is not retried"
-              exit 1
-            fi
+            read_pr
             echo "::warning::Merging failed on attempt $attempt"
-            sleep "$POLL_SECONDS"
+            if ((attempt < 3)); then
+              sleep "$POLL_SECONDS"
+            fi
           done
           echo "::error::Merging failed three times with every check passed"
           exit 1

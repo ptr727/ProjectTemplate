@@ -54,9 +54,9 @@ sys.exit(subprocess.run(["jq", "-rc", expr], input=json.dumps(response["json"]),
 
 
 def check_run(
-    name: str, status: str = "completed", conclusion: str | None = "success"
+    name: str, status: str = "completed", conclusion: str | None = "success", run_id: int = 1
 ) -> dict[str, Any]:
-    return {"name": name, "status": status, "conclusion": conclusion}
+    return {"id": run_id, "name": name, "status": status, "conclusion": conclusion}
 
 
 def runs(*checks: dict[str, Any]) -> dict[str, Any]:
@@ -307,6 +307,25 @@ class MergeStepCase(unittest.TestCase):
             merge=[refused],
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(1, len(self.merges(calls)))
+
+    def test_only_the_newest_run_of_a_re_run_check_counts(self) -> None:
+        failed = check_run("Lint job", conclusion="failure", run_id=1)
+        result, calls = self.merge(UNREQUIRED, [runs(check_run("Lint job", run_id=2), failed)])
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(1, len(self.merges(calls)))
+
+    def test_a_pull_request_closed_during_the_merge_retry_ends_without_failing(self) -> None:
+        refused = {"error": "GraphQL: Pull request is closed"}
+        closed = {"json": {**OPEN, "state": "closed"}}
+        result, calls = self.merge(
+            UNREQUIRED,
+            [runs(check_run("Lint job"))],
+            pulls=[{"json": OPEN}, closed],
+            merge=[refused],
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("::notice::The pull request was closed, so it is not merged", result.stdout)
         self.assertEqual(1, len(self.merges(calls)))
 
     def test_a_merge_refused_three_times_fails(self) -> None:
