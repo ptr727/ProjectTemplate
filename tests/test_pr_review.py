@@ -93,6 +93,7 @@ GATE_SOURCES = (
     "pr_review_promotion.py",
     "pr_review_hold.py",
     "pr_review_summary.py",
+    "pr_review_title.py",
 )
 WRITE_SCANNED = (*GATE_SOURCES, "pr_review_side.py", "pr_review_policy.py")
 # What a reader may import: the stdlib it parses with, the reviewer adapter, and the other readers.
@@ -113,6 +114,7 @@ READER_IMPORTS = frozenset(
         "pr_review_promotion",
         "pr_review_rounds",
         "pr_review_summary",
+        "pr_review_title",
     }
 )
 # One import each reader module is known to make, the floor under the allowlist above.
@@ -126,6 +128,7 @@ READER_FLOORS = {
     "pr_review_promotion": "pr_review_rounds",
     "pr_review_hold": "pr_review_checks",
     "pr_review_summary": "pr_review_rounds",
+    "pr_review_title": "pr_review_rounds",
 }
 # What a reader must never load, directly or through the adapter.
 REACHING_OUT = ("pr_review", "gh_graphql", "subprocess")

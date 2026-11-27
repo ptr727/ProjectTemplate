@@ -51,6 +51,7 @@ from pr_review_rounds import (
     window_blind,
 )
 from pr_review_summary import rabbit_on_head, summary_blind
+from pr_review_title import title_field, title_lines
 
 NO_THREAD, NOTED = answers.NO_THREAD, answers.NOTED
 BEHIND_THE_WINDOW = (
@@ -208,6 +209,7 @@ def render(
             "shapes",
             ("ACKNOWLEDGED" if hold[2] else "HELD") if hold else "NOTED" if notes else "ok",
         ),
+        ("title", title_field(pr)),
         ("refusal", refusal_field),
         ("threads", f"{len(threads)}{plus}"),
         ("unresolved", f"{len(unresolved)}{plus}{breakdown}"),
@@ -271,6 +273,7 @@ def render(
         )
         for part in hold[1]:
             lines += [f"    {part.note}", *([] if hold[2] else adapter.excerpt(part.text))]
+    lines += title_lines(pr)
     if owed:
         lines.append(
             f"  {NO_THREAD} ({owed}){keyed.get(NO_THREAD, '')}: the round covering the head names more findings "
