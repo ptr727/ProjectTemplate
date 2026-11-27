@@ -105,7 +105,8 @@ of its own.
    `git log refs/remotes/origin/develop` on the files the issue names. It also reads the state of
    any child issues the issue tracks, and any later comment recording a decision. A fix merged
    into `develop` and not yet promoted makes the issue `HELD` awaiting promotion rather than
-   `OVERTAKEN`. An `**Owed action:**` issue skips that check, since git records no step taken. It
+   `OVERTAKEN`. An `**Owed action:**` issue skips the `git log` reads, since git records no step taken.
+   A later comment recording the step done still makes it `OVERTAKEN`. Otherwise it
    is `HELD` on the step it names, whoever's step it is, since a step is not a question. Such an issue is one an account with write access opened, its
    body opening with that marker.
    The queued `decision` issues get the same check and no classification beyond it.

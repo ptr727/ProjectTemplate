@@ -94,7 +94,7 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    or ends**, per "Dispatching a Worker". Only an open issue an account with write access opened,
    whose body opens with `**Owed action:**` and names the action, holds it. That is an `**Owed action:**` issue.
    "Ranking" never ranks one, so no `Closes on promotion:` line closes it. The orchestrator files one where none holds it, saying
-   whose step it is. Attended, where the step is the maintainer's, it first offers the maintainer a
+   whose step it is and giving each step's command in order. Attended, where the step is the maintainer's, it first offers the maintainer a
    walk-through instead. It gives one step at a time, each confirmed done before the next. An action that needs a promotion or a release first is filed
    rather than offered. An action walked through to done needs no issue. The orchestrator closes
    an `**Owed action:**` issue walked through to done, citing the maintainer's confirmation.
@@ -336,6 +336,7 @@ for, and it binds harder than any throughput target.
   fetch above, run `git log --format=%H "origin/<base>..<ref>" -- "<file>"`, with `<base>` as the
   bullet above gives it. Run it for `<branch>` and for `origin/<branch>`, whichever exist. Run it with `git -C "<clone>"`
   for `<branch>` in a standalone clone the claim comment names, too. Each exiting 0 and printing nothing is that read.
+  It reads commits rather than the net diff above, so an edit the branch later reverted still holds the file.
   The parked branch's checkouts must also hold no uncommitted change to the file. They are the worktree
   `git worktree list --porcelain` shows holding `<branch>`, and any standalone clone the claim comment names.
   So `git -C "<checkout>" status --porcelain --untracked-files=all -- "<file>"` exits 0 and prints nothing in each.
@@ -474,7 +475,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   review findings. An owed action is a step outside the diff, usually the maintainer's, without
   which a machine or the fleet stays inconsistent once the change merges. Examples are a migration
   script, a live `configure.sh apply`, a first live run, and a fleet resync. The worker names,
-  for each, whose step it is. It also writes each under a fixed `## Owed actions` heading in its
+  for each, whose step it is and each step's command in order. It also writes each under a fixed `## Owed actions` heading in its
   pull request body before merging, which "Bounding the Wait on a Worker" reads back. That heading
   only carries an action, since a `Closes on promotion:` line still closes its source issue. "The
   Round" step 5 says how each one is held. Review findings stay `pr-review-conduct` outcome 4's, and this changes
