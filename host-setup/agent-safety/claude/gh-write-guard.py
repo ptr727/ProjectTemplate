@@ -29,6 +29,7 @@ The denied shapes, numbered as the README numbers them:
      unless GH_WRITE_GUARD_ALLOW_PRIMARY_CHECKOUT grants it.
      The repository's agent policy on main can exempt an in-place commit on a branch it lists.
   7. a while, until, or arithmetic for loop that sleeps with no bound
+  11. a git add, stage, or commit -a that sweeps files in a checkout with an origin
 
 Run `gh-write-guard.py --selftest` to check the decision matrix without Claude Code.
 """
@@ -96,19 +97,7 @@ _GH_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field"})
 _PROTECTED_DEFAULT = ("main", "master", "develop")
 
 _ALWAYS_DENY_SUBS = frozenset(
-    {
-        "reset",
-        "rebase",
-        "cherry-pick",
-        "revert",
-        "restore",
-        "add",
-        "stage",
-        "commit",
-        "rm",
-        "mv",
-        "apply",
-    }
+    {"reset", "rebase", "cherry-pick", "revert", "restore", "add", "commit", "rm", "mv", "apply"}
     | {"am", "push"}
 )
 _VERDICT_SUBS = (
@@ -729,7 +718,15 @@ def _git(argv: list[str]) -> _Git:
     i = 1
     while i < len(argv):
         a = argv[i]
-        if a in ("-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace"):
+        if a in (
+            "-C",
+            "-c",
+            "--config-env",
+            "--git-dir",
+            "--work-tree",
+            "--namespace",
+            "--attr-source",
+        ):
             value = argv[i + 1] if i + 1 < len(argv) else ""
             i += 2
         elif a.startswith(("-C", "-c")) and len(a) > 2:
@@ -742,7 +739,7 @@ def _git(argv: list[str]) -> _Git:
             i += 1
             continue
         else:
-            g.sub, g.args = a, argv[i + 1 :]
+            g.sub, g.args = ("add" if a == "stage" else a), argv[i + 1 :]
             return g
         if a == "-C":
             g.c_dirs.append(value)
@@ -1260,14 +1257,15 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
 
 
 _ORIGIN_URL = ["remote", "get-url", "origin"]
-_NOT_EXPLICIT = re.compile(r"[*?\[]|^:|^\.$")
+_NOT_EXPLICIT = re.compile(r"[*?\[$`]|^:|^\.$")
 
 
 def _explicit_paths(paths: list[str], target: str, no_dirs: bool) -> bool:
     """Whether `paths` names files only, the one meaning of "explicit path" for requirements 6 and 11."""
-    if not paths or any(_NOT_EXPLICIT.search(p) for p in paths):
-        return False
     joined = [_join_dir(target, p) for p in paths]
+    literal = [j is not None and os.path.isfile(j) and "$" not in p for p, j in zip(paths, joined)]
+    if not paths or any(_NOT_EXPLICIT.search(p) and not lit for p, lit in zip(paths, literal)):
+        return False
     return not no_dirs or all(j and not os.path.isdir(j) for j in joined)
 
 
@@ -1276,7 +1274,7 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     if _base(cmd.argv[0]) != "git":
         return None
     git = _git(cmd.argv)
-    sub = "add" if git.sub == "stage" else git.sub
+    sub = git.sub
     target = _moved(cmd.cwd, git.c_dirs)
     if sub not in ("add", "commit"):
         return None
@@ -1286,7 +1284,7 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     paths = [w for w in words[:cut] if not w.startswith("-")] + words[cut + 1 :]
     if "--dry-run" in flags or (sub == "add" and _short_has(flags, "n")):
         return None
-    sweeps = any(a.startswith("--pathspec") for a in git.args)
+    sweeps = any(a.startswith("--pathspec") for a in flags)
     if sub == "commit":
         sweeps = sweeps or "--all" in flags or _short_has(flags, "a")
         sweeps = (
@@ -1301,7 +1299,7 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     if not sweeps or not (known_origin or unread or _git_stdout(target, [*query, *_ORIGIN_URL])):
         return None
     return (
-        f"This stages by sweep (`git {git.sub}`) in a checkout with an origin ({target}), taking every "
+        f"This stages by sweep (`git {git.sub}`) in a checkout with an origin ({target or 'a run-time directory'}), taking every "
         "stray or secret-bearing file into the commit. Name each file in a `git add`, with no "
         "`.`, glob, directory, `-A`, or `-u`, and commit with no `-a`. See GOVERNANCE.md 'Git and Commit Rules'."
     )
@@ -2061,7 +2059,8 @@ _BLANKET = (
     "|allow:git add -v -- a.txt|allow:git commit -m '-a fix'|deny:git stage -A|deny:git commit -m x ."
     "|deny:git add --pathspec-from-file list.txt|deny:git add -A --chmod +x|deny:git commit -m x -- ."
     "|allow:git add -n .|allow:git add --dry-run -A|allow:git commit --dry-run -a|allow:git add -N -- a.txt"
-    "|allow:git commit -m x a.txt"
+    "|allow:git commit -m x a.txt|allow:git commit -m '--pathspec topic'|deny:git --attr-source HEAD add -A"
+    '|deny:cd "$X" && git add "$F"|allow:cd "$X" && git add a.txt'
 )
 
 
