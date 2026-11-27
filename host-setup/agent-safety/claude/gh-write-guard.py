@@ -1278,7 +1278,7 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     git = _git(cmd.argv)
     sub = "add" if git.sub == "stage" else git.sub
     target = _moved(cmd.cwd, git.c_dirs)
-    if sub not in ("add", "commit") or target is None:
+    if sub not in ("add", "commit"):
         return None
     words = _flags(sub, git.args)
     cut = words.index("--") if "--" in words else len(words)
@@ -1286,16 +1286,18 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     paths = [w for w in words[:cut] if not w.startswith("-")] + words[cut + 1 :]
     if "--dry-run" in flags or (sub == "add" and _short_has(flags, "n")):
         return None
-    sweeps = any(a.startswith("--pathspec-from-file") for a in git.args)
+    sweeps = any(a.startswith("--pathspec") for a in git.args)
     if sub == "commit":
         sweeps = sweeps or "--all" in flags or _short_has(flags, "a")
-        sweeps = sweeps or bool(paths) and not _explicit_paths(paths, target, True)
+        sweeps = (
+            sweeps or bool(paths) and not _explicit_paths(paths, target or "", target is not None)
+        )
     else:
-        sweeps = sweeps or not _explicit_paths(paths, target, True)
+        sweeps = sweeps or not _explicit_paths(paths, target or "", target is not None)
     named = _named_git_dir(cmd, git)
     where = None if named is None else _join_dir(target, named)
     query = ["--git-dir", where] if where else []
-    unread = named is not None and where is None
+    unread = target is None or (named is not None and where is None)
     if not sweeps or not (known_origin or unread or _git_stdout(target, [*query, *_ORIGIN_URL])):
         return None
     return (
@@ -2088,8 +2090,13 @@ def _blanket_live_selftest() -> bool | str:
             return classify(cmd, cwd, environ={}, primary_checkout_lookup=lambda _d: None)[0]
 
         got = [verdict("git add -A", d) for d in (live, linked, bare)]
-        got += [verdict(f"git --git-dir={live}/.git add -A", bare), verdict("git add -N f", linked)]
-        return got == ["deny", "deny", "allow", "deny", "allow"]
+        got += [
+            verdict(f"git --git-dir={live.replace(chr(92), '/')}/.git add -A", bare),
+            verdict("git add -N f", linked),
+        ]
+        os.mkdir(os.path.join(linked, "d"))
+        got += [verdict("git add d", linked), verdict('cd "$X" && git add -A', bare)]
+        return got == ["deny", "deny", "allow", "deny", "allow", "deny", "deny"]
 
 
 def _fixture_lookup(directory: str) -> bool | None:
