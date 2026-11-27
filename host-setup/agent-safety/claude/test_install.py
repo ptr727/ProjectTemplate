@@ -3657,11 +3657,21 @@ class TestLauncher(StampCase):
         shim.chmod(0o755)
         problem = install.shim_problem(str(shim))
         self.assertIn("version-manager shim", problem)
-        self.assertIn(f"run the installer with {sys.executable!r} instead", problem)
+        self.assertIn(f"pass {sys.executable!r} instead", problem)
         self._path_first(shim_dir)
         launcher, rejected = install.hook_launcher()
         self.assertNotEqual(launcher, str(shim))
         self.assertIn("version-manager shim", rejected[0])
+
+    def test_a_bare_name_resolving_to_a_shim_and_a_scoop_exe_shim(self):
+        shim_dir = pathlib.Path(self.tmp) / "pyenv" / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        self._path_first(shim_dir)
+        self.assertIn("version-manager shim", install.shim_problem("python3"))
+        self.assertIsNone(install.shim_problem("C:\\Users\\x\\scoop\\shims\\python3.exe"))
 
     def test_a_shim_that_names_no_interpreter_is_still_refused(self):
         shim_dir = pathlib.Path(self.tmp) / "asdf" / "shims"
@@ -3753,6 +3763,27 @@ class TestLauncher(StampCase):
                 r = run(self.home, "--report")
                 self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
                 self.assertIn("names a launcher that cannot run the write guard", r.stdout)
+
+    def test_report_flags_a_registered_version_manager_shim(self):
+        """A shim passes the probe in the report's own directory, so only the shim check catches it."""
+        self.install()
+        shim_dir = pathlib.Path(self.tmp) / ".pyenv" / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        settings = self.home / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        guard = self.home / "hooks" / install.GUARD_NAME
+        data["hooks"]["PreToolUse"][0]["hooks"][0] = {
+            "type": "command",
+            **install.hook_command(str(shim), guard),
+        }
+        settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("version-manager shim", r.stdout)
+        self.assertIn("can fail to run", r.stdout)
 
     def test_a_registration_in_another_shape_is_not_run(self):
         """What a composed command executes is not decidable from its string, so nothing in it is run."""

@@ -731,12 +731,16 @@ def shim_problem(launcher):
     """Why `launcher` is a version-manager shim, naming the interpreter to pass instead, or None.
 
     A shim, such as pyenv's, asdf's, or mise's, sits in a directory named `shims`.
+    A bare name is resolved through PATH first, as a legacy shell-form entry names it.
+    A `.exe` is not one, since Scoop's shims forward to one fixed interpreter.
     It picks its interpreter when the hook runs, from the session's directory.
     So the interpreter the probe saw can differ from the one a hook gets. A hook that gets one below 3.11 fails open.
     The shim is asked for the interpreter it runs, so the refusal can name the path to pass instead.
     """
-    if pathlib.Path(launcher).parent.name != "shims":
+    path = pathlib.PurePath(shutil.which(launcher) or launcher)
+    if path.parent.name != "shims" or path.suffix.lower() == ".exe":
         return None
+    launcher = str(path)
     problem = f"{launcher!r} is a version-manager shim, which picks its interpreter per directory when the hook runs"
     try:
         r = subprocess.run(
@@ -753,7 +757,7 @@ def shim_problem(launcher):
     real = r.stdout.strip()
     if r.returncode or not real or pathlib.Path(real).parent.name == "shims":
         return problem
-    return f"{problem}; run the installer with {real!r} instead"
+    return f"{problem}; pass {real!r} instead"
 
 
 def exec_spawn_problem(launcher, windows=None):
@@ -1624,7 +1628,12 @@ def registration_problems(claude_home):
                 if launcher is not None and probed[key]:
                     out.append(
                         f"a {event} entry names a launcher that cannot run the {label} "
-                        f"({probed[key]}), so the {label} never runs"
+                        f"({probed[key]}), so the {label} "
+                        + (
+                            "can fail to run"
+                            if "version-manager shim" in probed[key]
+                            else "never runs"
+                        )
                     )
                     continue
                 if judge(group, hook):
