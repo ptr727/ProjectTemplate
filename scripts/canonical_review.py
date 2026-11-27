@@ -74,6 +74,7 @@ import tempfile
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from types import FrameType
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -1159,13 +1160,14 @@ def main(argv: list[str] | None = None) -> int:
 received: list[int] = []
 
 
-def on_signal(signum: int, _frame: object) -> None:
+def on_signal(signum: int, frame: FrameType | None) -> None:
     """Record the signal in `received` and raise KeyboardInterrupt, so both unwind one path.
 
     A later signal is passed over, since it would cut the unwinding short. One is the SIGTERM that
     `uv run` forwards to a process group the terminal's SIGINT already reached.
+    A later signal can start inside this handler, so a call from this frame returns too.
     """
-    if received:
+    if received or (frame is not None and frame.f_code is on_signal.__code__):
         return
     received.append(signum)
     raise KeyboardInterrupt

@@ -3648,6 +3648,81 @@ class TestLauncher(StampCase):
         self.assertIsNone(install.exec_spawn_problem("C:\\Python313\\python.exe", windows=True))
         self.assertIsNone(install.exec_spawn_problem(shim, windows=False))
 
+    def _shim(self, body, parent="shims", name="python3"):
+        shim_dir = pathlib.Path(self.tmp) / parent / "shims"
+        shim_dir.mkdir(parents=True, exist_ok=True)
+        shim = shim_dir / name
+        shim.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        shim.chmod(0o755)
+        return shim
+
+    def test_a_version_manager_shim_is_passed_over_and_names_where_to_run_instead(self):
+        """A shim picks its interpreter per directory when the hook runs, so it is never registered."""
+        real = self._stub("python3", f"echo {install.LAUNCHER_TOKEN} 3 12")
+        shim = self._shim(
+            f'case "$2" in *sys.executable*) echo "{real}";; *) exec "{sys.executable}" "$@";; esac',
+            ".pyenv",
+        )
+        self.assertIn("version-manager shim", install.shim_problem(str(shim)))
+        self.assertEqual(install.shim_target(str(shim)), str(real))
+        self._path_first(shim.parent)
+        launcher, rejected = install.hook_launcher()
+        self.assertNotEqual(launcher, str(shim))
+        self.assertIn("version-manager shim", rejected[0])
+        self.assertFalse([r for r in rejected if "instead" in r], rejected)
+
+    def test_a_bare_name_resolving_to_a_shim_and_a_scoop_exe_shim(self):
+        shim = self._shim(f'exec "{sys.executable}" "$@"', "pyenv")
+        self._path_first(shim.parent)
+        self.assertIn("version-manager shim", install.shim_problem("python3"))
+        scoop = self._shim(f'exec "{sys.executable}" "$@"', "scoop", "python3.exe")
+        self.assertIsNone(install.shim_problem(str(scoop)))
+        self.assertIsNone(install.shim_problem(sys.executable))
+
+    def test_the_interpreter_a_shim_names_must_be_usable_and_not_a_shim_or_this_one(self):
+        old = self._stub("old-python", f"echo {install.LAUNCHER_TOKEN} 3 10")
+        other_shim = self._shim(f"echo {install.LAUNCHER_TOKEN} 3 12", "mise")
+        good = self._stub("python3", f"echo {install.LAUNCHER_TOKEN} 3 12")
+        for label, body in (
+            ("below the floor", f'echo "{old}"'),
+            ("this interpreter", f'echo "{sys.executable}"'),
+            ("another shim passing the probe", f'echo "{other_shim}"'),
+            ("a good one but exiting non-zero", f'echo "{good}"; exit 3'),
+            ("nothing", "exit 0"),
+        ):
+            with self.subTest(label):
+                self.assertIsNone(install.shim_target(str(self._shim(body, f"case-{label}"))))
+
+    def test_a_link_to_a_shim_is_a_shim_and_a_link_to_an_interpreter_is_not(self):
+        shim = self._shim(f'exec "{sys.executable}" "$@"', "asdf")
+        alias = pathlib.Path(self.tmp) / "bin" / "python3"
+        alias.parent.mkdir()
+        alias.symlink_to(shim)
+        self.assertIn("version-manager shim", install.shim_problem(str(alias)))
+        plain = pathlib.Path(self.tmp) / "bin" / "python"
+        plain.symlink_to(sys.executable)
+        self.assertIsNone(install.shim_problem(str(plain)))
+
+    def test_a_failing_shim_reports_its_own_failure_first(self):
+        shim = self._shim("exit 9", "pyenv")
+        self._path_first(shim.parent)
+        _, rejected = install.hook_launcher()
+        self.assertIn("did not run the version probe", rejected[0])
+        self.assertNotIn("version-manager shim", rejected[0])
+
+    def test_an_unstartable_shim_has_no_target(self):
+        missing = pathlib.Path(self.tmp) / "gone" / "shims" / "python3"
+        self.assertIsNone(install.shim_target(str(missing)))
+
+    def test_a_shim_alone_installs_nothing_and_says_where_to_run_instead(self):
+        real = self._stub("python3", f"echo {install.LAUNCHER_TOKEN} 3 12")
+        shim = self._shim(f'case "$1" in -c) echo "{real}";; esac', "mise")
+        self._path_first(shim.parent)
+        with mock.patch.object(install.sys, "executable", str(shim)):
+            launcher, rejected = install.hook_launcher()
+        self.assertIsNone(launcher)
+        self.assertIn(f"run the installer under {str(real)!r} instead", rejected[-1])
+
     def test_a_missing_launcher_is_refused(self):
         problem = install.launcher_problem(str(pathlib.Path(self.tmp) / "no-such-python"))
         self.assertIn("could not be run", problem)
@@ -3715,6 +3790,27 @@ class TestLauncher(StampCase):
                 r = run(self.home, "--report")
                 self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
                 self.assertIn("names a launcher that cannot run the write guard", r.stdout)
+
+    def test_report_flags_a_registered_version_manager_shim(self):
+        """A shim passes the probe in the report's own directory, so only the shim check catches it."""
+        self.install()
+        shim_dir = pathlib.Path(self.tmp) / ".pyenv" / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        settings = self.home / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        guard = self.home / "hooks" / install.GUARD_NAME
+        data["hooks"]["PreToolUse"][0]["hooks"][0] = {
+            "type": "command",
+            **install.hook_command(str(shim), guard),
+        }
+        settings.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        r = run(self.home, "--report")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("version-manager shim", r.stdout)
+        self.assertIn("can fail to run the write guard", r.stdout)
 
     def test_a_registration_in_another_shape_is_not_run(self):
         """What a composed command executes is not decidable from its string, so nothing in it is run."""
