@@ -478,12 +478,13 @@ gh_key_registered() {
 # Where gh's own list showed the signing key this run, or this run's gh add of it succeeded, gh's lists are the check.
 # The public lists may lag either one.
 # Everywhere else the public lists are the check, so a login missing scopes or a gh listing that fails cannot hide a registered key.
+# Anything short of gh's yes is the public check's to answer.
+# So a GitHub that cannot be reached still reads as unknown rather than as missing.
 signing_registration_state() {
-    if [[ $GH_SIGNING_LISTED == true ]]; then
-        gh_key_registered signing
-    else
-        github_signing_key_registered
+    if [[ $GH_SIGNING_LISTED == true ]] && gh_key_registered signing; then
+        return 0
     fi
+    github_signing_key_registered
 }
 
 # Registers one kind of key through gh, for an account gh is already logged in as.

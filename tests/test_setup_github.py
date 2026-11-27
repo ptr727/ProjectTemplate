@@ -733,7 +733,7 @@ gh() {
         printf 'github.com\n  \xe2\x9c\x93 Logged in to github.com account %s (keyring)\n  - Active account: true\n' "$ACCOUNT"
         ;;
     "ssh-key list")
-        [[ ${GH_HOST:-} == github.com ]] || return 9
+        [[ $(printenv GH_HOST) == github.com ]] || return 9
         [[ ${LIST_RC:-0} == 0 ]] || return "$LIST_RC"
         local kind
         for kind in $(<"$STATE"); do
@@ -742,7 +742,7 @@ gh() {
         done
         ;;
     "ssh-key add "*)
-        [[ ${GH_HOST:-} == github.com ]] || return 9
+        [[ $(printenv GH_HOST) == github.com ]] || return 9
         [[ ${ADD_RC:-0} == 0 && ( $* != *"--type signing" || ${ADD_SIGNING_RC:-0} == 0 ) ]] || return "${ADD_SIGNING_RC:-$ADD_RC}"
         printf '%s\n' "${*##* }" >>"$STATE"
         ;;
@@ -1061,6 +1061,15 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         result, _ = self.register(add_signing_rc=1, public_signing=True, then=check)
         self.assertIn("rc=0", result.stdout)
 
+    def test_an_unreachable_github_at_the_final_check_reads_as_unknown(self) -> None:
+        check = "PUBLIC_ERROR=yes\nGITHUB_USER=x\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
+        result, adds = self.register(
+            registered="auth signing", hide_signing=True, public_signing=True, then=check
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertIn("rc=2", result.stdout)
+
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
         check = 'signing_registration_state && echo "state=registered"'
         for registered, add_count in (("", 2), ("auth signing", 0)):
@@ -1193,6 +1202,7 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
             "user=$($script:GITHUB_USER) managed=$($script:MANAGED_KEY_AUTHENTICATES)"
         }
         if ($case.check) {
+            if ($case.publicErrorAfter) { $script:Case.publicError = $true }
             $script:GITHUB_USER = 'x'
             "state=$(Get-SigningRegistrationState)"
         }
@@ -1231,6 +1241,7 @@ def windows_register_case(
     auth: bool = False,
     public_error: bool = False,
     list_title: str = "",
+    public_error_after: bool = False,
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -1254,6 +1265,7 @@ def windows_register_case(
         "auth": auth,
         "publicError": public_error,
         "listTitle": list_title,
+        "publicErrorAfter": public_error_after,
         "pub": PUBLIC_KEY,
     }
 
@@ -1344,6 +1356,14 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             windows_register_case("lag", check=True),
             windows_register_case(
                 "listed-lag", registered=["authentication", "signing"], check=True
+            ),
+            windows_register_case(
+                "fallback-then-unreachable",
+                registered=["authentication", "signing"],
+                hide_signing=True,
+                public_signing=True,
+                public_error_after=True,
+                check=True,
             ),
             *(windows_register_case(f"tell-{state}", ssh_state=state) for state in CANNOT_TELL),
         ]
@@ -1534,6 +1554,10 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertIn("state=registered", self.output("lag"))
         self.assertEqual(self.adds("listed-lag"), [])
         self.assertIn("state=registered", self.output("listed-lag"))
+
+    def test_an_unreachable_github_at_the_final_check_reads_as_unknown(self) -> None:
+        self.assertEqual(self.adds("fallback-then-unreachable"), [])
+        self.assertIn("state=unknown", self.output("fallback-then-unreachable"))
 
     def test_help_no_longer_says_registration_cannot_be_automated(self) -> None:
         result = run_pwsh(["-File", str(WINDOWS_SCRIPT), "-Help"])

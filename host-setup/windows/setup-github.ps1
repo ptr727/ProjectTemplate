@@ -671,7 +671,9 @@ function Get-GhKeyState {
 # The public lists may lag either one.
 # Everywhere else the public lists are the check, so a login missing scopes or a gh listing that fails cannot hide a registered key.
 function Get-SigningRegistrationState {
-    if ($script:GH_SIGNING_LISTED) { return Get-GhKeyState -Kind 'signing' }
+    # Anything short of gh's yes is the public check's to answer.
+# So a GitHub that cannot be reached still reads as unknown rather than as missing.
+    if ($script:GH_SIGNING_LISTED -and (Get-GhKeyState -Kind 'signing') -eq 'registered') { return 'registered' }
     return Test-KeyRegistered -Kind 'signing'
 }
 
