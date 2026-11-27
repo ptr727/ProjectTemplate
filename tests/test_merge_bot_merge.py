@@ -34,9 +34,10 @@ args = sys.argv[2:]
 with (root / "calls").open("a", encoding="utf-8") as calls:
     calls.write(" ".join(args) + "\\n")
 if args[:2] == ["pr", "merge"]:
-    sys.exit(0)
-path = next(a for a in args[1:] if a.startswith("repos/"))
-key = next(k for k in ("rules", "check-runs", "status", "pulls") if "/" + k in path)
+    key = "merge"
+else:
+    path = next(a for a in args[1:] if a.startswith("repos/"))
+    key = next(k for k in ("rules", "check-runs", "status", "pulls") if "/" + k in path)
 served = json.loads((root / "fixtures.json").read_text(encoding="utf-8"))[key]
 count = root / ("count-" + key)
 index = int(count.read_text()) if count.exists() else 0
@@ -45,6 +46,8 @@ response = served[min(index, len(served) - 1)]
 if "error" in response:
     sys.stderr.write(response["error"] + "\\n")
     sys.exit(1)
+if key == "merge":
+    sys.exit(0)
 expr = args[args.index("--jq") + 1]
 sys.exit(subprocess.run(["jq", "-rc", expr], input=json.dumps(response["json"]), text=True).returncode)
 """
@@ -110,6 +113,7 @@ class MergeStepCase(unittest.TestCase):
         checks: list[dict[str, Any]],
         status: list[dict[str, Any]] | None = None,
         pulls: list[dict[str, Any]] | None = None,
+        merge: list[dict[str, Any]] | None = None,
         **env: str,
     ) -> tuple[CompletedProcess[str], list[str]]:
         dependabot, _, _ = merge_steps()
@@ -118,6 +122,7 @@ class MergeStepCase(unittest.TestCase):
             "check-runs": checks,
             "status": status or [statuses()],
             "pulls": pulls or [{"json": OPEN}],
+            "merge": merge or [{"json": None}],
         }
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
@@ -268,6 +273,48 @@ class MergeStepCase(unittest.TestCase):
         )
         self.assertEqual(1, self.reads(calls, "/check-runs"))
         self.assertEqual([], self.merges(calls))
+
+    def test_a_refused_status_read_names_the_unaccepted_permission(self) -> None:
+        refused = {"error": "gh: Resource not accessible by integration (HTTP 403)"}
+        result, calls = self.merge(UNREQUIRED, [runs(check_run("Lint job"))], [refused])
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("has not accepted the statuses: read permission yet", result.stdout)
+        self.assertEqual([], self.merges(calls))
+
+    def test_a_transient_read_failure_is_retried(self) -> None:
+        transient = {"error": "gh: Bad Gateway (HTTP 502)"}
+        result, calls = self.merge(UNREQUIRED, [transient, runs(check_run("Lint job"))])
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("::warning::Reading the head's check runs failed on attempt 1", result.stdout)
+        self.assertEqual(2, self.reads(calls, "/check-runs"))
+        self.assertEqual(1, len(self.merges(calls)))
+
+    def test_a_refused_merge_on_an_open_head_is_retried(self) -> None:
+        refused = {"error": "GraphQL: Base branch was modified. Review and try the merge again."}
+        result, calls = self.merge(
+            UNREQUIRED, [runs(check_run("Lint job"))], merge=[refused, {"json": None}]
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(2, len(self.merges(calls)))
+
+    def test_a_refused_merge_that_landed_ends_without_retrying(self) -> None:
+        refused = {"error": "gh: Bad Gateway (HTTP 502)"}
+        landed = {"json": {**OPEN, "state": "closed", "merged": True}}
+        result, calls = self.merge(
+            UNREQUIRED,
+            [runs(check_run("Lint job"))],
+            pulls=[{"json": OPEN}, landed],
+            merge=[refused],
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(1, len(self.merges(calls)))
+
+    def test_a_merge_refused_three_times_fails(self) -> None:
+        refused = {"error": "GraphQL: Pull request is not mergeable"}
+        result, calls = self.merge(UNREQUIRED, [runs(check_run("Lint job"))], merge=[refused])
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("::error::Merging failed three times with every check passed", result.stdout)
+        self.assertEqual(3, len(self.merges(calls)))
 
 
 if __name__ == "__main__":

@@ -157,7 +157,26 @@ jobs:
             sleep "$POLL_SECONDS"
           done
           # The head pin keeps a push landing after the last read from being merged in the bot's place.
-          gh pr merge "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"
+          # A sibling merging into the same base can refuse this one, so a refusal re-reads the pull request and tries again.
+          for attempt in 1 2 3; do
+            if gh pr merge "$MERGE_METHOD" --match-head-commit "$HEAD_SHA" "$PR_URL"; then
+              exit 0
+            fi
+            read_api "the pull request" "" gh api "repos/$REPO/pulls/$NUMBER" --jq '[.state, (.merged | tostring), .head.sha] | @tsv'
+            IFS=$'\t' read -r state merged head <<<"$out"
+            if [[ "$merged" == true ]]; then
+              echo "The pull request merged, so the refusal was not final"
+              exit 0
+            fi
+            if [[ "$state" != open || "$head" != "$HEAD_SHA" ]]; then
+              echo "::error::The pull request is $state at $head, so the refused merge is not retried"
+              exit 1
+            fi
+            echo "::warning::Merging failed on attempt $attempt"
+            sleep "$POLL_SECONDS"
+          done
+          echo "::error::Merging failed three times with every check passed"
+          exit 1
         env: &merge-env
           REPO: ${{ github.repository }}
           NUMBER: ${{ github.event.pull_request.number }}
