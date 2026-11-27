@@ -797,8 +797,13 @@ read_back_settles() { # read-function want
     settled=""
     while :; do
         # A failed read counts as an attempt rather than ending the run, since the endpoint can fail transiently too.
-        # Its own error text is dropped because it blames the token, which the pre-flight read already proved, and the caller's report names the outcome.
-        if ! settled="$("$1" 2>/dev/null)"; then settled=""; fi
+        # A retried read's error text is dropped because it blames the token, which the pre-flight read already proved.
+        # The last read keeps its text, so a failure that persists is still diagnosed.
+        if [ "$attempt" -lt "$readback_attempts" ]; then
+            if ! settled="$("$1" 2>/dev/null)"; then settled=""; fi
+        elif ! settled="$("$1")"; then
+            settled=""
+        fi
         if [ "$settled" = "$2" ]; then return 0; fi
         if [ "$attempt" -ge "$readback_attempts" ]; then return 1; fi
         attempt=$((attempt + 1))
@@ -825,7 +830,7 @@ apply_workflow_permissions() { # live-defaults-json
         exit 1
     fi
     if ! read_back_settles workflow_permissions_live "$want"; then
-        echo "Setting the Actions workflow token defaults of $repo reported success, but they read back as ${settled:-unreadable} rather than $want after $readback_attempts reads, so the write is unconfirmed. The write may still have landed, so run configure.sh check later, and run apply again either way, since the groups after this one did not run." >&2
+        echo "Setting the Actions workflow token defaults of $repo reported success, but they read back as ${settled:-unreadable} rather than $want after $readback_attempts reads, so the write is unconfirmed. The write may still have landed, so run $0 check${repo_arg:+ $repo} later, and run apply again either way, since the groups after this one did not run." >&2
         exit 1
     fi
     echo "Set the workflow token defaults from $1 to $want"

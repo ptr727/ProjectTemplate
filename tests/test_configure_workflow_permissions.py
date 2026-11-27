@@ -246,7 +246,7 @@ class ApplyCase(unittest.TestCase):
         self.assertNotEqual(status, 0)
         self.assertIn("unconfirmed", err)
         self.assertIn(f"after {ATTEMPTS} reads", err)
-        self.assertIn("configure.sh check", err)
+        self.assertIn(" check later", err)
         self.assertNotIn("Set the workflow token defaults", out)
         self.assertEqual(len(calls.strip().splitlines()), ATTEMPTS + 1, calls)
 
