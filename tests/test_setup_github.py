@@ -901,7 +901,8 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         result, adds = self.register(dry_run=True, key=False)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(adds, [])
-        self.assertIn("[dry run] gh ssh-key add", result.stdout)
+        self.assertIn("--type authentication", result.stdout)
+        self.assertIn("--type signing", result.stdout)
         self.assertEqual(result.stderr, "")
 
     def test_a_key_belonging_to_another_account_is_not_registered_through_gh(self) -> None:
@@ -1374,7 +1375,8 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     def test_a_dry_run_without_a_key_says_what_it_would_do_without_warning(self) -> None:
         self.assertEqual(self.adds("dry-run-no-key"), [])
         output = self.output("dry-run-no-key")
-        self.assertIn("[dry run] gh ssh-key add", output)
+        self.assertIn("--type authentication", output)
+        self.assertIn("--type signing", output)
         self.assertNotIn("WARNING", output)
 
     def test_a_key_belonging_to_another_account_is_not_registered_through_gh(self) -> None:

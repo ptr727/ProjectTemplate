@@ -579,7 +579,9 @@ register_keys_through_gh() {
     gh_key_registered signing || signing_rc=$?
     # A listing gh cannot read is most often a login without the key scopes.
     # So the scope remedy is the answer here, rather than the ssh probe's.
-    if ((auth_rc == 2)); then
+    # A dry run before the key exists has no key to list, which is a different case.
+    # It goes on to say what a real run would do.
+    if ((auth_rc == 2)) && [[ -f $KEY.pub ]]; then
         register_through_gh authentication 2
         return 0
     fi

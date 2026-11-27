@@ -751,7 +751,9 @@ function Register-KeysThroughGh {
     $signingState = Get-GhKeyState -Kind 'signing'
     # A listing gh cannot read is most often a login without the key scopes.
     # So the scope remedy is the answer here, rather than the ssh probe's.
-    if ($authState -eq 'unknown') {
+    # A dry run before the key exists has no key to list, which is a different case.
+    # It goes on to say what a real run would do.
+    if ($authState -eq 'unknown' -and (Test-Path "$($script:KEY).pub")) {
         $null = Register-KeyThroughGh -Kind 'authentication' -State 'unknown'
         return
     }
