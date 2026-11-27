@@ -35,6 +35,7 @@ Run `gh-write-guard.py --selftest` to check the decision matrix without Claude C
 """
 
 import contextlib
+import glob
 import json
 import os
 import re
@@ -1257,13 +1258,16 @@ def _in_place_allows(sub: str, args: list[str], target: str, branch: str) -> boo
 
 
 _ORIGIN_URL = ["remote", "get-url", "origin"]
-_NOT_EXPLICIT = re.compile(r"[*?\[$`]|^:|^\.$")
+_NOT_EXPLICIT = re.compile(r"[*?\[$`]|^:|^\.\.?/?$")
 
 
 def _explicit_paths(paths: list[str], target: str, no_dirs: bool) -> bool:
     """Whether `paths` names files only, the one meaning of "explicit path" for requirements 6 and 11."""
     joined = [_join_dir(target, p) for p in paths]
-    literal = [j is not None and os.path.isfile(j) and "$" not in p for p, j in zip(paths, joined)]
+    literal = [
+        j is not None and os.path.isfile(j) and set(glob.glob(j)) <= {j} and "$" not in p
+        for p, j in zip(paths, joined)
+    ]
     if not paths or any(_NOT_EXPLICIT.search(p) and not lit for p, lit in zip(paths, literal)):
         return False
     return not no_dirs or all(j and not os.path.isdir(j) for j in joined)
@@ -1284,7 +1288,7 @@ def _blanket_denial(cmd: _Cmd, known_origin: bool) -> str | None:
     paths = [w for w in words[:cut] if not w.startswith("-")] + words[cut + 1 :]
     if "--dry-run" in flags or (sub == "add" and _short_has(flags, "n")):
         return None
-    sweeps = any(a.startswith("--pathspec") for a in flags)
+    sweeps = any(a.startswith("--pathspec") for a in flags) or any(p.endswith("/") for p in paths)
     if sub == "commit":
         sweeps = sweeps or "--all" in flags or _short_has(flags, "a")
         sweeps = (
@@ -2061,6 +2065,8 @@ _BLANKET = (
     "|allow:git add -n .|allow:git add --dry-run -A|allow:git commit --dry-run -a|allow:git add -N -- a.txt"
     "|allow:git commit -m x a.txt|allow:git commit -m '--pathspec topic'|deny:git --attr-source HEAD add -A"
     '|deny:cd "$X" && git add "$F"|allow:cd "$X" && git add a.txt'
+    '|deny:cd "$X" && git add ./|deny:git -C "$D" add src/|deny:git -C "$D" add ..'
+    '|allow:cd "$X" && git add ./a.txt'
 )
 
 
