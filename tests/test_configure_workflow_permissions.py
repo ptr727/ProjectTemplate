@@ -26,6 +26,7 @@ ENDPOINT = "repos/ptr727/Fixture/actions/permissions/workflow"
 PROBLEM = function("payload_problem") + function("workflow_permissions_problem")
 LIVE = function("workflow_permissions_live")
 HELD = function("workflow_permissions_held")
+SETTLES = function("read_back_settles")
 
 
 def compact(document: dict[str, object]) -> str:
@@ -172,7 +173,8 @@ class ApplyCase(unittest.TestCase):
             result = run_bash(
                 f"repo=ptr727/Fixture\nworkflow_permissions_file={shlex.quote(str(payload))}\n"
                 f"lower_workflow_token={str(lower).lower()}\n"
-                f"{HELPERS}{gh_stub(log, reads, put_status=put_status)}{LIVE}{HELD}"
+                "readback_attempts=4\nreadback_delay=0\n"
+                f"{HELPERS}{gh_stub(log, reads, put_status=put_status)}{LIVE}{HELD}{SETTLES}"
                 f"{function('apply_workflow_permissions')}"
                 f"apply_workflow_permissions {shlex.quote(compact(before))}\n",
                 "jq",
@@ -225,6 +227,27 @@ class ApplyCase(unittest.TestCase):
         self.assertNotEqual(status, 0)
         self.assertIn("unconfirmed", err)
         self.assertNotIn("Set the workflow token defaults", out)
+
+    def test_a_stale_read_back_that_converges_is_confirmed(self) -> None:
+        """The endpoint is eventually consistent, so the first reads can still show the old value."""
+        stale = json.dumps(LOOSE)
+        out, err, status, calls = self.apply(LOOSE, [stale, stale, json.dumps(DECLARED)])
+        self.assertEqual(status, 0, err)
+        self.assertIn(f"Set the workflow token defaults from {compact(LOOSE)}", out)
+        lines = calls.strip().splitlines()
+        self.assertEqual(len(lines), 4, calls)
+        self.assertIn("--method PUT", lines[0])
+
+    def test_a_read_back_that_never_converges_is_unconfirmed_after_the_bound(self) -> None:
+        """The bound is four reads, then the message says a later check may show the write landed."""
+        stale = json.dumps(LOOSE)
+        out, err, status, calls = self.apply(LOOSE, [stale] * 6)
+        self.assertNotEqual(status, 0)
+        self.assertIn("unconfirmed", err)
+        self.assertIn("after 4 reads", err)
+        self.assertIn("configure.sh check", err)
+        self.assertNotIn("Set the workflow token defaults", out)
+        self.assertEqual(len(calls.strip().splitlines()), 5, calls)
 
 
 class HeldCase(unittest.TestCase):

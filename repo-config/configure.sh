@@ -297,6 +297,10 @@ settings_file="$script_dir/settings.json"
 labels_file="$script_dir/labels.json"
 project_file="$script_dir/project.json"
 workflow_permissions_file="$script_dir/workflow-permissions.json"
+# A settings read straight after its write can still answer the old value, so a confirming read is retried before it counts as a mismatch.
+# The delay is a variable so a test sets it to 0 rather than sleeping.
+readback_attempts=4
+readback_delay=3
 
 # ----- Resolve the public interaction policy (shared by apply and check) -----
 # The registry's publicInteraction names who may interact with the repo while it is public.
@@ -784,11 +788,28 @@ workflow_permissions_held() { # live-defaults-json
         [ "$(jqr '.default_workflow_permissions' "$workflow_permissions_file")" = read ]
 }
 
+# Test with `read_back_settles READ-FUNCTION WANT`, which sets `settled` to the last value read and succeeds once it equals WANT.
+# The settings endpoints are eventually consistent, so a write that landed can still read back as the old value for a few seconds.
+# The reads are bounded by readback_attempts, so a value that never converges ends in the caller's unconfirmed report rather than a wait.
+# Any GET-confirmed write shares this rather than carrying its own loop.
+read_back_settles() { # read-function want
+    local attempt=1
+    settled=""
+    while :; do
+        # A failed read counts as an attempt rather than ending the run, since the endpoint can fail transiently too.
+        if ! settled="$("$1")"; then settled=""; fi
+        if [ "$settled" = "$2" ]; then return 0; fi
+        if [ "$attempt" -ge "$readback_attempts" ]; then return 1; fi
+        attempt=$((attempt + 1))
+        sleep "$readback_delay"
+    done
+}
+
 # Write the defaults workflow-permissions.json declares, only where the live ones cmd_apply's pre-flight read differ.
 # A held group writes nothing, and cmd_apply's pre-flight has already decided the run ends non-zero for it.
 # The endpoint answers a write with no body, so the values are read back to confirm it rather than trusted from the status alone.
 apply_workflow_permissions() { # live-defaults-json
-    local want got=""
+    local want settled=""
     want="$(jqr -c -S '.' "$workflow_permissions_file")"
     if [ "$1" = "$want" ]; then
         echo "Workflow token defaults already match $want"
@@ -802,8 +823,8 @@ apply_workflow_permissions() { # live-defaults-json
         echo "Failed to set the Actions workflow token defaults of $repo from $1 to $want." >&2
         exit 1
     fi
-    if ! got="$(workflow_permissions_live)" || [ "$got" != "$want" ]; then
-        echo "Setting the Actions workflow token defaults of $repo reported success, but they read back as ${got:-unreadable} rather than $want, so the write is unconfirmed." >&2
+    if ! read_back_settles workflow_permissions_live "$want"; then
+        echo "Setting the Actions workflow token defaults of $repo reported success, but they read back as ${settled:-unreadable} rather than $want after $readback_attempts reads, so the write is unconfirmed. The write may still have landed, so run configure.sh check later, and run apply again either way, since the groups after this one did not run." >&2
         exit 1
     fi
     echo "Set the workflow token defaults from $1 to $want"
