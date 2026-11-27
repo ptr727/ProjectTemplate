@@ -45,7 +45,7 @@ internal sealed partial class Lifetime
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Reliability",
         "CA2000:Dispose objects before losing scope",
-        Justification = "The registrations live until Exit disposes them."
+        Justification = "The registrations live for the whole run, and Exit disposes them before re-sending a signal."
     )]
     public Lifetime()
     {
