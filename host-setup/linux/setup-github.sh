@@ -35,6 +35,9 @@ readonly KEY_SETTINGS_URL="https://github.com/settings/ssh/new"
 # A per-host value outranks the global one, and gh auth login writes one, so the global form alone can leave https.
 readonly GH_PROTOCOL_COMMAND=(gh config set git_protocol ssh --host github.com)
 
+# The command that adds the key scopes to a gh login, named wherever a missing scope is the likely cause.
+readonly GH_SCOPE_COMMAND="gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key"
+
 # The identity the maintainer's commits carry, used only where the host names none of its own.
 readonly DEFAULT_NAME="Pieter Viljoen"
 readonly DEFAULT_EMAIL="ptr727@users.noreply.github.com"
@@ -461,9 +464,9 @@ gh_key_registered() {
 
     # A token without admin:ssh_signing_key still lists the authentication keys and exits 0, leaving the signing rows out.
     # So a signing row missing from gh's list is asked of the list GitHub publishes for gh's account before it reads as missing.
+    # A public list that cannot be read leaves it missing, since gh's own listing answered and an add that is not needed is refused harmlessly.
     if [[ $kind == "signing" && -n $GH_ACCOUNT ]]; then
-        GITHUB_USER="$GH_ACCOUNT" github_signing_key_registered
-        return
+        GITHUB_USER="$GH_ACCOUNT" github_signing_key_registered && return 0
     fi
     return 1
 }
@@ -500,7 +503,7 @@ register_through_gh() {
         return 0
         ;;
     2)
-        warn "gh could not list its keys, so whether the $kind key is registered is unknown. A login missing the admin:public_key or admin:ssh_signing_key scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds them."
+        warn "gh could not list its keys, so whether the $kind key is registered is unknown. A login missing the admin:public_key or admin:ssh_signing_key scope is one cause, and $GH_SCOPE_COMMAND adds them."
         return 0
         ;;
     esac
@@ -516,13 +519,15 @@ register_through_gh() {
         KEY_REGISTERED=true
         return 0
     fi
-    warn "gh could not register the $kind key. A missing scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs. The key being in use on another account is the other."
+    warn "gh could not register the $kind key. A missing scope is one cause, and $GH_SCOPE_COMMAND adds the scopes it needs. The key being in use on another account is the other."
     return 0
 }
 
 # Whether gh may register the key for its account, warning with the reason and returning 1 where it may not.
 # A key already authenticating as another account belongs there.
-# GitHub would refuse the authentication add as well, and this names the account before any write is tried.
+# GitHub would refuse the authentication add as well, and the signing add follows only an authentication add that succeeded.
+# This part stays anyway, so the guard is one this script reads rather than a refusal whose wording it cannot check.
+# It also names the account the key belongs to before any write is tried.
 # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
 # Three things pass that part.
 #   - gh's own list showing the key as an authentication key.

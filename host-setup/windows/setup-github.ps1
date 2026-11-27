@@ -52,6 +52,8 @@ $KEY_SETTINGS_URL = 'https://github.com/settings/ssh/new'
 # A per-host value outranks the global one, and gh auth login writes one, so the global form alone can leave https.
 $GH_PROTOCOL_ARGUMENTS = @('config', 'set', 'git_protocol', 'ssh', '--host', 'github.com')
 $GH_PROTOCOL_COMMAND = "gh $($GH_PROTOCOL_ARGUMENTS -join ' ')"
+# The command that adds the key scopes to a gh login, named wherever a missing scope is the likely cause.
+$GH_SCOPE_COMMAND = 'gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key'
 
 # The identity the maintainer's commits carry, used only where the host names none of its own.
 $DEFAULT_NAME = 'Pieter Viljoen'
@@ -647,7 +649,8 @@ function Get-GhKeyState {
     if ($Kind -eq 'signing' -and $script:GH_ACCOUNT) {
         $user = $script:GITHUB_USER
         $script:GITHUB_USER = $script:GH_ACCOUNT
-        try { return Test-KeyRegistered -Kind 'signing' } finally { $script:GITHUB_USER = $user }
+        # A public list that cannot be read leaves it missing, since gh's own listing answered and an add that is not needed is refused harmlessly.
+        try { if ((Test-KeyRegistered -Kind 'signing') -eq 'registered') { return 'registered' } } finally { $script:GITHUB_USER = $user }
     }
     return 'missing'
 }
@@ -676,14 +679,14 @@ function Register-KeyThroughGh {
         return $true
     }
     if ($state -eq 'unknown') {
-        warn "gh could not list its keys, so whether the $Kind key is registered is unknown. A login missing the admin:public_key or admin:ssh_signing_key scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds them."
+        warn "gh could not list its keys, so whether the $Kind key is registered is unknown. A login missing the admin:public_key or admin:ssh_signing_key scope is one cause, and $($script:GH_SCOPE_COMMAND) adds them."
         return $false
     }
 
     $title = [System.Net.Dns]::GetHostName()
     $code = run -Command 'gh' -Arguments @('ssh-key', 'add', "$($script:KEY).pub", '--title', $title, '--type', $Kind)
     if ($code -ne 0) {
-        warn "gh could not register the $Kind key. A missing scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds the scopes it needs. The key being in use on another account is the other."
+        warn "gh could not register the $Kind key. A missing scope is one cause, and $($script:GH_SCOPE_COMMAND) adds the scopes it needs. The key being in use on another account is the other."
         return $false
     }
     if (-not $script:DRY_RUN) {
@@ -697,7 +700,9 @@ function Register-KeyThroughGh {
 
 # Whether gh may register the key for its account, warning with the reason where it may not.
 # A key already authenticating as another account belongs there.
-# GitHub would refuse the authentication add as well, and this names the account before any write is tried.
+# GitHub would refuse the authentication add as well, and the signing add follows only an authentication add that succeeded.
+# This part stays anyway, so the guard is one this script reads rather than a refusal whose wording it cannot check.
+# It also names the account the key belongs to before any write is tried.
 # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
 # Three things pass that part.
 #   - gh's own list showing the key as an authentication key.
@@ -752,6 +757,26 @@ function Register-KeysThroughGh {
     if (Register-KeyThroughGh -Kind 'authentication') {
         $null = Register-KeyThroughGh -Kind 'signing'
     }
+}
+
+# Reports which account this host authenticates as, and prints the authentication paste wherever the managed key is not what authenticates.
+# Returns whether anything reaches GitHub, since without that the signing check has no account to read.
+function Test-Authentication {
+    Resolve-GitHubUser
+    if (-not $script:GITHUB_USER) {
+        Show-RegistrationNeeded -Kind 'authentication' -Type 'Authentication'
+        warn 'Authentication does not work yet, so nothing that reaches GitHub will work until the key above is registered'
+        return $false
+    }
+    if ($script:MANAGED_KEY_AUTHENTICATES) {
+        info "Authenticated as $($script:GITHUB_USER), with the managed key"
+        return $true
+    }
+    # The host reaches GitHub, so this is not a failure, and the key this script manages is still not the one doing it.
+    info "Authenticated as $($script:GITHUB_USER), with a key other than the managed one"
+    Show-RegistrationNeeded -Kind 'authentication' -Type 'Authentication'
+    warn 'This host authenticates with a key other than the managed one, so the managed key is registered nowhere and revoking this host alone would not cut its access'
+    return $true
 }
 
 # --- Actions ---
@@ -853,13 +878,7 @@ function Invoke-Configure {
     Register-KeysThroughGh
 
     step 'Checking the key registrations at GitHub'
-    Resolve-GitHubUser
-    if (-not $script:GITHUB_USER) {
-        Show-RegistrationNeeded -Kind 'authentication' -Type 'Authentication'
-        warn 'Authentication does not work yet, so nothing that reaches GitHub will work until the key above is registered'
-        return
-    }
-    info "Authenticated as $($script:GITHUB_USER)"
+    if (-not (Test-Authentication)) { return }
 
     switch (Get-SigningRegistrationState) {
         'registered' { info 'The signing key is registered' }

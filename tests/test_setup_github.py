@@ -763,6 +763,7 @@ ssh() {
     esac
 }
 fetch() {
+    [[ ${PUBLIC_ERROR:-no} == no ]] || return 1
     case "$1" in
     */ssh_signing_keys)
         if [[ $PUBLIC_SIGNING == yes ]]; then
@@ -796,6 +797,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         add_signing_rc: int | None = None,
         public_signing: bool = False,
         hide_signing: bool = False,
+        public_error: bool = False,
         then: str = "",
     ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -828,6 +830,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
             "ADD_SIGNING_RC": str(add_rc if add_signing_rc is None else add_signing_rc),
             "PUBLIC_SIGNING": "yes" if public_signing else "no",
             "HIDE_SIGNING": "yes" if hide_signing else "no",
+            "PUBLIC_ERROR": "yes" if public_error else "no",
             "SSH_OUTPUT": SSH_STATES[ssh_state].replace(
                 "KEYPATH", str(home / ".ssh" / "id_ed25519")
             ),
@@ -952,6 +955,15 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         self.assertIn("Already registered as the signing key", result.stdout)
 
+    def test_an_unreadable_public_list_leaves_the_signing_add_to_gh(self) -> None:
+        result, adds = self.register(
+            registered="auth signing", hide_signing=True, public_error=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
+        self.assertNotIn("gh could not list its keys", result.stderr)
+
     def test_the_host_s_own_probe_is_asked_again_only_after_an_authentication_add(self) -> None:
         for general, registered, probes in (
             (SECOND, "", 1),
@@ -1062,12 +1074,14 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "Test-GhRegistrationAllowed",
     "Register-KeysThroughGh",
     "Show-RegistrationNeeded",
+    "Test-Authentication",
 ]
 WINDOWS_REGISTER_BODY = r"""
 function warn { param([string]$Message) Write-Host "WARNING: $Message" }
 # GitHub's public lists stay empty and gh's are kept in $script:Reg, so a check reading the wrong one reports a missing key.
 function Invoke-RestMethod {
     param([string]$Uri, [int]$TimeoutSec)
+    if ($script:Case.publicError) { throw 'constructed network failure' }
     if ($Uri -like '*ssh_signing_keys') {
         if ($script:Case.publicSigning) { return @([pscustomobject]@{ key = $script:Case.pub }) }
         return @()
@@ -1115,6 +1129,7 @@ $GhStub = {
 }
 Set-Item function:script:gh $GhStub
 $script:KEY_SETTINGS_URL = 'https://github.com/settings/ssh/new'
+$script:GH_SCOPE_COMMAND = 'gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key'
 $script:MODE = 'configure'
 $directory = Join-Path ([IO.Path]::GetTempPath()) ([Guid]::NewGuid().ToString())
 New-Item -ItemType Directory -Path $directory | Out-Null
@@ -1146,6 +1161,7 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
             $script:GITHUB_USER = 'x'
             "state=$(Get-SigningRegistrationState)"
         }
+        if ($case.auth) { $null = Test-Authentication }
         if ($case.paste) {
             $script:GITHUB_USER = 'x'
             if ((Get-SigningRegistrationState) -ne 'registered') { Show-RegistrationNeeded -Kind 'signing' -Type 'Signing' }
@@ -1177,6 +1193,8 @@ def windows_register_case(
     check: bool = False,
     paste: bool = False,
     hide_signing: bool = False,
+    auth: bool = False,
+    public_error: bool = False,
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -1197,6 +1215,8 @@ def windows_register_case(
         "check": check,
         "paste": paste,
         "hideSigning": hide_signing,
+        "auth": auth,
+        "publicError": public_error,
         "pub": PUBLIC_KEY,
     }
 
@@ -1219,7 +1239,16 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             windows_register_case("dry-run-no-key", dry_run=True, no_key=True),
             windows_register_case("other-account", managed=SECOND, ssh_state="silent"),
             windows_register_case("same-account", managed=ACCOUNT, registered=["authentication"]),
-            windows_register_case("host-other", general=SECOND, paste=True),
+            windows_register_case("host-other", general=SECOND, paste=True, auth=True),
+            windows_register_case(
+                "managed-auth", managed=ACCOUNT, registered=["authentication"], auth=True
+            ),
+            windows_register_case(
+                "signing-public-unreadable",
+                registered=["authentication", "signing"],
+                hide_signing=True,
+                public_error=True,
+            ),
             windows_register_case(
                 "host-other-key-on-gh",
                 managed=ACCOUNT,
@@ -1348,7 +1377,19 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertIn(HOST_MISMATCH, output)
         self.assertNotIn("Registering the key through gh", output)
         self.assertIn('Set the key type to "Signing key"', output)
+        self.assertIn('Set the key type to "Authentication key"', output)
         self.assertIn(PUBLIC_KEY, output)
+
+    def test_a_host_the_managed_key_authenticates_prints_no_authentication_paste(self) -> None:
+        output = self.output("managed-auth")
+        self.assertIn(f"Authenticated as {ACCOUNT}, with the managed key", output)
+        self.assertNotIn('Set the key type to "Authentication key"', output)
+
+    def test_an_unreadable_public_list_leaves_the_signing_add_to_gh(self) -> None:
+        adds = self.adds("signing-public-unreadable")
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
+        self.assertNotIn("gh could not list its keys", self.output("signing-public-unreadable"))
 
     def test_a_host_identity_answering_as_another_account_refuses_beside_a_key_on_gh_s(
         self,
@@ -1442,7 +1483,7 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             WINDOWS_SCRIPT.read_text(encoding="utf-8"), "\nfunction Invoke-Configure {"
         )
         self.assertIn("\n    Register-KeysThroughGh\n", body)
-        self.assertLess(body.index("Register-KeysThroughGh"), body.index("Resolve-GitHubUser"))
+        self.assertLess(body.index("Register-KeysThroughGh"), body.index("Test-Authentication"))
 
 
 def function_body(text: str, opener: str) -> str:
