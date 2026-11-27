@@ -4,19 +4,18 @@ This is a reference skeleton for `CODESTYLE.md` "Interrupts in .NET" and "Unhand
 
 ## Project
 
-The project selects the .NET 11 line, since `ProcessStartInfo.StartDetached` and `KillOnParentExit` need it. It references System.CommandLine, CliWrap, Serilog, and Serilog.Sinks.Console, with their versions in `Directory.Packages.props`. `AllowUnsafeBlocks` is set because the `LibraryImport` source generator requires it.
+The repository selects the .NET 11 line, since `ProcessStartInfo.StartDetached` and `KillOnParentExit` need it. Its move to that line follows `CODESTYLE.md` "Toolchain Versions", with `TargetFramework` set to `net11.0` in `Directory.Build.props`. The code relies on `ImplicitUsings` being enabled there. The project references System.CommandLine, CliWrap, Serilog, and Serilog.Sinks.Console, with their versions in `Directory.Packages.props`. Its own `.csproj` sets `AllowUnsafeBlocks`, because the `LibraryImport` source generator requires it.
 
 ```xml
 <PropertyGroup>
   <OutputType>Exe</OutputType>
-  <TargetFramework>net11.0</TargetFramework>
   <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 </PropertyGroup>
 ```
 
 ## The Lifetime Owner
 
-`Exit` is the one exit decision. `Main` calls it last, after the log is flushed, and it also tells a waiting Windows close or shutdown handler that cleanup finished. The Windows console close and shutdown handlers wait whatever stop came before them, and the kill bound is armed once. The token sources are never disposed, which is what the CA1001 suppression records.
+`Exit` is the one exit decision. `Main` calls it last, after the log is flushed, and it also tells a waiting Windows close or shutdown handler that cleanup finished. The Windows console close and shutdown handlers wait for cleanup even when another stop came first, and the kill bound is armed once. The token sources are never disposed, which is what the CA1001 suppression records.
 
 ```csharp
 using System.Runtime.InteropServices;
@@ -385,7 +384,7 @@ internal enum ToolOutcome
 
 ## Measured Stop Matrix
 
-The results below come from a prototype of this design. It ran on .NET 11 with System.CommandLine and CliWrap, in the .NET 11 SDK container image. Its child was a shell script that logs each signal it receives. The prototype had variants the skeleton does not show. Some ran several children in parallel, signaled a child directly, used a child that ignores the stop, or hung the cleanup. Others changed the kill bound, the start options, or the exit status of a tool failure, or injected a fault. So a row can describe a variant rather than the skeleton as printed.
+The table holds results measured with a prototype of this design. The prototype runs on .NET 11 with System.CommandLine and CliWrap, in the .NET 11 SDK container image. Its child is a shell script that logs each signal it receives. The prototype has variants the skeleton does not show. Some run several children in parallel, signal a child directly, use a child that ignores the stop, or hang the cleanup. Others change the kill bound, the start options, or the exit status of a tool failure, or inject a fault. So a row can describe a variant rather than the skeleton as printed.
 
 | Stop | Reaches | App result | Child |
 | --- | --- | --- | --- |
@@ -412,4 +411,4 @@ The results below come from a prototype of this design. It ran on .NET 11 with S
 | Exception on a pool thread, PID 1 | n/a | Logged, flushed, exit 139 | None left |
 | Ctrl-C typed at `docker run -it` | PID 1 | Exit 130 | One SIGINT each |
 
-No run covers Windows, so its console close, Ctrl-C, and job object handling come from the .NET sources alone. macOS has no `KillOnParentExit`, so a child there outlives an app that is killed.
+No run covers Windows, so its console close, shutdown, Ctrl-C, and job object handling come from the .NET sources alone. macOS has no `KillOnParentExit`, so a child there outlives an app that is killed.
