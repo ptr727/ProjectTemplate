@@ -727,6 +727,35 @@ def base_interpreters(path):
     return [path]
 
 
+def shim_problem(launcher):
+    """Why `launcher` is a version-manager shim, naming the interpreter to pass instead, or None.
+
+    A shim, such as pyenv's, asdf's, or mise's, sits in a directory named `shims`.
+    It picks its interpreter when the hook runs, from the session's directory.
+    So the interpreter the probe saw can differ from the one a hook gets. A hook that gets one below 3.11 fails open.
+    The shim is asked for the interpreter it runs, so the refusal can name the path to pass instead.
+    """
+    if pathlib.Path(launcher).parent.name != "shims":
+        return None
+    problem = f"{launcher!r} is a version-manager shim, which picks its interpreter per directory when the hook runs"
+    try:
+        r = subprocess.run(
+            [launcher, "-c", "import sys; print(sys.executable)"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=LAUNCHER_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return problem
+    real = r.stdout.strip()
+    if r.returncode or not real or pathlib.Path(real).parent.name == "shims":
+        return problem
+    return f"{problem}; run the installer with {real!r} instead"
+
+
 def exec_spawn_problem(launcher, windows=None):
     """Why exec form cannot spawn `launcher`, or None where it can.
 
@@ -747,7 +776,8 @@ def hook_launcher():
 
     The path is absolute, so the hook does not depend on the session's own PATH.
     Exec form searches PATH for a bare name, and a session an IDE launched may carry a PATH other than the installing shell's.
-    A version-manager shim, such as pyenv's, still picks its interpreter when the hook runs, as a bare `python3` did before.
+    A version-manager shim, such as pyenv's, is passed over, since it picks its interpreter when the hook runs.
+    The reason names the real interpreter, which the installer run with it registers.
     The `python3` on PATH is preferred, being unambiguously Python 3.
     A candidate inside a virtual environment yields first to the interpreters that venv was made from.
     Its path is kept as PATH resolves it, and its links are not followed.
@@ -768,7 +798,11 @@ def hook_launcher():
             if candidate in seen:
                 continue
             seen.add(candidate)
-            problem = exec_spawn_problem(candidate) or launcher_problem(candidate)
+            problem = (
+                exec_spawn_problem(candidate)
+                or shim_problem(candidate)
+                or launcher_problem(candidate)
+            )
             if problem is None:
                 return candidate, rejected
             rejected.append(problem)
@@ -1586,7 +1620,7 @@ def registration_problems(claude_home):
                 key = (launcher, exec_form(hook))
                 if launcher is not None and key not in probed:
                     spawn = exec_spawn_problem(launcher) if key[1] else None
-                    probed[key] = spawn or launcher_problem(launcher)
+                    probed[key] = spawn or shim_problem(launcher) or launcher_problem(launcher)
                 if launcher is not None and probed[key]:
                     out.append(
                         f"a {event} entry names a launcher that cannot run the {label} "
@@ -2433,12 +2467,13 @@ def run() -> int:
 received: list[int] = []
 
 
-def on_signal(signum: int, _frame: types.FrameType | None) -> None:
+def on_signal(signum: int, frame: types.FrameType | None) -> None:
     """Record the signal and raise KeyboardInterrupt, so both signals unwind one path.
 
     A later signal is passed over, since it would cut the unwinding short.
+    A later signal can start inside this handler, so a call from this frame returns too.
     """
-    if received:
+    if received or (frame is not None and frame.f_code is on_signal.__code__):
         return
     received.append(signum)
     raise KeyboardInterrupt

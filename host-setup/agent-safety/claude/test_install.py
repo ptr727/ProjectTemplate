@@ -3648,6 +3648,44 @@ class TestLauncher(StampCase):
         self.assertIsNone(install.exec_spawn_problem("C:\\Python313\\python.exe", windows=True))
         self.assertIsNone(install.exec_spawn_problem(shim, windows=False))
 
+    def test_a_version_manager_shim_is_refused_naming_the_real_interpreter(self):
+        """A shim picks its interpreter per directory when the hook runs, so it is never registered."""
+        shim_dir = pathlib.Path(self.tmp) / ".pyenv" / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        problem = install.shim_problem(str(shim))
+        self.assertIn("version-manager shim", problem)
+        self.assertIn(f"run the installer with {sys.executable!r} instead", problem)
+        self._path_first(shim_dir)
+        launcher, rejected = install.hook_launcher()
+        self.assertNotEqual(launcher, str(shim))
+        self.assertIn("version-manager shim", rejected[0])
+
+    def test_a_shim_that_names_no_interpreter_is_still_refused(self):
+        shim_dir = pathlib.Path(self.tmp) / "asdf" / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        shim.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        shim.chmod(0o755)
+        problem = install.shim_problem(str(shim))
+        self.assertIn("version-manager shim", problem)
+        self.assertNotIn("instead", problem)
+        self.assertIsNone(install.shim_problem(sys.executable))
+
+    def test_a_shim_alone_installs_nothing(self):
+        shim_dir = pathlib.Path(self.tmp) / "mise" / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        self._path_first(shim_dir)
+        with mock.patch.object(install.sys, "executable", str(shim)):
+            launcher, rejected = install.hook_launcher()
+        self.assertIsNone(launcher)
+        self.assertEqual(len(rejected), 1, rejected)
+
     def test_a_missing_launcher_is_refused(self):
         problem = install.launcher_problem(str(pathlib.Path(self.tmp) / "no-such-python"))
         self.assertIn("could not be run", problem)

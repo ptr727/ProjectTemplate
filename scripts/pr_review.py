@@ -253,6 +253,7 @@ import urllib.parse
 from collections.abc import Callable, Iterable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from types import FrameType
 
 import gh_graphql as shared
 import pr_review_policy as review_policy
@@ -2165,13 +2166,14 @@ def main(argv: list[str] | None = None) -> int:
 received: list[int] = []
 
 
-def on_signal(signum: int, _frame: object) -> None:
+def on_signal(signum: int, frame: FrameType | None) -> None:
     """Record the signal in `received` and raise `KeyboardInterrupt`, so both unwind one path.
 
     A later signal is passed over, since it would cut the unwinding short. One is the copy `uv run`
     forwards of a SIGTERM an outer `timeout` already sent this whole process group.
+    A later signal can start inside this handler, so a call from this frame returns too.
     """
-    if received:
+    if received or (frame is not None and frame.f_code is on_signal.__code__):
         return
     received.append(signum)
     raise KeyboardInterrupt
