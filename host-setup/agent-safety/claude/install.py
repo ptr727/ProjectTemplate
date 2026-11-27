@@ -736,6 +736,7 @@ def shim_problem(launcher):
     It picks its interpreter when the hook runs, from the session's directory.
     So the interpreter the probe saw can differ from the one a hook gets. A hook that gets one below 3.11 fails open.
     The shim is asked for the interpreter it runs, so the refusal can name the one to run the installer under.
+    That interpreter is named only where it passes the probe and is not the one already running.
     A shim that cannot be started is left to `launcher_problem`, which says why.
     """
     path = pathlib.PurePath(shutil.which(launcher) or launcher)
@@ -756,7 +757,13 @@ def shim_problem(launcher):
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return None
     real = r.stdout.strip()
-    if r.returncode or not real or pathlib.Path(real).parent.name == "shims":
+    if (
+        r.returncode
+        or not real
+        or pathlib.Path(real).parent.name == "shims"
+        or os.path.abspath(real) == os.path.abspath(sys.executable)
+        or launcher_problem(real) is not None
+    ):
         return problem
     return f"{problem}; run the installer under {real!r} instead"
 

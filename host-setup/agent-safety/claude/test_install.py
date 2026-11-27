@@ -3653,11 +3653,12 @@ class TestLauncher(StampCase):
         shim_dir = pathlib.Path(self.tmp) / ".pyenv" / "shims"
         shim_dir.mkdir(parents=True)
         shim = shim_dir / "python3"
-        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
+        real = self._stub("python3", f"echo {install.LAUNCHER_TOKEN} 3 12")
+        shim.write_text(f'#!/bin/sh\necho "{real}"\n', encoding="utf-8")
         shim.chmod(0o755)
         problem = install.shim_problem(str(shim))
         self.assertIn("version-manager shim", problem)
-        self.assertIn(f"run the installer under {sys.executable!r} instead", problem)
+        self.assertIn(f"run the installer under {str(real)!r} instead", problem)
         self._path_first(shim_dir)
         launcher, rejected = install.hook_launcher()
         self.assertNotEqual(launcher, str(shim))
@@ -3688,6 +3689,17 @@ class TestLauncher(StampCase):
         self.assertNotIn("instead", install.shim_problem(str(shim)))
         shim.unlink()
         self.assertIsNone(install.shim_problem(str(shim)))
+
+    def test_the_interpreter_named_must_pass_the_probe_and_not_be_this_one(self):
+        shim_dir = pathlib.Path(self.tmp) / ".pyenv" / "shims"
+        shim_dir.mkdir(parents=True)
+        shim = shim_dir / "python3"
+        old = self._stub("old-python", f"echo {install.LAUNCHER_TOKEN} 3 10")
+        shim.write_text(f'#!/bin/sh\necho "{old}"\n', encoding="utf-8")
+        shim.chmod(0o755)
+        self.assertNotIn("instead", install.shim_problem(str(shim)))
+        shim.write_text(f'#!/bin/sh\necho "{sys.executable}"\n', encoding="utf-8")
+        self.assertNotIn("instead", install.shim_problem(str(shim)))
 
     def test_a_shim_that_names_no_interpreter_is_still_refused(self):
         shim_dir = pathlib.Path(self.tmp) / "asdf" / "shims"
