@@ -3294,6 +3294,7 @@ class TestGuardSelftestUnderWindowsPaths(unittest.TestCase):
             mock.patch.dict(os.environ, {"USERPROFILE": os.path.expanduser("~")}),
             mock.patch.object(guard, "_is_primary_checkout_selftest", return_value="skip"),
             mock.patch.object(guard, "_in_place_selftest", return_value="skip"),
+            mock.patch.object(guard, "_blanket_live_selftest", return_value="skip"),
             contextlib.redirect_stdout(out),
         ):
             status = guard._selftest()
