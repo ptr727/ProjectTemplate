@@ -1032,6 +1032,14 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         result, _ = self.register(list_rc=1, then=check)
         self.assertIn("rc=1", result.stdout)
 
+    def test_a_listing_gh_cannot_read_names_the_scope_remedy_before_any_probe(self) -> None:
+        result, adds = self.register(list_rc=1, batch_user="", ssh_state="passphrase")
+        self.assertEqual(adds, [])
+        self.assertIn(ADD_REFRESH, result.stderr)
+        self.assertNotIn("Could not tell", result.stderr)
+        calls = (self.tmp / "calls").read_text().splitlines()
+        self.assertFalse([c for c in calls if "IdentitiesOnly" in c], calls)
+
     def test_a_login_with_only_the_authentication_scope_falls_back_to_the_public_list(self) -> None:
         check = "GITHUB_USER=x\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
         result, adds = self.register(add_signing_rc=1, then=check)
@@ -1296,6 +1304,9 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             ),
             windows_register_case("list-fails", list_rc=1, public_signing=True, check=True),
             windows_register_case("list-fails-empty", list_rc=1, check=True),
+            windows_register_case(
+                "list-fails-passphrase", list_rc=1, batch_user="", ssh_state="passphrase"
+            ),
             windows_register_case("auth-scope-only", add_signing_rc=1, check=True),
             windows_register_case(
                 "auth-scope-only-listed", add_signing_rc=1, public_signing=True, check=True
@@ -1459,6 +1470,12 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertIn(ADD_REFRESH, self.output("list-fails"))
         self.assertIn("state=registered", self.output("list-fails"))
         self.assertIn("state=missing", self.output("list-fails-empty"))
+
+    def test_a_listing_gh_cannot_read_names_the_scope_remedy_before_any_probe(self) -> None:
+        output = self.output("list-fails-passphrase")
+        self.assertIn(ADD_REFRESH, output)
+        self.assertNotIn("Could not tell", output)
+        self.assertEqual(self.listed("list-fails-passphrase", "probes"), [])
 
     def test_a_login_with_only_the_authentication_scope_falls_back_to_the_public_list(self) -> None:
         self.assertEqual(len(self.adds("auth-scope-only")), 2)

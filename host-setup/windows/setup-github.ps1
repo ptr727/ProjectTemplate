@@ -749,6 +749,12 @@ function Register-KeysThroughGh {
 
     $authState = Get-GhKeyState -Kind 'authentication'
     $signingState = Get-GhKeyState -Kind 'signing'
+    # A listing gh cannot read is most often a login without the key scopes.
+    # So the scope remedy is the answer here, rather than the ssh probe's.
+    if ($authState -eq 'unknown') {
+        $null = Register-KeyThroughGh -Kind 'authentication' -State 'unknown'
+        return
+    }
     if (($authState -ne 'registered' -or $signingState -ne 'registered') -and -not (Test-GhRegistrationAllowed -Account $account -AuthState $authState)) {
         return
     }

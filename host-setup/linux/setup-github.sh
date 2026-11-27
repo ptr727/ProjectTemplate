@@ -577,6 +577,12 @@ register_keys_through_gh() {
 
     gh_key_registered authentication || auth_rc=$?
     gh_key_registered signing || signing_rc=$?
+    # A listing gh cannot read is most often a login without the key scopes.
+    # So the scope remedy is the answer here, rather than the ssh probe's.
+    if ((auth_rc == 2)); then
+        register_through_gh authentication 2
+        return 0
+    fi
     if ((auth_rc != 0 || signing_rc != 0)) && ! gh_registration_allowed "$account" "$auth_rc"; then
         return 0
     fi
