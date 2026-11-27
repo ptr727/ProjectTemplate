@@ -260,8 +260,10 @@ owns formatting and IDE0055 stays `none`.
    ```
 
 5. **Exceptions**: do not swallow exceptions, either log and rethrow or translate to a
-   domain-specific exception. A signal handler's catch-all is excepted, and so is a callback off
-   the main flow reporting a fault to the lifetime owner, per "Interrupts in .NET".
+   domain-specific exception. A catch at the last frame an exception can reach logs or reports it
+   and does not rethrow, since nothing above it can. Such frames are the entry point's final catch,
+   a signal handler, the unhandled-exception handler's guards, and a callback reporting a fault,
+   per "Interrupts in .NET".
 
 ## Code patterns
 
