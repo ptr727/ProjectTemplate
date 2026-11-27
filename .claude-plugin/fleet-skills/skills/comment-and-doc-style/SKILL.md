@@ -160,6 +160,9 @@ Applies to code and workflow (`#`) comments alike.
   header a tool or policy requires is not a summary and is unaffected.
 - **Never let a comment grow across edits.** Touching code near an existing comment means the
   comment comes out the same length or shorter, never one more clause of rationale appended.
+- **Leave a human-authored comment exactly as written.** Never reword, trim, reflow, or clean
+  one, even where another rule would shape it differently. A comment the agent's own change makes
+  false, one whose code the change deletes included, is the agent's to correct or remove.
 
 A continuation stays unindented, one sentence per line:
 
