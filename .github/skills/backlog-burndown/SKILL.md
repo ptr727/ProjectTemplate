@@ -96,8 +96,7 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    "Ranking" never ranks one, so no `Closes on promotion:` line closes it. The orchestrator files one where none holds it, saying
    whose step it is and giving each step's command in order. Attended, where the step is the maintainer's, it first offers the maintainer a
    walk-through instead. It gives one step at a time, each confirmed done before the next. An action that needs a promotion or a release first is filed
-   rather than offered. An action walked through to done needs no issue. The orchestrator closes
-   an `**Owed action:**` issue walked through to done, citing the maintainer's confirmation.
+   rather than offered. An action walked through to done needs no issue.
 6. **Clean up and refill as each worker ends**, rather than once the round's last worker has.
    Clean up the worktree, local branch, and remote branch of a group that merged or was abandoned, per
    "Dispatching a Worker". Then run steps 1 to 3 afresh for the free slots and dispatch the
