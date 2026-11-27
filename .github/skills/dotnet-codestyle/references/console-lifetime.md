@@ -16,7 +16,7 @@ The project selects the .NET 11 line, since `ProcessStartInfo.StartDetached` and
 
 ## The Lifetime Owner
 
-`Exit` is the one exit decision. `Main` calls it last, after the log is flushed, and it also tells a waiting Windows console close handler that cleanup finished. The token sources are never disposed, which is what the CA1001 suppression records.
+`Exit` is the one exit decision. `Main` calls it last, after the log is flushed, and it also tells a waiting Windows console close handler that cleanup finished. That handler waits whatever stop came before it, and the kill bound is armed once. The token sources are never disposed, which is what the CA1001 suppression records.
 
 ```csharp
 using System.Runtime.InteropServices;
@@ -38,6 +38,7 @@ internal sealed partial class Lifetime
     private readonly ManualResetEventSlim _cleanupDone = new();
     private readonly PosixSignalRegistration[] _registrations;
     private int _stopCount;
+    private int _killArmed;
     private int _signalNumber;
     private Exception? _fault;
 
@@ -106,6 +107,15 @@ internal sealed partial class Lifetime
     {
         try
         {
+            if (OperatingSystem.IsWindows() && context.Signal == PosixSignal.SIGHUP)
+            {
+                _ = Interlocked.CompareExchange(ref _signalNumber, SignalNumber(context.Signal), 0);
+                Log.Warning("{Signal} received, the console is closing", context.Signal);
+                RequestStop();
+                _ = _kill.CancelAsync();
+                _ = _cleanupDone.Wait(TimeSpan.FromSeconds(4));
+                return;
+            }
             int count = Interlocked.Increment(ref _stopCount);
             if (count >= 3)
             {
@@ -123,11 +133,6 @@ internal sealed partial class Lifetime
             _ = Interlocked.CompareExchange(ref _signalNumber, SignalNumber(context.Signal), 0);
             Log.Warning("{Signal} received, stopping", context.Signal);
             RequestStop();
-            if (OperatingSystem.IsWindows() && context.Signal == PosixSignal.SIGHUP)
-            {
-                _ = _kill.CancelAsync();
-                _ = _cleanupDone.Wait(TimeSpan.FromSeconds(4));
-            }
         }
         catch (Exception exception)
         {
@@ -137,7 +142,10 @@ internal sealed partial class Lifetime
 
     private void RequestStop()
     {
-        _kill.CancelAfter(KillBound);
+        if (Interlocked.Exchange(ref _killArmed, 1) == 0)
+        {
+            _kill.CancelAfter(KillBound);
+        }
         _ = _stop.CancelAsync();
     }
 
