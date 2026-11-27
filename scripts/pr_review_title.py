@@ -20,8 +20,10 @@ Title case is read one word at a time, and a word is exempt where a pattern cann
 is wrong. One is a word inside a code span. Another carries a character no English word carries,
 such as a digit, a dot, a slash, or an underscore. A third has an upper-case letter after its
 first, such as `macOS`. So `net8.0`, `softprops/action-gh-release`, and `README` pass as
-written. A lower-case tool name such as `ruff` goes in a code span. Each part of a hyphenated word
-is capitalized unless it is a bind word, so `Built-in` and `24-Hour` pass. The first word is
+written. A lower-case tool name such as `ruff` goes in a code span. A word joined to a code span,
+such as the `'s` after one, is part of the name and skipped too. A hyphenated word capitalizes its
+first part, and each later part unless it is a bind word, so `Built-in`, `24-Hour`, and
+`On-Demand` pass. The first word is
 capitalized whatever it is. A bind word opening a subtitle after a colon takes either case.
 Punctuation around a word, such as a closing period or comma, is not part of it.
 """
@@ -51,14 +53,15 @@ def mixed_case(part: str) -> bool:
     return any(c.isupper() for c in part[1:])
 
 
-def wanted(part: str, index: int, first: bool, opens: bool) -> bool | None:
+def wanted(part: str, index: int, parts: int, first: bool, opens: bool) -> bool | None:
     """Whether a word part's first letter is owed upper case, or None where either case reads.
 
-    `index` is the part's place in a hyphenated word. `first` marks the word opening the title,
-    and `opens` one opening a subtitle after a colon. There a bind word takes either case.
+    `index` is the part's place in a hyphenated word of `parts` parts. `first` marks the word
+    opening the title, and `opens` one opening a subtitle after a colon. There a bind word takes
+    either case.
     """
     bind = part.lower() in BIND_WORDS
-    if index == 0 and first:
+    if index == 0 and (first or parts > 1):
         return True
     if index == 0 and opens and bind:
         return None
@@ -72,7 +75,7 @@ def word_fix(word: str, first: bool, opens: bool) -> str:
         return ""
     parts, raised = core.split("-"), False
     for i, part in enumerate(parts):
-        upper = wanted(part, i, first, opens) if part and not mixed_case(part) else None
+        upper = wanted(part, i, len(parts), first, opens) if part and not mixed_case(part) else None
         if upper is None or part[0].isupper() == upper:
             continue
         raised = raised or upper
@@ -95,10 +98,10 @@ def problems(title: str) -> list[str]:
         found.append(f"shorten it from {len(title)} to {MAX_LENGTH} characters or fewer")
     if title.rstrip().endswith("."):
         found.append("drop the trailing period")
-    words = CODE_SPAN.sub(f" {SPAN} ", title).split()
+    words = CODE_SPAN.sub(SPAN, title).split()
     for i, word in enumerate(words):
         opens = i > 0 and words[i - 1].endswith(":")
-        if word != SPAN and (fix := word_fix(word, i == 0, opens)):
+        if SPAN not in word and (fix := word_fix(word, i == 0, opens)):
             found.append(fix)
     return found
 
@@ -122,7 +125,7 @@ def title_hold(pr: dict) -> list[str] | None:
 
 def title_field(pr: dict) -> str | None:
     """The digest's `title=` value, or None to leave the field out where nothing is read."""
-    if "title" in pr and exempt(pr):
+    if "title" in pr and exempt(pr) and is_open(pr):
         return EXEMPT
     hold = title_hold(pr)
     return None if hold is None else HELD if hold else OK

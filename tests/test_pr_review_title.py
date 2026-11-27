@@ -115,6 +115,7 @@ class TestTitleCase(unittest.TestCase):
             ["write `Built-In` as `Built-in`, since a bind word stays lower case"],
             title.problems("Add Built-In Support"),
         )
+        self.assertEqual([], title.problems("Use an In-Memory Cache and an On-Demand Scan"))
         (fix,) = title.problems("Add Read-only Mounts")
         self.assertTrue(fix.startswith("write `Read-only` as `Read-Only`"))
 
@@ -127,6 +128,8 @@ class TestTitleCase(unittest.TestCase):
             "Run `ruff` on the Tests",
             "Run `uv lock --upgrade` on the Tests",
             "Read the Head's Value",
+            "Fix `pr_review.py`'s Exit Code",
+            "Drop Stale `Item`s",
         ):
             with self.subTest(name):
                 self.assertEqual([], title.problems(name))
@@ -166,9 +169,10 @@ class TestHold(unittest.TestCase):
     def test_a_closed_pull_request_holds_nothing(self) -> None:
         for state in ("MERGED", "CLOSED"):
             with self.subTest(state):
-                pr = titled("add a sensor.", state=state)
-                self.assertIsNone(title.title_hold(pr))
-                self.assertIsNone(title.title_field(pr))
+                for login in ("someone", "dependabot"):
+                    pr = titled("add a sensor.", login, state)
+                    self.assertIsNone(title.title_hold(pr))
+                    self.assertIsNone(title.title_field(pr))
 
     def test_a_payload_that_never_asked_reads_nothing(self) -> None:
         pr = titled(None)
