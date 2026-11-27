@@ -93,8 +93,8 @@ A round is the unit. Each one runs these steps, step 6 repeating as each worker 
    **Each owed action a merged group reports is held by an open issue before the round promotes
    or ends**, per "Dispatching a Worker". Only an open `**Owed action:**` issue that names the action
    holds it. "Needs the Maintainer" under "Away Mode" defines such an issue.
-   "Ranking" never ranks one, so no `Closes on promotion:` line closes it. The orchestrator files one where none holds it, saying
-   whose step it is and giving each step's command in order. Attended, where the step is the maintainer's, it first offers the maintainer a
+   "Ranking" never ranks one, so no `Closes on promotion:` line closes it. The orchestrator files one where none holds it. The issue says
+   whose step it is, any promotion or release it waits on, and each step's command in order. Attended, where the step is the maintainer's, it first offers the maintainer a
    walk-through instead. It gives one step at a time, each confirmed done before the next. An action that needs a promotion or a release first is filed
    rather than offered. Only an action walked through to done needs no issue, so a declined or
    unfinished walk-through files one.
@@ -477,7 +477,7 @@ Brief on `AGENTS.md` "Context and Delegation Discipline"'s subagent shape.
   review findings. An owed action is a step outside the diff, usually the maintainer's, without
   which a machine or the fleet stays inconsistent once the change merges. Examples are a migration
   script, a live `configure.sh apply`, a first live run, and a fleet resync. The worker names,
-  for each, whose step it is and each step's command in order. It also writes each under a fixed `## Owed actions` heading in its
+  for each, whose step it is, any promotion or release it waits on, and each step's command in order. It also writes each under a fixed `## Owed actions` heading in its
   pull request body before merging, which "Bounding the Wait on a Worker" reads back. That heading
   only carries an action, since a `Closes on promotion:` line still closes its source issue. "The
   Round" step 5 says how each one is held. Review findings stay `pr-review-conduct` outcome 4's, and this changes
