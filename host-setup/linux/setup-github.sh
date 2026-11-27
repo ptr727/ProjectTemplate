@@ -482,7 +482,8 @@ gh_key_registered() {
 # Anything short of gh's yes is the public check's to answer.
 # So a GitHub that cannot be reached still reads as unknown rather than as missing.
 signing_registration_state() {
-    if [[ $GH_SIGNING_LISTED == true ]] && gh_key_registered signing; then
+    # The list gh returns speaks for gh's account alone, so it answers only where this host answers as that account.
+    if [[ $GH_SIGNING_LISTED == true && $GITHUB_USER == "$GH_ACCOUNT" ]] && gh_key_registered signing; then
         return 0
     fi
     github_signing_key_registered

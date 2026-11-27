@@ -964,7 +964,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(len(adds), 1, adds)
 
     def test_a_host_identity_answering_as_another_account_registers_nothing(self) -> None:
-        paste = "GITHUB_USER=x\nsigning_registration_state || registration_needed signing Signing"
+        paste = "GITHUB_USER=example-user\nsigning_registration_state || registration_needed signing Signing"
         result, adds = self.register(general=SECOND, then=paste)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(adds, [])
@@ -1077,7 +1077,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertIn(f"user={ACCOUNT} managed=true", result.stdout)
 
     def test_a_gh_listing_that_fails_registers_nothing_and_the_public_list_answers(self) -> None:
-        check = "GITHUB_USER=x\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
+        check = "GITHUB_USER=example-user\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
         result, adds = self.register(list_rc=1, public_signing=True, then=check)
         self.assertEqual(adds, [])
         self.assertIn("gh could not list its keys", result.stderr)
@@ -1095,15 +1095,21 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertFalse([c for c in calls if "IdentitiesOnly" in c], calls)
 
     def test_a_login_with_only_the_authentication_scope_falls_back_to_the_public_list(self) -> None:
-        check = "GITHUB_USER=x\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
+        check = "GITHUB_USER=example-user\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
         result, adds = self.register(add_signing_rc=1, then=check)
         self.assertEqual(len(adds), 2, adds)
         self.assertIn("rc=1", result.stdout)
         result, _ = self.register(add_signing_rc=1, public_signing=True, then=check)
         self.assertIn("rc=0", result.stdout)
 
+    def test_gh_s_signing_answer_speaks_only_for_gh_s_account(self) -> None:
+        check = "GITHUB_USER=other-user\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
+        result, adds = self.register(registered="auth signing", general=SECOND, then=check)
+        self.assertEqual(adds, [])
+        self.assertIn("rc=1", result.stdout)
+
     def test_an_unreachable_github_at_the_final_check_reads_as_unknown(self) -> None:
-        check = "PUBLIC_ERROR=yes\nGITHUB_USER=x\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
+        check = "PUBLIC_ERROR=yes\nGITHUB_USER=example-user\nrc=0\nsigning_registration_state || rc=$?\necho rc=$rc"
         result, adds = self.register(
             registered="auth signing", hide_signing=True, public_signing=True, then=check
         )
@@ -1112,7 +1118,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertIn("rc=2", result.stdout)
 
     def test_a_lagging_public_list_cannot_cause_a_false_paste_or_a_second_add(self) -> None:
-        check = 'signing_registration_state && echo "state=registered"'
+        check = 'GITHUB_USER=example-user\nsigning_registration_state && echo "state=registered"'
         for registered, add_count in (("", 2), ("auth signing", 0)):
             with self.subTest(registered=registered):
                 result, adds = self.register(registered=registered, then=check)
@@ -1249,12 +1255,12 @@ foreach ($case in (Get-Content $Cases -Raw | ConvertFrom-Json)) {
         }
         if ($case.check) {
             if ($case.publicErrorAfter) { $script:Case.publicError = $true }
-            $script:GITHUB_USER = 'x'
+            $script:GITHUB_USER = if ($case.checkUser) { $case.checkUser } else { 'example-user' }
             "state=$(Get-SigningRegistrationState)"
         }
         if ($case.auth) { $null = Test-Authentication }
         if ($case.paste) {
-            $script:GITHUB_USER = 'x'
+            $script:GITHUB_USER = 'example-user'
             if ((Get-SigningRegistrationState) -ne 'registered') { Show-RegistrationNeeded -Kind 'signing' -Type 'Signing' }
         }
     } 6>&1 | ForEach-Object { "$_" }
@@ -1288,6 +1294,7 @@ def windows_register_case(
     public_error: bool = False,
     list_title: str = "",
     public_error_after: bool = False,
+    check_user: str = "",
 ) -> dict[str, object]:
     return {
         "name": name,
@@ -1312,6 +1319,7 @@ def windows_register_case(
         "publicError": public_error,
         "listTitle": list_title,
         "publicErrorAfter": public_error_after,
+        "checkUser": check_user,
         "pub": PUBLIC_KEY,
     }
 
@@ -1416,6 +1424,12 @@ class TestWindowsKeyRegistration(unittest.TestCase):
             windows_register_case("lag", check=True),
             windows_register_case(
                 "listed-lag", registered=["authentication", "signing"], check=True
+            ),
+            windows_register_case(
+                "listed-other-account",
+                registered=["authentication", "signing"],
+                check=True,
+                check_user=SECOND,
             ),
             windows_register_case(
                 "fallback-then-unreachable",
@@ -1639,6 +1653,9 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertIn("state=registered", self.output("lag"))
         self.assertEqual(self.adds("listed-lag"), [])
         self.assertIn("state=registered", self.output("listed-lag"))
+
+    def test_gh_s_signing_answer_speaks_only_for_gh_s_account(self) -> None:
+        self.assertIn("state=missing", self.output("listed-other-account"))
 
     def test_an_unreachable_github_at_the_final_check_reads_as_unknown(self) -> None:
         self.assertEqual(self.adds("fallback-then-unreachable"), [])

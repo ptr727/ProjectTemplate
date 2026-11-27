@@ -601,8 +601,8 @@ function Invoke-SecretRestore {
 # The order is fixed rather than chosen.
 # Packages come first so install-tools.ps1 and setup-github.ps1 act on a host winget has just brought current.
 # GitHub comes after the tools, because install-tools.ps1 provides the gh it registers the key through.
-# It is also the only step that can wait on a person in a browser.
-# It waits only where gh cannot register the key, which includes no gh login.
+# It is also the only step that can need a person in a browser, to paste a key and then run it again.
+# It needs one only where gh cannot register the key, which includes no gh login.
 # The agent setup runs after the tools, because install-tools.ps1 provides the interpreter it needs.
 function Invoke-StandUp {
     # Named Kind rather than Profile, which is PowerShell's own automatic variable for the current user's profile script.

@@ -674,7 +674,8 @@ function Get-GhKeyState {
 function Get-SigningRegistrationState {
     # Anything short of gh's yes is the public check's to answer.
     # So a GitHub that cannot be reached still reads as unknown rather than as missing.
-    if ($script:GH_SIGNING_LISTED -and (Get-GhKeyState -Kind 'signing') -eq 'registered') { return 'registered' }
+    # The list gh returns speaks for gh's account alone, so it answers only where this host answers as that account.
+    if ($script:GH_SIGNING_LISTED -and $script:GITHUB_USER -eq $script:GH_ACCOUNT -and (Get-GhKeyState -Kind 'signing') -eq 'registered') { return 'registered' }
     return Test-KeyRegistered -Kind 'signing'
 }
 
