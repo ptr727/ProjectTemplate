@@ -16,7 +16,7 @@ The project selects the .NET 11 line, since `ProcessStartInfo.StartDetached` and
 
 ## The Lifetime Owner
 
-`Exit` is the one exit decision. `Main` calls it last, after the log is flushed, and it also tells a waiting Windows console close handler that cleanup finished. That handler waits whatever stop came before it, and the kill bound is armed once. The token sources are never disposed, which is what the CA1001 suppression records.
+`Exit` is the one exit decision. `Main` calls it last, after the log is flushed, and it also tells a waiting Windows close or shutdown handler that cleanup finished. The Windows console close and shutdown handlers wait whatever stop came before them, and the kill bound is armed once. The token sources are never disposed, which is what the CA1001 suppression records.
 
 ```csharp
 using System.Runtime.InteropServices;
@@ -107,10 +107,16 @@ internal sealed partial class Lifetime
     {
         try
         {
-            if (OperatingSystem.IsWindows() && context.Signal == PosixSignal.SIGHUP)
+            if (
+                OperatingSystem.IsWindows()
+                && context.Signal is PosixSignal.SIGHUP or PosixSignal.SIGTERM
+            )
             {
                 _ = Interlocked.CompareExchange(ref _signalNumber, SignalNumber(context.Signal), 0);
-                Log.Warning("{Signal} received, the console is closing", context.Signal);
+                Log.Warning(
+                    "{Signal} received, the process ends when this returns",
+                    context.Signal
+                );
                 RequestStop();
                 _ = _kill.CancelAsync();
                 _ = _cleanupDone.Wait(TimeSpan.FromSeconds(4));
@@ -379,7 +385,7 @@ internal enum ToolOutcome
 
 ## Measured Stop Matrix
 
-A prototype of this skeleton ran on .NET 11 with System.CommandLine and CliWrap, in the .NET 11 SDK container image. Its child was a shell script that logs each signal it receives.
+The results below come from a prototype of this design. It ran on .NET 11 with System.CommandLine and CliWrap, in the .NET 11 SDK container image. Its child was a shell script that logs each signal it receives. The prototype had variants the skeleton does not show. Some ran several children in parallel, signaled a child directly, used a child that ignores the stop, or hung the cleanup. Others changed the kill bound, the start options, or the exit status of a tool failure, or injected a fault. So a row can describe a variant rather than the skeleton as printed.
 
 | Stop | Reaches | App result | Child |
 | --- | --- | --- | --- |
