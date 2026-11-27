@@ -36,6 +36,7 @@ COMPANIONS = {
     "scripts/docker_lint.py": (".github/actions/docker-lint-pins/Dockerfile",),
 }
 LOOKUP_TIMEOUT = 5
+STOP_TIMEOUT = 10
 
 
 def lookup_via_git() -> tuple[str | None, str]:
@@ -123,6 +124,21 @@ def fetch_all(ref: str, paths: tuple[str, ...]) -> dict[str, bytes]:
     return fetched
 
 
+def stop(child: subprocess.Popen[bytes]) -> None:
+    """Stop `child`, killing it if it outlasts SIGTERM, so a stop always ends.
+
+    The handler passes over a second Ctrl-C.
+    So a child ignoring SIGTERM would otherwise hold this process and its fetched tree forever.
+    The kill reaches `child` alone, which is `uv run` rather than the script it started.
+    """
+    child.terminate()
+    try:
+        child.wait(timeout=STOP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait()
+
+
 USAGE = "usage: hub_fetch_run.py <hub-relative-path> [script-args...]"
 
 
@@ -177,8 +193,7 @@ def main(argv: list[str]) -> int:
         try:
             return child.wait()
         finally:
-            child.terminate()
-            child.wait()
+            stop(child)
 
 
 # The first signal the handler took, where one interrupted the run.

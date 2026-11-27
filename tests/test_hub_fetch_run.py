@@ -20,6 +20,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -374,14 +375,14 @@ class InterruptTests(unittest.TestCase):
     """
 
     def interrupt(
-        self, sigs: tuple[signal.Signals, ...], group: bool
+        self, sigs: tuple[signal.Signals, ...], group: bool, trap: str = "", sleep: int = TIMEOUT
     ) -> tuple[int, str, list[str]]:
         outside = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         ready, stubs, scratch = outside / "started", outside / "bin", outside / "tmp"
         stubs.mkdir()
         scratch.mkdir()
         uv = stubs / "uv"
-        uv.write_text(f'#!/bin/sh\n: >"{ready}"\nexec sleep {TIMEOUT}\n', encoding="utf-8")
+        uv.write_text(f'#!/bin/sh\n{trap}: >"{ready}"\nexec sleep {sleep}\n', encoding="utf-8")
         uv.chmod(0o755)
         launcher = outside / "launch.py"
         launcher.write_text(INTERRUPT_LAUNCHER, encoding="utf-8")
@@ -423,6 +424,61 @@ class InterruptTests(unittest.TestCase):
                     self.assertIn(f"hub_fetch_run: interrupted by {sig.name}.", stderr)
                     self.assertNotIn("Traceback", stderr)
                     self.assertEqual([], left)
+
+    def test_a_uv_ignoring_sigterm_is_killed_once_the_stop_times_out(self) -> None:
+        """The stub uv ignores SIGTERM and outlives TIMEOUT, so an unbounded wait fails the case."""
+        self.assertLess(hub.STOP_TIMEOUT, TIMEOUT)
+        status, stderr, left = self.interrupt(
+            (signal.SIGTERM,), False, "trap '' TERM\n", sleep=TIMEOUT * 4
+        )
+        self.assertEqual(-signal.SIGTERM, status, stderr)
+        self.assertIn("hub_fetch_run: interrupted by SIGTERM.", stderr)
+        self.assertEqual([], left)
+
+
+STOPPED_CHILD = """
+import pathlib, signal, sys, time
+if sys.argv[3] == "ignore":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+pathlib.Path(sys.argv[1]).touch()
+time.sleep(float(sys.argv[2]))
+"""
+
+
+@unittest.skipIf(sys.platform == "win32", "Windows has no SIGTERM for a child to ignore")
+class StopTests(unittest.TestCase):
+    """The stop terminates a child, and kills one that outlasts SIGTERM, so it always ends."""
+
+    def stopped(self, ignore_term: bool, bound: float) -> tuple[int, float]:
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        ready = outside / "started"
+        mode = "ignore" if ignore_term else "honor"
+        child = subprocess.Popen(
+            [sys.executable, "-c", STOPPED_CHILD, str(ready), str(TIMEOUT), mode],
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            wait_until_started(child, ready)
+            started = time.monotonic()
+            with mock.patch.object(hub, "STOP_TIMEOUT", bound):
+                hub.stop(child)
+            elapsed = time.monotonic() - started
+            assert_group_ended(child.pid)
+        finally:
+            end_group(child)
+        assert child.returncode is not None
+        return child.returncode, elapsed
+
+    def test_a_child_that_honors_sigterm_ends_by_it(self) -> None:
+        status, _ = self.stopped(ignore_term=False, bound=hub.STOP_TIMEOUT)
+        self.assertEqual(-signal.SIGTERM, status)
+
+    def test_a_child_ignoring_sigterm_is_killed_after_the_timeout(self) -> None:
+        status, elapsed = self.stopped(ignore_term=True, bound=0.5)
+        self.assertEqual(-signal.SIGKILL, status)
+        self.assertGreaterEqual(elapsed, 0.5)
+        self.assertLess(elapsed, TIMEOUT)
 
 
 class GitLookupTests(unittest.TestCase):
