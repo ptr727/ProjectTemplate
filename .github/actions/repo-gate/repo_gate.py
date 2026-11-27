@@ -62,6 +62,7 @@ HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
 # Reading any of those as absence fails a correct pin, which is the direction that costs most.
 ABSENT = {"404", "422"}
 GH_TIMEOUT = 20
+GITHUB_HOST = "github.com"
 CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 COMMAND_LEAD = re.compile(r"\A(\s*):(?=:)")
 LEGACY_COMMAND = "##["
@@ -95,6 +96,17 @@ def origin_owner(root: Path) -> str | None:
     return m.group(1).lower() if m else None
 
 
+def gh_env() -> dict[str, str]:
+    """This process's environment with `GH_HOST` naming github.com, for the `gh` child a read runs in.
+
+    An exported `GH_HOST` would move a read to a host that may lack the path. Its 404 would then
+    read as absent, and a correct pin as unresolvable. This is the pin `gh_graphql.pinned_env` sets.
+    It is set here rather than loaded from there, since a single-file fetch, as `hub_fetch_run.py`
+    makes, has no hub tree to load it from.
+    """
+    return {**os.environ, "GH_HOST": GITHUB_HOST}
+
+
 def gh_read(path: str, *flags: str) -> tuple[bool | None, str]:
     """GitHub's answer for `path` and the body it printed, which is empty unless the answer is True.
 
@@ -112,6 +124,7 @@ def gh_read(path: str, *flags: str) -> tuple[bool | None, str]:
             errors="replace",
             timeout=GH_TIMEOUT,
             check=False,
+            env=gh_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None, ""
@@ -432,7 +445,7 @@ def check_eol_coverage(root: Path, files: list[str]) -> list[str]:
 ACTION_FILE = re.compile(r"^\.github/actions/(?:.+/)?action\.ya?ml$")
 # A GitHub expression is not shell, so shellcheck would read its braces as syntax.
 EXPRESSION_START = "${{"
-SHELLCHECK_IMAGE = "mirror.gcr.io/koalaman/shellcheck:stable"
+PIN_MANIFEST = ".github/actions/docker-lint-pins/Dockerfile"
 SHELLCHECK_TIMEOUT = 300
 SCHEMA_TIMEOUT = 300
 YAML_TIMEOUT = 60
@@ -655,9 +668,46 @@ def substitute_expressions(body: str) -> str:
     return "\n".join(out)
 
 
-def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
+def hub_docker_lint() -> ModuleType:
+    """The hub's `scripts/docker_lint.py`, which parses the pin manifest and holds the pull retry.
+
+    It is loaded from the hub tree this gate sits in, at the commit that tree holds.
+    Raises ValueError where none is beside this gate, or where the script fails to load.
+    A copy fetched alone has no hub tree, so that error names where the check can run.
+    The script runs under whatever `python3` the host has, so any failure to load it is a reason.
+    """
+    hub = gate_hub_root()
+    if hub is None:
+        raise ValueError(
+            f"{PIN_MANIFEST} is not beside this script, so run this check from a hub checkout "
+            "or through the repo-gate action"
+        )
+    try:
+        return hub_script(hub, "docker_lint")
+    except Exception as error:
+        raise ValueError(
+            "the hub's scripts/docker_lint.py, which parses the pin manifest and holds the pull "
+            f"retry, failed to load: {error}"
+        ) from error
+
+
+def shellcheck_image(docker_lint: ModuleType) -> str:
+    """The shellcheck image reference the pin manifest names, a tag with its digest.
+
+    `docker_lint.read_pins` is the manifest's one parser, which the docker-lint-pins action also reads through.
+    Raises ValueError where the manifest cannot be read, names a stage twice, or pins no shellcheck stage.
+    """
+    try:
+        pins = docker_lint.read_pins(docker_lint.manifest_path())
+        docker_lint.require_stages(pins, ["shellcheck"])
+    except docker_lint.CommandFailed as error:
+        raise ValueError(str(error)) from error
+    return pins["shellcheck"]
+
+
+def shellcheck_body(label: str, dialect: str, text: str, image: str) -> list[str]:
     # SC2154 is off because a step's `env:` variables are invisible to shellcheck.
-    command = ["docker", "run", "--rm", "-i", "--network=none", SHELLCHECK_IMAGE]
+    command = ["docker", "run", "--rm", "-i", "--network=none", image]
     command += ["-s", dialect, "-S", "warning", "-e", "SC2154", "-f", "gcc", "-"]
     try:
         result = subprocess.run(
@@ -681,11 +731,12 @@ def shellcheck_body(label: str, dialect: str, text: str) -> list[str]:
     return [f"{label}: shellcheck exited {result.returncode}: {stderr}"]
 
 
-def docker_unreachable() -> str | None:
+def docker_unreachable(docker_lint: ModuleType, image: str) -> str | None:
     """The reason no docker daemon answers or the image cannot be pulled, or None where both work.
 
     The explicit pull makes a fetch failure one finding with its reason, rather than one per body.
-    A locally cached image is reused, so a local run may lag CI, which always pulls fresh.
+    The image is pinned by digest, so a locally cached copy is the one CI pulls.
+    The pull runs through the hub's `docker_lint.py`, whose bounded retry every Docker lint pull shares.
     """
     try:
         result = subprocess.run(
@@ -699,7 +750,7 @@ def docker_unreachable() -> str | None:
         return f"docker info exited {result.returncode}"
     try:
         present = subprocess.run(
-            ["docker", "image", "inspect", SHELLCHECK_IMAGE],
+            ["docker", "image", "inspect", image],
             capture_output=True,
             check=False,
             timeout=DOCKER_TIMEOUT,
@@ -711,23 +762,13 @@ def docker_unreachable() -> str | None:
     if present.returncode == 0:
         return None
     try:
-        pull = subprocess.run(
-            ["docker", "pull", "--quiet", SHELLCHECK_IMAGE],
-            capture_output=True,
-            check=False,
-            timeout=SHELLCHECK_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
-        return f"docker pull did not finish within {SHELLCHECK_TIMEOUT}s"
-    except OSError as error:
-        return f"docker pull could not start: {error}"
-    if pull.returncode != 0:
-        detail = pull.stderr.decode("utf-8", errors="replace").strip()
-        return f"docker pull of {SHELLCHECK_IMAGE} exited {pull.returncode}: {detail}"
+        docker_lint.pull_image("shellcheck", image, SHELLCHECK_TIMEOUT, docker_lint.run_command)
+    except docker_lint.CommandFailed as error:
+        return f"docker pull of {image} failed: {error}"
     return None
 
 
-def check_composite_shell(root: Path, path: str) -> list[str]:
+def check_composite_shell(root: Path, path: str, image: str) -> list[str]:
     try:
         action = load_action(root / path)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
@@ -750,7 +791,7 @@ def check_composite_shell(root: Path, path: str) -> list[str]:
         name = step.get("name")
         if name and not isinstance(name, (dict, list)):
             label += f" ({name})"
-        hits.extend(shellcheck_body(label, dialect, substitute_expressions(body)))
+        hits.extend(shellcheck_body(label, dialect, substitute_expressions(body), image))
     return hits
 
 
@@ -801,16 +842,24 @@ def check_composite_actions(root: Path, files: list[str]) -> list[str]:
         NOTES.append("no composite action file is tracked, so nothing was checked.")
         return []
     hits: list[str] = []
-    unreachable = (
-        "docker is not installed" if shutil.which("docker") is None else docker_unreachable()
-    )
+    image = ""
+    if shutil.which("docker") is None:
+        unreachable: str | None = "docker is not installed"
+    else:
+        try:
+            docker_lint = hub_docker_lint()
+            image = shellcheck_image(docker_lint)
+        except ValueError as error:
+            unreachable = f"the shellcheck pin could not be read: {error}"
+        else:
+            unreachable = docker_unreachable(docker_lint, image)
     if unreachable is not None:
         hits.append(f"{unreachable}, so no run body was shellchecked")
     else:
         PYYAML_PYTHON.clear()
         for path in actions:
             try:
-                hits.extend(check_composite_shell(root, path))
+                hits.extend(check_composite_shell(root, path, image))
             except UvxUnavailable as error:
                 hits.append(f"{error}, so no run body was shellchecked")
                 break
@@ -833,14 +882,21 @@ def gate_hub_root() -> Path | None:
     return root if (root / "spec" / "files.json").is_file() else None
 
 
-def hub_carry(hub: Path) -> ModuleType:
-    """The hub's own `scripts/carry.py`, whose tree inventory and comparison this check reuses.
+def hub_script(hub: Path | None, name: str) -> ModuleType:
+    """The hub's own `scripts/<name>.py`, whose code a check here reuses rather than copies.
 
-    It imports only the standard library until a section is read, so plain `python3` loads it.
+    `carry.py` and `docker_lint.py` each import only the standard library at load, so plain
+    `python3` loads them. Raises ValueError where no hub tree is beside this gate.
+    A dataclass resolves its module through `sys.modules`, so the module is registered there.
+    It takes a name of its own, which leaves another import of the same script as it was.
     """
-    spec = importlib.util.spec_from_file_location("carry", hub / "scripts" / "carry.py")
+    if hub is None:
+        raise ValueError("no hub tree is beside this gate")
+    qualified = f"repo_gate_hub_{name}"
+    spec = importlib.util.spec_from_file_location(qualified, hub / "scripts" / f"{name}.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[qualified] = module
     spec.loader.exec_module(module)
     return module
 
@@ -879,7 +935,7 @@ def check_carried_trees(root: Path, files: list[str]) -> list[str]:
     # Each failure is a note rather than a traceback, since one here would also skip every check sorted after this one.
     # The catches are broad because carry.py runs under whatever `python3` the host has, so a newer interpreter's API in it fails here as any exception.
     try:
-        carry = hub_carry(hub)
+        carry = hub_script(hub, "carry")
     except Exception as error:  # noqa: BLE001
         NOTES.append(
             f"the hub's scripts/carry.py could not be loaded, so no carried tree was compared: {error}"

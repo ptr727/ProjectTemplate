@@ -14,6 +14,7 @@ import io
 import json
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -145,11 +146,14 @@ class AuditAgreementCase(unittest.TestCase):
             if "/git/blobs/sha-" in path:
                 text = (projects or {})[path.partition("/git/blobs/sha-")[2]]
                 return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
-            return {"secrets": []}
+            raise AssertionError(path)
 
         head = {"commit": {"sha": "c1", "commit": {"tree": {"sha": TREE_SHA}}}}
         run = audit.Run(e, {"secrets": SECRETS}, "owner/ExampleRepo", "main", {}, None, None, head)
-        with unittest.mock.patch.object(audit, "gh", answer):
+        with (
+            unittest.mock.patch.object(audit, "gh", answer),
+            unittest.mock.patch.object(resolve_secrets, "read_names", lambda *_: []),
+        ):
             findings = audit.check_secrets_names(run)
         missing: dict[str, set[str]] = {"actions": set(), "dependabot": set()}
         for severity, text in findings:
@@ -230,11 +234,11 @@ class AuditAgreementCase(unittest.TestCase):
             read_project=lambda path: None,
         )
 
-        def answer(path: str, ok404: bool = False) -> Any:
-            store = path.split("/")[-2].split("?")[0] if "/secrets" in path else ""
-            return {"secrets": [{"name": n} for n in sorted(live[store])]}
+        def answer(path: str, key: str) -> list[str]:
+            self.assertEqual((path.split("/")[-1], key), ("secrets", "secrets"))
+            return sorted(live[path.split("/")[-2]])
 
-        with unittest.mock.patch.object(audit, "gh", answer):
+        with unittest.mock.patch.object(resolve_secrets, "read_names", answer):
             from_audit = audit.check_secrets_names(run)
         plan = secret_names.secret_plan(SECRETS, e, TESTED, "ExampleRepo", live)
         from_cli = [tuple(f) for f in plan["findings"] if f[0] != "OK"]
@@ -299,6 +303,21 @@ def gh_failure(status: str) -> tuple[int, str, str]:
     if status == "none":
         return 1, "", "gh: boom\n"
     return 1, "", f"gh: error (HTTP {status})\n"
+
+
+class HostPinCase(unittest.TestCase):
+    """The store reads run through gh_graphql.run_subprocess, which pins the host."""
+
+    def test_every_store_read_runs_on_github_com_whatever_host_was_exported(self) -> None:
+        answered = subprocess.CompletedProcess(["gh"], 0, "ALPHA\n", "")
+        with (
+            unittest.mock.patch.dict(os.environ, {"GH_HOST": "ghe.example.invalid"}),
+            unittest.mock.patch("subprocess.run", return_value=answered) as run,
+        ):
+            live = resolve_secrets.read_live_names("owner/ExampleRepo")
+        self.assertEqual(live, {store: {"ALPHA"} for store in secret_names.STORES})
+        hosts = [call.kwargs["env"]["GH_HOST"] for call in run.call_args_list]
+        self.assertEqual(hosts, ["github.com"] * len(secret_names.STORES))
 
 
 class FakeGh:

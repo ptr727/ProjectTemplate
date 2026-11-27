@@ -56,6 +56,11 @@ ACK_LINE = re.compile(r"^<!-- fleet-finding-ack: key=([0-9a-f]{12}) outcome=([a-
 OUTCOMES = ("fixed", "declined", "filed", "listed", "dropped")
 NO_THREAD, NOTED, VERDICT = "FINDINGS WITH NO THREAD", "REVIEWER OUTPUT NOTED", "verdict"
 DRIFT = "login drift"
+# An in-place Qodo edit can rewrite a link or a commit hash, so a Qodo key omits both.
+VOLATILE = re.compile(
+    r"https?://[^\s\"'<>)\]]+|\b(?i:commits?)\b(?:<[^<>]*>|[\s`'\"\[(:])*[0-9a-f]{7,40}\b"
+)
+QODO_WHERE = re.compile(r"^[^\s\[\]]+\[[\d ,-]+\]$", re.MULTILINE)
 # A digest count and the reviewer's sections it is read from, so an answer clears what it counts.
 SOURCES = {
     "suppressed": (REVIEWER, "suppressed", "SUPPRESSED"),
@@ -148,7 +153,12 @@ def items(pr: dict) -> list[Item]:
         anchor = qodo.get("id") or qodo.get("createdAt") or ""
         sections = [s for s in reading(qodo, QODO_LOGIN).sections if s.kind == "open"]
         found += [
-            Item("qodo_open", key("qodo_open", anchor, f"{s.title}\0{s.text}"), "", s.title)
+            Item(
+                "qodo_open",
+                key("qodo_open", anchor, VOLATILE.sub("", f"{s.title}\0{s.text}")),
+                "",
+                "\n".join([s.title, *QODO_WHERE.findall(s.text)]),
+            )
             for s in sections
         ]
     newest = newest_of(head_reviews(pr))
@@ -304,13 +314,13 @@ def unthreaded_lines(pr: dict, owner: str, repo: str, num: int) -> list[str]:
             lines.append(f"  {label}")
             continue
         if item.kind == "qodo_open":
-            number = m[1] if (m := re.match(r"(\d+)\.", item.text)) else "<number>"
             lines.append(
                 f"  {label}: only Qodo's own badge clears it on Qodo's side, and resolving a thread "
                 "or answering in the conversation adds none. A fixed finding Qodo marks Resolved "
                 f"itself. For a disproved one, answer with {hint}, its body mentioning "
-                f"@{QODO_LOGIN} and asking it to dismiss finding {number} by that number, with "
-                "the reason"
+                f"@{QODO_LOGIN} and asking it to dismiss the finding by the title and file "
+                "location below, with the reason. Where no location prints, take it from Qodo's "
+                "comment"
             )
         else:
             lines.append(

@@ -149,9 +149,9 @@ interpreter its `pyvenv.cfg` names, since deleting the venv would leave every ho
 spawn. The `python3`, or `python.exe` on Windows, in its `home` directory is tried first, then its recorded `executable`, then the venv's own. On Windows a candidate must resolve to a `.exe`. Exec form cannot spawn a `.bat` or `.cmd`
 shim, such as pyenv-win's, and `--report` flags an exec-form launcher that is not a `.exe`. Each candidate is run with a probe that prints a token and its
 version, and the output is read. That is because presence on `PATH` and a zero exit each pass a stub
-that runs no script, such as a Windows app execution alias. A hook naming one fails open. The
-installer substitutes `sys.executable`'s own absolute path when `python3` is absent or fails the
-probe, most commonly on a Windows host with no `python3` shim. It installs nothing when neither
+that runs no script, such as a Windows app execution alias. A hook naming one fails open. A `python3` in a version manager's `shims` directory, such as pyenv's, is passed over. It picks its interpreter per directory when the hook runs. An install that finds no other launcher names the interpreter to run the installer under, where the shim's is usable and not the one running. `--report` flags a registration naming one. The
+installer substitutes `sys.executable`'s own absolute path when `python3` is absent, is such a shim, or fails the
+probe. That is most common on a Windows host with no `python3` shim. It installs nothing when neither
 passes. Each hook's self-test runs under the chosen launcher, so a pass also proves the launcher runs
 the hook. `--report` runs the launcher each registration names. That is an exec-form entry's
 `command`, or the first word of a shell-form entry's `<launcher> <path>` string. So a host

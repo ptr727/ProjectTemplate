@@ -127,7 +127,11 @@ Where `RESYNC.md` section 4 requires a pin bump before a retirement, the bump la
 deletions pull request. A pull request is never a direct
 push to a protected branch and never a hand edit outside a pull request. Close the review loop,
 per the `pr-review-conduct` skill, before asking the maintainer for merge permission. The
-maintainer merges, the agent drives to green and stops. Re-run the audit after the merge.
+agent drives each fix pull request into the target's `develop` to green. Once the maintainer
+merges it, the agent opens that target's `develop` -> `main` promotion, or finds the open one,
+and drives it to green. The maintainer merges that too. On an operational repository, the agent
+confirms that a promotion is wanted before opening one, per `drive-pr`.
+Re-run the audit once the fix is on `main`.
 From the hub checkout, commit the report under the hub's own `reports/` once authorized, per
 `AUDIT.md` section 8 and `git-commit-conventions`. A session resyncing its own repository
 leaves the report to a hub-side audit instead. Done means measured, not applied.

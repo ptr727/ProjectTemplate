@@ -578,8 +578,9 @@ class RunWithDeadlineCase(unittest.TestCase):
     def test_every_timed_captured_run_in_scripts_goes_through_the_helper(self) -> None:
         """A new site written the old way would outlast its deadline on Windows again.
 
-        `docker_lint.py` is fetched alone, so it cannot import the helper, and the helper's own
-        `taskkill` is a native binary that starts no child. The helper's own call is the floor,
+        `docker_lint.py` is fetched with only its pin manifest beside it, so it cannot import the
+        helper. The helper's own `taskkill` is a native binary that starts no child. The helper's
+        own call is the floor,
         since a scan that matched nothing would read as a pass."""
         exempt = {"docker_lint.py", "run_deadline.py"}
         scripts = Path(skills_install.__file__).resolve().parent

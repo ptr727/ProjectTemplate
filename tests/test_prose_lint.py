@@ -30,6 +30,7 @@ import time
 import unittest
 from collections.abc import Iterator
 from pathlib import Path
+from types import FrameType
 from typing import Any, ClassVar
 from unittest import mock
 
@@ -9120,7 +9121,8 @@ READY = pathlib.Path(sys.argv[2])
 
 def held(*args, **kwargs):
     READY.touch()
-    time.sleep(60)
+    for _ in range(1200):
+        time.sleep(0.05)
 
 subprocess.run = held
 sys.argv = [sys.argv[1], *sys.argv[3:]]
@@ -9134,6 +9136,7 @@ class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
 
     The gate runs under this interpreter directly, since `uv run` would exit with a status rather
     than die by the signal. Its git call is a stub that marks itself started and sleeps.
+    It sleeps in short steps, since a signal landing just before a long sleep waits it out.
     """
 
     def test_a_signal_mid_run_ends_the_gate_by_it(self) -> None:
@@ -9171,6 +9174,28 @@ class TestTheGateReRaisesAnInterrupt(unittest.TestCase):
                 self.assertEqual(-sig, gate.returncode, stderr)
                 self.assertIn(f"prose_lint.py: interrupted by {sig.name}.", stderr)
                 self.assertNotIn("Traceback", stderr)
+
+    def test_a_signal_handled_as_the_first_handler_starts_is_passed_over(self) -> None:
+        """A SIGTERM handled as the SIGINT's handler starts leaves the SIGINT first.
+
+        Python checks for signals as a function starts, so the pair above can be handled there.
+        A profile hook makes that nested call at that point, so the order is fixed, not raced.
+        """
+        self.addCleanup(prose_lint.received.clear)
+        prose_lint.received.clear()
+
+        def nest(frame: FrameType, event: str, _arg: object) -> None:
+            if event == "call" and frame.f_code is prose_lint.on_signal.__code__:
+                sys.setprofile(None)
+                prose_lint.on_signal(signal.SIGTERM, frame)
+
+        sys.setprofile(nest)
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                prose_lint.on_signal(signal.SIGINT, None)
+        finally:
+            sys.setprofile(None)
+        self.assertEqual([signal.SIGINT], prose_lint.received)
 
 
 VOCABULARY_CAP = 5

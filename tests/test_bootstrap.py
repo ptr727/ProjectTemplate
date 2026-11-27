@@ -244,6 +244,8 @@ class TestSpecCoverage(unittest.TestCase):
             name = tool["name"]
             if not tool.get("required", False):
                 continue
+            if platform not in tool.get("platforms", (platform,)):
+                continue
 
             # Every required tool is checked, including one whose declaration names no source for this platform.
             # A tool is in scope because the spec requires it, never because its declaration happens to describe where this platform gets it.
@@ -506,6 +508,8 @@ class TestSpecCoverage(unittest.TestCase):
                         f"{name} declares a floor and no remedy, so its failure names no command"
                     )
                 for platform in ("linux", "macos", "windows"):
+                    if platform not in tool.get("platforms", (platform,)):
+                        continue
                     if platform in REMEDY_NOT_APPLICABLE.get(name, {}):
                         self.assertNotIn(
                             platform,

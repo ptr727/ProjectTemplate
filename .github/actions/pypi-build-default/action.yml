@@ -18,6 +18,10 @@ inputs:
   version-file:
     description: Repo-relative path of the file carrying the hardcoded __version__ hatchling reads.
     required: true
+  python-version:
+    description: Python line the build runs under, the one the caller's root .python-version selects. Empty lets uv choose an interpreter the project's requires-python admits, for a caller carrying no selector.
+    required: false
+    default: ''
   uv-version:
     description: uv version, pinned in lockstep with the devcontainer's UV_VERSION.
     required: false
@@ -39,6 +43,7 @@ runs:
       uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
       with:
         version: ${{ inputs.uv-version }}
+        python-version: ${{ inputs.python-version }}
         enable-cache: true
         cache-dependency-glob: ${{ inputs.project-dir }}/uv.lock
 

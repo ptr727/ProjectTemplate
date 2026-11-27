@@ -1,4 +1,4 @@
 {
-  "dotnet": "10",
-  "python": "3.13"
+  "dotnet": "11",
+  "python": "3.15"
 }

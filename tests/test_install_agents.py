@@ -36,6 +36,7 @@ READS = {
     "mise ls --json",
     "mise which opencode",
     "mise which codex",
+    "mise which herdr",
 }
 
 AWKWARD = 'a "quoted" back\\slash\ttab\nnewline\rreturn \x01\x1f é end'
@@ -50,7 +51,7 @@ case "$*" in
 "root -g") cat "$STUB_DIR/npm_root" 2>/dev/null || true ;;
 "prefix -g") cat "$STUB_DIR/npm_prefix" 2>/dev/null || true ;;
 "ls --json") cat "$STUB_DIR/mise_ls.json" 2>/dev/null || true ;;
-"which opencode"|"which codex") cat "$STUB_DIR/mise_which" 2>/dev/null || true ;;
+"which opencode"|"which codex"|"which herdr") cat "$STUB_DIR/mise_which" 2>/dev/null || true ;;
 esac
 exit 0
 """
@@ -169,6 +170,28 @@ class TestInstallAgents(unittest.TestCase):
         path.chmod(0o755)
         return path
 
+    def native(self, name: str, banner: str) -> Path:
+        """The managed copy of claude or codex, from its native installer in ~/.local/bin and linked onto PATH."""
+        return self.stub(name, banner, where=self.home / ".local" / "bin")
+
+    def native_text(self, name: str, text: str) -> Path:
+        path = self.home / ".local" / "bin" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+        (self.bin / name).symlink_to(path)
+        return path
+
+    def assert_stray(self, tool: str, removal: str | None = None) -> None:
+        """An upgrade runs nothing for the tool and names its hand fix."""
+        result = self.run_script("--upgrade", "--yes", tool)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn("remove it by hand", result.stderr)
+        self.assertIn(f"then run: install-agents.sh --install {tool}", result.stderr)
+        if removal is not None:
+            self.assertIn(removal, result.stderr)
+
     def curl(self) -> None:
         path = self.bin / "curl"
         path.write_text(CURL, encoding="utf-8")
@@ -252,8 +275,64 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), ["curl https://opencode.ai/v2/install"])
 
-    def test_upgrade_drives_only_the_tools_present(self) -> None:
+    def test_a_native_codex_alone_is_upgraded_by_its_own_updater(self) -> None:
+        self.native("codex", "codex-cli 0.149.1")
+        result = self.run_script("--upgrade", "--yes", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["codex update"])
+        self.assertEqual(self.report()["codex"]["notes"], [])
+
+    def test_codex_in_the_install_directory_the_installer_honors_is_the_managed_copy(self) -> None:
+        directory = self.dir / "codex-bin"
+        self.stub("codex", "codex-cli 0.149.1", where=directory)
+        result = self.run_script(
+            "--upgrade", "--yes", "codex", extra_env={"CODEX_INSTALL_DIR": str(directory)}
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), ["codex update"])
+
+    def test_an_npm_copy_ahead_of_the_native_one_is_reported_and_neither_runs(self) -> None:
+        self.native("claude", "2.1.300 (Claude Code)")
+        (self.bin / "claude").unlink()
+        root = self.dir / "lib" / "node_modules"
+        self.stub("claude", "2.1.0", where=root / "@anthropic-ai" / "claude-code" / "bin")
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        notes = " ".join(self.report()["claude"]["notes"])
+        self.assertIn("remove it by hand: npm uninstall -g @anthropic-ai/claude-code", notes)
+        self.assertIn("then run: install-agents.sh --install claude", notes)
+        self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
+
+    def test_an_npm_copy_linked_into_the_managed_directory_is_still_a_stray(self) -> None:
+        root = self.dir / "lib" / "node_modules"
+        real = self.stub("claude", "2.1.300", where=root / "@anthropic-ai" / "claude-code" / "bin")
+        (self.bin / "claude").unlink()
+        link = self.home / ".local" / "bin" / "claude"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+        (self.bin / "claude").symlink_to(link)
+        (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
+        self.stub("npm", "npm 10.0.0")
+        self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
+
+    def test_install_leaves_a_stray_codex_and_names_its_fix(self) -> None:
+        self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        self.curl()
+        result = self.run_script("--install", "--yes", "codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.called(), [])
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", result.stderr)
+
+    def test_a_stray_no_manager_owns_is_fixed_by_deleting_it(self) -> None:
         self.stub("claude", "2.1.300 (Claude Code)")
+        result = self.run_script("--upgrade", "--yes", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("so remove it by hand: rm ", result.stderr)
+        self.assertEqual(self.called(), [])
+
+    def test_upgrade_drives_only_the_tools_present(self) -> None:
+        self.native("claude", "2.1.300 (Claude Code)")
         self.stub("cswap", "cswap 0.27.1")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -261,17 +340,13 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("codex: not installed, leaving it absent", result.stdout)
 
     def test_upgrade_reports_the_version_now_first_on_path(self) -> None:
-        stub = self.bin / "claude"
-        stub.write_text(RELOCATING_STUB, encoding="utf-8")
-        stub.chmod(0o755)
+        self.native_text("claude", RELOCATING_STUB)
         result = self.run_script("--upgrade", "--yes", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
 
     def test_a_failed_upgrade_that_moved_the_version_is_still_listed_as_changed(self) -> None:
-        stub = self.bin / "claude"
-        stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
-        stub.chmod(0o755)
+        self.native_text("claude", RELOCATING_FAILING_STUB)
         result = self.run_script("--upgrade", "--yes", "claude")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn("claude: its updater failed", result.stderr)
@@ -283,92 +358,80 @@ class TestInstallAgents(unittest.TestCase):
         (self.dir / "npm_root").write_text(str(node_modules), encoding="utf-8")
         return node_modules
 
-    def test_files_outside_the_npm_global_root_are_not_claimed_by_that_npm(self) -> None:
+    def test_a_codex_outside_the_npm_global_root_is_a_stray_no_npm_command_removes(self) -> None:
         self.codex_in_npm()
         self.stub("npm", "npm 10.0.0")
         (self.dir / "npm_root").write_text(
             str(self.dir / "elsewhere" / "node_modules"), encoding="utf-8"
         )
-        result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), [])
-        self.assertIn("not under the global root of the npm on PATH", result.stdout)
+        self.assert_stray(
+            "codex", "did not report where it installs, so run: npm uninstall -g @openai/codex"
+        )
 
-    def test_an_npm_that_cannot_say_its_root_claims_nothing(self) -> None:
+    def test_a_codex_under_an_npm_that_cannot_say_its_root_is_a_stray(self) -> None:
         self.codex_in_npm()
         self.stub("npm", "npm 10.0.0")
         (self.dir / "npm_root").unlink()
-        result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(self.called(), [])
-        self.assertIn("does not own it", result.stdout)
+        self.assert_stray("codex")
 
-    def test_an_npm_install_is_upgraded_through_npm_for_that_one_package(self) -> None:
+    def test_an_npm_codex_is_a_stray_and_is_never_upgraded_through_npm(self) -> None:
         self.codex_in_npm()
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            self.called(), ["npm install -g --allow-scripts=@openai/codex @openai/codex@latest"]
-        )
+        self.assert_stray("codex", "npm uninstall -g @openai/codex")
         self.assertEqual(self.report()["codex"]["manager"], "npm")
 
-    def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
+    def test_a_dry_run_names_the_hand_fix_for_a_stray_and_runs_nothing(self) -> None:
         self.codex_in_npm()
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes", "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            "[dry run] npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
-            result.stdout,
-        )
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", result.stderr)
+        self.assertNotIn("[dry run]", result.stdout)
         self.assertEqual(self.called(), [])
 
-    def test_the_report_names_the_command_an_upgrade_will_run(self) -> None:
+    def test_the_report_names_the_removal_and_the_install_for_a_stray_codex(self) -> None:
         self.codex_in_npm()
         self.stub("npm", "npm 10.0.0")
         notes = self.report()["codex"]["notes"]
-        self.assertEqual(
-            notes,
-            [
-                "installed through npm, --upgrade runs: npm install -g --allow-scripts=@openai/codex @openai/codex@latest"
-            ],
-        )
-        self.assertNotIn("which upgrades it", " ".join(notes))
+        self.assertEqual(len(notes), 1)
+        self.assertIn("is the npm copy rather than the managed ~/.local/bin/codex", notes[0])
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", notes[0])
+        self.assertIn("then run: install-agents.sh --install codex", notes[0])
 
-    def test_an_unwritable_npm_directory_is_reported_with_its_command_and_not_run(self) -> None:
+    def test_a_stray_in_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
         node_modules = self.codex_in_npm()
         self.stub("npm", "npm 10.0.0")
         node_modules.chmod(0o555)
         self.addCleanup(node_modules.chmod, 0o755)
+        self.assert_stray("codex")
+        self.assertNotIn("sudo", self.run_script("--report").stdout)
+
+    def test_a_stray_fails_nothing_and_the_other_tools_still_run(self) -> None:
+        self.codex_in_npm()
+        self.stub("npm", "npm 10.0.0")
+        self.native("claude", "2.1.300 (Claude Code)")
         result = self.run_script("--upgrade", "--yes")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", result.stderr)
+        self.assertNotIn("Failed:", result.stderr)
+        self.assertEqual(self.called(), ["claude update"])
+
+    def test_a_tool_bun_owns_is_reported_and_never_upgraded_through_bun(self) -> None:
+        self.stub(
+            "herdr",
+            "herdr 0.9.0",
+            where=self.home / ".bun" / "install" / "global" / "node_modules" / "herdr" / "bin",
+        )
+        self.stub("bun", "1.1.0")
+        result = self.run_script("--upgrade", "--yes", "herdr")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), [])
         self.assertIn(
-            "is not writable by this user, so run as its owner: npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
+            "no managed tool is upgraded through bun, so upgrade herdr with bun by hand",
             result.stdout,
         )
-        self.assertNotIn("sudo", result.stdout)
-        self.assertIn("--upgrade does not run it", " ".join(self.report()["codex"]["notes"]))
 
-    def test_a_failing_manager_is_reported_and_the_other_tools_still_run(self) -> None:
-        self.codex_in_npm()
-        failing = self.bin / "npm"
-        failing.write_text(
-            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\n[[ $1 == install ]] && exit 3\ncat "$STUB_DIR/npm_root" "$STUB_DIR/npm_prefix" 2>/dev/null\nexit 0\n',
-            encoding="utf-8",
-        )
-        failing.chmod(0o755)
-        self.stub("claude", "2.1.300 (Claude Code)")
-        result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(result.returncode, 3)
-        self.assertIn("codex: npm failed to upgrade it", result.stderr)
-        self.assertIn("Failed: codex", result.stderr)
-        self.assertEqual(
-            self.called(),
-            ["claude update", "npm install -g --allow-scripts=@openai/codex @openai/codex@latest"],
-        )
-
-    def test_bun_is_upgraded_through_bun(self) -> None:
+    def test_a_bun_codex_is_a_stray_and_is_never_upgraded_through_bun(self) -> None:
         self.stub(
             "codex",
             "1.18.18",
@@ -382,11 +445,9 @@ class TestInstallAgents(unittest.TestCase):
             / "bin",
         )
         self.stub("bun", "1.1.0")
-        result = self.run_script("--upgrade", "--yes", "codex")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["bun install -g @openai/codex@latest"])
+        self.assert_stray("codex", "bun remove -g @openai/codex")
 
-    def test_homebrew_formula_and_cask_are_upgraded_by_the_name_in_their_path(self) -> None:
+    def test_homebrew_formula_and_cask_strays_are_removed_by_the_name_in_their_path(self) -> None:
         self.stub(
             "codex",
             "1.0.0",
@@ -400,11 +461,11 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("brew", "Homebrew 4.0.0")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            sorted(self.called()), ["brew upgrade --cask claude-code", "brew upgrade codex"]
-        )
+        self.assertEqual(self.called(), [])
+        self.assertIn("remove it by hand: brew uninstall codex", result.stderr)
+        self.assertIn("remove it by hand: brew uninstall --cask claude-code", result.stderr)
 
-    def test_an_npm_global_under_a_mise_node_is_npms_and_not_mises(self) -> None:
+    def test_an_npm_global_under_a_mise_node_is_removed_through_npm_and_not_mise(self) -> None:
         root = self.dir / "mise" / "installs" / "node" / "20.1.0" / "lib" / "node_modules"
         self.stub(
             "claude", "2.1.300 (Claude Code)", where=root / "@anthropic-ai" / "claude-code" / "bin"
@@ -412,49 +473,38 @@ class TestInstallAgents(unittest.TestCase):
         (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
         self.stub("npm", "npm 10.0.0")
         self.stub("mise", "mise 2024.1.1")
-        result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            self.called(),
-            [
-                "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest"
-            ],
-        )
+        self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
         self.assertEqual(self.report()["claude"]["manager"], "npm")
 
-    def test_an_npm_global_under_a_keg_only_node_in_the_cellar_is_npms_and_not_brews(self) -> None:
+    def test_an_npm_global_under_a_keg_only_node_is_removed_through_npm_and_not_brew(self) -> None:
         root = self.dir / "linuxbrew" / "Cellar" / "node@20" / "20.1.0" / "lib" / "node_modules"
         self.stub("codex", "codex-cli 0.149.1", where=root / "@openai" / "codex" / "bin")
         (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
         self.stub("npm", "npm 10.0.0")
         self.stub("brew", "Homebrew 4.0.0")
-        result = self.run_script("--upgrade", "--yes")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            self.called(), ["npm install -g --allow-scripts=@openai/codex @openai/codex@latest"]
-        )
+        self.assert_stray("codex", "npm uninstall -g @openai/codex")
 
-    def test_a_fork_with_the_same_command_under_the_npm_root_is_reported_not_run(self) -> None:
+    def test_a_fork_with_the_same_command_under_the_npm_root_is_a_stray_npm_does_not_remove(
+        self,
+    ) -> None:
         root = self.dir / "lib" / "node_modules"
         self.stub("codex", "codex-cli 9.9.9", where=root / "codex-fork" / "bin")
         (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("--upgrade", "--yes", "codex")
-        self.assertEqual(self.called(), [])
-        self.assertIn("are not under the npm package @openai/codex", result.stdout)
+        self.assert_stray("codex", "are not under the npm package @openai/codex")
 
-    def test_a_fork_under_bun_is_reported_not_run(self) -> None:
+    def test_a_fork_under_bun_is_a_stray_bun_does_not_remove(self) -> None:
         self.stub(
             "codex",
             "1.0.0",
             where=self.home / ".bun" / "install" / "global" / "node_modules" / "codex-fork" / "bin",
         )
         self.stub("bun", "1.1.0")
-        result = self.run_script("--upgrade", "--yes", "codex")
-        self.assertEqual(self.called(), [])
-        self.assertIn("not under bun's global package @openai/codex", result.stdout)
+        self.assert_stray("codex", "not under bun's global package @openai/codex")
 
-    def test_an_agent_inside_a_homebrew_node_the_npm_does_not_own_is_reported_not_run(self) -> None:
+    def test_an_agent_inside_a_homebrew_node_the_npm_does_not_own_is_a_stray_left_alone(
+        self,
+    ) -> None:
         self.stub(
             "codex",
             "1.0.0",
@@ -470,13 +520,11 @@ class TestInstallAgents(unittest.TestCase):
             / "bin",
         )
         self.stub("brew", "Homebrew 4.0.0")
-        result = self.run_script("--upgrade", "--yes", "codex")
-        self.assertEqual(self.called(), [])
-        self.assertIn(
-            "it sits inside Homebrew's Node, and the npm on PATH does not own it", result.stdout
+        self.assert_stray(
+            "codex", "it sits inside Homebrew's Node, and the npm on PATH does not own it"
         )
 
-    def test_an_agent_inside_a_mise_node_the_npm_does_not_own_is_reported_not_run(self) -> None:
+    def test_an_agent_inside_a_mise_node_the_npm_does_not_own_is_a_stray_left_alone(self) -> None:
         install = self.dir / "mise" / "installs" / "node" / "20.1.0"
         self.stub(
             "codex", "1.0.0", where=install / "lib" / "node_modules" / "@openai" / "codex" / "bin"
@@ -485,10 +533,8 @@ class TestInstallAgents(unittest.TestCase):
             json.dumps({"core:node": [{"install_path": str(install)}]}), encoding="utf-8"
         )
         self.stub("mise", "mise 2024.1.1")
-        result = self.run_script("--upgrade", "--yes", "codex")
-        self.assertEqual(self.called(), [])
-        self.assertIn(
-            "it sits inside mise's Node, and the npm on PATH does not own it", result.stdout
+        self.assert_stray(
+            "codex", "it sits inside mise's Node, and the npm on PATH does not own it"
         )
 
     def test_a_stray_inside_a_mise_node_is_never_fixed_by_removing_that_node(self) -> None:
@@ -515,7 +561,8 @@ class TestInstallAgents(unittest.TestCase):
             "--upgrade", "--yes", "codex", extra_env={"BUN_INSTALL_GLOBAL_DIR": str(custom)}
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["bun install -g @openai/codex@latest"])
+        self.assertEqual(self.called(), [])
+        self.assertIn("remove it by hand: bun remove -g @openai/codex", result.stderr)
 
     def mise_shim(self, resolves: bool) -> None:
         """A mise shim, a symlink to the mise executable that Homebrew keeps in its Cellar."""
@@ -534,21 +581,16 @@ class TestInstallAgents(unittest.TestCase):
             (self.dir / "mise_which").write_text(str(real), encoding="utf-8")
         self.stub("brew", "Homebrew 4.0.0")
 
-    def test_a_mise_shim_is_resolved_through_mise_which_and_never_upgrades_mise_itself(
+    def test_a_mise_shim_is_resolved_through_mise_which_and_never_removes_mise_itself(
         self,
     ) -> None:
         self.mise_shim(resolves=True)
-        result = self.run_script("--upgrade", "--yes", "codex")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["mise upgrade npm:@openai/codex"])
+        self.assert_stray("codex", "mise unuse -g npm:@openai/codex")
         self.assertNotIn("brew", " ".join(self.called()))
 
     def test_a_mise_shim_mise_cannot_resolve_is_reported_and_nothing_runs(self) -> None:
         self.mise_shim(resolves=False)
-        result = self.run_script("--upgrade", "--yes", "codex")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), [])
-        self.assertIn("is a mise shim and mise which could not resolve it", result.stdout)
+        self.assert_stray("codex", "mise which could not resolve its shim")
 
     def test_the_report_names_outdated_integrations_for_a_manager_owned_herdr(self) -> None:
         self.stub(
@@ -586,14 +628,13 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("herdr integration install claude", calls)
 
     def mise_layout(self, listed: bool = True) -> Path:
-        """An npm-backend tool laid out as mise does, a node_modules inside its install directory, and mise's listing of it."""
-        install = self.dir / "mise" / "installs" / "npm-openai-codex" / "1.0.0"
-        package = install / "lib" / "node_modules" / "@openai" / "codex" / "bin"
-        self.stub("codex", "1.0.0", where=package)
-        other = self.dir / "mise" / "installs" / "aqua-openai-codex" / "0.9.0"
-        entries = {"aqua:openai/codex": [{"install_path": str(other)}]}
+        """A tool laid out as mise does, a bin inside its install directory, and mise's listing of it."""
+        install = self.dir / "mise" / "installs" / "github-example-herdr" / "1.0.0"
+        self.stub("herdr", "1.0.0", where=install / "bin")
+        other = self.dir / "mise" / "installs" / "aqua-example-herdr" / "0.9.0"
+        entries = {"aqua:example/herdr": [{"install_path": str(other)}]}
         if listed:
-            entries["npm:@openai/codex"] = [{"install_path": str(install)}]
+            entries["github:example/herdr"] = [{"install_path": str(install)}]
         (self.dir / "mise_ls.json").write_text(json.dumps(entries), encoding="utf-8")
         self.stub("mise", "mise 2024.1.1")
         return install
@@ -603,8 +644,8 @@ class TestInstallAgents(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["mise upgrade npm:@openai/codex"])
-        self.assertEqual(self.report()["codex"]["manager"], "mise")
+        self.assertEqual(self.called()[0], "mise upgrade github:example/herdr")
+        self.assertEqual(self.report()["herdr"]["manager"], "mise")
 
     def test_a_mise_tool_the_listing_does_not_hold_is_reported_and_not_run(self) -> None:
         self.mise_layout(listed=False)
@@ -616,23 +657,26 @@ class TestInstallAgents(unittest.TestCase):
     def test_a_relocated_mise_tool_is_read_from_mises_listing_not_its_path(self) -> None:
         # MISE_DATA_DIR moved: no /mise/installs/ segment, and a plain binary that would otherwise read as self.
         install = self.dir / "agent-tools" / "installs" / "codex" / "1.0.0"
-        self.stub("codex", "1.0.0", where=install / "bin")
-        listing = {"codex": [{"install_path": str(install)}]}
+        self.stub("herdr", "1.0.0", where=install / "bin")
+        listing = {"herdr": [{"install_path": str(install)}]}
         (self.dir / "mise_ls.json").write_text(json.dumps(listing), encoding="utf-8")
         self.stub("mise", "mise 2024.1.1")
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("--upgrade", "--yes", "codex")
+        result = self.run_script("--upgrade", "--yes", "herdr")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.called(), ["mise upgrade codex"])
-        self.assertEqual(self.report()["codex"]["manager"], "mise")
+        self.assertEqual(self.called()[0], "mise upgrade herdr")
+        self.assertEqual(self.report()["herdr"]["manager"], "mise")
 
-    def test_a_tool_with_no_recorded_package_name_is_reported_not_guessed(self) -> None:
+    def test_a_tool_npm_owns_is_reported_and_never_upgraded_through_npm(self) -> None:
         self.stub("herdr", "herdr 0.9.0", where=self.dir / "lib" / "node_modules" / "herdr" / "bin")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("--upgrade", "--yes", "herdr")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.called(), [])
-        self.assertIn("no npm package name is recorded for herdr", result.stdout)
+        self.assertIn(
+            "no managed tool is upgraded through npm, so upgrade herdr with npm by hand",
+            result.stdout,
+        )
 
     def plan(self, tool: str, path: str, manager: str) -> str:
         """Runs the script's own manager_plan, with the final call to main cut off so it can be sourced."""
@@ -763,7 +807,7 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("could not read whether a running server needs a restart", text.stdout)
 
     def test_report_shape(self) -> None:
-        self.stub("claude", "2.1.299 (Claude Code)")
+        self.native("claude", "2.1.299 (Claude Code)")
         rows = self.report()
         self.assertEqual(list(rows), ["claude", "codex", "opencode", "herdr", "cswap"])
         for row in rows.values():
@@ -787,14 +831,14 @@ class TestInstallAgents(unittest.TestCase):
         )
 
     def test_the_report_notes_a_claude_below_its_floor(self) -> None:
-        self.stub("claude", "2.1.280 (Claude Code)")
+        self.native("claude", "2.1.280 (Claude Code)")
         self.assertEqual(
             self.report()["claude"]["notes"],
             ["at 2.1.280, below the fleet floor 2.1.281, --upgrade updates it"],
         )
 
     def test_the_report_says_nothing_of_a_claude_at_its_floor(self) -> None:
-        self.stub("claude", "2.1.281 (Claude Code)")
+        self.native("claude", "2.1.281 (Claude Code)")
         self.assertEqual(self.report()["claude"]["notes"], [])
 
     def test_the_report_says_upgrade_does_not_fix_a_floor_it_will_not_run(self) -> None:
@@ -809,7 +853,7 @@ class TestInstallAgents(unittest.TestCase):
         )
 
     def test_an_unreadable_claude_version_is_noted_and_warned_about_but_never_fails(self) -> None:
-        self.stub("claude", "Claude Code")
+        self.native("claude", "Claude Code")
         self.assertEqual(
             self.report()["claude"]["notes"],
             ["its version could not be read, so it is not known to meet the fleet floor 2.1.281"],
@@ -819,7 +863,7 @@ class TestInstallAgents(unittest.TestCase):
         self.assertIn("could not be read after the run", result.stderr)
 
     def test_an_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.native("claude", "2.1.0 (Claude Code)")
         result = self.run_script("--upgrade", "--yes", "claude")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn(
@@ -828,32 +872,22 @@ class TestInstallAgents(unittest.TestCase):
         self.assertEqual(self.called(), ["claude update"])
 
     def test_an_upgrade_that_lifts_claude_past_its_floor_passes(self) -> None:
-        stub = self.bin / "claude"
-        stub.write_text(RELOCATING_STUB, encoding="utf-8")
-        stub.chmod(0o755)
+        self.native_text("claude", RELOCATING_STUB)
         result = self.run_script("--upgrade", "--yes", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("fleet floor", result.stderr)
 
-    def test_a_manager_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
+    def test_a_stray_claude_below_its_floor_is_reported_and_left_for_a_fix_by_hand(self) -> None:
         root = self.dir / "lib" / "node_modules"
         self.stub(
             "claude", "2.1.0 (Claude Code)", where=root / "@anthropic-ai" / "claude-code" / "bin"
         )
         (self.dir / "npm_root").write_text(str(root), encoding="utf-8")
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("--upgrade", "--yes", "claude")
-        self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(
-            self.called(),
-            [
-                "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest"
-            ],
-        )
-        self.assertIn("still below the fleet floor 2.1.281", result.stderr)
+        self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
 
     def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.native("claude", "2.1.0 (Claude Code)")
         result = self.run_script("--upgrade", "--dry-run", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("[dry run] claude update", result.stdout)
@@ -1031,6 +1065,30 @@ class TestInstallAgentsWindows(unittest.TestCase):
             timeout=120,
         )
 
+    def native(self, name: str, banner: str) -> Path:
+        """The managed copy of claude, from its native installer in ~\\.local\\bin, which the script adds to its own PATH."""
+        return self.stub(name, banner, self.home / ".local" / "bin")
+
+    def native_text(self, name: str, text: str) -> Path:
+        path = self.home / ".local" / "bin" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def assert_stray(self, tool: str, removal: str | None = None, **run: Any) -> None:
+        """An upgrade runs nothing for the tool and names its hand fix."""
+        result = self.run_script("-Upgrade", "-Yes", tool, **run)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            [c for c in self.recorded() if not c.endswith("--version") and c not in READS],
+            [],
+        )
+        self.assertIn("remove it by hand", result.stderr)
+        self.assertIn(f"then run: install-agents.ps1 -Install {tool}", result.stderr)
+        if removal is not None:
+            self.assertIn(removal, result.stderr)
+
     def recorded(self) -> list[str]:
         return self.calls.read_text(encoding="utf-8").splitlines()
 
@@ -1163,8 +1221,86 @@ class TestInstallAgentsWindows(unittest.TestCase):
         writes = [c for c in self.recorded() if not c.endswith("--version") and c not in READS]
         self.assertEqual(writes, [])
 
-    def test_upgrade_drives_only_present_tools(self) -> None:
+    def test_a_native_claude_alone_is_upgraded_by_its_own_updater(self) -> None:
+        self.native("claude", "2.1.300 (Claude Code)")
+        result = self.run_script("-Upgrade", "-Yes", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("claude update", self.recorded())
+        self.assertNotIn("remove it by hand", result.stderr)
+
+    def test_codex_in_the_install_directory_the_installer_honors_is_the_managed_copy(self) -> None:
+        directory = self.dir / "codex-bin"
+        self.stub("codex", "codex-cli 0.149.1", directory)
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "codex",
+            extra_path=directory,
+            extra_env={"CODEX_INSTALL_DIR": str(directory)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("codex update", self.recorded())
+        self.assertNotIn("remove it by hand", result.stderr)
+
+    def test_codex_under_the_local_app_data_install_directory_is_the_managed_copy(self) -> None:
+        local = self.dir / "local"
+        directory = local / "Programs" / "OpenAI" / "Codex" / "bin"
+        self.stub("codex", "codex-cli 0.149.1", directory)
+        result = self.run_script(
+            "-Upgrade",
+            "-Yes",
+            "codex",
+            extra_path=directory,
+            extra_env={"LOCALAPPDATA": str(local)},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("codex update", self.recorded())
+        self.assertNotIn("remove it by hand", result.stderr)
+
+    def test_an_npm_claude_ahead_of_the_native_one_is_reported_and_neither_runs(self) -> None:
+        self.native("claude", "2.1.300 (Claude Code)")
+        npm_bin = self.dir / "node_modules" / ".bin"
+        (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
+        self.own_npm(
+            self.stub("claude", "2.1.0 (Claude Code)", npm_bin),
+            self.dir,
+            "@anthropic-ai/claude-code",
+        )
+        self.stub("npm", "npm 10.0.0")
+        self.assert_stray(
+            "claude", "npm uninstall -g @anthropic-ai/claude-code", extra_path=npm_bin
+        )
+
+    def test_an_npm_copy_in_the_managed_directory_is_still_a_stray(self) -> None:
+        npm_bin = self.home / ".local" / "bin"
+        (self.dir / "npm_prefix").write_text(str(npm_bin), encoding="utf-8")
+        self.own_npm(
+            self.stub("claude", "2.1.300 (Claude Code)", npm_bin),
+            npm_bin,
+            "@anthropic-ai/claude-code",
+        )
+        self.stub("npm", "npm 10.0.0")
+        self.assert_stray("claude", "npm uninstall -g @anthropic-ai/claude-code")
+
+    def test_install_leaves_a_stray_codex_and_names_its_fix(self) -> None:
+        npm_bin = self.dir / "node_modules" / ".bin"
+        (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
+        self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
+        self.stub("npm", "npm 10.0.0")
+        result = self.run_script("-Install", "-Yes", "codex", extra_path=npm_bin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", result.stderr)
+        self.assertNotIn("npm install", " ".join(self.recorded()))
+
+    def test_a_stray_no_manager_owns_is_fixed_by_deleting_it(self) -> None:
         self.stub("claude", "2.1.300 (Claude Code)")
+        result = self.run_script("-Upgrade", "-Yes", "claude")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no package manager owns it, so delete", result.stderr)
+        self.assertNotIn("claude update", self.recorded())
+
+    def test_upgrade_drives_only_present_tools(self) -> None:
+        self.native("claude", "2.1.300 (Claude Code)")
         self.stub("herdr", "herdr 0.9.0")
         result = self.run_script("-Upgrade", "-Yes")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -1182,49 +1318,42 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("uv tool upgrade claude-swap", self.recorded())
         self.assertNotIn("cswap upgrade", self.recorded())
 
-    def test_node_modules_path_reads_as_npm_and_is_upgraded_through_npm(self) -> None:
+    def test_an_npm_codex_is_a_stray_and_is_never_upgraded_through_npm(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest", self.recorded()
-        )
-        self.assertNotIn("codex update", self.recorded())
+        self.assert_stray("codex", "npm uninstall -g @openai/codex", extra_path=npm_bin)
 
-    def test_a_dry_run_prints_the_manager_command_and_runs_nothing(self) -> None:
+    def test_a_dry_run_names_the_hand_fix_for_a_stray_and_runs_nothing(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         self.stub("npm", "npm 10.0.0")
         result = self.run_script("-Upgrade", "-Yes", "-DryRun", "codex", extra_path=npm_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            "[dry run] npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
-            result.stdout,
-        )
-        self.assertNotIn(
-            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest", self.recorded()
-        )
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", result.stderr)
+        self.assertNotIn("[dry run]", result.stdout)
 
-    def test_the_report_names_the_command_and_not_the_false_claim(self) -> None:
+    def test_the_report_names_the_removal_and_the_install_for_a_stray_codex(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("-Report", "codex", extra_path=npm_bin)
-        self.assertIn(
-            "-Upgrade runs: npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
-            result.stdout,
-        )
-        self.assertNotIn("which upgrades it", result.stdout)
+        result = self.run_script("-Report", "-Json", "codex", extra_path=npm_bin)
+        notes = json.loads(result.stdout)["tools"][0]["notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertIn("is the npm copy rather than the managed copy in ", notes[0])
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", notes[0])
+        self.assertIn("then run: install-agents.ps1 -Install codex", notes[0])
 
     @unittest.skipIf(
         hasattr(os, "geteuid") and os.geteuid() == 0, "root can write the unwritable directory"
     )
-    def test_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
+    @unittest.skipIf(
+        hasattr(os, "geteuid") and os.geteuid() == 0, "root can write the unwritable directory"
+    )
+    def test_a_stray_in_an_unwritable_npm_directory_is_reported_and_not_run(self) -> None:
         prefix = self.dir / "npmprefix"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
         self.own_npm(
@@ -1235,56 +1364,52 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.stub("npm", "npm 10.0.0")
         prefix.chmod(0o555)
         self.addCleanup(prefix.chmod, 0o755)
-        result = self.run_script(
-            "-Upgrade", "-Yes", "codex", extra_path=prefix / "node_modules" / ".bin"
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("is not writable by this user", result.stdout)
-        self.assertNotIn(
-            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest", self.recorded()
-        )
+        self.assert_stray("codex", extra_path=prefix / "node_modules" / ".bin")
 
-    def test_a_failing_manager_is_reported_and_the_other_tools_still_run(self) -> None:
+    def test_a_stray_fails_nothing_and_the_other_tools_still_run(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.own_npm(self.stub("codex", "codex-cli 0.1.0", npm_bin), self.dir, "@openai/codex")
-        failing = self.bin / "npm"
-        failing.write_text(
-            '#!/bin/bash\nprintf "npm %s\\n" "$*" >>"$CALLS"\n[[ $1 == install ]] && exit 3\ncat "$STUB_DIR/npm_root" "$STUB_DIR/npm_prefix" 2>/dev/null\nexit 0\n',
-            encoding="utf-8",
-        )
-        failing.chmod(0o755)
-        self.stub("claude", "2.1.300 (Claude Code)")
+        self.stub("npm", "npm 10.0.0")
+        self.native("claude", "2.1.300 (Claude Code)")
         result = self.run_script("-Upgrade", "-Yes", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 3)
-        self.assertIn("npm failed to upgrade it", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("remove it by hand: npm uninstall -g @openai/codex", result.stderr)
         self.assertIn("claude update", self.recorded())
+        self.assertNotIn("npm install", " ".join(self.recorded()))
 
     def bun_package(self, name: str) -> None:
         package = self.home / ".bun" / "install" / "global" / "node_modules" / name
         package.mkdir(parents=True)
         (package / "package.json").write_text('{"name": "' + name + '"}', encoding="utf-8")
 
-    def test_bun_is_upgraded_through_bun(self) -> None:
+    def test_a_bun_codex_is_a_stray_and_is_never_upgraded_through_bun(self) -> None:
         # The real Windows layout of bun: a copied shim in .bun\bin and the package under install\global.
         bun_bin = self.home / ".bun" / "bin"
         self.stub("codex", "1.0.0", bun_bin)
         self.bun_package("@openai/codex")
         self.stub("bun", "1.1.0")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=bun_bin)
+        self.assert_stray("codex", "bun remove -g @openai/codex", extra_path=bun_bin)
+
+    def test_a_tool_bun_owns_is_reported_and_never_upgraded_through_bun(self) -> None:
+        bun_bin = self.home / ".bun" / "bin"
+        self.stub("herdr", "1.0.0", bun_bin)
+        self.stub("bun", "1.1.0")
+        result = self.run_script("-Upgrade", "-Yes", "herdr", extra_path=bun_bin)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("bun install -g @openai/codex@latest", self.recorded())
+        self.assertEqual([c for c in self.recorded() if c.startswith("bun")], [])
+        self.assertIn("no managed tool is upgraded through bun", result.stdout)
 
     def test_scoop_updates_the_app_its_which_names(self) -> None:
         root = self.dir / "Apps" / "scoop"
         shims = root / "shims"
-        self.stub("codex", "1.0.0", shims)
-        self.scoop_which(f"{root}/apps/codex/current/codex.exe")
+        self.stub("herdr", "1.0.0", shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
         result = self.run_script(
-            "-Upgrade", "-Yes", "codex", extra_path=shims, extra_env={"SCOOP": str(root)}
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("scoop update codex", self.recorded())
+        self.assertIn("scoop update herdr", self.recorded())
         self.assertNotIn("scoop update scoop", self.recorded())
 
     def scoop_which(self, answer: str) -> None:
@@ -1298,30 +1423,26 @@ class TestInstallAgentsWindows(unittest.TestCase):
 
     def test_scoops_tilde_path_for_a_per_user_install_is_expanded_before_matching(self) -> None:
         shims = self.home / "scoop" / "shims"
-        self.stub("codex", "1.0.0", shims)
-        self.scoop_which("~\\scoop\\apps\\codex\\current\\codex.exe")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=shims)
+        self.stub("herdr", "1.0.0", shims)
+        self.scoop_which("~\\scoop\\apps\\herdr\\current\\herdr.exe")
+        result = self.run_script("-Upgrade", "-Yes", "herdr", extra_path=shims)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("scoop update codex", self.recorded())
+        self.assertIn("scoop update herdr", self.recorded())
 
-    def test_a_fork_under_the_npm_prefix_is_reported_not_run(self) -> None:
+    def test_a_fork_under_the_npm_prefix_is_a_stray_npm_does_not_remove(self) -> None:
         prefix = self.dir / "npmprefix"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
         self.stub("codex", "codex-cli 9.9.9", prefix)
         self.own_npm(prefix / "codex", prefix, "codex-fork")
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=prefix)
-        self.assertNotIn("npm install", " ".join(self.recorded()))
-        self.assertIn("are not the npm package @openai/codex", result.stdout)
+        self.assert_stray("codex", "are not the npm package @openai/codex", extra_path=prefix)
 
-    def test_a_fork_under_bun_is_reported_not_run(self) -> None:
+    def test_a_fork_under_bun_is_a_stray_bun_does_not_remove(self) -> None:
         fork = self.home / ".bun" / "bin"
         self.stub("codex", "1.0.0", fork)
         self.bun_package("codex-fork")
         self.stub("bun", "1.1.0")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=fork)
-        self.assertNotIn("bun install", " ".join(self.recorded()))
-        self.assertIn("not under bun's global package @openai/codex", result.stdout)
+        self.assert_stray("codex", "not under bun's global package @openai/codex", extra_path=fork)
 
     def test_bun_honors_its_global_dir_variable_and_not_bunfig(self) -> None:
         custom = self.dir / "custom-global"
@@ -1331,15 +1452,12 @@ class TestInstallAgentsWindows(unittest.TestCase):
         (self.home / "bunfig.toml").write_text(
             '[install]\nglobalDir = "/elsewhere"\n', encoding="utf-8"
         )
-        result = self.run_script(
-            "-Upgrade",
-            "-Yes",
+        self.assert_stray(
             "codex",
+            "bun remove -g @openai/codex",
             extra_path=bun_bin,
             extra_env={"BUN_INSTALL_GLOBAL_DIR": str(custom)},
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("bun install -g @openai/codex@latest", self.recorded())
 
     def test_a_relocated_bun_is_recognized_by_its_copied_shim_in_its_bin_directory(self) -> None:
         # The real Windows layout with both bun variables moved: a copied shim in BUN_INSTALL\bin, no .bun segment.
@@ -1350,16 +1468,12 @@ class TestInstallAgentsWindows(unittest.TestCase):
         package.mkdir(parents=True)
         (package / "package.json").write_text('{"name": "@openai/codex"}', encoding="utf-8")
         self.stub("bun", "1.1.0")
-        result = self.run_script(
-            "-Upgrade",
-            "-Yes",
+        self.assert_stray(
             "codex",
+            "bun remove -g @openai/codex",
             extra_path=bun_install / "bin",
             extra_env={"BUN_INSTALL": str(bun_install), "BUN_INSTALL_GLOBAL_DIR": str(global_dir)},
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("bun install -g @openai/codex@latest", self.recorded())
-        self.assertNotIn("codex update", " ".join(self.recorded()))
 
     def test_the_report_names_outdated_integrations_for_a_scoop_owned_herdr(self) -> None:
         root = self.dir / "AgentTools"
@@ -1401,49 +1515,49 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_scoops_own_config_names_the_root_when_the_environment_does_not(self) -> None:
         root = self.dir / "AgentTools"
         shims = root / "shims"
-        self.stub("codex", "1.0.0", shims)
+        self.stub("herdr", "1.0.0", shims)
         config = self.home / ".config" / "scoop"
         config.mkdir(parents=True)
         (config / "config.json").write_text(json.dumps({"root_path": str(root)}), encoding="utf-8")
-        report = self.run_script("-Report", "-Json", "codex", extra_path=shims)
+        report = self.run_script("-Report", "-Json", "herdr", extra_path=shims)
         self.assertEqual(json.loads(report.stdout)["tools"][0]["manager"], "scoop")
-        self.scoop_which(f"{root}/apps/codex/current/codex.exe")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=shims)
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
+        result = self.run_script("-Upgrade", "-Yes", "herdr", extra_path=shims)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("scoop update codex", self.recorded())
+        self.assertIn("scoop update herdr", self.recorded())
 
     def test_an_unreadable_scoop_config_falls_back_to_the_defaults(self) -> None:
         config = self.home / ".config" / "scoop"
         config.mkdir(parents=True)
         (config / "config.json").write_text("{ not json", encoding="utf-8")
         shims = self.home / "scoop" / "shims"
-        self.stub("codex", "1.0.0", shims)
-        self.scoop_which("~\\scoop\\apps\\codex\\current\\codex.exe")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=shims)
+        self.stub("herdr", "1.0.0", shims)
+        self.scoop_which("~\\scoop\\apps\\herdr\\current\\herdr.exe")
+        result = self.run_script("-Upgrade", "-Yes", "herdr", extra_path=shims)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("scoop update codex", self.recorded())
+        self.assertIn("scoop update herdr", self.recorded())
 
     def test_a_global_scoop_app_is_reported_with_its_elevated_command(self) -> None:
         glob = self.dir / "GlobalScoop"
         shims = glob / "shims"
-        self.stub("codex", "1.0.0", shims)
-        self.scoop_which(f"{glob}/apps/codex/current/codex.exe")
+        self.stub("herdr", "1.0.0", shims)
+        self.scoop_which(f"{glob}/apps/herdr/current/herdr.exe")
         result = self.run_script(
-            "-Upgrade", "-Yes", "codex", extra_path=shims, extra_env={"SCOOP_GLOBAL": str(glob)}
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP_GLOBAL": str(glob)}
         )
         self.assertNotIn("scoop update", " ".join(self.recorded()))
         self.assertIn(
-            "scoop's global apps need an elevated shell and this script never elevates, so run in one: scoop update codex --global",
+            "scoop's global apps need an elevated shell and this script never elevates, so run in one: scoop update herdr --global",
             result.stdout,
         )
 
     def test_scoops_nodejs_app_is_never_updated_for_an_agent(self) -> None:
         root = self.dir / "AgentTools"
         shims = root / "shims"
-        self.stub("codex", "1.0.0", shims)
-        self.scoop_which(f"{root}/apps/nodejs/current/bin/codex.exe")
+        self.stub("herdr", "1.0.0", shims)
+        self.scoop_which(f"{root}/apps/nodejs/current/bin/herdr.exe")
         result = self.run_script(
-            "-Upgrade", "-Yes", "codex", extra_path=shims, extra_env={"SCOOP": str(root)}
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
         )
         self.assertNotIn("scoop update", " ".join(self.recorded()))
         self.assertIn("it sits inside scoop's Node", result.stdout)
@@ -1451,29 +1565,29 @@ class TestInstallAgentsWindows(unittest.TestCase):
     def test_a_configured_scoop_root_without_a_scoop_segment_is_still_scoop(self) -> None:
         root = self.dir / "AgentTools"
         shims = root / "shims"
-        self.stub("codex", "1.0.0", shims)
+        self.stub("herdr", "1.0.0", shims)
         result = self.run_script(
-            "-Report", "-Json", "codex", extra_path=shims, extra_env={"SCOOP": str(root)}
+            "-Report", "-Json", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
         )
         self.assertEqual(json.loads(result.stdout)["tools"][0]["manager"], "scoop")
-        self.scoop_which(f"{root}/apps/codex/current/codex.exe")
+        self.scoop_which(f"{root}/apps/herdr/current/herdr.exe")
         upgraded = self.run_script(
-            "-Upgrade", "-Yes", "codex", extra_path=shims, extra_env={"SCOOP": str(root)}
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
         )
         self.assertEqual(upgraded.returncode, 0, upgraded.stderr)
-        self.assertIn("scoop update codex", self.recorded())
+        self.assertIn("scoop update herdr", self.recorded())
 
     def test_a_scoop_path_outside_the_roots_apps_directory_is_reported_not_run(self) -> None:
         root = self.dir / "Apps" / "scoop"
         shims = root / "shims"
-        self.stub("codex", "1.0.0", shims)
-        self.scoop_which(f"{self.dir}/Apps/other/apps/codex/current/codex.exe")
+        self.stub("herdr", "1.0.0", shims)
+        self.scoop_which(f"{self.dir}/Apps/other/apps/herdr/current/herdr.exe")
         result = self.run_script(
-            "-Upgrade", "-Yes", "codex", extra_path=shims, extra_env={"SCOOP": str(root)}
+            "-Upgrade", "-Yes", "herdr", extra_path=shims, extra_env={"SCOOP": str(root)}
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("scoop update", " ".join(self.recorded()))
-        self.assertIn("scoop's name for codex could not be read", result.stdout)
+        self.assertIn("scoop's name for herdr could not be read", result.stdout)
 
     def test_shims_directly_in_the_npm_prefix_are_classified_as_npm(self) -> None:
         prefix = self.dir / "Program Files" / "nodejs"
@@ -1484,7 +1598,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         row = json.loads(result.stdout)["tools"][0]
         self.assertEqual(row["manager"], "npm")
 
-    def test_an_npm_global_under_a_scoop_node_is_npms_and_not_scoops(self) -> None:
+    def test_an_npm_global_under_a_scoop_node_is_removed_through_npm_and_not_scoop(self) -> None:
         # Scoop's real layout: npm's prefix is the persist directory, while PATH lists the linked current\bin.
         prefix = self.dir / "scoop" / "persist" / "nodejs" / "bin"
         (self.dir / "npm_prefix").write_text(str(prefix), encoding="utf-8")
@@ -1496,37 +1610,29 @@ class TestInstallAgentsWindows(unittest.TestCase):
         on_path = version.parent / "current" / "bin"
         self.stub("npm", "npm 10.0.0")
         self.scoop_which(f"{self.dir}/scoop/apps/nodejs/current/node.exe")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=on_path)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(
-            "npm install -g --allow-scripts=@openai/codex @openai/codex@latest",
-            " ".join(self.recorded()),
-        )
-        self.assertNotIn("scoop update", " ".join(self.recorded()))
+        self.assert_stray("codex", "npm uninstall -g @openai/codex", extra_path=on_path)
+        self.assertNotIn("scoop", " ".join(self.recorded()))
 
-    def test_files_outside_the_npm_prefix_are_not_claimed_by_that_npm(self) -> None:
+    def test_a_codex_outside_the_npm_prefix_is_a_stray_no_npm_command_removes(self) -> None:
         (self.dir / "npm_prefix").write_text(str(self.dir / "somewhere"), encoding="utf-8")
         elsewhere = self.dir / "node_modules" / ".bin"
         self.stub("codex", "codex-cli 0.1.0", elsewhere)
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=elsewhere)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("npm install", " ".join(self.recorded()))
-        self.assertIn("not under the prefix of the npm on PATH", result.stdout)
+        self.assert_stray("codex", "not under the prefix of the npm on PATH", extra_path=elsewhere)
 
     def test_winget_is_left_to_upgrade_host(self) -> None:
         links = self.dir / "Microsoft" / "WinGet" / "Links"
-        self.stub("codex", "1.0.0", links)
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=links)
+        self.stub("herdr", "1.0.0", links)
+        result = self.run_script("-Upgrade", "-Yes", "herdr", extra_path=links)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("winget owns it and upgrade-host upgrades it", result.stdout)
         self.assertEqual([c for c in self.recorded() if not c.endswith("--version")], [])
 
     def test_choco_is_reported_with_its_command_and_never_run(self) -> None:
         bin_dir = self.dir / "chocolatey" / "bin"
-        self.stub("codex", "1.0.0", bin_dir)
+        self.stub("herdr", "1.0.0", bin_dir)
         self.stub("choco", "choco 2.0.0")
-        result = self.run_script("-Upgrade", "-Yes", "codex", extra_path=bin_dir)
+        result = self.run_script("-Upgrade", "-Yes", "herdr", extra_path=bin_dir)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
             "choco needs an elevated shell and this script never elevates, so run in one: choco upgrade",
@@ -1630,7 +1736,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         return json.loads(result.stdout)["tools"][0]["notes"]
 
     def test_the_report_notes_a_claude_below_its_floor(self) -> None:
-        self.stub("claude", "2.1.280 (Claude Code)")
+        self.native("claude", "2.1.280 (Claude Code)")
         self.assertEqual(
             self.claude_notes(),
             ["at 2.1.280, below the fleet floor 2.1.281, -Upgrade updates it"],
@@ -1644,7 +1750,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
             "2.1.281-1",
         ):
             with self.subTest(banner=banner):
-                self.stub("claude", banner)
+                self.native("claude", banner)
                 self.assertEqual(self.claude_notes(), [])
 
     def test_the_report_says_upgrade_does_not_fix_a_floor_it_will_not_run(self) -> None:
@@ -1658,7 +1764,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         )
 
     def test_an_unreadable_claude_version_is_noted_and_warned_about_but_never_fails(self) -> None:
-        self.stub("claude", "Claude Code")
+        self.native("claude", "Claude Code")
         self.assertEqual(
             self.claude_notes(),
             ["its version could not be read, so it is not known to meet the fleet floor 2.1.281"],
@@ -1668,7 +1774,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         self.assertIn("could not be read after the run", result.stderr)
 
     def test_an_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.native("claude", "2.1.0 (Claude Code)")
         result = self.run_script("-Upgrade", "-Yes", "claude")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn(
@@ -1676,7 +1782,7 @@ class TestInstallAgentsWindows(unittest.TestCase):
         )
         self.assertIn("claude update", self.recorded())
 
-    def test_a_manager_upgrade_that_leaves_claude_below_its_floor_fails(self) -> None:
+    def test_a_stray_claude_below_its_floor_is_reported_and_left_for_a_fix_by_hand(self) -> None:
         npm_bin = self.dir / "node_modules" / ".bin"
         (self.dir / "npm_prefix").write_text(str(self.dir), encoding="utf-8")
         self.own_npm(
@@ -1685,32 +1791,24 @@ class TestInstallAgentsWindows(unittest.TestCase):
             "@anthropic-ai/claude-code",
         )
         self.stub("npm", "npm 10.0.0")
-        result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=npm_bin)
-        self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertIn(
-            "npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest",
-            self.recorded(),
+        self.assert_stray(
+            "claude", "npm uninstall -g @anthropic-ai/claude-code", extra_path=npm_bin
         )
-        self.assertIn("still below the fleet floor 2.1.281", result.stderr)
 
     def test_a_dry_run_upgrade_never_fails_on_the_floor(self) -> None:
-        self.stub("claude", "2.1.0 (Claude Code)")
+        self.native("claude", "2.1.0 (Claude Code)")
         result = self.run_script("-Upgrade", "-DryRun", "claude")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("[dry run] claude update", result.stdout)
 
     def test_upgrade_reports_the_version_now_first_on_path(self) -> None:
-        stub = self.bin / "claude"
-        stub.write_text(RELOCATING_STUB, encoding="utf-8")
-        stub.chmod(0o755)
+        self.native_text("claude", RELOCATING_STUB)
         result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=self.dir / "front")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("claude 2.1.0 -> 2.2.0", result.stdout)
 
     def test_a_failed_upgrade_that_moved_the_version_is_still_listed_as_changed(self) -> None:
-        stub = self.bin / "claude"
-        stub.write_text(RELOCATING_FAILING_STUB, encoding="utf-8")
-        stub.chmod(0o755)
+        self.native_text("claude", RELOCATING_FAILING_STUB)
         result = self.run_script("-Upgrade", "-Yes", "claude", extra_path=self.dir / "front")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertIn("claude: its updater failed", result.stderr)
