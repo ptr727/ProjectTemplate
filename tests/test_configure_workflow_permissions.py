@@ -26,6 +26,8 @@ ENDPOINT = "repos/ptr727/Fixture/actions/permissions/workflow"
 PROBLEM = function("payload_problem") + function("workflow_permissions_problem")
 LIVE = function("workflow_permissions_live")
 HELD = function("workflow_permissions_held")
+SETTLES = function("read_back_settles")
+ATTEMPTS = int(lift(r"^readback_attempts=(\d+)$"))
 
 
 def compact(document: dict[str, object]) -> str:
@@ -37,11 +39,15 @@ DECLARED = {"default_workflow_permissions": "read", "can_approve_pull_request_re
 LOOSE = {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": True}
 
 
+FAILED_READ = "__failed_read__"
+
+
 def gh_stub(log: Path, reads: list[str], read_status: int = 0, put_status: int = 0) -> str:
     """A `gh` recording each call, answering each read with the next of `reads` and a write with no body.
 
     The reads are served in order, so a read after the write can answer differently from the one before it.
     That is what lets the read-back confirmation be told apart from the pre-flight read.
+    An answer equal to FAILED_READ makes that one read fail with no body, so a read can fail among reads that succeed.
     The position is kept in a file, since each read runs in a command substitution's subshell, where a variable set is lost.
     """
     answers = "\n".join(f"answers+=({shlex.quote(answer)})" for answer in reads)
@@ -56,6 +62,7 @@ def gh_stub(log: Path, reads: list[str], read_status: int = 0, put_status: int =
         "  esac\n"
         f'  read_index="$(cat {index})"\n'
         f'  echo "$((read_index + 1))" >{index}\n'
+        f'  if [ "${{answers[$read_index]}}" = {FAILED_READ} ]; then return 1; fi\n'
         '  printf "%s" "${answers[$read_index]}"\n'
         f"  return {read_status}\n"
         "}\n"
@@ -172,7 +179,8 @@ class ApplyCase(unittest.TestCase):
             result = run_bash(
                 f"repo=ptr727/Fixture\nworkflow_permissions_file={shlex.quote(str(payload))}\n"
                 f"lower_workflow_token={str(lower).lower()}\n"
-                f"{HELPERS}{gh_stub(log, reads, put_status=put_status)}{LIVE}{HELD}"
+                f"readback_attempts={ATTEMPTS}\nreadback_delay=0\n"
+                f"{HELPERS}{gh_stub(log, reads, put_status=put_status)}{LIVE}{HELD}{SETTLES}"
                 f"{function('apply_workflow_permissions')}"
                 f"apply_workflow_permissions {shlex.quote(compact(before))}\n",
                 "jq",
@@ -221,9 +229,47 @@ class ApplyCase(unittest.TestCase):
 
     def test_a_write_that_does_not_read_back_is_unconfirmed(self) -> None:
         """A policy above the repository can hold a value, so a success status alone is not proof."""
-        out, err, status, _ = self.apply(LOOSE, [json.dumps(LOOSE)])
+        out, err, status, _ = self.apply(LOOSE, [json.dumps(LOOSE)] * ATTEMPTS)
         self.assertNotEqual(status, 0)
         self.assertIn("unconfirmed", err)
+        self.assertIn(f"read back as {compact(LOOSE)}", err)
+        self.assertNotIn("Set the workflow token defaults", out)
+
+    def test_a_stale_read_back_that_converges_is_confirmed(self) -> None:
+        """The endpoint is eventually consistent, so the first reads can still show the old value."""
+        stale = json.dumps(LOOSE)
+        out, err, status, calls = self.apply(LOOSE, [stale, stale, json.dumps(DECLARED)])
+        self.assertEqual(status, 0, err)
+        self.assertIn(f"Set the workflow token defaults from {compact(LOOSE)}", out)
+        lines = calls.strip().splitlines()
+        self.assertEqual(len(lines), 4, calls)
+        self.assertIn("--method PUT", lines[0])
+
+    def test_a_read_back_that_never_converges_is_unconfirmed_after_the_bound(self) -> None:
+        """The bound is the script's own, then the message says a later check may show the write landed."""
+        stale = json.dumps(LOOSE)
+        out, err, status, calls = self.apply(LOOSE, [stale] * (ATTEMPTS + 2))
+        self.assertNotEqual(status, 0)
+        self.assertIn("unconfirmed", err)
+        self.assertIn(f"after {ATTEMPTS} reads", err)
+        self.assertIn(" check later", err)
+        self.assertNotIn("Set the workflow token defaults", out)
+        self.assertEqual(len(calls.strip().splitlines()), ATTEMPTS + 1, calls)
+
+    def test_a_failed_early_read_is_retried_without_its_error_text(self) -> None:
+        """A transient failure ends in a confirmed write, and its token-blaming message never reaches stderr."""
+        out, err, status, calls = self.apply(LOOSE, [FAILED_READ, json.dumps(DECLARED)])
+        self.assertEqual(status, 0, err)
+        self.assertIn("Set the workflow token defaults", out)
+        self.assertNotIn("Failed to read the Actions workflow token defaults", err)
+        self.assertEqual(len(calls.strip().splitlines()), 3, calls)
+
+    def test_a_failed_final_read_keeps_its_error_text(self) -> None:
+        """A failure that persists past the bound is still diagnosed from the last read."""
+        out, err, status, _ = self.apply(LOOSE, [FAILED_READ] * ATTEMPTS)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(err.count("Failed to read the Actions workflow token defaults"), 1, err)
+        self.assertIn("unreadable", err)
         self.assertNotIn("Set the workflow token defaults", out)
 
 
