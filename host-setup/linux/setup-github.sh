@@ -479,7 +479,7 @@ register_through_gh() {
         return 0
         ;;
     2)
-        warn "gh could not list its keys, so whether the $kind key is registered is unknown"
+        warn "gh could not list its keys, so whether the $kind key is registered is unknown. A login missing the admin:public_key or admin:ssh_signing_key scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds them."
         return 0
         ;;
     esac
@@ -497,28 +497,25 @@ register_through_gh() {
     return 0
 }
 
-# Registers both keys through gh where gh is logged in, before the checks that read them.
-# Not being logged in, or not having gh, is the paste's case, so it is silent here and the checks below report it.
-# The login itself is interactive and stays the operator's, so it is never run from here.
-# The authentication key goes first, and a refusal there skips the signing key, since a refusal can mean the key belongs elsewhere.
-register_keys_through_gh() {
-    command -v gh >/dev/null || return 0
-    local account
-    account=$(gh_account)
-    [[ -n $account ]] || return 0
-
-    # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
-    # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
-    # Only the key's own account naming gh's, or ssh offering the key and GitHub refusing it, passes this part of the gate.
-    if [[ -f $KEY ]]; then
+# Whether gh may register the key for its account, warning with the reason and returning 1 where it may not.
+# A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
+# A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
+# Three things pass that part.
+#   - gh's own list showing the key as an authentication key.
+#   - The key's own account naming gh's.
+#   - Ssh offering the key and GitHub refusing it.
+# GitHub holds an authentication key on one account only, which is why gh's list showing one is proof of whose it is.
+gh_registration_allowed() {
+    local account="$1" auth_rc="$2"
+    if ((auth_rc != 0)) && [[ -f $KEY ]]; then
         probe_managed_key
         if [[ -n $MANAGED_USER && $MANAGED_USER != "$account" ]]; then
             warn "gh is logged in as $account, while the managed key belongs to $MANAGED_USER, so the key was not registered through gh. Register it with the paste below."
-            return 0
+            return 1
         fi
         if [[ -z $MANAGED_USER && $MANAGED_DENIED == false ]]; then
             warn "Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. Register it with the paste below."
-            return 0
+            return 1
         fi
     fi
 
@@ -529,6 +526,26 @@ register_keys_through_gh() {
     general=$(github_auth_user)
     if [[ -n $general && $general != "$account" ]]; then
         warn "gh is logged in as $account, while this host's ssh identity answers as $general, so the key was not registered through gh. Register it with the paste below on the intended account, or log gh in as that account and re-run."
+        return 1
+    fi
+    return 0
+}
+
+# Registers both keys through gh where gh is logged in, before the checks that read them.
+# Not being logged in, or not having gh, is the paste's case, so it is silent here and the checks below report it.
+# The login itself is interactive and stays the operator's, so it is never run from here.
+# The authentication key goes first, and a refusal there skips the signing key, since a refusal can mean the key belongs elsewhere.
+# A key gh already lists as both kinds leaves nothing to write.
+# So the gate is not asked, and a configured host is told to paste nothing.
+register_keys_through_gh() {
+    command -v gh >/dev/null || return 0
+    local account auth_rc=0 signing_rc=0
+    account=$(gh_account)
+    [[ -n $account ]] || return 0
+
+    gh_key_registered authentication || auth_rc=$?
+    gh_key_registered signing || signing_rc=$?
+    if ((auth_rc != 0 || signing_rc != 0)) && ! gh_registration_allowed "$account" "$auth_rc"; then
         return 0
     fi
 

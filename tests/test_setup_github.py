@@ -921,6 +921,21 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         self.assertEqual(adds, [])
         self.assertIn(HOST_MISMATCH, result.stderr)
 
+    def test_gh_listing_the_authentication_key_proves_whose_it_is(self) -> None:
+        result, adds = self.register(registered="auth", batch_user="", ssh_state="passphrase")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
+        self.assertNotIn("Could not tell", result.stderr)
+
+    def test_a_configured_host_is_not_told_to_paste(self) -> None:
+        result, adds = self.register(
+            registered="auth signing", batch_user="", ssh_state="passphrase", general=SECOND
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(adds, [])
+        self.assertNotIn("paste", result.stderr)
+
     def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
         result, adds = self.register(general=ACCOUNT)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -938,9 +953,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
                 )
 
     def test_only_the_evidence_probe_is_verbose_and_non_prompting(self) -> None:
-        result, _ = self.register(
-            managed=ACCOUNT, registered="auth signing", then="resolve_github_user"
-        )
+        result, _ = self.register(managed=ACCOUNT, then="resolve_github_user")
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = (self.tmp / "calls").read_text().splitlines()
         probes = [c for c in calls if "IdentitiesOnly" in c]
@@ -969,6 +982,7 @@ class TestLinuxKeyRegistration(unittest.TestCase):
         result, adds = self.register(list_rc=1, public_signing=True, then=check)
         self.assertEqual(adds, [])
         self.assertIn("gh could not list its keys", result.stderr)
+        self.assertIn(ADD_REFRESH, result.stderr)
         self.assertIn("rc=0", result.stdout)
         result, _ = self.register(list_rc=1, then=check)
         self.assertIn("rc=1", result.stdout)
@@ -1013,6 +1027,7 @@ WINDOWS_REGISTER_FUNCTIONS = [
     "Test-KeyRegistered",
     "Get-SigningRegistrationState",
     "Register-KeyThroughGh",
+    "Test-GhRegistrationAllowed",
     "Register-KeysThroughGh",
 ]
 WINDOWS_REGISTER_BODY = r"""
@@ -1165,11 +1180,19 @@ class TestWindowsKeyRegistration(unittest.TestCase):
                 general=SECOND,
             ),
             windows_register_case("host-same", general=ACCOUNT),
+            windows_register_case("probe-once", managed=ACCOUNT, resolve=True),
             windows_register_case(
-                "probe-once",
-                managed=ACCOUNT,
+                "listed-auth-passphrase",
+                registered=["authentication"],
+                batch_user="",
+                ssh_state="passphrase",
+            ),
+            windows_register_case(
+                "configured-host",
                 registered=["authentication", "signing"],
-                resolve=True,
+                batch_user="",
+                ssh_state="passphrase",
+                general=SECOND,
             ),
             windows_register_case(
                 "passphrase-resolve",
@@ -1271,6 +1294,16 @@ class TestWindowsKeyRegistration(unittest.TestCase):
         self.assertEqual(self.adds("host-other-key-on-gh"), [])
         self.assertIn(HOST_MISMATCH, self.output("host-other-key-on-gh"))
 
+    def test_gh_listing_the_authentication_key_proves_whose_it_is(self) -> None:
+        adds = self.adds("listed-auth-passphrase")
+        self.assertEqual(len(adds), 1, adds)
+        self.assertTrue(adds[0].endswith("--type signing"), adds)
+        self.assertNotIn("Could not tell", self.output("listed-auth-passphrase"))
+
+    def test_a_configured_host_is_not_told_to_paste(self) -> None:
+        self.assertEqual(self.adds("configured-host"), [])
+        self.assertNotIn("paste", self.output("configured-host"))
+
     def test_a_host_identity_answering_as_the_gh_account_is_registered(self) -> None:
         self.assertEqual(len(self.adds("host-same")), 2)
         self.assertNotIn("ssh identity answers as", self.output("host-same"))
@@ -1302,6 +1335,7 @@ class TestWindowsKeyRegistration(unittest.TestCase):
     def test_a_gh_listing_that_fails_registers_nothing_and_the_public_list_answers(self) -> None:
         self.assertEqual(self.adds("list-fails"), [])
         self.assertIn("gh could not list its keys", self.output("list-fails"))
+        self.assertIn(ADD_REFRESH, self.output("list-fails"))
         self.assertIn("state=registered", self.output("list-fails"))
         self.assertIn("state=missing", self.output("list-fails-empty"))
 

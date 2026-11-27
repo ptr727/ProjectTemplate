@@ -655,7 +655,7 @@ function Register-KeyThroughGh {
         return $true
     }
     if ($state -eq 'unknown') {
-        warn "gh could not list its keys, so whether the $Kind key is registered is unknown"
+        warn "gh could not list its keys, so whether the $Kind key is registered is unknown. A login missing the admin:public_key or admin:ssh_signing_key scope is one cause, and gh auth refresh -h github.com -s admin:public_key,admin:ssh_signing_key adds them."
         return $false
     }
 
@@ -672,28 +672,26 @@ function Register-KeyThroughGh {
     return $true
 }
 
-# Registers both keys through gh where gh is logged in, before the checks that read them.
-# Not being logged in, or not having gh, is the paste's case, so it is silent here and the checks below report it.
-# The login itself is interactive and stays the operator's, so it is never run from here.
-# The authentication key goes first, and a refusal there skips the signing key, since a refusal can mean the key belongs elsewhere.
-function Register-KeysThroughGh {
-    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
-    $account = Get-GhAccount
-    if (-not $account) { return }
-
-    # A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
-    # A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
-    # Only the key's own account naming gh's, or ssh offering the key and GitHub refusing it, passes this part of the gate.
-    if (Test-Path $script:KEY) {
+# Whether gh may register the key for its account, warning with the reason where it may not.
+# A key already authenticating as another account belongs there, and gh would write the signing registration to this one.
+# A probe that could not tell is not a pass, since a denial without an offer of this key says nothing about it.
+# Three things pass that part.
+#   - gh's own list showing the key as an authentication key.
+#   - The key's own account naming gh's.
+#   - Ssh offering the key and GitHub refusing it.
+# GitHub holds an authentication key on one account only, which is why gh's list showing one is proof of whose it is.
+function Test-GhRegistrationAllowed {
+    param([string]$Account, [string]$AuthState)
+    if ($AuthState -ne 'registered' -and (Test-Path $script:KEY)) {
         $greeting = Get-SshGreeting -ManagedKeyOnly -Evidence
         $managed = Get-GreetingUser $greeting
-        if ($managed -and $managed -ne $account) {
-            warn "gh is logged in as $account, while the managed key belongs to $managed, so the key was not registered through gh. Register it with the paste below."
-            return
+        if ($managed -and $managed -ne $Account) {
+            warn "gh is logged in as $Account, while the managed key belongs to $managed, so the key was not registered through gh. Register it with the paste below."
+            return $false
         }
         if (-not $managed -and -not (Test-ManagedKeyDenied -Greeting $greeting)) {
             warn 'Could not tell which account the managed key belongs to, because ssh did not show GitHub refusing the key it offered, so the key was not registered through gh. Register it with the paste below.'
-            return
+            return $false
         }
     }
 
@@ -701,8 +699,27 @@ function Register-KeysThroughGh {
     # A host whose existing ssh identity answers as another account is told so before anything is written, rather than after.
     # A host with no identity GitHub accepts names no account here, so it is unaffected.
     $general = Get-GreetingUser (Get-SshGreeting)
-    if ($general -and $general -ne $account) {
-        warn "gh is logged in as $account, while this host's ssh identity answers as $general, so the key was not registered through gh. Register it with the paste below on the intended account, or log gh in as that account and re-run."
+    if ($general -and $general -ne $Account) {
+        warn "gh is logged in as $Account, while this host's ssh identity answers as $general, so the key was not registered through gh. Register it with the paste below on the intended account, or log gh in as that account and re-run."
+        return $false
+    }
+    return $true
+}
+
+# Registers both keys through gh where gh is logged in, before the checks that read them.
+# Not being logged in, or not having gh, is the paste's case, so it is silent here and the checks below report it.
+# The login itself is interactive and stays the operator's, so it is never run from here.
+# The authentication key goes first, and a refusal there skips the signing key, since a refusal can mean the key belongs elsewhere.
+# A key gh already lists as both kinds leaves nothing to write.
+# So the gate is not asked, and a configured host is told to paste nothing.
+function Register-KeysThroughGh {
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return }
+    $account = Get-GhAccount
+    if (-not $account) { return }
+
+    $authState = Get-GhKeyState -Kind 'authentication'
+    $signingState = Get-GhKeyState -Kind 'signing'
+    if (($authState -ne 'registered' -or $signingState -ne 'registered') -and -not (Test-GhRegistrationAllowed -Account $account -AuthState $authState)) {
         return
     }
 
