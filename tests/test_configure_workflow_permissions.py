@@ -39,11 +39,15 @@ DECLARED = {"default_workflow_permissions": "read", "can_approve_pull_request_re
 LOOSE = {"default_workflow_permissions": "write", "can_approve_pull_request_reviews": True}
 
 
+FAILED_READ = "__failed_read__"
+
+
 def gh_stub(log: Path, reads: list[str], read_status: int = 0, put_status: int = 0) -> str:
     """A `gh` recording each call, answering each read with the next of `reads` and a write with no body.
 
     The reads are served in order, so a read after the write can answer differently from the one before it.
     That is what lets the read-back confirmation be told apart from the pre-flight read.
+    An answer equal to FAILED_READ makes that one read fail with no body, so a read can fail among reads that succeed.
     The position is kept in a file, since each read runs in a command substitution's subshell, where a variable set is lost.
     """
     answers = "\n".join(f"answers+=({shlex.quote(answer)})" for answer in reads)
@@ -58,6 +62,7 @@ def gh_stub(log: Path, reads: list[str], read_status: int = 0, put_status: int =
         "  esac\n"
         f'  read_index="$(cat {index})"\n'
         f'  echo "$((read_index + 1))" >{index}\n'
+        f'  if [ "${{answers[$read_index]}}" = {FAILED_READ} ]; then return 1; fi\n'
         '  printf "%s" "${answers[$read_index]}"\n'
         f"  return {read_status}\n"
         "}\n"
@@ -249,6 +254,22 @@ class ApplyCase(unittest.TestCase):
         self.assertIn(" check later", err)
         self.assertNotIn("Set the workflow token defaults", out)
         self.assertEqual(len(calls.strip().splitlines()), ATTEMPTS + 1, calls)
+
+    def test_a_failed_early_read_is_retried_without_its_error_text(self) -> None:
+        """A transient failure ends in a confirmed write, and its token-blaming message never reaches stderr."""
+        out, err, status, calls = self.apply(LOOSE, [FAILED_READ, json.dumps(DECLARED)])
+        self.assertEqual(status, 0, err)
+        self.assertIn("Set the workflow token defaults", out)
+        self.assertNotIn("Failed to read the Actions workflow token defaults", err)
+        self.assertEqual(len(calls.strip().splitlines()), 3, calls)
+
+    def test_a_failed_final_read_keeps_its_error_text(self) -> None:
+        """A failure that persists past the bound is still diagnosed from the last read."""
+        out, err, status, _ = self.apply(LOOSE, [FAILED_READ] * ATTEMPTS)
+        self.assertNotEqual(status, 0)
+        self.assertEqual(err.count("Failed to read the Actions workflow token defaults"), 1, err)
+        self.assertIn("unreadable", err)
+        self.assertNotIn("Set the workflow token defaults", out)
 
 
 class HeldCase(unittest.TestCase):
