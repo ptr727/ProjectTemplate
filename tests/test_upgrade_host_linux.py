@@ -171,12 +171,9 @@ class TestPackageUpgradeRetry(unittest.TestCase):
                 "apt-get autoclean",
             ],
         )
-        self.assertEqual(
-            [line for line in self.full_calls() if line.startswith("apt-get update")],
-            [
-                "apt-get update -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
-            ]
-            * 2,
+        self.assert_retried_call_kept_its_arguments(
+            "update",
+            "apt-get update -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold",
         )
 
     def test_an_unattended_install_that_fails_once_reads_the_lists_again_and_succeeds(self) -> None:
@@ -195,11 +192,8 @@ class TestPackageUpgradeRetry(unittest.TestCase):
                 "apt-get autoclean",
             ],
         )
-        installs = [line for line in self.full_calls() if line.startswith("apt-get install")]
-        self.assertEqual(len(installs), 2)
-        self.assertEqual(installs[0], installs[1])
-        self.assertEqual(
-            installs[1],
+        self.assert_retried_call_kept_its_arguments(
+            "install",
             "apt-get install -f -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold",
         )
 
