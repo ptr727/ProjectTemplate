@@ -95,7 +95,7 @@ Actions, name one, default --packages:
 Options:
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt, keep the installed config file on a packaging conflict, and
-                    retry a failed upgrade once after reading the package lists again
+                    retry a failed package list read or upgrade once
 
 A release upgrade moves one release at a time, which is what both distributions support: a host two
 releases behind is upgraded by running this twice. Debian is carried by rewriting the codename in
@@ -175,16 +175,18 @@ run_root() { run "${SUDO[@]}" "$@"; }
 
 apt_get() { run_root apt-get "$@" "${APT_OPTS[@]}"; }
 
-apt_upgrade() {
+apt_retry() {
     local status=0
     apt_get "$@" || status=$?
     if [[ $status -eq 0 || $ASSUME_YES != true ]]; then
         return "$status"
     fi
     warn "apt-get $* failed (exit $status), a mirror still syncing is the usual cause"
-    info "Waiting ${APT_RETRY_DELAY}s, then reading the package lists again and retrying once"
+    info "Waiting ${APT_RETRY_DELAY}s, then retrying once"
     sleep "$APT_RETRY_DELAY"
-    apt_get update
+    if [[ $1 != "update" ]]; then
+        apt_get update
+    fi
     apt_get "$@"
 }
 
@@ -207,10 +209,10 @@ fetch() {
 
 upgrade_packages() {
     step "Updating package lists"
-    apt_get update
+    apt_retry update
 
     step "Upgrading packages"
-    apt_upgrade full-upgrade
+    apt_retry full-upgrade
 
     step "Completing any partial install"
     apt_get install -f
@@ -341,7 +343,7 @@ ensure_release_prerequisites() {
     command -v curl >/dev/null && return 0
 
     step "Installing curl, which the release index is read with"
-    apt_get update
+    apt_retry update
     apt_get install curl ca-certificates
 }
 
@@ -548,15 +550,15 @@ debian_release_upgrade() {
     debian_rewrite_sources "$CODENAME" "$next"
 
     step "Reading the $next package lists"
-    apt_get update
+    apt_retry update
 
     # The release notes take the minimal upgrade first.
     # So the packages that need no new dependencies land before the ones that pull in a changed dependency set.
     step "Upgrading without new packages"
-    apt_upgrade upgrade --without-new-pkgs
+    apt_retry upgrade --without-new-pkgs
 
     step "Upgrading the rest of the distribution"
-    apt_upgrade full-upgrade
+    apt_retry full-upgrade
 
     step "Removing what $next no longer needs"
     apt_get autoremove --purge

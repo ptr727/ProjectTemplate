@@ -76,17 +76,14 @@ class TestPackageUpgradeRetry(unittest.TestCase):
     def run_upgrade(
         self, *args: str, fail: dict[str, str], stdin: int | None = None
     ) -> subprocess.CompletedProcess[str]:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith("FAIL_") and key != "WSL_DISTRO_NAME"
-        }
+        env = dict(os.environ)
         env.update({f"FAIL_{sub}": attempts for sub, attempts in fail.items()})
         env.update(
             {
                 "PATH": f"{self.bin}{os.pathsep}{env.get('PATH', '')}",
                 "STUB_DIR": str(self.work),
                 "STUB_LOG": str(self.log),
+                "TMPDIR": str(self.work),
             }
         )
         return subprocess.run(
@@ -143,6 +140,22 @@ class TestPackageUpgradeRetry(unittest.TestCase):
         self.assertEqual(result.returncode, 100, result.stderr)
         self.assertEqual(
             self.calls(), ["apt-get update", "apt-get full-upgrade", "sleep 90", "apt-get update"]
+        )
+
+    def test_an_unattended_list_read_that_fails_once_is_retried_alone(self) -> None:
+        result = self.run_upgrade("--yes", fail={"update": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.calls(),
+            [
+                "apt-get update",
+                "sleep 90",
+                "apt-get update",
+                "apt-get full-upgrade",
+                "apt-get install",
+                "apt-get autoremove",
+                "apt-get autoclean",
+            ],
         )
 
     def test_an_attended_upgrade_is_not_retried(self) -> None:
