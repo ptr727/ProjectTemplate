@@ -25,6 +25,8 @@ readonly SUDOERS_FILE="/etc/sudoers.d/90-host-setup-sudo-timestamp"
 # The value is long enough to cover a run started from another terminal and short enough that a host left alone does not stay elevated.
 readonly SUDO_TIMESTAMP_TIMEOUT=60
 
+readonly APT_RETRY_DELAY=90
+
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
 readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell op)
 MANAGED_TOOLS=("${TOOLS[@]}")
@@ -219,7 +221,8 @@ Actions, name one, default --report:
 Options:
   -j, --json        Write the report as JSON rather than a table, for a program to read
   -n, --dry-run     Print the commands instead of running them
-  -y, --yes         Do not prompt before changing the host
+  -y, --yes         Do not prompt before changing the host, and retry a failed apt-get list read or
+                    install once
   -o, --optional    Include the optional tools and the optional package sets, where a tool has one
       --repo PATH   Include apt packages declared by PATH/host-tools.json
 
@@ -333,10 +336,25 @@ apt_candidate_version() {
     printf '%s' "$version"
 }
 
+apt_retry() {
+    local status=0
+    run_root apt-get "$@" || status=$?
+    if [[ $status -eq 0 || $ASSUME_YES != true ]]; then
+        return "$status"
+    fi
+    warn "apt-get $* failed (exit $status), a mirror still syncing is the usual cause"
+    info "Waiting ${APT_RETRY_DELAY}s, then retrying once"
+    sleep "$APT_RETRY_DELAY"
+    if [[ $1 != "update" ]]; then
+        run_root apt-get update || return
+    fi
+    run_root apt-get "$@"
+}
+
 # Refresh the apt lists, once per run, and again after a sources file changes.
 apt_refresh() {
     [[ $APT_REFRESHED == true && $APT_DIRTY == false ]] && return 0
-    run_root apt-get update
+    apt_retry update
     APT_REFRESHED=true
     APT_DIRTY=false
 }
@@ -357,7 +375,7 @@ apt_install() {
     [[ ${#wanted[@]} -eq 0 ]] && return 0
 
     apt_refresh
-    run_root apt-get install -y "${wanted[@]}"
+    apt_retry install -y "${wanted[@]}"
 }
 
 # Packages from a set that are not installed, one per line.
@@ -475,7 +493,7 @@ apt_install_displacing() {
         confirm "  Continue?" || die "Declined, $package left as it is"
     fi
 
-    run_root apt-get install -y "$package"
+    apt_retry install -y "$package"
 }
 
 # --- Repositories ---
@@ -566,7 +584,7 @@ ensure_prerequisites() {
     readarray -t missing < <(apt_missing ca-certificates curl gnupg gpgv)
     [[ ${#missing[@]} -eq 0 ]] && return 0
     apt_refresh
-    run_root apt-get install -y "${missing[@]}"
+    apt_retry install -y "${missing[@]}"
 }
 
 # --- Upstream releases ---

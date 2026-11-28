@@ -371,6 +371,140 @@ if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
         )
 
 
+APT_RETRY_STUB = """declare -A SEEN=()
+run_root() {
+    printf '%s\\n' "$*" >>"$CALLS"
+    local sub=$2
+    SEEN[$sub]=$((${SEEN[$sub]:-0} + 1))
+    local fails="FAIL_$sub"
+    [[ " ${!fails:-} " == *" ${SEEN[$sub]} "* ]] && return 100
+    return 0
+}
+sleep() { printf 'sleep %s\\n' "$*" >>"$CALLS"; }
+"""
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxAptRetry(LinuxFunctionsCase):
+    """An unattended run retries a failed apt-get list read or install once, after a wait and a fresh list read.
+
+    The stub records each root command and each sleep.
+    It fails the nth call of an apt-get subcommand where FAIL_<subcommand> names n.
+    The tool installers call these helpers with errexit off, so each body calls them the same way.
+    A failure must then come back as a status rather than relying on errexit to stop the run.
+    """
+
+    def run_apt(
+        self, call: str, *, assume_yes: bool = True, fail: dict[str, str] | None = None
+    ) -> tuple[int, list[str]]:
+        """Run one helper call against the stub, returning its status and the commands it ran."""
+        calls = self.dir / "calls"
+        failures = "\n".join(f"FAIL_{sub}='{nth}'" for sub, nth in (fail or {}).items())
+        body = f"""CALLS="{calls}"
+ASSUME_YES={"true" if assume_yes else "false"}
+MODE=upgrade
+{APT_RETRY_STUB}{failures}
+status=0
+{call} || status=$?
+printf 'STATUS %s\\n' "$status"
+"""
+        result = self.run_bash(body)
+        lines = result.stdout.splitlines()
+        status = [line for line in lines if line.startswith("STATUS ")]
+        self.assertEqual(len(status), 1, result.stdout + result.stderr)
+        recorded = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+        return int(status[0].split()[1]), recorded
+
+    def test_an_unattended_install_that_fails_once_reads_the_lists_again_and_succeeds(
+        self,
+    ) -> None:
+        status, calls = self.run_apt("apt_install jq", fail={"install": "1"})
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            [
+                "apt-get update",
+                "apt-get install -y jq",
+                "sleep 90",
+                "apt-get update",
+                "apt-get install -y jq",
+            ],
+        )
+
+    def test_an_unattended_install_that_fails_twice_returns_apt_s_status(self) -> None:
+        status, calls = self.run_apt("apt_install jq", fail={"install": "1 2"})
+        self.assertEqual(status, 100)
+        self.assertEqual(
+            calls,
+            [
+                "apt-get update",
+                "apt-get install -y jq",
+                "sleep 90",
+                "apt-get update",
+                "apt-get install -y jq",
+            ],
+        )
+
+    def test_a_failed_list_read_inside_the_retry_returns_without_installing_again(
+        self,
+    ) -> None:
+        status, calls = self.run_apt("apt_install jq", fail={"install": "1", "update": "2"})
+        self.assertEqual(status, 100)
+        self.assertEqual(
+            calls, ["apt-get update", "apt-get install -y jq", "sleep 90", "apt-get update"]
+        )
+
+    def test_an_unattended_list_read_that_fails_once_is_retried_alone(self) -> None:
+        status, calls = self.run_apt(
+            'apt_refresh && printf "REFRESHED %s\\n" "$APT_REFRESHED" >>"$CALLS"',
+            fail={"update": "1"},
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(calls, ["apt-get update", "sleep 90", "apt-get update", "REFRESHED true"])
+
+    def test_the_prerequisites_and_a_displacing_install_are_retried_too(self) -> None:
+        status, calls = self.run_apt(
+            "apt_missing() { printf 'curl\\n'; }; ensure_prerequisites", fail={"install": "1"}
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(calls[-3:], ["sleep 90", "apt-get update", "apt-get install -y curl"])
+
+        (self.dir / "calls").unlink()
+        status, calls = self.run_apt(
+            "apt-get() { :; }; apt_install_displacing nodejs", fail={"install": "1"}
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(calls[-3:], ["sleep 90", "apt-get update", "apt-get install -y nodejs"])
+
+    def test_an_attended_install_is_not_retried(self) -> None:
+        status, calls = self.run_apt("apt_install jq", assume_yes=False, fail={"install": "1"})
+        self.assertEqual(status, 100)
+        self.assertEqual(calls, ["apt-get update", "apt-get install -y jq"])
+
+    def test_every_root_apt_get_call_but_the_retry_helper_s_own_is_a_deliberate_choice(
+        self,
+    ) -> None:
+        """A new root apt-get call fails this until it is listed, since one that fetches belongs in apt_retry.
+
+        The removal stays outside, since it reads nothing from a mirror.
+        """
+        text = LINUX_INSTALLER.read_text(encoding="utf-8")
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if "run_root apt-get" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(
+            lines,
+            [
+                'run_root apt-get "$@" || status=$?',
+                "run_root apt-get update || return",
+                'run_root apt-get "$@"',
+                'run_root apt-get remove -y "${present[@]}"',
+            ],
+        )
+
+
 @unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
 class TestLinuxOptionalTools(LinuxFunctionsCase):
     """An optional tool joins the default selection only under --optional, and naming it selects it."""
