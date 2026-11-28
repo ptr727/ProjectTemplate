@@ -72,7 +72,6 @@ jobs:
       versions: ${{ steps.build.outputs.versions }}
     steps:
 
-      # The selector alone is read where no matrix file is named, so the checkout stays one file.
       - name: Checkout code step
         if: ${{ inputs.test-matrix-file != '' || inputs.python-versions == '' || inputs.dotnet-versions != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
