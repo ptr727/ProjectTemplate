@@ -356,6 +356,7 @@ apt_retry() {
 # Refresh the apt lists, once per run, and again after a sources file changes.
 apt_refresh() {
     [[ $APT_REFRESHED == true && $APT_DIRTY == false ]] && return 0
+    local dirty=$APT_DIRTY
     if apt_retry update; then
         APT_LISTS_FAILED=false
     else
@@ -364,6 +365,7 @@ apt_refresh() {
     fi
     APT_REFRESHED=true
     APT_DIRTY=false
+    [[ $APT_LISTS_FAILED == false || $dirty == false ]]
 }
 
 # Install packages.
@@ -381,7 +383,7 @@ apt_install() {
     done
     [[ ${#wanted[@]} -eq 0 ]] && return 0
 
-    apt_refresh
+    apt_refresh || return
     apt_retry install -y "${wanted[@]}"
 }
 
@@ -479,7 +481,7 @@ remove_unowned_command() {
 # Orphaned dependencies are left for a later apt autoremove rather than swept here, since autoremove reaches the whole host.
 apt_install_displacing() {
     local package="$1"
-    apt_refresh
+    apt_refresh || return
 
     if [[ $DRY_RUN == true ]]; then
         info "[dry run] apt-get install -y $package, removals cannot be previewed until the repository is read"
@@ -590,7 +592,7 @@ ensure_prerequisites() {
     # The gpgv package is named on its own rather than left to gnupg, since the keyring check depends on it.
     readarray -t missing < <(apt_missing ca-certificates curl gnupg gpgv)
     [[ ${#missing[@]} -eq 0 ]] && return 0
-    apt_refresh
+    apt_refresh || return
     apt_retry install -y "${missing[@]}"
 }
 

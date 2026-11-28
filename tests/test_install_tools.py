@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -555,6 +556,34 @@ git_restore_mtime_install""",
         )
         self.assertEqual(status, 1)
         self.assertNotIn("FETCH", calls)
+
+    def test_a_failed_list_read_after_a_new_source_fails_only_that_tool(self) -> None:
+        status, calls = self.run_apt(
+            """APT_DIRTY=true
+if apt_install gh; then printf 'GH OK\\n' >>"$CALLS"; else printf 'GH FAILED\\n' >>"$CALLS"; fi
+apt_install jq""",
+            fail={"update": "1 2"},
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            ["apt-get update", "sleep 90", "apt-get update", "GH FAILED", "apt-get install -y jq"],
+        )
+
+    def test_both_scripts_wait_the_same_time_before_a_retry(self) -> None:
+        """The README states one wait for both scripts, and each carries its own copy of it."""
+        upgrader = ROOT / "host-setup" / "linux" / "upgrade-host.sh"
+        delays = {}
+        for script in (LINUX_INSTALLER, upgrader):
+            found = re.findall(
+                r"^readonly APT_RETRY_DELAY=(\d+)$",
+                script.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            self.assertEqual(len(found), 1, script)
+            delays[script.name] = found[0]
+        self.assertEqual(delays["install-tools.sh"], delays["upgrade-host.sh"])
+        self.assertEqual(delays["install-tools.sh"], "90")
 
     def test_the_prerequisites_and_a_displacing_install_are_retried_too(self) -> None:
         status, calls = self.run_apt(
