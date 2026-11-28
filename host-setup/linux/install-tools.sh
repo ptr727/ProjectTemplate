@@ -53,6 +53,7 @@ WITH_OPTIONAL=false
 APT_REFRESHED=false
 APT_DIRTY=false
 APT_LISTS_FAILED=false
+APT_SOURCE_ADDED=false
 DISTRO_ID=""
 DISTRO_VERSION=""
 CODENAME=""
@@ -356,7 +357,6 @@ apt_retry() {
 # Refresh the apt lists, once per run, and again after a sources file changes.
 apt_refresh() {
     [[ $APT_REFRESHED == true && $APT_DIRTY == false ]] && return 0
-    local dirty=$APT_DIRTY
     if apt_retry update; then
         APT_LISTS_FAILED=false
     else
@@ -365,7 +365,7 @@ apt_refresh() {
     fi
     APT_REFRESHED=true
     APT_DIRTY=false
-    [[ $APT_LISTS_FAILED == false || $dirty == false ]]
+    [[ $APT_LISTS_FAILED == false || $APT_SOURCE_ADDED == false ]]
 }
 
 # Install packages.
@@ -583,6 +583,7 @@ register_apt_source() {
     fi
     if write_sources "$name" "$uris" "$suites" "$components" "$keyring"; then
         APT_DIRTY=true
+        APT_SOURCE_ADDED=true
     fi
     [[ $# -eq 0 ]] || remove_stale "$@"
 }
@@ -1033,6 +1034,7 @@ microsoft_feed() {
     # A failed install ends the run here instead, rather than failing only the tool as the missing feed above does.
     run_root dpkg -i "$deb" || die "Cannot install Microsoft's feed from $deb"
     APT_DIRTY=true
+    APT_SOURCE_ADDED=true
     apt_refresh
 }
 
@@ -1609,6 +1611,7 @@ tool_unshadow() {
 # Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status
+    APT_SOURCE_ADDED=false
 
     if [[ -n ${REPO_PACKAGES[$tool]:-} ]]; then
         local package="${REPO_PACKAGES[$tool]}"

@@ -560,6 +560,7 @@ git_restore_mtime_install""",
     def test_a_failed_list_read_after_a_new_source_fails_only_that_tool(self) -> None:
         status, calls = self.run_apt(
             """APT_DIRTY=true
+APT_SOURCE_ADDED=true
 if apt_install gh; then printf 'GH OK\\n' >>"$CALLS"; else printf 'GH FAILED\\n' >>"$CALLS"; fi
 apt_install jq""",
             fail={"update": "1 2"},
@@ -569,6 +570,25 @@ apt_install jq""",
             calls,
             ["apt-get update", "sleep 90", "apt-get update", "GH FAILED", "apt-get install -y jq"],
         )
+
+    def test_a_failed_list_read_fails_no_tool_that_added_no_source(self) -> None:
+        for call in [
+            "APT_DIRTY=true; apt_install jq",
+            """apt_installed_version() { :; }
+apt_candidate_version() { printf '1.0'; }
+REPO_PACKAGES[jq]=jq
+APT_DIRTY=true
+APT_SOURCE_ADDED=true
+apply_tool jq""",
+        ]:
+            with self.subTest(call=call):
+                (self.dir / "calls").unlink(missing_ok=True)
+                status, calls = self.run_apt(call, fail={"update": "1 2"})
+                self.assertEqual(status, 0)
+                self.assertEqual(
+                    calls,
+                    ["apt-get update", "sleep 90", "apt-get update", "apt-get install -y jq"],
+                )
 
     def test_both_scripts_wait_the_same_time_before_a_retry(self) -> None:
         """The README states one wait for both scripts, and each carries its own copy of it."""
