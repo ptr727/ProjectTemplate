@@ -2091,7 +2091,7 @@ gh() {
         checkout = yaml_step(job, "Checkout code step")
         self.assertIn("        if: ${{ inputs.test-matrix-file != '' || ", checkout)
         self.assertEqual(
-            "${{ inputs.test-matrix-file == '' && '/.python-version' || '' }}",
+            "${{ inputs.test-matrix-file == '' && fromJSON('\"/.python-version\\n/global.json\"') || '' }}",
             yaml_value(checkout, "with", "sparse-checkout"),
         )
         self.assertEqual(yaml_value(checkout, "with", "persist-credentials"), "false")
@@ -2874,16 +2874,35 @@ class DotnetSdkLineCase(unittest.TestCase):
     def test_validate_task_hands_dotnet_versions_to_every_sdk_step(self) -> None:
         workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
         self.assertIn("      dotnet-versions:\n", workflow)
-        uses = 0
-        for job, body in job_texts(workflow).items():
-            if "uses: $/.github/actions/dotnet-sdk" in body:
-                uses += 1
-                setup = yaml_step(body, "Setup .NET SDK step")
-                with self.subTest(job=job):
-                    self.assertEqual(
-                        yaml_value(setup, "with", "versions"), "${{ inputs.dotnet-versions }}"
-                    )
-        self.assertEqual(uses, 2)
+        jobs = job_texts(workflow)
+        users = sorted(
+            job for job, body in jobs.items() if "uses: $/.github/actions/dotnet-sdk" in body
+        )
+        self.assertEqual(users, ["lint", "test-matrix", "unit-test"])
+        for job in ("lint", "unit-test"):
+            with self.subTest(job=job):
+                setup = yaml_step(jobs[job], "Setup .NET SDK step")
+                self.assertEqual(
+                    yaml_value(setup, "with", "versions"), "${{ inputs.dotnet-versions }}"
+                )
+                self.assertIsNone(yaml_value(setup, "with", "install"))
+
+    def test_the_entry_job_validates_dotnet_versions_before_any_build(self) -> None:
+        """WORKFLOW.md D2.1: the cross-input check runs once in the job unit-test waits on, installing nothing."""
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        jobs = job_texts(workflow)
+        entry = jobs["test-matrix"]
+        check = yaml_step(entry, "Validate dotnet-versions input step")
+        self.assertEqual(yaml_value(check, "uses"), "$/.github/actions/dotnet-sdk")
+        self.assertEqual(yaml_value(check, "with", "versions"), "${{ inputs.dotnet-versions }}")
+        self.assertEqual(yaml_value(check, "with", "install"), "'false'")
+        checkout = yaml_step(entry, "Checkout code step")
+        self.assertIn("inputs.dotnet-versions != ''", yaml_value(checkout, "if") or "")
+        self.assertIn("/global.json", yaml_value(checkout, "with", "sparse-checkout") or "")
+        self.assertIn("needs: test-matrix", jobs["unit-test"])
+        action = self.ACTION.read_text(encoding="utf-8")
+        setup = yaml_step(action, "Setup .NET SDK step")
+        self.assertEqual(yaml_value(setup, "if"), "${{ inputs.install != 'false' }}")
 
     def test_a_global_json_selecting_a_line_is_read(self) -> None:
         selects = json.dumps({"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}})
@@ -3037,10 +3056,10 @@ class PythonVersionLineCase(unittest.TestCase):
         builder = jobs["test-matrix"]
         checkout = yaml_step(builder, "Checkout code step")
         self.assertEqual(
-            "${{ inputs.test-matrix-file != '' || inputs.python-versions == '' }}",
+            "${{ inputs.test-matrix-file != '' || inputs.python-versions == '' || inputs.dotnet-versions != '' }}",
             yaml_value(checkout, "if"),
         )
-        self.assertIn("'/.python-version'", yaml_value(checkout, "with", "sparse-checkout") or "")
+        self.assertIn('"/.python-version\\n', yaml_value(checkout, "with", "sparse-checkout") or "")
         resolved = "${{ inputs.python-versions || format('[\"{0}\"]', steps.python-version.outputs.version) }}"
         for job, steps, condition in (
             (

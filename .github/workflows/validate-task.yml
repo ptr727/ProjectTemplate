@@ -74,11 +74,11 @@ jobs:
 
       # The selector alone is read where no matrix file is named, so the checkout stays one file.
       - name: Checkout code step
-        if: ${{ inputs.test-matrix-file != '' || inputs.python-versions == '' }}
+        if: ${{ inputs.test-matrix-file != '' || inputs.python-versions == '' || inputs.dotnet-versions != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: ${{ inputs.test-matrix-file == '' && '/.python-version' || '' }}
+          sparse-checkout: ${{ inputs.test-matrix-file == '' && fromJSON('"/.python-version\n/global.json"') || '' }}
           sparse-checkout-cone-mode: false
 
       # This job cannot tell whether the caller holds Python, so the lint job, which can, warns of a fallback instead.
@@ -88,6 +88,13 @@ jobs:
         uses: $/.github/actions/python-version
         with:
           warn: 'false'
+
+      - name: Validate dotnet-versions input step
+        if: ${{ inputs.dotnet-versions != '' }}
+        uses: $/.github/actions/dotnet-sdk
+        with:
+          versions: ${{ inputs.dotnet-versions }}
+          install: 'false'
 
       # Either input lands in one file here, so the check below and the build step read the same bytes whichever input the caller set.
       - name: Validate test-matrix input step

@@ -11,6 +11,10 @@ inputs:
     description: JSON array of the X.Y .NET lines to install, one per target framework the caller's projects build, for example ["11.0", "10.0"]. The first entry is the line the root global.json selects, which builds every target framework, and a first entry differing from it fails the step. The others install beside it, so a test project runs under each framework's own runtime. A caller carrying no global.json sdk.version gets every entry instead of the fallback line. Quote each entry, since an unquoted one is a JSON number rather than a line. Empty installs the one line global.json selects, or the fallback.
     required: false
     default: ''
+  install:
+    description: Whether the selected lines are installed. An entry job passes false to validate versions against global.json before any job builds, installing nothing.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -80,6 +84,7 @@ runs:
         PY
 
     - name: Setup .NET SDK step
+      if: ${{ inputs.install != 'false' }}
       uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
       with:
         global-json-file: ${{ steps.sdk-line.outputs.global-json-file }}
