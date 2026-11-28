@@ -103,6 +103,11 @@ class TestPackageUpgradeRetry(unittest.TestCase):
             " ".join(line.split()[:2]) for line in self.log.read_text(encoding="utf-8").splitlines()
         ]
 
+    def full_calls(self) -> list[str]:
+        if not self.log.exists():
+            return []
+        return self.log.read_text(encoding="utf-8").splitlines()
+
     def test_an_unattended_upgrade_that_fails_once_reads_the_lists_again_and_succeeds(self) -> None:
         result = self.run_upgrade("--yes", fail={"full_upgrade": "1"})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -173,6 +178,13 @@ class TestPackageUpgradeRetry(unittest.TestCase):
                 "apt-get autoremove",
                 "apt-get autoclean",
             ],
+        )
+        installs = [line for line in self.full_calls() if line.startswith("apt-get install")]
+        self.assertEqual(len(installs), 2)
+        self.assertEqual(installs[0], installs[1])
+        self.assertEqual(
+            installs[1],
+            "apt-get install -f -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold",
         )
 
     def test_an_attended_upgrade_is_not_retried(self) -> None:
