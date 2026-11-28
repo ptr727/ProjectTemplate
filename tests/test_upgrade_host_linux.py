@@ -93,6 +93,7 @@ class TestPackageUpgradeRetry(unittest.TestCase):
             stdin=stdin if stdin is not None else subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
         )
