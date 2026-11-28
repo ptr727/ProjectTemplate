@@ -462,31 +462,36 @@ printf 'STATUS %s\\n' "$status"
         self.assertEqual(status, 0)
         self.assertEqual(calls, ["apt-get update", "sleep 90", "apt-get update", "REFRESHED true"])
 
-    def test_a_list_read_that_fails_twice_installs_nothing_and_leaves_the_lists_unread(
-        self,
-    ) -> None:
+    def test_a_list_read_that_fails_twice_is_read_once_and_each_tool_carries_on(self) -> None:
         status, calls = self.run_apt(
-            'apt_install jq || printf "FAILED %s REFRESHED %s\\n" "$?" "$APT_REFRESHED" >>"$CALLS"',
+            'apt_install jq && apt_install rg && printf "LISTS %s\\n" "$APT_LISTS_FAILED" >>"$CALLS"',
             fail={"update": "1 2"},
         )
         self.assertEqual(status, 0)
         self.assertEqual(
             calls,
-            ["apt-get update", "sleep 90", "apt-get update", "FAILED 100 REFRESHED false"],
+            [
+                "apt-get update",
+                "sleep 90",
+                "apt-get update",
+                "apt-get install -y jq",
+                "apt-get install -y rg",
+                "LISTS true",
+            ],
         )
 
-    def test_a_failed_list_read_fails_the_tool_rather_than_running_on(self) -> None:
-        for call, expected in [
-            ("apt_missing() { printf 'curl\\n'; }; ensure_prerequisites", 100),
-            ("apt-get() { :; }; apt_install_displacing nodejs", 100),
-            ("dotnet_sdk_latest() { printf 'dotnet-sdk-10.0\\n'; }; dotnet_feed", 2),
-            ("apt_missing() { printf 'curl\\n'; }; gh_install", 1),
-        ]:
-            with self.subTest(call=call):
-                (self.dir / "calls").unlink(missing_ok=True)
-                status, calls = self.run_apt(call, fail={"update": "1 2"})
-                self.assertEqual(status, expected)
-                self.assertEqual(calls, ["apt-get update", "sleep 90", "apt-get update"])
+    def test_a_list_read_that_fails_twice_fails_the_run_and_names_it(self) -> None:
+        status, calls = self.run_apt(
+            """warn() { printf 'WARN %s\\n' "$*" >>"$CALLS"; }
+SELECTED=()
+ensure_prerequisites() { apt_refresh; }
+apply""",
+            fail={"update": "1 2"},
+        )
+        self.assertEqual(status, 1)
+        commands = [line for line in calls if not line.startswith("WARN ")]
+        self.assertEqual(commands, ["apt-get update", "sleep 90", "apt-get update"])
+        self.assertEqual(calls[-1], "WARN Failed: apt-get update")
 
     def test_the_prerequisites_and_a_displacing_install_are_retried_too(self) -> None:
         status, calls = self.run_apt(
