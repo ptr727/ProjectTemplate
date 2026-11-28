@@ -53,7 +53,6 @@ WITH_OPTIONAL=false
 APT_REFRESHED=false
 APT_DIRTY=false
 APT_LISTS_FAILED=false
-APT_SOURCE_ADDED=false
 DISTRO_ID=""
 DISTRO_VERSION=""
 CODENAME=""
@@ -365,7 +364,6 @@ apt_refresh() {
     fi
     APT_REFRESHED=true
     APT_DIRTY=false
-    [[ $APT_LISTS_FAILED == false || $APT_SOURCE_ADDED == false ]]
 }
 
 # Install packages.
@@ -383,7 +381,7 @@ apt_install() {
     done
     [[ ${#wanted[@]} -eq 0 ]] && return 0
 
-    apt_refresh || return
+    apt_refresh
     apt_retry install -y "${wanted[@]}"
 }
 
@@ -481,7 +479,7 @@ remove_unowned_command() {
 # Orphaned dependencies are left for a later apt autoremove rather than swept here, since autoremove reaches the whole host.
 apt_install_displacing() {
     local package="$1"
-    apt_refresh || return
+    apt_refresh
 
     if [[ $DRY_RUN == true ]]; then
         info "[dry run] apt-get install -y $package, removals cannot be previewed until the repository is read"
@@ -583,7 +581,6 @@ register_apt_source() {
     fi
     if write_sources "$name" "$uris" "$suites" "$components" "$keyring"; then
         APT_DIRTY=true
-        APT_SOURCE_ADDED=true
     fi
     [[ $# -eq 0 ]] || remove_stale "$@"
 }
@@ -593,7 +590,7 @@ ensure_prerequisites() {
     # The gpgv package is named on its own rather than left to gnupg, since the keyring check depends on it.
     readarray -t missing < <(apt_missing ca-certificates curl gnupg gpgv)
     [[ ${#missing[@]} -eq 0 ]] && return 0
-    apt_refresh || return
+    apt_refresh
     apt_retry install -y "${missing[@]}"
 }
 
@@ -1034,7 +1031,6 @@ microsoft_feed() {
     # A failed install ends the run here instead, rather than failing only the tool as the missing feed above does.
     run_root dpkg -i "$deb" || die "Cannot install Microsoft's feed from $deb"
     APT_DIRTY=true
-    APT_SOURCE_ADDED=true
     apt_refresh
 }
 
@@ -1611,7 +1607,6 @@ tool_unshadow() {
 # Some upstream lookups also end the run today where collecting them would match the intent above, which TODO.md records rather than changes here.
 apply_tool() {
     local tool="$1" installed target status
-    APT_SOURCE_ADDED=false
 
     if [[ -n ${REPO_PACKAGES[$tool]:-} ]]; then
         local package="${REPO_PACKAGES[$tool]}"
