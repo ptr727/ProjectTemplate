@@ -18,6 +18,7 @@
 set -Eeuo pipefail
 
 readonly BACKUP_ROOT="/var/backups/upgrade-host"
+readonly APT_RETRY_DELAY=90
 
 MODE="packages"
 DRY_RUN=false
@@ -93,7 +94,8 @@ Actions, name one, default --packages:
 
 Options:
   -n, --dry-run     Print the commands instead of running them
-  -y, --yes         Do not prompt, and keep the installed config file on a packaging conflict
+  -y, --yes         Do not prompt, keep the installed config file on a packaging conflict, and
+                    retry a failed apt-get list read, install, or upgrade once
 
 A release upgrade moves one release at a time, which is what both distributions support: a host two
 releases behind is upgraded by running this twice. Debian is carried by rewriting the codename in
@@ -173,6 +175,21 @@ run_root() { run "${SUDO[@]}" "$@"; }
 
 apt_get() { run_root apt-get "$@" "${APT_OPTS[@]}"; }
 
+apt_retry() {
+    local status=0
+    apt_get "$@" || status=$?
+    if [[ $status -eq 0 || $ASSUME_YES != true ]]; then
+        return "$status"
+    fi
+    warn "apt-get $* failed (exit $status), a mirror still syncing is the usual cause"
+    info "Waiting ${APT_RETRY_DELAY}s, then retrying once"
+    sleep "$APT_RETRY_DELAY"
+    if [[ $1 != "update" ]]; then
+        apt_get update
+    fi
+    apt_get "$@"
+}
+
 confirm() {
     [[ $ASSUME_YES == true || $DRY_RUN == true ]] && return 0
     [[ -t 0 ]] || die "Not a terminal and --yes was not given, refusing to change the host unattended"
@@ -192,13 +209,13 @@ fetch() {
 
 upgrade_packages() {
     step "Updating package lists"
-    apt_get update
+    apt_retry update
 
     step "Upgrading packages"
-    apt_get full-upgrade
+    apt_retry full-upgrade
 
     step "Completing any partial install"
-    apt_get install -f
+    apt_retry install -f
 
     step "Removing unused packages and old kernels"
     apt_get autoremove --purge
@@ -326,8 +343,8 @@ ensure_release_prerequisites() {
     command -v curl >/dev/null && return 0
 
     step "Installing curl, which the release index is read with"
-    apt_get update
-    apt_get install curl ca-certificates
+    apt_retry update
+    apt_retry install curl ca-certificates
 }
 
 backup_sources() {
@@ -533,15 +550,15 @@ debian_release_upgrade() {
     debian_rewrite_sources "$CODENAME" "$next"
 
     step "Reading the $next package lists"
-    apt_get update
+    apt_retry update
 
     # The release notes take the minimal upgrade first.
     # So the packages that need no new dependencies land before the ones that pull in a changed dependency set.
     step "Upgrading without new packages"
-    apt_get upgrade --without-new-pkgs
+    apt_retry upgrade --without-new-pkgs
 
     step "Upgrading the rest of the distribution"
-    apt_get full-upgrade
+    apt_retry full-upgrade
 
     step "Removing what $next no longer needs"
     apt_get autoremove --purge
@@ -554,7 +571,7 @@ ubuntu_release_upgrade() {
     step "Checking for a new Ubuntu release"
 
     if ! command -v do-release-upgrade >/dev/null; then
-        apt_get install update-manager-core
+        apt_retry install update-manager-core
     fi
 
     # Which release is offered, LTS or every release, is the host's own policy in /etc/update-manager/release-upgrades rather than something to decide here.
