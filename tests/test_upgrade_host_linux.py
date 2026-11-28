@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import os
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
 
@@ -41,12 +39,6 @@ done
 
 RECORDING_STUB = """#!/bin/bash
 printf '%s %s\\n' "$(basename "$0")" "$*" >>"$STUB_LOG"
-"""
-
-WAITING_SLEEP_STUB = """#!/bin/bash
-printf '%s' "$$" >"$STUB_DIR/sleep.pid"
-printf 'sleep %s\\n' "$*" >>"$STUB_LOG"
-exec /bin/sleep "$@"
 """
 
 SUDO_STUB = """#!/bin/bash
@@ -230,49 +222,6 @@ class TestPackageUpgradeRetry(unittest.TestCase):
                 "run_root apt-get autoclean",
             ],
         )
-
-    def test_a_terminate_during_the_retry_wait_stops_the_run_and_the_wait(self) -> None:
-        stub = self.bin / "sleep"
-        stub.write_text(WAITING_SLEEP_STUB, encoding="utf-8")
-        env = dict(os.environ)
-        env.update(
-            {
-                "FAIL_full_upgrade": "1",
-                "PATH": f"{self.bin}{os.pathsep}{env.get('PATH', '')}",
-                "STUB_DIR": str(self.work),
-                "STUB_LOG": str(self.log),
-                "TMPDIR": str(self.work),
-            }
-        )
-        with subprocess.Popen(
-            ["bash", str(UPGRADER), "--packages", "--yes"],
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
-        ) as process:
-            pid_file = self.work / "sleep.pid"
-            deadline = time.monotonic() + 30
-            while not (pid_file.exists() and pid_file.read_text(encoding="utf-8")):
-                if time.monotonic() >= deadline:
-                    break
-                time.sleep(0.05)
-            self.assertTrue(pid_file.exists(), "the retry wait never started")
-            sleeper = int(pid_file.read_text(encoding="utf-8"))
-            process.send_signal(signal.SIGTERM)
-            _, stderr = process.communicate(timeout=30)
-        self.assertEqual(process.returncode, -signal.SIGTERM, stderr)
-        self.assertIn("interrupted by SIGTERM", stderr)
-        for _ in range(100):
-            try:
-                os.kill(sleeper, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            os.kill(sleeper, signal.SIGKILL)
-            self.fail("the retry wait outlived the interrupted run")
 
     def test_an_attended_upgrade_is_not_retried(self) -> None:
         primary, secondary = os.openpty()

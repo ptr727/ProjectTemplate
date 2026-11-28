@@ -23,7 +23,6 @@ readonly APT_RETRY_DELAY=90
 MODE="packages"
 DRY_RUN=false
 ASSUME_YES=false
-SLEEP_PID=""
 DISTRO_ID=""
 DISTRO_VERSION=""
 CODENAME=""
@@ -49,15 +48,12 @@ on_exit() {
 }
 
 # An interrupt names the signal and re-raises it, per CODESTYLE.md "Interrupts in Shell".
+# Every command runs in the foreground, per that section's launcher case.
 # The tools apt-get, dpkg, and the installers start do not stop cleanly on SIGTERM.
 # A Ctrl-C that reaches this shell as well runs the trap once the running command returns.
 # shellcheck disable=SC2317,SC2329  # The INT and TERM traps run it.
 interrupted() {
     printf 'upgrade-host.sh: interrupted by SIG%s.\n' "$1" >&2
-    if [[ -n $SLEEP_PID ]]; then
-        kill "$SLEEP_PID" 2>/dev/null || :
-        wait "$SLEEP_PID" || :
-    fi
     trap - "$1"
     kill -s "$1" "$$"
 }
@@ -187,10 +183,7 @@ apt_retry() {
     fi
     warn "apt-get $* failed (exit $status), a mirror still syncing is the usual cause"
     info "Waiting ${APT_RETRY_DELAY}s, then retrying once"
-    sleep "$APT_RETRY_DELAY" &
-    SLEEP_PID=$!
-    wait "$SLEEP_PID"
-    SLEEP_PID=""
+    sleep "$APT_RETRY_DELAY"
     if [[ $1 != "update" ]]; then
         apt_get update
     fi
