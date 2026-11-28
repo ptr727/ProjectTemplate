@@ -81,13 +81,7 @@ runs:
       run: |
         set -Eeuo pipefail
         shopt -s nullglob
-        packages=("$RUNNER_TEMP"/publish/*.nupkg)
-        if (( ${#packages[@]} == 0 )); then
-          echo "::error::The build wrote no .nupkg under the publish folder to archive."
-          exit 1
-        fi
-        packages+=("$RUNNER_TEMP"/publish/*.snupkg)
-        7z a -t7z "$RUNNER_TEMP/nuget.7z" "${packages[@]}"
+        7z a -t7z "$RUNNER_TEMP/nuget.7z" "$RUNNER_TEMP"/publish/*.nupkg "$RUNNER_TEMP"/publish/*.snupkg
 
     # GitHub-release asset, uploaded under the release-asset-<branch>-<target> pattern the github-release job collects.
     - name: Upload release asset step

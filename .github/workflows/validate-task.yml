@@ -28,7 +28,7 @@ on:
         type: string
         default: ''
       dotnet-versions:
-        description: JSON array of the X.Y .NET lines a multi-targeted caller's projects build, one per target framework, for example ["11.0", "10.0"]. The first entry is the line the root global.json selects, which builds every target framework, and an entry differing from it fails the run. Every listed line is installed in the one unit-test job, whose dotnet test runs each target framework under its own runtime, so it adds no matrix leg. Quote each entry, since an unquoted one is a JSON number rather than a line. Empty installs the one line global.json selects, or the hub's fallback line where it carries none.
+        description: JSON array of the X.Y .NET lines a multi-targeted caller's projects build, one per target framework, for example ["11.0", "10.0"]. The first entry is the line the root global.json selects, which builds every target framework, and a first entry differing from it fails the run. Every listed line is installed in the one unit-test job, whose dotnet test runs each target framework under its own runtime, so it adds no matrix leg. Quote each entry, since an unquoted one is a JSON number rather than a line. Empty installs the one line global.json selects, or the hub's fallback line where it carries none.
         required: false
         type: string
         default: ''

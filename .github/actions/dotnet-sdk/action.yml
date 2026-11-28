@@ -8,7 +8,7 @@ description: >-
 
 inputs:
   versions:
-    description: JSON array of the X.Y .NET lines to install, one per target framework the caller's projects build, for example ["11.0", "10.0"]. The first entry is the line the root global.json selects, which builds every target framework, and an entry differing from it fails the step. The others install beside it, so a test project runs under each framework's own runtime. A caller carrying no global.json sdk.version gets every entry instead of the fallback line. Quote each entry, since an unquoted one is a JSON number rather than a line. Empty installs the one line global.json selects, or the fallback.
+    description: JSON array of the X.Y .NET lines to install, one per target framework the caller's projects build, for example ["11.0", "10.0"]. The first entry is the line the root global.json selects, which builds every target framework, and a first entry differing from it fails the step. The others install beside it, so a test project runs under each framework's own runtime. A caller carrying no global.json sdk.version gets every entry instead of the fallback line. Quote each entry, since an unquoted one is a JSON number rather than a line. Empty installs the one line global.json selects, or the fallback.
     required: false
     default: ''
 
@@ -57,7 +57,8 @@ runs:
             try:
                 document = json.loads(text)
             except ValueError as error:
-                print(f"::warning::global.json could not be read ({error}), so this installs the {fallback} fallback.")
+                installs = "every versions entry" if lines else f"the {fallback} fallback"
+                print(f"::warning::global.json could not be read ({error}), so this installs {installs}.")
             else:
                 # The host reads a missing or null sdk as no selection, so either takes the fallback rather than failing.
                 sdk = document.get("sdk")

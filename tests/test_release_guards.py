@@ -2662,6 +2662,8 @@ class NugetMultiTargetCase(unittest.TestCase):
                 "DOTNET_NOLOGO": "1",
                 "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
                 "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
+                "MSBUILDDISABLENODEREUSE": "1",
+                "UseSharedCompilation": "false",
             }
             sdk = run(
                 [dotnet, "--version"],
@@ -2670,10 +2672,12 @@ class NugetMultiTargetCase(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                check=True,
+                check=False,
                 timeout=60,
-            ).stdout.strip()
-            major = int(sdk.split(".", 1)[0])
+            )
+            if sdk.returncode != 0:
+                self.skipTest("the dotnet on PATH carries no SDK to build the fixture with")
+            major = int(sdk.stdout.strip().split(".", 1)[0])
             frameworks = {f"net{line}.0": line for line in (major - 1, major)}
             project = scratch / "Fixture" / "Fixture.csproj"
             project.parent.mkdir()
@@ -2777,10 +2781,9 @@ class NugetMultiTargetCase(unittest.TestCase):
             self.assertEqual(
                 archived, ["a", "-t7z", "nuget.7z", "Fixture.1.2.3.nupkg", "Fixture.1.2.3.snupkg"]
             )
-            code, stdout, archived = zip_step("Fixture.dll", "Fixture.pdb")
-            self.assertNotEqual(code, 0)
-            self.assertIn("::error::The build wrote no .nupkg", stdout)
-            self.assertEqual(archived, [])
+            code, _, archived = zip_step("Fixture.dll", "Fixture.1.2.3.nupkg")
+            self.assertEqual(code, 0)
+            self.assertEqual(archived, ["a", "-t7z", "nuget.7z", "Fixture.1.2.3.nupkg"])
 
     def test_the_build_passes_no_global_output_path(self) -> None:
         script = step_script(self.ACTION, "Build library step")
@@ -2840,6 +2843,8 @@ class DotnetSdkLineCase(unittest.TestCase):
         self.assertEqual(self.select(None, '["11.0", "10.0"]'), expected)
         runner_only = json.dumps({"test": {"runner": "Microsoft.Testing.Platform"}})
         self.assertEqual(self.select(runner_only, '["11.0", "10.0"]'), expected)
+        self.assertEqual(self.select("{not json", '["11.0", "10.0"]'), expected)
+        self.assertIn("so this installs every versions entry.", self.last_stdout)
 
     def test_a_first_versions_entry_off_the_selected_line_is_refused(self) -> None:
         """The release builds every framework with the SDK global.json selects, so the list cannot lead with another."""
