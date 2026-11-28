@@ -699,7 +699,7 @@ git_restore_mtime_target() {
 # Git runs any executable named git-* on the PATH as a subcommand, so this is all "git restore-mtime" needs.
 git_restore_mtime_install() {
     # Upstream ships a python3 script, and a minimal server image carries no python at all.
-    apt_install python3
+    apt_install python3 || return 1
 
     git_restore_mtime_fetch
     run_root install -m 0755 "$TMP_DIR/git-restore-mtime" "$BIN_DIR/git-restore-mtime"

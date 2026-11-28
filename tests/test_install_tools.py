@@ -514,6 +514,48 @@ apply""",
                 self.assertEqual(calls[:3], ["apt-get update", "sleep 90", "apt-get update"])
                 self.assertEqual(calls[3:], tail)
 
+    def test_an_attended_list_read_failure_is_not_retried_and_fails_the_run(self) -> None:
+        status, calls = self.run_apt(
+            """warn() { printf 'WARN %s\\n' "$*" >>"$CALLS"; }
+confirm() { return 0; }
+SELECTED=()
+ensure_prerequisites() { apt_install jq; }
+apply""",
+            assume_yes=False,
+            fail={"update": "1"},
+        )
+        self.assertEqual(status, 1)
+        commands = [line for line in calls if not line.startswith("WARN ")]
+        self.assertEqual(commands, ["apt-get update", "apt-get install -y jq"])
+        self.assertEqual(calls[-1], "WARN Failed: apt-get update")
+
+    def test_a_prerequisite_install_that_fails_twice_ends_the_run_with_apt_s_status(
+        self,
+    ) -> None:
+        calls = self.dir / "calls"
+        result = self.run_bash(
+            f"""CALLS="{calls}"
+ASSUME_YES=true
+MODE=upgrade
+{APT_RETRY_STUB}FAIL_install='1 2'
+apt_missing() {{ printf 'curl\\n'; }}
+SELECTED=()
+apply
+printf 'AFTER\\n' >>"$CALLS"
+"""
+        )
+        self.assertEqual(result.returncode, 100, result.stderr)
+        self.assertNotIn("AFTER", calls.read_text(encoding="utf-8").splitlines())
+
+    def test_a_tool_whose_runtime_install_fails_stops_before_its_own_install(self) -> None:
+        status, calls = self.run_apt(
+            """git_restore_mtime_fetch() { printf 'FETCH\\n' >>"$CALLS"; }
+git_restore_mtime_install""",
+            fail={"install": "1 2"},
+        )
+        self.assertEqual(status, 1)
+        self.assertNotIn("FETCH", calls)
+
     def test_the_prerequisites_and_a_displacing_install_are_retried_too(self) -> None:
         status, calls = self.run_apt(
             "apt_missing() { printf 'curl\\n'; }; ensure_prerequisites", fail={"install": "1"}
