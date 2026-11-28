@@ -187,6 +187,25 @@ class TestPackageUpgradeRetry(unittest.TestCase):
             "apt-get install -f -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold",
         )
 
+    def test_every_apt_get_call_site_but_the_retry_helper_s_own_is_a_deliberate_choice(
+        self,
+    ) -> None:
+        sites = [
+            line.strip()
+            for line in UPGRADER.read_text(encoding="utf-8").splitlines()
+            if line.strip().startswith("apt_get ")
+        ]
+        self.assertEqual(
+            sites,
+            [
+                'apt_get "$@" || status=$?',
+                "apt_get update",
+                'apt_get "$@"',
+                "apt_get autoremove --purge",
+                "apt_get autoremove --purge",
+            ],
+        )
+
     def test_an_attended_upgrade_is_not_retried(self) -> None:
         primary, secondary = os.openpty()
         self.addCleanup(os.close, primary)
