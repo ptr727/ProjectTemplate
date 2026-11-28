@@ -56,6 +56,7 @@ interrupted() {
     printf 'upgrade-host.sh: interrupted by SIG%s.\n' "$1" >&2
     if [[ -n $SLEEP_PID ]]; then
         kill "$SLEEP_PID" 2>/dev/null || :
+        wait "$SLEEP_PID" || :
     fi
     trap - "$1"
     kill -s "$1" "$$"
