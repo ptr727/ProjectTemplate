@@ -121,6 +121,16 @@ Shared MSBuild configuration is centralized at the repository root, never duplic
   baseline, the installers, that fallback, and the devcontainer snippet's image tag. A repository
   not yet moved keeps building on its own line.
 
+  A multi-targeted project (`<TargetFrameworks>net10.0;net11.0</TargetFrameworks>`) still has one
+  selector. Its `global.json` names the highest target framework's line, since that SDK builds
+  every target framework, so the release and the pack run on it. Where `Directory.Build.props`
+  sets a singular `TargetFramework`, the multi-targeted `.csproj` clears it, since a singular value
+  wins and builds one framework only. Its test projects run each framework under that framework's
+  own runtime. So the repository passes the hub's `validate-task.yml` a `dotnet-versions` input
+  naming every line, the `global.json` line first, such as `'["11.0", "10.0"]'`. That installs
+  each line beside the selected one in the one unit-test job. An entry leading with another line
+  fails the run.
+
   A developer host now needs a release SDK on the repository's line, 10.0.x for the fleet default
   today. A host holding only another major, or only a 10.0 preview, fails with a clear error. It
   reads "A compatible .NET SDK was not found" rather than silently drifting. The hub's host

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import os
@@ -11,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import zipfile
 from collections.abc import Callable
 from pathlib import Path
 from subprocess import run
@@ -2637,6 +2639,155 @@ def run_selection_step(
         return code, stdout, stderr, written.splitlines()
 
 
+class NugetMultiTargetCase(unittest.TestCase):
+    """The NuGet default packs each target framework's own build, and archives the packages alone."""
+
+    ACTION = REPO / ".github/actions/nuget-build-default/action.yml"
+
+    def test_each_target_framework_packs_its_own_assembly(self) -> None:
+        """A command-line OutputPath is global, so every inner build would write one folder.
+
+        The package would then carry the last-built assembly under every lib/<tfm>/.
+        """
+        dotnet = shutil.which("dotnet")
+        if dotnet is None:
+            self.skipTest("no dotnet SDK on PATH to build the multi-targeted fixture with")
+        bash = bash_or_skip()
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory)
+            env = {
+                **os.environ,
+                "DOTNET_CLI_HOME": str(scratch / "home"),
+                "NUGET_PACKAGES": str(scratch / "packages"),
+                "DOTNET_NOLOGO": "1",
+                "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
+                "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1",
+            }
+            sdk = run(
+                [dotnet, "--version"],
+                cwd=scratch,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=True,
+                timeout=60,
+            ).stdout.strip()
+            major = int(sdk.split(".", 1)[0])
+            frameworks = {f"net{line}.0": line for line in (major - 1, major)}
+            project = scratch / "Fixture" / "Fixture.csproj"
+            project.parent.mkdir()
+            project.write_text(
+                '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n'
+                f"    <TargetFrameworks>{';'.join(frameworks)}</TargetFrameworks>\n"
+                "    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>\n"
+                "  </PropertyGroup>\n</Project>\n",
+                encoding="utf-8",
+            )
+            (project.parent / "Fixture.cs").write_text(
+                "namespace Fixture;\n\npublic static class Probe\n{\n    public static int Value => 1;\n}\n",
+                encoding="utf-8",
+            )
+            step = scratch / "step.sh"
+            step.write_text(
+                step_script(self.ACTION, "Build library step"), encoding="utf-8", newline="\n"
+            )
+            runner_temp = scratch / "runner"
+            runner_temp.mkdir()
+            result = run(
+                [bash, str(step)],
+                cwd=scratch,
+                env={
+                    **env,
+                    "RUNNER_TEMP": str(runner_temp),
+                    "BRANCH": "main",
+                    "PROJECT_FILE": str(project),
+                    "SEMVER2": "1.2.3",
+                    "ASSEMBLY_VERSION": "1.0.0.0",
+                    "ASSEMBLY_FILE_VERSION": "1.2.3.0",
+                    "ASSEMBLY_INFORMATIONAL_VERSION": "1.2.3+0000000",
+                },
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                check=False,
+                timeout=600,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            packages = sorted((runner_temp / "publish").glob("*.nupkg"))
+            self.assertEqual([path.name for path in packages], ["Fixture.1.2.3.nupkg"])
+            with zipfile.ZipFile(packages[0]) as package:
+                assemblies = {
+                    framework: package.read(f"lib/{framework}/Fixture.dll")
+                    for framework in frameworks
+                }
+        digests = {hashlib.sha256(assembly).hexdigest() for assembly in assemblies.values()}
+        self.assertEqual(len(digests), len(frameworks))
+        for framework, line in frameworks.items():
+            with self.subTest(framework=framework):
+                self.assertIn(f".NETCoreApp,Version=v{line}.0".encode(), assemblies[framework])
+
+    def test_the_release_archive_carries_the_packages_alone(self) -> None:
+        """Loose build output beside the packages is the layout a multi-targeted build cannot share."""
+        bash = bash_or_skip()
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory)
+            stub = scratch / "bin" / "7z"
+            stub.parent.mkdir()
+            stub.write_text(
+                '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$RUNNER_TEMP/archived"\n',
+                encoding="utf-8",
+                newline="\n",
+            )
+            stub.chmod(0o755)
+            step = scratch / "step.sh"
+            step.write_text(
+                step_script(self.ACTION, "Zip output step"), encoding="utf-8", newline="\n"
+            )
+
+            def zip_step(*names: str) -> tuple[int, str, list[str]]:
+                runner_temp = scratch / f"runner-{len(names)}"
+                (runner_temp / "publish").mkdir(parents=True)
+                for name in names:
+                    (runner_temp / "publish" / name).write_bytes(b"")
+                result = run(
+                    [bash, str(step)],
+                    cwd=scratch,
+                    env={
+                        **os.environ,
+                        "PATH": f"{stub.parent}{os.pathsep}{os.environ['PATH']}",
+                        "RUNNER_TEMP": str(runner_temp),
+                    },
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=False,
+                    timeout=60,
+                )
+                archived = runner_temp / "archived"
+                lines = (
+                    archived.read_text(encoding="utf-8").splitlines() if archived.exists() else []
+                )
+                return result.returncode, result.stdout, [Path(line).name for line in lines]
+
+            code, _, archived = zip_step(
+                "Fixture.dll", "Fixture.1.2.3.nupkg", "Fixture.1.2.3.snupkg"
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                archived, ["a", "-t7z", "nuget.7z", "Fixture.1.2.3.nupkg", "Fixture.1.2.3.snupkg"]
+            )
+            code, stdout, archived = zip_step("Fixture.dll", "Fixture.pdb")
+            self.assertNotEqual(code, 0)
+            self.assertIn("::error::The build wrote no .nupkg", stdout)
+            self.assertEqual(archived, [])
+
+    def test_the_build_passes_no_global_output_path(self) -> None:
+        script = step_script(self.ACTION, "Build library step")
+        self.assertNotRegex(script, r"(?i)-p(roperty)?:OutputPath=")
+        self.assertIn('-property:PackageOutputPath="$RUNNER_TEMP/publish/"', script)
+
+
 class DotnetSdkLineCase(unittest.TestCase):
     """The hub's .NET SDK steps install the line the caller's global.json selects, else 10.x."""
 
@@ -2644,11 +2795,17 @@ class DotnetSdkLineCase(unittest.TestCase):
     SELECT = "Select .NET SDK line step"
     last_stdout = ""
 
-    def select(self, global_json: str | bytes | None) -> list[str]:
+    def select(self, global_json: str | bytes | None, versions: str = "") -> list[str]:
         """The outputs the selection step writes in a workspace holding `global_json`, or none.
 
         The step's own stdout, where its workflow commands go, is kept in `last_stdout`.
         """
+        code, outputs = self.run_select(global_json, versions)
+        self.assertEqual(code, 0, self.last_stdout)
+        return outputs
+
+    def run_select(self, global_json: str | bytes | None, versions: str) -> tuple[int, list[str]]:
+        """The selection step's exit status and outputs, given `versions` as its versions input."""
         bash = bash_or_skip()
         # Asked of bash, since the step finds python3 the way bash does, and a found alias may not run.
         probe = run([bash, "-c", "python3 -c pass"], capture_output=True, check=False, timeout=30)
@@ -2658,11 +2815,70 @@ class DotnetSdkLineCase(unittest.TestCase):
             )
         if isinstance(global_json, str):
             global_json = global_json.encode("utf-8")
-        code, self.last_stdout, stderr, outputs = run_selection_step(
-            self.ACTION, self.SELECT, "global.json", global_json, {}
+        code, self.last_stdout, _, outputs = run_selection_step(
+            self.ACTION, self.SELECT, "global.json", global_json, {"VERSIONS": versions}
         )
-        self.assertEqual(code, 0, stderr)
-        return outputs
+        return code, outputs
+
+    def test_versions_install_every_line_beside_the_selected_one(self) -> None:
+        """A multi-targeted test project runs each framework under its own runtime, so each line installs."""
+        selects = json.dumps({"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}})
+        self.assertEqual(
+            self.select(selects, '["11.0", "10.0"]'),
+            [
+                "global-json-file=global.json",
+                "dotnet-version<<DOTNET_VERSIONS",
+                "10.0.x",
+                "DOTNET_VERSIONS",
+            ],
+        )
+        self.assertEqual(self.select(selects, '["11.0"]'), ["global-json-file=global.json"])
+        self.assertEqual(self.select(selects, " "), ["global-json-file=global.json"])
+
+    def test_versions_without_a_selecting_global_json_install_every_entry(self) -> None:
+        expected = ["dotnet-version<<DOTNET_VERSIONS", "11.0.x", "10.0.x", "DOTNET_VERSIONS"]
+        self.assertEqual(self.select(None, '["11.0", "10.0"]'), expected)
+        runner_only = json.dumps({"test": {"runner": "Microsoft.Testing.Platform"}})
+        self.assertEqual(self.select(runner_only, '["11.0", "10.0"]'), expected)
+
+    def test_a_first_versions_entry_off_the_selected_line_is_refused(self) -> None:
+        """The release builds every framework with the SDK global.json selects, so the list cannot lead with another."""
+        selects = json.dumps({"sdk": {"version": "11.0.100"}})
+        code, outputs = self.run_select(selects, '["10.0", "11.0"]')
+        self.assertNotEqual(code, 0)
+        self.assertEqual(outputs, [])
+        self.assertIn("::error::The first versions entry differs", self.last_stdout)
+
+    def test_a_malformed_versions_value_is_refused(self) -> None:
+        selects = json.dumps({"sdk": {"version": "11.0.100"}})
+        for value in (
+            "[11.0]",
+            "[]",
+            '"11.0"',
+            '["11"]',
+            '["11.0.x"]',
+            '["11.0", 10]',
+            "{not json",
+        ):
+            with self.subTest(value=value):
+                code, outputs = self.run_select(selects, value)
+                self.assertNotEqual(code, 0)
+                self.assertEqual(outputs, [])
+                self.assertIn("::error::The versions input must be", self.last_stdout)
+
+    def test_validate_task_hands_dotnet_versions_to_every_sdk_step(self) -> None:
+        workflow = (REPO / ".github/workflows/validate-task.yml").read_text(encoding="utf-8")
+        self.assertIn("      dotnet-versions:\n", workflow)
+        uses = 0
+        for job, body in job_texts(workflow).items():
+            if "uses: $/.github/actions/dotnet-sdk" in body:
+                uses += 1
+                setup = yaml_step(body, "Setup .NET SDK step")
+                with self.subTest(job=job):
+                    self.assertEqual(
+                        yaml_value(setup, "with", "versions"), "${{ inputs.dotnet-versions }}"
+                    )
+        self.assertEqual(uses, 2)
 
     def test_a_global_json_selecting_a_line_is_read(self) -> None:
         selects = json.dumps({"sdk": {"version": "11.0.100", "rollForward": "latestFeature"}})
