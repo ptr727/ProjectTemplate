@@ -29,7 +29,7 @@ CODENAME=""
 IS_PROXMOX=false
 IS_WSL=false
 SUDO=()
-APT_OPTS=(-o Acquire::Retries=3)
+APT_OPTS=()
 
 USAGE_REFUSED=false
 
@@ -95,7 +95,7 @@ Actions, name one, default --packages:
 Options:
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt, keep the installed config file on a packaging conflict, and
-                    retry a failed package list read or upgrade once
+                    retry a failed package list read, install, or upgrade once
 
 A release upgrade moves one release at a time, which is what both distributions support: a host two
 releases behind is upgraded by running this twice. Debian is carried by rewriting the codename in
@@ -147,7 +147,7 @@ detect_host() {
         #   - An unattended run has nobody to answer the prompt.
         #   - A replaced config is the harder half to notice afterwards.
         export DEBIAN_FRONTEND=noninteractive
-        APT_OPTS+=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+        APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
     fi
 }
 
@@ -215,7 +215,7 @@ upgrade_packages() {
     apt_retry full-upgrade
 
     step "Completing any partial install"
-    apt_get install -f
+    apt_retry install -f
 
     step "Removing unused packages and old kernels"
     apt_get autoremove --purge
@@ -344,7 +344,7 @@ ensure_release_prerequisites() {
 
     step "Installing curl, which the release index is read with"
     apt_retry update
-    apt_get install curl ca-certificates
+    apt_retry install curl ca-certificates
 }
 
 backup_sources() {
@@ -571,7 +571,7 @@ ubuntu_release_upgrade() {
     step "Checking for a new Ubuntu release"
 
     if ! command -v do-release-upgrade >/dev/null; then
-        apt_get install update-manager-core
+        apt_retry install update-manager-core
     fi
 
     # Which release is offered, LTS or every release, is the host's own policy in /etc/update-manager/release-upgrades rather than something to decide here.

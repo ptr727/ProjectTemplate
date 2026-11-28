@@ -158,6 +158,23 @@ class TestPackageUpgradeRetry(unittest.TestCase):
             ],
         )
 
+    def test_an_unattended_install_that_fails_once_reads_the_lists_again_and_succeeds(self) -> None:
+        result = self.run_upgrade("--yes", fail={"install": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.calls(),
+            [
+                "apt-get update",
+                "apt-get full-upgrade",
+                "apt-get install",
+                "sleep 90",
+                "apt-get update",
+                "apt-get install",
+                "apt-get autoremove",
+                "apt-get autoclean",
+            ],
+        )
+
     def test_an_attended_upgrade_is_not_retried(self) -> None:
         primary, secondary = os.openpty()
         self.addCleanup(os.close, primary)
@@ -168,20 +185,6 @@ class TestPackageUpgradeRetry(unittest.TestCase):
             os.close(secondary)
         self.assertEqual(result.returncode, 100, result.stderr)
         self.assertEqual(self.calls(), ["apt-get update", "apt-get full-upgrade"])
-
-    def test_every_apt_get_call_through_the_helper_asks_for_fetch_retries(self) -> None:
-        result = self.run_upgrade("--yes", fail={})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        lines = [
-            line
-            for line in self.log.read_text(encoding="utf-8").splitlines()
-            if line.startswith("apt-get ")
-        ]
-        helper_calls = [line for line in lines if not line.startswith("apt-get autoclean")]
-        self.assertTrue(helper_calls)
-        for line in helper_calls:
-            with self.subTest(call=line):
-                self.assertIn("-o Acquire::Retries=3", line)
 
 
 if __name__ == "__main__":
