@@ -348,6 +348,7 @@ apt_retry() {
     sleep "$APT_RETRY_DELAY"
     if [[ $1 != "update" ]]; then
         run_root apt-get update || return
+        APT_LISTS_FAILED=false
     fi
     run_root apt-get "$@"
 }
@@ -355,8 +356,10 @@ apt_retry() {
 # Refresh the apt lists, once per run, and again after a sources file changes.
 apt_refresh() {
     [[ $APT_REFRESHED == true && $APT_DIRTY == false ]] && return 0
-    if ! apt_retry update; then
-        warn "The package lists could not be read, so each tool installs from the lists already on disk and the run exits non-zero"
+    if apt_retry update; then
+        APT_LISTS_FAILED=false
+    else
+        warn "The package lists could not be read, so tools install from the lists already on disk until a later read succeeds"
         APT_LISTS_FAILED=true
     fi
     APT_REFRESHED=true

@@ -493,6 +493,27 @@ apply""",
         self.assertEqual(commands, ["apt-get update", "sleep 90", "apt-get update"])
         self.assertEqual(calls[-1], "WARN Failed: apt-get update")
 
+    def test_a_later_list_read_that_succeeds_clears_the_failure(self) -> None:
+        for call, fail, tail in [
+            (
+                "apt_install jq",
+                {"update": "1 2", "install": "1"},
+                ["apt-get install -y jq", "sleep 90", "apt-get update", "apt-get install -y jq"],
+            ),
+            ("apt_refresh; APT_DIRTY=true; apt_refresh", {"update": "1 2"}, ["apt-get update"]),
+        ]:
+            with self.subTest(call=call):
+                (self.dir / "calls").unlink(missing_ok=True)
+                status, calls = self.run_apt(
+                    f"""SELECTED=()
+ensure_prerequisites() {{ {call}; }}
+apply""",
+                    fail=fail,
+                )
+                self.assertEqual(status, 0)
+                self.assertEqual(calls[:3], ["apt-get update", "sleep 90", "apt-get update"])
+                self.assertEqual(calls[3:], tail)
+
     def test_the_prerequisites_and_a_displacing_install_are_retried_too(self) -> None:
         status, calls = self.run_apt(
             "apt_missing() { printf 'curl\\n'; }; ensure_prerequisites", fail={"install": "1"}
