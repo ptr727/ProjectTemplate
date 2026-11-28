@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -367,6 +368,249 @@ if docker_install; then printf 'RC 0\\n'; else printf 'RC %s\\n' "$?"; fi"""
                 "  Removing 2 conflicting package(s): docker.io runc",
                 "ROOT apt-get remove -y docker.io runc",
                 "PAST REMOVAL",
+            ],
+        )
+
+
+APT_RETRY_STUB = """declare -A SEEN=()
+run_root() {
+    printf '%s\\n' "$*" >>"$CALLS"
+    local sub=$2
+    SEEN[$sub]=$((${SEEN[$sub]:-0} + 1))
+    local fails="FAIL_$sub"
+    [[ " ${!fails:-} " == *" ${SEEN[$sub]} "* ]] && return 100
+    return 0
+}
+sleep() { printf 'sleep %s\\n' "$*" >>"$CALLS"; }
+"""
+
+
+@unittest.skipUnless(sys.platform == "linux", "drives the Linux installer's own functions")
+class TestLinuxAptRetry(LinuxFunctionsCase):
+    """An unattended run retries a failed apt-get list read or install once, after a wait and a fresh list read.
+
+    The stub records each root command and each sleep.
+    It fails the nth call of an apt-get subcommand where FAIL_<subcommand> names n.
+    The tool installers call these helpers with errexit off, so each body calls them the same way.
+    A failure must then come back as a status rather than relying on errexit to stop the run.
+    """
+
+    def run_apt(
+        self, call: str, *, assume_yes: bool = True, fail: dict[str, str] | None = None
+    ) -> tuple[int, list[str]]:
+        """Run one helper call against the stub, returning its status and the commands it ran."""
+        calls = self.dir / "calls"
+        failures = "\n".join(f"FAIL_{sub}='{nth}'" for sub, nth in (fail or {}).items())
+        body = f"""CALLS="{calls}"
+ASSUME_YES={"true" if assume_yes else "false"}
+MODE=upgrade
+{APT_RETRY_STUB}{failures}
+status=0
+{call} || status=$?
+printf 'STATUS %s\\n' "$status"
+"""
+        result = self.run_bash(body)
+        lines = result.stdout.splitlines()
+        status = [line for line in lines if line.startswith("STATUS ")]
+        self.assertEqual(len(status), 1, result.stdout + result.stderr)
+        recorded = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+        return int(status[0].split()[1]), recorded
+
+    def test_an_unattended_install_that_fails_once_reads_the_lists_again_and_succeeds(
+        self,
+    ) -> None:
+        status, calls = self.run_apt("apt_install jq", fail={"install": "1"})
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            [
+                "apt-get update",
+                "apt-get install -y jq",
+                "sleep 90",
+                "apt-get update",
+                "apt-get install -y jq",
+            ],
+        )
+
+    def test_an_unattended_install_that_fails_twice_returns_apt_s_status(self) -> None:
+        status, calls = self.run_apt("apt_install jq", fail={"install": "1 2"})
+        self.assertEqual(status, 100)
+        self.assertEqual(
+            calls,
+            [
+                "apt-get update",
+                "apt-get install -y jq",
+                "sleep 90",
+                "apt-get update",
+                "apt-get install -y jq",
+            ],
+        )
+
+    def test_a_failed_list_read_inside_the_retry_returns_without_installing_again(
+        self,
+    ) -> None:
+        status, calls = self.run_apt("apt_install jq", fail={"install": "1", "update": "2"})
+        self.assertEqual(status, 100)
+        self.assertEqual(
+            calls, ["apt-get update", "apt-get install -y jq", "sleep 90", "apt-get update"]
+        )
+
+    def test_an_unattended_list_read_that_fails_once_is_retried_alone(self) -> None:
+        status, calls = self.run_apt(
+            'apt_refresh && printf "REFRESHED %s\\n" "$APT_REFRESHED" >>"$CALLS"',
+            fail={"update": "1"},
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(calls, ["apt-get update", "sleep 90", "apt-get update", "REFRESHED true"])
+
+    def test_a_list_read_that_fails_twice_is_read_once_and_each_tool_carries_on(self) -> None:
+        status, calls = self.run_apt(
+            'apt_install jq && apt_install rg && printf "LISTS %s\\n" "$APT_LISTS_FAILED" >>"$CALLS"',
+            fail={"update": "1 2"},
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            [
+                "apt-get update",
+                "sleep 90",
+                "apt-get update",
+                "apt-get install -y jq",
+                "apt-get install -y rg",
+                "LISTS true",
+            ],
+        )
+
+    def test_a_list_read_that_fails_twice_fails_the_run_and_names_it(self) -> None:
+        status, calls = self.run_apt(
+            """warn() { printf 'WARN %s\\n' "$*" >>"$CALLS"; }
+SELECTED=()
+ensure_prerequisites() { apt_refresh; }
+apply""",
+            fail={"update": "1 2"},
+        )
+        self.assertEqual(status, 1)
+        commands = [line for line in calls if not line.startswith("WARN ")]
+        self.assertEqual(commands, ["apt-get update", "sleep 90", "apt-get update"])
+        self.assertEqual(calls[-1], "WARN Failed: apt-get update")
+
+    def test_a_later_list_read_that_succeeds_clears_the_failure(self) -> None:
+        for call, fail, tail in [
+            (
+                "apt_install jq",
+                {"update": "1 2", "install": "1"},
+                ["apt-get install -y jq", "sleep 90", "apt-get update", "apt-get install -y jq"],
+            ),
+            ("apt_refresh; APT_DIRTY=true; apt_refresh", {"update": "1 2"}, ["apt-get update"]),
+        ]:
+            with self.subTest(call=call):
+                (self.dir / "calls").unlink(missing_ok=True)
+                status, calls = self.run_apt(
+                    f"""SELECTED=()
+ensure_prerequisites() {{ {call}; }}
+apply""",
+                    fail=fail,
+                )
+                self.assertEqual(status, 0)
+                self.assertEqual(calls[:3], ["apt-get update", "sleep 90", "apt-get update"])
+                self.assertEqual(calls[3:], tail)
+
+    def test_an_attended_list_read_failure_is_not_retried_and_fails_the_run(self) -> None:
+        status, calls = self.run_apt(
+            """warn() { printf 'WARN %s\\n' "$*" >>"$CALLS"; }
+confirm() { return 0; }
+SELECTED=()
+ensure_prerequisites() { apt_install jq; }
+apply""",
+            assume_yes=False,
+            fail={"update": "1"},
+        )
+        self.assertEqual(status, 1)
+        commands = [line for line in calls if not line.startswith("WARN ")]
+        self.assertEqual(commands, ["apt-get update", "apt-get install -y jq"])
+        self.assertEqual(calls[-1], "WARN Failed: apt-get update")
+
+    def test_a_prerequisite_install_that_fails_twice_ends_the_run_with_apt_s_status(
+        self,
+    ) -> None:
+        calls = self.dir / "calls"
+        result = self.run_bash(
+            f"""CALLS="{calls}"
+ASSUME_YES=true
+MODE=upgrade
+{APT_RETRY_STUB}FAIL_install='1 2'
+apt_missing() {{ printf 'curl\\n'; }}
+SELECTED=()
+apply
+printf 'AFTER\\n' >>"$CALLS"
+"""
+        )
+        self.assertEqual(result.returncode, 100, result.stderr)
+        self.assertNotIn("AFTER", calls.read_text(encoding="utf-8").splitlines())
+
+    def test_a_tool_whose_runtime_install_fails_stops_before_its_own_install(self) -> None:
+        status, calls = self.run_apt(
+            """git_restore_mtime_fetch() { printf 'FETCH\\n' >>"$CALLS"; }
+git_restore_mtime_install""",
+            fail={"install": "1 2"},
+        )
+        self.assertEqual(status, 1)
+        self.assertNotIn("FETCH", calls)
+
+    def test_both_scripts_wait_the_same_time_before_a_retry(self) -> None:
+        """The README states one wait for both scripts, and each carries its own copy of it."""
+        upgrader = ROOT / "host-setup" / "linux" / "upgrade-host.sh"
+        delays = {}
+        for script in (LINUX_INSTALLER, upgrader):
+            found = re.findall(
+                r"^readonly APT_RETRY_DELAY=(\d+)$",
+                script.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            self.assertEqual(len(found), 1, script)
+            delays[script.name] = found[0]
+        self.assertEqual(delays["install-tools.sh"], delays["upgrade-host.sh"])
+        self.assertEqual(delays["install-tools.sh"], "90")
+
+    def test_the_prerequisites_and_a_displacing_install_are_retried_too(self) -> None:
+        status, calls = self.run_apt(
+            "apt_missing() { printf 'curl\\n'; }; ensure_prerequisites", fail={"install": "1"}
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(calls[-3:], ["sleep 90", "apt-get update", "apt-get install -y curl"])
+
+        (self.dir / "calls").unlink()
+        status, calls = self.run_apt(
+            "apt-get() { :; }; apt_install_displacing nodejs", fail={"install": "1"}
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(calls[-3:], ["sleep 90", "apt-get update", "apt-get install -y nodejs"])
+
+    def test_an_attended_install_is_not_retried(self) -> None:
+        status, calls = self.run_apt("apt_install jq", assume_yes=False, fail={"install": "1"})
+        self.assertEqual(status, 100)
+        self.assertEqual(calls, ["apt-get update", "apt-get install -y jq"])
+
+    def test_every_root_apt_get_call_but_the_retry_helper_s_own_is_a_deliberate_choice(
+        self,
+    ) -> None:
+        """A new root apt-get call fails this until it is listed, since one that fetches belongs in apt_retry.
+
+        The removal stays outside, since it reads nothing from a mirror.
+        """
+        text = LINUX_INSTALLER.read_text(encoding="utf-8")
+        lines = [
+            line.strip()
+            for line in text.splitlines()
+            if "run_root apt-get" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(
+            lines,
+            [
+                'run_root apt-get "$@" || status=$?',
+                "run_root apt-get update || return",
+                'run_root apt-get "$@"',
+                'run_root apt-get remove -y "${present[@]}"',
             ],
         )
 

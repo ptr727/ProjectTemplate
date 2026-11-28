@@ -102,6 +102,8 @@ The cache stays valid for 60 minutes, from `SUDO_TIMESTAMP_TIMEOUT` in the scrip
 
 **An unattended run retries a failed `apt-get` list read, install, or upgrade once.** A third party repository republishing a nightly channel can serve files that disagree with its own index for a while. apt then drops the whole transaction, and every other pending upgrade goes with the one bad package. apt's own fetch retries, on by default since apt 2.3.2, read that same stale index. So `upgrade-host.sh --yes` waits 90 seconds, runs `apt-get update` again, and retries the call. The installs it runs are retried the same way, since they fetch from the same mirrors. A failed `apt-get update` is retried too, after the same wait and with no extra list read. The same window can serve index files that fail their size or hash check. A second failure stops the run with apt's own status, so a fault that persists still surfaces. That includes the list read inside a retry, which is not retried again. An attended run does not retry, because a declined prompt also exits non-zero and the operator is there to see the error. [`tests/test_upgrade_host_linux.py`][test-upgrade-host-linux] drives the retry against a stubbed `apt-get`.
 
+`install-tools.sh --yes` retries its own list reads and installs the same way, after the same 90 second wait. It reads the lists across the third party repositories it adds, so it meets the same window. A list read that fails twice is warned about, and tools then install from the lists already on disk. A tool whose repository those lists do not hold yet can then install the distro's package instead, which #4537 tracks. Unless a later list read succeeds, the run still exits non-zero, naming `apt-get update` among its failures. An install that fails twice, including at the list read inside its retry, returns apt's own status to its caller. For a managed tool's own packages that fails the tool. For the prerequisites every tool shares, or a package `--repo` declares, it ends the run. An attended run does not retry there either, since the operator is there to see the error. The removal of a conflicting Docker package reads nothing from a mirror and is not retried. [`tests/test_install_tools.py`][test-install-tools] drives the retry against a stubbed root command.
+
 ## Release Upgrades
 
 `upgrade-host.sh` splits the routine from the rare. `--packages` upgrades within the current release, and `--release` is its own action because the release upgrade is where hosts differ.
@@ -209,6 +211,7 @@ CI checks the scripts with `shellcheck` and `shfmt`. It runs both over every `.s
 [setup-github]: ./setup-github.sh
 [skills-install]: ../../scripts/skills_install.py
 [test-bootstrap]: ../../tests/test_bootstrap.py
+[test-install-tools]: ../../tests/test_install_tools.py
 [test-upgrade-host-linux]: ../../tests/test_upgrade_host_linux.py
 [upgrade-host]: ./upgrade-host.sh
 [windows-readme]: ../windows/README.md

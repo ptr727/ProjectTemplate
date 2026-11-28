@@ -25,6 +25,8 @@ readonly SUDOERS_FILE="/etc/sudoers.d/90-host-setup-sudo-timestamp"
 # The value is long enough to cover a run started from another terminal and short enough that a host left alone does not stay elevated.
 readonly SUDO_TIMESTAMP_TIMEOUT=60
 
+readonly APT_RETRY_DELAY=90
+
 # Managed tools, in dependency order: node asks jq to read the upstream release index.
 readonly TOOLS=(git gh jq git-restore-mtime node python ripgrep uv docker dotnet powershell op)
 MANAGED_TOOLS=("${TOOLS[@]}")
@@ -50,6 +52,7 @@ ASSUME_YES=false
 WITH_OPTIONAL=false
 APT_REFRESHED=false
 APT_DIRTY=false
+APT_LISTS_FAILED=false
 DISTRO_ID=""
 DISTRO_VERSION=""
 CODENAME=""
@@ -219,7 +222,8 @@ Actions, name one, default --report:
 Options:
   -j, --json        Write the report as JSON rather than a table, for a program to read
   -n, --dry-run     Print the commands instead of running them
-  -y, --yes         Do not prompt before changing the host
+  -y, --yes         Do not prompt before changing the host, and retry a failed apt-get list read or
+                    install once
   -o, --optional    Include the optional tools and the optional package sets, where a tool has one
       --repo PATH   Include apt packages declared by PATH/host-tools.json
 
@@ -333,10 +337,31 @@ apt_candidate_version() {
     printf '%s' "$version"
 }
 
+apt_retry() {
+    local status=0
+    run_root apt-get "$@" || status=$?
+    if [[ $status -eq 0 || $ASSUME_YES != true ]]; then
+        return "$status"
+    fi
+    warn "apt-get $* failed (exit $status), a mirror still syncing is the usual cause"
+    info "Waiting ${APT_RETRY_DELAY}s, then retrying once"
+    sleep "$APT_RETRY_DELAY"
+    if [[ $1 != "update" ]]; then
+        run_root apt-get update || return
+        APT_LISTS_FAILED=false
+    fi
+    run_root apt-get "$@"
+}
+
 # Refresh the apt lists, once per run, and again after a sources file changes.
 apt_refresh() {
     [[ $APT_REFRESHED == true && $APT_DIRTY == false ]] && return 0
-    run_root apt-get update
+    if apt_retry update; then
+        APT_LISTS_FAILED=false
+    else
+        warn "The package lists could not be read, so tools install from the lists already on disk until a later read succeeds"
+        APT_LISTS_FAILED=true
+    fi
     APT_REFRESHED=true
     APT_DIRTY=false
 }
@@ -357,7 +382,7 @@ apt_install() {
     [[ ${#wanted[@]} -eq 0 ]] && return 0
 
     apt_refresh
-    run_root apt-get install -y "${wanted[@]}"
+    apt_retry install -y "${wanted[@]}"
 }
 
 # Packages from a set that are not installed, one per line.
@@ -475,7 +500,7 @@ apt_install_displacing() {
         confirm "  Continue?" || die "Declined, $package left as it is"
     fi
 
-    run_root apt-get install -y "$package"
+    apt_retry install -y "$package"
 }
 
 # --- Repositories ---
@@ -566,7 +591,7 @@ ensure_prerequisites() {
     readarray -t missing < <(apt_missing ca-certificates curl gnupg gpgv)
     [[ ${#missing[@]} -eq 0 ]] && return 0
     apt_refresh
-    run_root apt-get install -y "${missing[@]}"
+    apt_retry install -y "${missing[@]}"
 }
 
 # --- Upstream releases ---
@@ -674,7 +699,7 @@ git_restore_mtime_target() {
 # Git runs any executable named git-* on the PATH as a subcommand, so this is all "git restore-mtime" needs.
 git_restore_mtime_install() {
     # Upstream ships a python3 script, and a minimal server image carries no python at all.
-    apt_install python3
+    apt_install python3 || return 1
 
     git_restore_mtime_fetch
     run_root install -m 0755 "$TMP_DIR/git-restore-mtime" "$BIN_DIR/git-restore-mtime"
@@ -1692,6 +1717,7 @@ apply() {
         log "Nothing changed"
     fi
 
+    [[ $APT_LISTS_FAILED == true ]] && FAILED+=("apt-get update")
     if [[ ${#FAILED[@]} -gt 0 ]]; then
         log ""
         warn "Failed: ${FAILED[*]}"
