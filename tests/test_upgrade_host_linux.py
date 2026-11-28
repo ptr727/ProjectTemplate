@@ -11,6 +11,7 @@ Run as `python3 tests/test_upgrade_host_linux.py`, or under `python3 -m unittest
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -205,15 +206,19 @@ class TestPackageUpgradeRetry(unittest.TestCase):
     def test_every_apt_get_call_site_but_the_retry_helper_s_own_is_a_deliberate_choice(
         self,
     ) -> None:
+        mention = re.compile(r"(?<![\w-])apt[_-]get(?![\w-])")
         sites = [
             line.strip()
             for line in UPGRADER.read_text(encoding="utf-8").splitlines()
-            if line.strip().startswith(("apt_get ", "run_root apt-get "))
+            if mention.search(line) and not line.lstrip().startswith("#")
         ]
         self.assertEqual(
             sites,
             [
+                'command -v apt-get >/dev/null || die "apt-get not found, this script upgrades apt based hosts"',
+                'apt_get() { run_root apt-get "$@" "${APT_OPTS[@]}"; }',
                 'apt_get "$@" || status=$?',
+                'warn "apt-get $* failed (exit $status), a mirror still syncing is the usual cause"',
                 "apt_get update",
                 'apt_get "$@"',
                 "apt_get autoremove --purge",
