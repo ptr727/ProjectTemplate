@@ -209,6 +209,7 @@ class TestPackageUpgradeRetry(unittest.TestCase):
         self.assertEqual(
             sites,
             [
+                "retry a failed apt-get list read, install, or upgrade once",
                 'command -v apt-get >/dev/null || die "apt-get not found, this script upgrades apt based hosts"',
                 'apt_get() { run_root apt-get "$@" "${APT_OPTS[@]}"; }',
                 'apt_get "$@" || status=$?',

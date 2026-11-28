@@ -95,7 +95,7 @@ Actions, name one, default --packages:
 Options:
   -n, --dry-run     Print the commands instead of running them
   -y, --yes         Do not prompt, keep the installed config file on a packaging conflict, and
-                    retry a failed package list read, install, or upgrade once
+                    retry a failed apt-get list read, install, or upgrade once
 
 A release upgrade moves one release at a time, which is what both distributions support: a host two
 releases behind is upgraded by running this twice. Debian is carried by rewriting the codename in
