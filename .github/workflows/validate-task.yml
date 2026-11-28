@@ -27,6 +27,11 @@ on:
         required: false
         type: string
         default: ''
+      dotnet-versions:
+        description: JSON array of the X.Y .NET lines a multi-targeted caller's projects build, one per target framework, for example ["11.0", "10.0"]. The first entry is the line the root global.json selects, which builds every target framework, and a first entry differing from it fails the run. Every listed line is installed in the one unit-test job, whose dotnet test runs each target framework under its own runtime, so it adds no matrix leg. Quote each entry, since an unquoted one is a JSON number rather than a line. Empty installs the one line global.json selects, or the hub's fallback line where it carries none.
+        required: false
+        type: string
+        default: ''
       test-matrix:
         description: JSON array of objects, one pytest leg per entry. Each has a unique label of 1 to 38 characters from A-Z, a-z, 0-9, underscore, dot, or hyphen. Each may have a python-version, defaulting to the first python-versions entry, or to the selected line where python-versions is empty. Each leg calls the caller's .github/actions/install-test-deps hook after the base install, with the entry as its leg input. The hook may also run a check needing that leg's environment, and a failure there fails the leg before its Python tests run. Set at most one of this and test-matrix-file. Empty, with test-matrix-file empty too, runs the python-versions legs with no hook.
         required: false
@@ -67,13 +72,12 @@ jobs:
       versions: ${{ steps.build.outputs.versions }}
     steps:
 
-      # The selector alone is read where no matrix file is named, so the checkout stays one file.
       - name: Checkout code step
-        if: ${{ inputs.test-matrix-file != '' || inputs.python-versions == '' }}
+        if: ${{ inputs.test-matrix-file != '' || inputs.python-versions == '' || inputs.dotnet-versions != '' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: ${{ inputs.test-matrix-file == '' && '/.python-version' || '' }}
+          sparse-checkout: ${{ inputs.test-matrix-file == '' && fromJSON('"/.python-version\n/global.json"') || '' }}
           sparse-checkout-cone-mode: false
 
       # This job cannot tell whether the caller holds Python, so the lint job, which can, warns of a fallback instead.
@@ -83,6 +87,13 @@ jobs:
         uses: $/.github/actions/python-version
         with:
           warn: 'false'
+
+      - name: Validate dotnet-versions input step
+        if: ${{ inputs.dotnet-versions != '' }}
+        uses: $/.github/actions/dotnet-sdk
+        with:
+          versions: ${{ inputs.dotnet-versions }}
+          install: 'false'
 
       # Either input lands in one file here, so the check below and the build step read the same bytes whichever input the caller set.
       - name: Validate test-matrix input step
@@ -334,6 +345,8 @@ jobs:
       - name: Setup .NET SDK step
         if: hashFiles('**/*.csproj') != ''
         uses: $/.github/actions/dotnet-sdk
+        with:
+          versions: ${{ inputs.dotnet-versions }}
 
       - name: Restore dotnet tools step
         if: >-
@@ -871,6 +884,8 @@ jobs:
       - name: Setup .NET SDK step
         if: hashFiles('**/*Tests*.csproj') != ''
         uses: $/.github/actions/dotnet-sdk
+        with:
+          versions: ${{ inputs.dotnet-versions }}
 
       - name: Resolve .NET workspaces step
         id: dotnet

@@ -4,6 +4,17 @@ description: >-
   CI then follows the repository's own line, whether or not it is the fleet default.
   A caller carrying no such global.json yet gets the fallback line the selection step names,
   which the hub's tests hold to the global.json baseline's major.
+  A multi-targeted caller names every line its target frameworks need in versions, so each runtime its tests run under is installed.
+
+inputs:
+  versions:
+    description: JSON array of the X.Y .NET lines to install, one per target framework the caller's projects build, for example ["11.0", "10.0"]. The first entry is the line the root global.json selects, which builds every target framework, and a first entry differing from it fails the step. The others install beside it, so a test project runs under each framework's own runtime. A caller carrying no global.json sdk.version gets every entry instead of the fallback line. Quote each entry, since an unquoted one is a JSON number rather than a line. Empty installs the one line global.json selects, or the fallback.
+    required: false
+    default: ''
+  install:
+    description: Whether the selected lines are installed. An entry job passes false to validate versions against global.json before any job builds, installing nothing.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -12,6 +23,8 @@ runs:
     - name: Select .NET SDK line step
       id: sdk-line
       shell: bash
+      env:
+        VERSIONS: ${{ inputs.versions }}
       run: |
         set -Eeuo pipefail
         fallback=10.x
@@ -26,6 +39,17 @@ runs:
         from pathlib import Path
 
         fallback = sys.argv[1]
+        raw = os.environ.get("VERSIONS", "")
+        lines = []
+        if raw.strip():
+            try:
+                lines = json.loads(raw)
+            except ValueError:
+                lines = None
+            well_formed = isinstance(lines, list) and len(lines) > 0
+            if not (well_formed and all(isinstance(line, str) and re.fullmatch(r"[0-9]+\.[0-9]+", line) for line in lines)):
+                print('::error::The versions input must be a non-empty JSON array of quoted X.Y lines, such as ["11.0", "10.0"].')
+                sys.exit(1)
         path = Path("global.json")
         selected = False
         if path.is_file():
@@ -37,16 +61,30 @@ runs:
             try:
                 document = json.loads(text)
             except ValueError as error:
-                print(f"::warning::global.json could not be read ({error}), so this installs the {fallback} fallback.")
+                installs = "every versions entry" if lines else f"the {fallback} fallback"
+                print(f"::warning::global.json could not be read ({error}), so this installs {installs}.")
             else:
                 # The host reads a missing or null sdk as no selection, so either takes the fallback rather than failing.
                 sdk = document.get("sdk")
                 selected = isinstance(sdk, dict) and isinstance(sdk.get("version"), str)
+        extra = lines
+        if selected and lines:
+            line = re.match(r"[0-9]+\.[0-9]+", sdk["version"])
+            if line is None or lines[0] != line.group(0):
+                print("::error::The first versions entry differs from the X.Y line the root global.json selects, which the release builds on.")
+                sys.exit(1)
+            extra = lines[1:]
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-            output.write("global-json-file=global.json\n" if selected else f"dotnet-version={fallback}\n")
+            if selected:
+                output.write("global-json-file=global.json\n")
+            if extra:
+                output.write("dotnet-version<<DOTNET_VERSIONS\n" + "".join(f"{line}.x\n" for line in extra) + "DOTNET_VERSIONS\n")
+            elif not selected and not lines:
+                output.write(f"dotnet-version={fallback}\n")
         PY
 
     - name: Setup .NET SDK step
+      if: ${{ inputs.install != 'false' }}
       uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
       with:
         global-json-file: ${{ steps.sdk-line.outputs.global-json-file }}

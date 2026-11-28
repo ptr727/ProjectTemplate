@@ -37,7 +37,6 @@ runs:
         echo "::error::project-file is required when the hub NuGet default runs."
         exit 1
 
-    # Build output and packages land in the same publish/ folder so they archive together.
     - name: Build library step
       shell: bash
       env:
@@ -53,7 +52,6 @@ runs:
         [[ "$BRANCH" == "main" ]] && configuration=Release
         dotnet build "$PROJECT_FILE" \
           --configuration "$configuration" \
-          -property:OutputPath="$RUNNER_TEMP/publish/" \
           -property:PackageOutputPath="$RUNNER_TEMP/publish/" \
           -property:Version="$SEMVER2" \
           -property:FileVersion="$ASSEMBLY_FILE_VERSION" \
@@ -80,7 +78,10 @@ runs:
     - name: Zip output step
       if: ${{ inputs.smoke != 'true' }}
       shell: bash
-      run: 7z a -t7z "$RUNNER_TEMP/nuget.7z" "$RUNNER_TEMP"/publish/*
+      run: |
+        set -Eeuo pipefail
+        shopt -s nullglob
+        7z a -t7z "$RUNNER_TEMP/nuget.7z" "$RUNNER_TEMP"/publish/*.nupkg "$RUNNER_TEMP"/publish/*.snupkg
 
     # GitHub-release asset, uploaded under the release-asset-<branch>-<target> pattern the github-release job collects.
     - name: Upload release asset step
