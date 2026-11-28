@@ -18,6 +18,7 @@
 set -Eeuo pipefail
 
 readonly BACKUP_ROOT="/var/backups/upgrade-host"
+readonly APT_RETRY_DELAY=90
 
 MODE="packages"
 DRY_RUN=false
@@ -28,7 +29,7 @@ CODENAME=""
 IS_PROXMOX=false
 IS_WSL=false
 SUDO=()
-APT_OPTS=()
+APT_OPTS=(-o Acquire::Retries=3)
 
 USAGE_REFUSED=false
 
@@ -93,7 +94,8 @@ Actions, name one, default --packages:
 
 Options:
   -n, --dry-run     Print the commands instead of running them
-  -y, --yes         Do not prompt, and keep the installed config file on a packaging conflict
+  -y, --yes         Do not prompt, keep the installed config file on a packaging conflict, and
+                    retry a failed upgrade once after reading the package lists again
 
 A release upgrade moves one release at a time, which is what both distributions support: a host two
 releases behind is upgraded by running this twice. Debian is carried by rewriting the codename in
@@ -145,7 +147,7 @@ detect_host() {
         #   - An unattended run has nobody to answer the prompt.
         #   - A replaced config is the harder half to notice afterwards.
         export DEBIAN_FRONTEND=noninteractive
-        APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+        APT_OPTS+=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
     fi
 }
 
@@ -173,6 +175,19 @@ run_root() { run "${SUDO[@]}" "$@"; }
 
 apt_get() { run_root apt-get "$@" "${APT_OPTS[@]}"; }
 
+apt_upgrade() {
+    local status=0
+    apt_get "$@" || status=$?
+    if [[ $status -eq 0 || $ASSUME_YES != true ]]; then
+        return "$status"
+    fi
+    warn "apt-get $* failed (exit $status), a mirror still syncing is the usual cause"
+    info "Waiting ${APT_RETRY_DELAY}s, then reading the package lists again and retrying once"
+    sleep "$APT_RETRY_DELAY"
+    apt_get update
+    apt_get "$@"
+}
+
 confirm() {
     [[ $ASSUME_YES == true || $DRY_RUN == true ]] && return 0
     [[ -t 0 ]] || die "Not a terminal and --yes was not given, refusing to change the host unattended"
@@ -195,7 +210,7 @@ upgrade_packages() {
     apt_get update
 
     step "Upgrading packages"
-    apt_get full-upgrade
+    apt_upgrade full-upgrade
 
     step "Completing any partial install"
     apt_get install -f
@@ -538,10 +553,10 @@ debian_release_upgrade() {
     # The release notes take the minimal upgrade first.
     # So the packages that need no new dependencies land before the ones that pull in a changed dependency set.
     step "Upgrading without new packages"
-    apt_get upgrade --without-new-pkgs
+    apt_upgrade upgrade --without-new-pkgs
 
     step "Upgrading the rest of the distribution"
-    apt_get full-upgrade
+    apt_upgrade full-upgrade
 
     step "Removing what $next no longer needs"
     apt_get autoremove --purge

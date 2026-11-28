@@ -98,6 +98,10 @@ An install or upgrade collects a tool whose install fails and carries on, so one
 
 The cache stays valid for 60 minutes, from `SUDO_TIMESTAMP_TIMEOUT` in the script. Removing the drop-in undoes the sharing. Where the run also switched the sudo alternative, `update-alternatives --auto sudo` is what undoes that half.
 
+## A Failed Package Upgrade Is Retried Once
+
+**An unattended run retries a failed upgrade once, after reading the package lists again.** A third party repository republishing a nightly channel can serve files that disagree with its own index for a while. apt then drops the whole transaction, and every other pending upgrade goes with the one bad package. apt's own fetch retries read that same stale index, so `upgrade-host.sh --yes` waits 90 seconds, runs `apt-get update` again, and retries the upgrade. A second failure stops the run with apt's own status, so a fault that persists still surfaces. An attended run does not retry, because a declined prompt also exits non-zero and the operator is there to see the error. Every `apt-get` call also passes `-o Acquire::Retries=3`, which apt 2.3.2 and later already default to. [`tests/test_upgrade_host_linux.py`][test-upgrade-host-linux] drives the retry against a stubbed `apt-get`.
+
 ## Release Upgrades
 
 `upgrade-host.sh` splits the routine from the rare. `--packages` upgrades within the current release, and `--release` is its own action because the release upgrade is where hosts differ.
@@ -205,6 +209,7 @@ CI checks the scripts with `shellcheck` and `shfmt`. It runs both over every `.s
 [setup-github]: ./setup-github.sh
 [skills-install]: ../../scripts/skills_install.py
 [test-bootstrap]: ../../tests/test_bootstrap.py
+[test-upgrade-host-linux]: ../../tests/test_upgrade_host_linux.py
 [upgrade-host]: ./upgrade-host.sh
 [windows-readme]: ../windows/README.md
 
