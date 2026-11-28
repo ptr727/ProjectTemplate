@@ -116,6 +116,10 @@ class TestPackageUpgradeRetry(unittest.TestCase):
             return []
         return self.log.read_text(encoding="utf-8").splitlines()
 
+    def assert_retried_call_kept_its_arguments(self, subcommand: str, expected: str) -> None:
+        lines = [line for line in self.full_calls() if line.split()[:2] == ["apt-get", subcommand]]
+        self.assertEqual(lines, [expected, expected])
+
     def test_an_unattended_upgrade_that_fails_once_reads_the_lists_again_and_succeeds(self) -> None:
         result = self.run_upgrade("--yes", fail={"full_upgrade": "1"})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -133,6 +137,10 @@ class TestPackageUpgradeRetry(unittest.TestCase):
             ],
         )
         self.assertIn("a mirror still syncing is the usual cause", result.stderr)
+        self.assert_retried_call_kept_its_arguments(
+            "full-upgrade",
+            "apt-get full-upgrade -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold",
+        )
 
     def test_an_unattended_upgrade_that_fails_twice_stops_with_apt_s_status(self) -> None:
         result = self.run_upgrade("--yes", fail={"full_upgrade": "1 2"})
@@ -169,6 +177,13 @@ class TestPackageUpgradeRetry(unittest.TestCase):
                 "apt-get autoremove",
                 "apt-get autoclean",
             ],
+        )
+        self.assertEqual(
+            [line for line in self.full_calls() if line.startswith("apt-get update")],
+            [
+                "apt-get update -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+            ]
+            * 2,
         )
 
     def test_an_unattended_install_that_fails_once_reads_the_lists_again_and_succeeds(self) -> None:
@@ -239,7 +254,9 @@ class TestPackageUpgradeRetry(unittest.TestCase):
         ) as process:
             pid_file = self.work / "sleep.pid"
             deadline = time.monotonic() + 30
-            while not pid_file.exists() and time.monotonic() < deadline:
+            while not (pid_file.exists() and pid_file.read_text(encoding="utf-8")):
+                if time.monotonic() >= deadline:
+                    break
                 time.sleep(0.05)
             self.assertTrue(pid_file.exists(), "the retry wait never started")
             sleeper = int(pid_file.read_text(encoding="utf-8"))
