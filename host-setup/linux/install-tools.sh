@@ -354,7 +354,7 @@ apt_retry() {
 # Refresh the apt lists, once per run, and again after a sources file changes.
 apt_refresh() {
     [[ $APT_REFRESHED == true && $APT_DIRTY == false ]] && return 0
-    apt_retry update
+    apt_retry update || return
     APT_REFRESHED=true
     APT_DIRTY=false
 }
@@ -374,7 +374,7 @@ apt_install() {
     done
     [[ ${#wanted[@]} -eq 0 ]] && return 0
 
-    apt_refresh
+    apt_refresh || return
     apt_retry install -y "${wanted[@]}"
 }
 
@@ -472,7 +472,7 @@ remove_unowned_command() {
 # Orphaned dependencies are left for a later apt autoremove rather than swept here, since autoremove reaches the whole host.
 apt_install_displacing() {
     local package="$1"
-    apt_refresh
+    apt_refresh || return
 
     if [[ $DRY_RUN == true ]]; then
         info "[dry run] apt-get install -y $package, removals cannot be previewed until the repository is read"
@@ -583,7 +583,7 @@ ensure_prerequisites() {
     # The gpgv package is named on its own rather than left to gnupg, since the keyring check depends on it.
     readarray -t missing < <(apt_missing ca-certificates curl gnupg gpgv)
     [[ ${#missing[@]} -eq 0 ]] && return 0
-    apt_refresh
+    apt_refresh || return
     apt_retry install -y "${missing[@]}"
 }
 
@@ -620,7 +620,7 @@ gh_version() { apt_installed_version gh; }
 gh_target() { apt_candidate_version gh; }
 
 gh_install() {
-    ensure_prerequisites
+    ensure_prerequisites || return 1
 
     # The keyring moved to /etc/apt/keyrings and the sources file to deb822, so both predecessors are cleared.
     register_apt_source "github-cli" "https://cli.github.com/packages/githubcli-archive-keyring.gpg" \
@@ -735,7 +735,7 @@ node_lts_major() {
 }
 
 node_install() {
-    ensure_prerequisites
+    ensure_prerequisites || return 1
 
     local major
     major=$(node_lts_major) || die "Cannot read the current LTS line from the upstream release index"
@@ -902,7 +902,7 @@ docker_install() {
         run_root apt-get remove -y "${present[@]}"
     fi
 
-    ensure_prerequisites
+    ensure_prerequisites || return 1
 
     register_apt_source "docker" "https://download.docker.com/linux/$DISTRO_ID/gpg" \
         "$KEYRING_DIR/docker.gpg" "https://download.docker.com/linux/$DISTRO_ID/dists/$CODENAME/InRelease" true \
@@ -990,7 +990,7 @@ dotnet_feed() {
     # The decision rests on what the distro feed carries, so it is made against lists that have been read at least once.
     # A host whose lists were never populated reports no SDK at all.
     # Adding Microsoft's feed to a distribution that ships its own is the mixing this exists to avoid.
-    apt_refresh
+    apt_refresh || return 2
 
     [[ -n $(dotnet_sdk_latest) ]] && return 0
 
@@ -1207,7 +1207,7 @@ op_install() {
 
     local had
     had=$(op_version)
-    ensure_prerequisites
+    ensure_prerequisites || return 1
 
     # The vendor's one-line file names another keyring, and apt refuses two Signed-By values for one repository.
     register_apt_source "1password" "https://downloads.1password.com/linux/keys/1password.asc" \

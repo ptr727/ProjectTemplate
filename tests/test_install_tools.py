@@ -462,6 +462,32 @@ printf 'STATUS %s\\n' "$status"
         self.assertEqual(status, 0)
         self.assertEqual(calls, ["apt-get update", "sleep 90", "apt-get update", "REFRESHED true"])
 
+    def test_a_list_read_that_fails_twice_installs_nothing_and_leaves_the_lists_unread(
+        self,
+    ) -> None:
+        status, calls = self.run_apt(
+            'apt_install jq || printf "FAILED %s REFRESHED %s\\n" "$?" "$APT_REFRESHED" >>"$CALLS"',
+            fail={"update": "1 2"},
+        )
+        self.assertEqual(status, 0)
+        self.assertEqual(
+            calls,
+            ["apt-get update", "sleep 90", "apt-get update", "FAILED 100 REFRESHED false"],
+        )
+
+    def test_a_failed_list_read_fails_the_tool_rather_than_running_on(self) -> None:
+        for call, expected in [
+            ("apt_missing() { printf 'curl\\n'; }; ensure_prerequisites", 100),
+            ("apt-get() { :; }; apt_install_displacing nodejs", 100),
+            ("dotnet_sdk_latest() { printf 'dotnet-sdk-10.0\\n'; }; dotnet_feed", 2),
+            ("apt_missing() { printf 'curl\\n'; }; gh_install", 1),
+        ]:
+            with self.subTest(call=call):
+                (self.dir / "calls").unlink(missing_ok=True)
+                status, calls = self.run_apt(call, fail={"update": "1 2"})
+                self.assertEqual(status, expected)
+                self.assertEqual(calls, ["apt-get update", "sleep 90", "apt-get update"])
+
     def test_the_prerequisites_and_a_displacing_install_are_retried_too(self) -> None:
         status, calls = self.run_apt(
             "apt_missing() { printf 'curl\\n'; }; ensure_prerequisites", fail={"install": "1"}
